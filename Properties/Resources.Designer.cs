@@ -1201,6 +1201,24 @@ namespace AnonPDF.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Aplikacja została zamknięta z przyczyn serwisowych. Czy chcesz przywrócić ostatnią sesję?.
+        /// </summary>
+        internal static string Msg_MaintenanceRecoveryPrompt {
+            get {
+                return ResourceManager.GetString("Msg_MaintenanceRecoveryPrompt", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Wyłączenie za {0}.
+        /// </summary>
+        internal static string Msg_MaintenanceCountdown {
+            get {
+                return ResourceManager.GetString("Msg_MaintenanceCountdown", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to {0} możliwość zmiany pozycji tekstu..
         /// </summary>
         internal static string Msg_TextPositionInfo {

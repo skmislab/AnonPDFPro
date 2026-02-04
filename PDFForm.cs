@@ -53,9 +53,17 @@ namespace AnonPDF
     public partial class PDFForm : Form
     {
         private static readonly string DebugLogPath = Path.Combine(Path.GetTempPath(), "AnonPDF-debug.log");
+        private static readonly string MaintenanceRecoveryDirectory = Path.Combine(Path.GetTempPath(), "AnonPDFPro");
+        private static readonly string MaintenanceRecoveryProjectPath = Path.Combine(MaintenanceRecoveryDirectory, "maintenance-recovery.app");
         private static bool diagnosticModeEnabled = false;
         private static bool DebugLogEnabled => diagnosticModeEnabled;
         private readonly string fileVersion;
+        private readonly Timer maintenanceCountdownTimer;
+        private DateTime? maintenanceShutdownAt;
+        private Label maintenanceCountdownLabel;
+        private string serviceEndDate = "";
+        private static System.Timers.Timer maintenanceCheckTimer;
+        private static bool exitScheduled = false;
         private string inputPdfPath = "";
         private string inputProjectPath = "";
         private int currentPage = 1;
@@ -441,6 +449,28 @@ namespace AnonPDF
             var fileVersionInfo = FileVersionInfo.GetVersionInfo(assembly.Location);
             fileVersion = fileVersionInfo.FileVersion;
 
+            maintenanceCountdownTimer = new Timer
+            {
+                Interval = 1000
+            };
+            maintenanceCountdownTimer.Tick += MaintenanceCountdownTimer_Tick;
+
+            bool hasServiceFileAtStartup = File.Exists(Path.Combine(Application.StartupPath, "service.json"));
+            if (hasServiceFileAtStartup && !IsVersionMatching())
+            {
+                System.Threading.Thread exitThread = new System.Threading.Thread(() =>
+                {
+                    // Wait 10 seconds
+                    System.Threading.Thread.Sleep(10 * 1000);
+                    Environment.Exit(0);
+                });
+                exitThread.IsBackground = true;
+                exitThread.Start();
+                MessageBox.Show(string.Format(Resources.Msg_ServiceUpdateInProgress, serviceEndDate, Branding.ProductName), Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                Environment.Exit(0);
+                return;
+            }
+
             InitializeComponent();
             LoadPreferredTheme();
             ApplyTheme();
@@ -501,6 +531,15 @@ namespace AnonPDF
 
             // Handle KeyDown for global shortcuts
             this.KeyDown += PDFForm_KeyDown;
+
+            if (hasServiceFileAtStartup)
+            {
+                // Maintenance window check timer – check every 10 minutes
+                maintenanceCheckTimer = new System.Timers.Timer(10 * 60 * 1000);
+                maintenanceCheckTimer.Elapsed += OnMaintenanceWindowCheck;
+                maintenanceCheckTimer.AutoReset = true;
+                maintenanceCheckTimer.Start();
+            }
 
             // Mouse events for selection and annotation operations
             pdfViewer.MouseDown += OnMouseDown;
@@ -1789,6 +1828,249 @@ namespace AnonPDF
         }
 
 
+        // Method to check if the application version matches the version from the file
+        private bool IsVersionMatching()
+        {
+            try
+            {
+                string versionFilePath = Path.Combine(Application.StartupPath, "service.json");
+                if (!File.Exists(versionFilePath))
+                {
+                    Console.WriteLine("Version file not found: " + versionFilePath);
+                    return true; // Decision: if the file is missing, continue working
+                }
+                string json = File.ReadAllText(versionFilePath);
+                JObject obj = JObject.Parse(json);
+                string networkVersion = (string)obj["version"];
+                serviceEndDate = (string)obj["enddate"];
+                return networkVersion == fileVersion;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Error while checking version: " + ex.Message);
+                // In case of error you can decide whether to continue or terminate application.
+                return true;
+            }
+        }
+
+        // Method called by timer for periodic maintenance window checking
+        private void OnMaintenanceWindowCheck(object sender, EventArgs e)
+        {
+            if (!IsVersionMatching() && !exitScheduled)
+            {
+                exitScheduled = true;
+                StartMaintenanceCountdown(DateTime.Now.AddMinutes(5));
+                BringAppToFront();
+                // Launch separate thread counting down 5 minutes before shutdown
+                System.Threading.Thread exitThread = new System.Threading.Thread(() =>
+                {
+                    System.Threading.Thread.Sleep(5 * 60 * 1000);
+                    SaveMaintenanceRecoveryIfNeeded();
+                    Environment.Exit(0);
+                });
+                exitThread.IsBackground = true;
+                exitThread.Start();
+
+                MessageBox.Show(this, string.Format(Resources.Msg_NewVersionDetectedMaintenance, serviceEndDate, Branding.ProductName), Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void StartMaintenanceCountdown(DateTime shutdownAt)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<DateTime>(StartMaintenanceCountdown), shutdownAt);
+                return;
+            }
+
+            maintenanceShutdownAt = shutdownAt;
+            EnsureMaintenanceCountdownOverlay();
+            maintenanceCountdownLabel.Visible = true;
+            UpdateMaintenanceCountdownLabel();
+            maintenanceCountdownTimer.Start();
+        }
+
+        private void MaintenanceCountdownTimer_Tick(object sender, EventArgs e)
+        {
+            UpdateMaintenanceCountdownLabel();
+        }
+
+        private void UpdateMaintenanceCountdownLabel()
+        {
+            if (maintenanceCountdownLabel == null)
+            {
+                return;
+            }
+
+            if (!maintenanceShutdownAt.HasValue)
+            {
+                maintenanceCountdownLabel.Visible = false;
+                maintenanceCountdownTimer.Stop();
+                return;
+            }
+
+            var remaining = maintenanceShutdownAt.Value - DateTime.Now;
+            if (remaining < TimeSpan.Zero)
+            {
+                remaining = TimeSpan.Zero;
+            }
+
+            maintenanceCountdownLabel.Text = string.Format(Resources.Msg_MaintenanceCountdown, remaining.ToString(@"mm\:ss"));
+            PositionMaintenanceCountdownLabel();
+
+            if (remaining == TimeSpan.Zero)
+            {
+                maintenanceCountdownTimer.Stop();
+                SaveMaintenanceRecoveryIfNeeded();
+                Environment.Exit(0);
+            }
+        }
+
+        private void EnsureMaintenanceCountdownOverlay()
+        {
+            if (maintenanceCountdownLabel != null)
+            {
+                return;
+            }
+
+            maintenanceCountdownLabel = new Label
+            {
+                AutoSize = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Microsoft Sans Serif", 8.25F, FontStyle.Bold),
+                Padding = new Padding(6, 2, 6, 2),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Visible = false
+            };
+
+            this.Controls.Add(maintenanceCountdownLabel);
+            maintenanceCountdownLabel.BringToFront();
+            this.ClientSizeChanged += (_, __) => PositionMaintenanceCountdownLabel();
+            mainAppSplitContainer.Panel2.SizeChanged += (_, __) => PositionMaintenanceCountdownLabel();
+            ApplyThemeToMaintenanceCountdownLabel();
+            PositionMaintenanceCountdownLabel();
+        }
+
+        private void PositionMaintenanceCountdownLabel()
+        {
+            if (maintenanceCountdownLabel == null)
+            {
+                return;
+            }
+
+            int margin = 8;
+            Point panelOrigin = GetPanel2OriginInForm();
+            int x = panelOrigin.X + margin;
+            int y = panelOrigin.Y + margin;
+            maintenanceCountdownLabel.Location = new Point(x, y);
+        }
+
+        private void ApplyThemeToMaintenanceCountdownLabel()
+        {
+            if (maintenanceCountdownLabel == null)
+            {
+                return;
+            }
+
+            maintenanceCountdownLabel.BackColor = CurrentTheme.DangerBackColor;
+            maintenanceCountdownLabel.ForeColor = System.Drawing.Color.White;
+        }
+
+        private Point GetPanel2OriginInForm()
+        {
+            if (mainAppSplitContainer == null)
+            {
+                return Point.Empty;
+            }
+
+            Point screenPoint = mainAppSplitContainer.Panel2.PointToScreen(Point.Empty);
+            return this.PointToClient(screenPoint);
+        }
+
+        private void SaveMaintenanceRecoveryIfNeeded()
+        {
+            try
+            {
+                if (!projectWasChangedAfterLastSave)
+                {
+                    return;
+                }
+                if (string.IsNullOrWhiteSpace(inputPdfPath))
+                {
+                    return;
+                }
+
+                Directory.CreateDirectory(MaintenanceRecoveryDirectory);
+
+                var jsonSettings = new JsonSerializerSettings
+                {
+                    Formatting = Formatting.Indented // prettier, indented format
+                };
+
+                var projectData = new ProjectData
+                {
+                    RedactionBlocks = redactionBlocks ?? new List<RedactionBlock>(),
+                    PagesToRemove = pagesToRemove ?? new HashSet<int>(),
+                    TextAnnotations = textAnnotations ?? new List<TextAnnotation>(),
+                    PageRotationOffsets = pageRotationOffsets == null
+                        ? new Dictionary<int, int>()
+                        : new Dictionary<int, int>(pageRotationOffsets),
+                    FilePath = inputPdfPath,
+                    CurrentPage = currentPage,
+                    SignaturesMode = GetSignatureModeForProject(),
+                    SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null
+                };
+
+                string json = JsonConvert.SerializeObject(projectData, jsonSettings);
+                File.WriteAllText(MaintenanceRecoveryProjectPath, json);
+                LogDebug($"Maintenance recovery saved: {MaintenanceRecoveryProjectPath}");
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"Maintenance recovery save failed: {ex.Message}");
+            }
+        }
+
+        private void PromptMaintenanceRecoveryIfAvailable()
+        {
+            if (!File.Exists(MaintenanceRecoveryProjectPath))
+            {
+                return;
+            }
+
+            var result = MessageBox.Show(
+                this,
+                Resources.Msg_MaintenanceRecoveryPrompt,
+                Resources.Title_Warning,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning);
+
+            if (result == DialogResult.Yes)
+            {
+                LoadRedactionBlocks(MaintenanceRecoveryProjectPath, registerAsProject: false);
+                TryDeleteMaintenanceRecoveryFile();
+            }
+            else
+            {
+                TryDeleteMaintenanceRecoveryFile();
+            }
+        }
+
+        private void TryDeleteMaintenanceRecoveryFile()
+        {
+            try
+            {
+                if (File.Exists(MaintenanceRecoveryProjectPath))
+                {
+                    File.Delete(MaintenanceRecoveryProjectPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"Maintenance recovery cleanup failed: {ex.Message}");
+            }
+        }
+
         private void BringAppToFront()
         {
             // If the form is minimized, restore it
@@ -1973,6 +2255,7 @@ namespace AnonPDF
                 }
             }
 
+            PromptMaintenanceRecoveryIfAvailable();
             UpdateLeftPanelWidth();
             Task.Run(() => CheckForNewVersion());
             Task.Run(() => RefreshLicenseStatusFromServer());
@@ -2073,10 +2356,12 @@ namespace AnonPDF
             tableLayoutPanel1.BackColor = theme.SectionBackColor;
 
             ApplyThemeToControls(mainAppSplitContainer.Panel1.Controls, theme);
+            ApplyThemeToControls(mainAppSplitContainer.Panel2.Controls, theme);
             ApplyThemeToControls(tableLayoutPanel1.Controls, theme);
             ApplyIconButtonTheme(removePageButton, theme);
             ApplyIconButtonTheme(removePageRangeButton, theme);
             ApplyDangerButtonTheme(clearSelectionButton, theme);
+            ApplyThemeToMaintenanceCountdownLabel();
             ApplyTitleBarColor();
             UpdateSaveGroupState();
             UpdateOptionsGroupState();
@@ -2388,6 +2673,8 @@ namespace AnonPDF
             // Attach the ZoomPanel to Panel2
             mainAppSplitContainer.Panel2.Controls.Add(zoomPanel);
             zoomPanel.Visible = true;
+
+            EnsureMaintenanceCountdownOverlay();
 
             UpdateHelpMenuAvailability();
 
@@ -5971,7 +6258,7 @@ namespace AnonPDF
             UpdateRemovePageButtonVisual(false);
         }
 
-        private void LoadRedactionBlocks(string inputProjectPathTemp)
+        private void LoadRedactionBlocks(string inputProjectPathTemp, bool registerAsProject = true)
         {
             if (redactionBlocks.Count > 0 && projectWasChangedAfterLastSave)
             {
@@ -6153,14 +6440,27 @@ namespace AnonPDF
                         }
                     }
 
-                    inputProjectPath = inputProjectPathTemp;
-                    //Properties.Settings.Default.LastPapPath = inputProjectPath;
-                    //Properties.Settings.Default.Save();
+                    if (registerAsProject)
+                    {
+                        inputProjectPath = inputProjectPathTemp;
+                        //Properties.Settings.Default.LastPapPath = inputProjectPath;
+                        //Properties.Settings.Default.Save();
+                        projectWasChangedAfterLastSave = false;
+                        AddRecentFile(inputProjectPathTemp);
+                    }
+                    else
+                    {
+                        inputProjectPath = "";
+                        lastSavedProjectName = "";
+                        projectWasChangedAfterLastSave = true;
+                        saveProjectButton.Enabled = true;
+                        saveProjectMenuItem.Enabled = true;
+                        saveProjectAsButton.Enabled = true;
+                        saveProjectAsMenuItem.Enabled = true;
+                    }
 
                     UpdateSelectionNavigationButtons();
                     UpdateWindowTitle();
-                    projectWasChangedAfterLastSave = false;
-                    AddRecentFile(inputProjectPathTemp);
                 }
                 catch (Exception)
                 {

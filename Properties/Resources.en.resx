@@ -677,7 +677,13 @@ Files saved to:
 
 Please save your work and close the application.
 
-The application will close automatically in 5 minutes.</value>
+  The application will close automatically in 5 minutes.</value>
+  </data>
+  <data name="Msg_MaintenanceRecoveryPrompt" xml:space="preserve">
+    <value>The application was closed for maintenance. Do you want to restore the last session?</value>
+  </data>
+  <data name="Msg_MaintenanceCountdown" xml:space="preserve">
+    <value>Shutdown in {0}</value>
   </data>
   <data name="Msg_NewVersionAvailable" xml:space="preserve">
     <value>A newer version {0} is available for download (updated: {1}).</value>
