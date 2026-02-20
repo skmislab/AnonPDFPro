@@ -4826,7 +4826,7 @@ namespace AnonPDF
             }
             catch (Exception ex)
             {
-                LogDebug("Failed to apply demo watermark: " + ex.Message);
+                LogDebug("Failed to apply demo watermark: " + ex);
             }
         }
 
@@ -4843,16 +4843,39 @@ namespace AnonPDF
             var font = PdfFontFactory.CreateFont(iText.IO.Font.Constants.StandardFonts.HELVETICA_BOLD);
             var watermarkColor = new DeviceRgb(220, 0, 0);
             var opacityState = new PdfExtGState().SetFillOpacity(0.15f);
+            int totalPages = pdfDoc.GetNumberOfPages();
+            LogDebug($"DemoWatermark start pages={totalPages} textLen={watermarkText.Length} provider={(rotationProvider == null ? "null" : "custom")}");
 
-            for (int pageNumber = 1; pageNumber <= pdfDoc.GetNumberOfPages(); pageNumber++)
+            for (int pageNumber = 1; pageNumber <= totalPages; pageNumber++)
             {
                 var page = pdfDoc.GetPage(pageNumber);
                 var pageSize = page.GetPageSize();
                 var rotatedSize = page.GetPageSizeWithRotation();
+                PdfNumber rawRotateObj = page.GetPdfObject()?.GetAsNumber(PdfName.Rotate);
 
                 int rotationDeg = rotationProvider?.Invoke(pageNumber) ?? page.GetRotation();
+                int pageRotation = page.GetRotation();
                 float angle = ComputeWatermarkAngle(rotatedSize, rotationDeg);
                 float fontSize = GetWatermarkFontSize(pageSize);
+                float angleDeg = (float)(angle * 180.0 / Math.PI);
+                float centerX = pageSize.GetWidth() / 2f;
+                float centerY = pageSize.GetHeight() / 2f;
+
+                LogDebug(
+                    $"DemoWatermark page={pageNumber}/{totalPages} rawRotate={(rawRotateObj == null ? "null" : rawRotateObj.IntValue().ToString(CultureInfo.InvariantCulture))} " +
+                    $"pageRotate={pageRotation} providerRotate={rotationDeg} normalizedRotate={NormalizeRotation(rotationDeg)} " +
+                    $"pageSize={pageSize.GetWidth().ToString("0.##", CultureInfo.InvariantCulture)}x{pageSize.GetHeight().ToString("0.##", CultureInfo.InvariantCulture)} " +
+                    $"rotatedSize={rotatedSize.GetWidth().ToString("0.##", CultureInfo.InvariantCulture)}x{rotatedSize.GetHeight().ToString("0.##", CultureInfo.InvariantCulture)} " +
+                    $"font={fontSize.ToString("0.##", CultureInfo.InvariantCulture)} angleRad={angle.ToString("0.####", CultureInfo.InvariantCulture)} angleDeg={angleDeg.ToString("0.##", CultureInfo.InvariantCulture)} " +
+                    $"center={centerX.ToString("0.##", CultureInfo.InvariantCulture)},{centerY.ToString("0.##", CultureInfo.InvariantCulture)}");
+
+                // Isolate existing page content graphics state from appended watermark content.
+                // Some PDFs end content streams with non-default CTM, which can flip/rotate overlays.
+                var wrapBeforeCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page.NewContentStreamBefore(), page.GetResources(), pdfDoc);
+                wrapBeforeCanvas.WriteLiteral("\nq\n");
+                var wrapAfterCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page.NewContentStreamAfter(), page.GetResources(), pdfDoc);
+                wrapAfterCanvas.WriteLiteral("\nQ\n");
+                LogDebug($"DemoWatermark wrap page={pageNumber}/{totalPages} qQ=inserted-literal");
 
                 var pdfCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page.NewContentStreamAfter(), page.GetResources(), pdfDoc);
                 pdfCanvas.SaveState();
@@ -4868,12 +4891,13 @@ namespace AnonPDF
 
                     canvas.ShowTextAligned(
                         paragraph,
-                        pageSize.GetWidth() / 2f,
-                        pageSize.GetHeight() / 2f,
+                        centerX,
+                        centerY,
                         pageNumber,
                         iText.Layout.Properties.TextAlignment.CENTER,
                         iText.Layout.Properties.VerticalAlignment.MIDDLE,
                         angle);
+                    LogDebug($"DemoWatermark drawn page={pageNumber}/{totalPages}");
                 }
                 finally
                 {
