@@ -3967,6 +3967,216 @@ namespace AnonPDF
             return File.Exists(fontFile) ? fontFile : null;
         }
 
+        private static List<string> WrapTextToWidth(PdfFont font, string text, float fontSize, float maxWidth)
+        {
+            var wrapped = new List<string>();
+            if (font == null || string.IsNullOrEmpty(text) || maxWidth <= 0f)
+            {
+                return wrapped;
+            }
+
+            string normalized = text.Replace("\r\n", "\n").Replace("\r", "\n");
+            string[] baseLines = normalized.Split(new[] { '\n' }, StringSplitOptions.None);
+
+            foreach (string baseLine in baseLines)
+            {
+                if (string.IsNullOrEmpty(baseLine))
+                {
+                    wrapped.Add(string.Empty);
+                    continue;
+                }
+
+                var current = new System.Text.StringBuilder();
+                string[] words = baseLine.Split(new[] { ' ' }, StringSplitOptions.None);
+
+                foreach (string word in words)
+                {
+                    string candidate = current.Length == 0 ? word : current + " " + word;
+                    if (font.GetWidth(candidate, fontSize) <= maxWidth)
+                    {
+                        current.Clear();
+                        current.Append(candidate);
+                        continue;
+                    }
+
+                    if (current.Length > 0)
+                    {
+                        wrapped.Add(current.ToString());
+                        current.Clear();
+                    }
+
+                    if (font.GetWidth(word, fontSize) <= maxWidth)
+                    {
+                        current.Append(word);
+                        continue;
+                    }
+
+                    string remaining = word;
+                    while (remaining.Length > 0)
+                    {
+                        int chunkLen = remaining.Length;
+                        while (chunkLen > 1 && font.GetWidth(remaining.Substring(0, chunkLen), fontSize) > maxWidth)
+                        {
+                            chunkLen--;
+                        }
+
+                        chunkLen = Math.Max(1, chunkLen);
+                        string chunk = remaining.Substring(0, chunkLen);
+                        wrapped.Add(chunk);
+                        remaining = remaining.Substring(chunkLen);
+                    }
+                }
+
+                if (current.Length > 0)
+                {
+                    wrapped.Add(current.ToString());
+                }
+            }
+
+            return wrapped;
+        }
+
+        private static PdfStream ResolveNormalAppearanceStream(PdfDictionary apDict, PdfDictionary widgetObject)
+        {
+            if (apDict == null)
+            {
+                return null;
+            }
+
+            PdfObject normalAppearance = apDict.Get(PdfName.N);
+            if (normalAppearance == null)
+            {
+                return null;
+            }
+
+            if (normalAppearance.IsStream())
+            {
+                return apDict.GetAsStream(PdfName.N);
+            }
+
+            if (!normalAppearance.IsDictionary())
+            {
+                return null;
+            }
+
+            PdfDictionary normalDict = apDict.GetAsDictionary(PdfName.N);
+            if (normalDict == null)
+            {
+                return null;
+            }
+
+            PdfName widgetState = widgetObject?.GetAsName(PdfName.AS);
+            if (widgetState != null)
+            {
+                PdfStream stateStream = normalDict.GetAsStream(widgetState);
+                if (stateStream != null)
+                {
+                    return stateStream;
+                }
+            }
+
+            foreach (PdfName stateName in normalDict.KeySet())
+            {
+                PdfStream stream = normalDict.GetAsStream(stateName);
+                if (stream != null)
+                {
+                    return stream;
+                }
+            }
+
+            return null;
+        }
+
+        private static bool TryDrawOriginalSignatureWatermark(
+            PdfDictionary widgetObject,
+            PdfDictionary widgetAp,
+            iText.Kernel.Pdf.Canvas.PdfCanvas canvas,
+            float width,
+            float height,
+            out string sourceInfo)
+        {
+            sourceInfo = "none";
+            if (widgetObject == null || widgetAp == null || canvas == null || width <= 0f || height <= 0f)
+            {
+                return false;
+            }
+
+            PdfStream apStream = ResolveNormalAppearanceStream(widgetAp, widgetObject);
+            if (apStream == null)
+            {
+                sourceInfo = "no-ap-stream";
+                return false;
+            }
+
+            PdfDictionary resources = apStream.GetAsDictionary(PdfName.Resources);
+            PdfDictionary xObjects = resources?.GetAsDictionary(PdfName.XObject);
+            if (xObjects == null || xObjects.Size() == 0)
+            {
+                sourceInfo = "no-xobject";
+                return false;
+            }
+
+            PdfStream bestImage = null;
+            PdfName bestImageName = null;
+            float bestArea = -1f;
+
+            foreach (PdfName xName in xObjects.KeySet())
+            {
+                PdfStream xStream = xObjects.GetAsStream(xName);
+                if (xStream == null)
+                {
+                    continue;
+                }
+
+                PdfName subtype = xStream.GetAsName(PdfName.Subtype);
+                if (!PdfName.Image.Equals(subtype))
+                {
+                    continue;
+                }
+
+                float iw = xStream.GetAsNumber(PdfName.Width)?.FloatValue() ?? 0f;
+                float ih = xStream.GetAsNumber(PdfName.Height)?.FloatValue() ?? 0f;
+                float area = iw * ih;
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    bestImage = xStream;
+                    bestImageName = xName;
+                }
+            }
+
+            if (bestImage != null)
+            {
+                var imgXObj = new PdfImageXObject(bestImage);
+                canvas.AddXObjectFittedIntoRectangle(imgXObj, new KernelGeom.Rectangle(0, 0, width, height));
+                sourceInfo = $"image:{bestImageName?.GetValue()}";
+                return true;
+            }
+
+            foreach (PdfName xName in xObjects.KeySet())
+            {
+                PdfStream xStream = xObjects.GetAsStream(xName);
+                if (xStream == null)
+                {
+                    continue;
+                }
+
+                PdfName subtype = xStream.GetAsName(PdfName.Subtype);
+                if (!PdfName.Form.Equals(subtype))
+                {
+                    continue;
+                }
+
+                var formXObj = new PdfFormXObject(xStream);
+                canvas.AddXObjectFittedIntoRectangle(formXObj, new KernelGeom.Rectangle(0, 0, width, height));
+                sourceInfo = $"form:{xName.GetValue()}";
+                return true;
+            }
+
+            sourceInfo = "xobject-without-image-form";
+            return false;
+        }
+
         void RedactText(string inputFile, string outputFile, ISet<int> pagesWithBakedRotation = null)
         {
             iText.Kernel.Colors.Color cleanUpColorBlack = new DeviceRgb(0, 0, 0);
@@ -4065,7 +4275,19 @@ namespace AnonPDF
                                 pdfCanvas.BeginText()
                                  .SetFontAndSize(font, 12)
                                  .MoveText(50, shiftStart)
-                                 .ShowText($"   {Resources.Signatures_Report_Field_SignerTitle}: {sig.SignerTitle}")
+                                     .ShowText($"   {Resources.Signatures_Report_Field_SignerTitle}: {sig.SignerTitle}")
+                                     .EndText();
+                            }
+                            if (!string.IsNullOrWhiteSpace(sig.SignerOrganization))
+                            {
+                                shiftStart -= shift;
+                                string organizationLabel = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pl"
+                                    ? "Instytucja"
+                                    : "Organization";
+                                pdfCanvas.BeginText()
+                                 .SetFontAndSize(font, 12)
+                                 .MoveText(50, shiftStart)
+                                 .ShowText($"   {organizationLabel}: {sig.SignerOrganization}")
                                  .EndText();
                             }
                             if (sig.SignDate.ToString() != "")
@@ -4125,98 +4347,171 @@ namespace AnonPDF
                     PdfAcroForm form = PdfAcroForm.GetAcroForm(pdfDoc, false);
                     if (form != null)
                     {
-                        // Get all form fields
                         IDictionary<string, PdfFormField> fields = form.GetAllFormFields();
-                        foreach (var field in fields)
-                        {
-                            if (field.Value is PdfSignatureFormField sigField)
-                            {
-
-                                foreach (var widget in sigField.GetWidgets())
-                                {
-                                    var page = widget.GetPage();
-                                    if (page == null) continue;
-
-                                    // 1) Get /AP /N (normal appearance) as Form XObject
-                                    var apDict = widget.GetAppearanceDictionary();
-                                    if (apDict == null) continue;
-                                    var nStream = apDict.GetAsStream(PdfName.N);
-                                    if (nStream == null) continue;
-
-                                    var xObj = new PdfFormXObject(nStream);
-
-                                    // 2) Signature position (widget rectangle)
-                                    KernelGeom.Rectangle rect = widget.GetRectangle().ToRectangle();
-
-                                    // 3) Insert XObject into page content (below or above content)
-                                    //    - before: "background" (overwriting by other elements will disappear)
-                                    //    - after: "above" content (usually what you want)
-
-                                    var canvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page.NewContentStreamAfter(), page.GetResources(), pdfDoc);
-
-                                    int rotation = GetEffectiveRotationDegrees(pdfDoc.GetPageNumber(page));
-                                    float dpiX, dpiY;
-                                    using (Graphics g = pdfViewer.CreateGraphics())
-                                    {
-                                        dpiX = g.DpiX;
-                                        dpiY = g.DpiY;
-                                    }
-
-
-                                    // DPI correction for pdfCoordinates
-                                    float scaleX = 72f / dpiX; // Scaling factor for X axis
-                                    float scaleY = 72f / dpiY; // Scaling factor for Y axis
-                                    RectangleF scaledAnnotationBounds = new RectangleF(
-                                       rect.GetX(),
-                                       rect.GetY(),
-                                       rect.GetWidth() * scaleX,
-                                       rect.GetHeight() * scaleY
-                                    );
-                                    var pdfCoordinates = ConvertToPdfCoordinates(scaledAnnotationBounds, 1, rotation);
-
-                                    // Adjust X coordinate based on alignment
-                                    float adjustedX = pdfCoordinates.X;
-
-
-                                    // 4) Scale XObject to rect size (BBox XObject defines its own layout)
-                                    KernelGeom.Rectangle bbox = xObj.GetBBox().ToRectangle();
-                                    float sx = rect.GetWidth() / bbox.GetWidth();
-                                    float sy = rect.GetHeight() / bbox.GetHeight();
-
-                                    // Save state, set transformation and draw
-                                    canvas.SaveState();
-
-
-                                    // 1) Move to the lower-left corner of the target rect
-                                    canvas.ConcatMatrix(1, 0, 0, 1, rect.GetLeft(), rect.GetBottom());
-                                    
-
-
-                                    canvas.AddXObject(xObj);
-                                    canvas.RestoreState();
-                                }
-
-
-                            }
-                        }
-
-                        // Collect signature field keys for removal
-                        // (cannot modify collection during iteration)
                         var signatureFieldKeys = fields
                             .Where(f => f.Value is iText.Forms.Fields.PdfSignatureFormField)
                             .Select(f => f.Key)
                             .ToList();
 
-                        // Remove signature fields
+                        PdfFont signaturePlaceholderFont;
+                        string signatureFontPath = GetFontFilePathFromRegistry("Arial", FontStyle.Regular);
+                        if (!string.IsNullOrEmpty(signatureFontPath))
+                        {
+                            signaturePlaceholderFont = PdfFontFactory.CreateFont(
+                                signatureFontPath,
+                                PdfEncodings.IDENTITY_H,
+                                PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                        }
+                        else
+                        {
+                            signaturePlaceholderFont = PdfFontFactory.CreateFont(
+                                iText.IO.Font.Constants.StandardFonts.HELVETICA, "Cp1250");
+                        }
+                        int drawnWidgets = 0;
                         foreach (var key in signatureFieldKeys)
                         {
-                            form.RemoveField(key);
-                        }
-                        pdfDoc.GetCatalog().Remove(PdfName.Perms);
+                            SignatureInfo signatureInfo = signatures.FirstOrDefault(s => string.Equals(s.FieldName, key, StringComparison.OrdinalIgnoreCase));
+                            if (fields.TryGetValue(key, out PdfFormField rawField) && rawField is PdfSignatureFormField sigField)
+                            {
+                                int widgetIndex = 0;
+                                foreach (var widget in sigField.GetWidgets())
+                                {
+                                    widgetIndex++;
+                                    var page = widget.GetPage();
+                                    int pageNum = page != null ? pdfDoc.GetPageNumber(page) : -1;
+                                    int pageRotate = page != null ? page.GetRotation() : 0;
+                                    var rectArray = widget.GetRectangle();
+                                    string rectText = rectArray != null ? rectArray.ToString() : "null";
 
+                                    bool drawn = false;
+                                    string apText = "replacement(none)";
+                                    var rect = widget.GetRectangle()?.ToRectangle();
+                                    if (rect != null)
+                                    {
+                                        float appW = Math.Max(1f, rect.GetWidth());
+                                        float appH = Math.Max(1f, rect.GetHeight());
+                                        var replacementAppearance = new PdfFormXObject(new KernelGeom.Rectangle(0, 0, appW, appH));
+                                        var apCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(replacementAppearance, pdfDoc);
+
+                                        string watermarkInfo;
+                                        bool watermarkDrawn = TryDrawOriginalSignatureWatermark(
+                                            widget.GetPdfObject(),
+                                            widget.GetAppearanceDictionary(),
+                                            apCanvas,
+                                            appW,
+                                            appH,
+                                            out watermarkInfo);
+                                        if (!watermarkDrawn)
+                                        {
+                                            apCanvas.SaveState();
+                                            apCanvas.SetFillColor(new DeviceRgb(245, 245, 245));
+                                            apCanvas.Rectangle(0, 0, appW, appH);
+                                            apCanvas.Fill();
+                                            apCanvas.SetStrokeColor(new DeviceRgb(150, 150, 150));
+                                            apCanvas.Rectangle(0, 0, appW, appH);
+                                            apCanvas.Stroke();
+                                            apCanvas.RestoreState();
+
+                                            string signerName = signatureInfo?.SignerName;
+                                            string signerTitle = signatureInfo?.SignerTitle;
+                                            string signerOrganization = signatureInfo?.SignerOrganization;
+                                            string signDate = (signatureInfo != null && signatureInfo.SignDate != default(DateTime))
+                                                ? signatureInfo.SignDate.ToString("yyyy-MM-dd HH:mm:ss")
+                                                : string.Empty;
+
+                                            var lines = new List<string> { "Podpis z dokumentu źródłowego" };
+                                            if (!string.IsNullOrWhiteSpace(signerName))
+                                            {
+                                                lines.Add($"{Resources.Signatures_Report_Field_SignerName}: {signerName}");
+                                            }
+                                            if (!string.IsNullOrWhiteSpace(signerTitle))
+                                            {
+                                                lines.Add($"{Resources.Signatures_Report_Field_SignerTitle}: {signerTitle}");
+                                            }
+                                            if (!string.IsNullOrWhiteSpace(signerOrganization))
+                                            {
+                                                string organizationLabel = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pl"
+                                                    ? "Instytucja"
+                                                    : "Organization";
+                                                lines.Add($"{organizationLabel}: {signerOrganization}");
+                                            }
+                                            if (!string.IsNullOrWhiteSpace(signDate))
+                                            {
+                                                lines.Add($"{Resources.Signatures_Report_Field_SignDate}: {signDate}");
+                                            }
+
+                                            float padding = 3f;
+                                            float fontSize = 7f;
+                                            float lineHeight = 8.2f;
+                                            float titleGap = 3.0f;
+                                            float maxTextWidth = Math.Max(8f, appW - (2f * padding));
+                                            float minY = padding;
+                                            float currentY = appH - padding - fontSize;
+
+                                            apCanvas.BeginText();
+                                            apCanvas.SetFillColor(new DeviceRgb(0, 0, 0));
+                                            apCanvas.SetFontAndSize(signaturePlaceholderFont, fontSize);
+                                            for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
+                                            {
+                                                var wrappedLines = WrapTextToWidth(signaturePlaceholderFont, lines[lineIndex], fontSize, maxTextWidth);
+                                                foreach (string wrappedLine in wrappedLines)
+                                                {
+                                                    if (currentY < minY)
+                                                    {
+                                                        break;
+                                                    }
+
+                                                    if (!string.IsNullOrEmpty(wrappedLine))
+                                                    {
+                                                        apCanvas.SetTextMatrix(1, 0, 0, 1, padding, currentY);
+                                                        apCanvas.ShowText(wrappedLine);
+                                                    }
+                                                    currentY -= lineHeight;
+                                                }
+
+                                                if (lineIndex == 0)
+                                                {
+                                                    currentY -= titleGap;
+                                                }
+
+                                                if (currentY < minY)
+                                                {
+                                                    break;
+                                                }
+                                            }
+                                            apCanvas.EndText();
+                                        }
+
+                                        PdfDictionary widgetAp = widget.GetAppearanceDictionary();
+                                        if (widgetAp == null)
+                                        {
+                                            widgetAp = new PdfDictionary();
+                                            widget.GetPdfObject().Put(PdfName.AP, widgetAp);
+                                        }
+                                        widgetAp.Put(PdfName.N, replacementAppearance.GetPdfObject());
+                                        widget.GetPdfObject().Remove(PdfName.AS);
+
+                                        drawn = true;
+                                        drawnWidgets++;
+                                        apText = $"replacement bbox=[0 0 {appW} {appH}] mode=metadata-ap wm={(watermarkDrawn ? watermarkInfo : "none")} text={(watermarkDrawn ? "skipped" : "fallback")}";
+                                    }
+
+                                    LogDebug($"Signature viz-only field={key} widget={widgetIndex} page={pageNum} rotate={pageRotate} rect={rectText} ap={apText} drawn={drawn}");
+                                }
+                            }
+
+                            form.PartialFormFlattening(key);
+                        }
+
+                        if (signatureFieldKeys.Count > 0)
+                        {
+                            form.SetGenerateAppearance(false);
+                            form.FlattenFields();
+                        }
+
+                        LogDebug($"Signature viz-only completed fields={signatureFieldKeys.Count} drawnWidgets={drawnWidgets}");
+                        pdfDoc.GetCatalog().Remove(PdfName.Perms);
                     }
-                    // Optionally remove signature dictionary from document catalog
-                    pdfDoc.GetCatalog().Remove(PdfName.Perms);
                 }
 
 
@@ -8191,12 +8486,18 @@ namespace AnonPDF
 
                     string certCn = subject.GetField("CN") ?? "";
                     string certT = subject.GetField("T") ?? "";
+                    string certO = subject.GetField("O") ?? "";
+                    if (string.IsNullOrWhiteSpace(certO))
+                    {
+                        certO = subject.GetField("OU") ?? "";
+                    }
 
                     signatures.Add(new SignatureInfo
                     {
                         FieldName = name,
                         SignerName = certCn,
                         SignerTitle = certT,
+                        SignerOrganization = certO,
                         SignDate = signDate
                     });
                 }
@@ -10157,6 +10458,7 @@ namespace AnonPDF
         public string FieldName { get; set; }
         public string SignerName { get; set; }
         public string SignerTitle { get; set; }
+        public string SignerOrganization { get; set; }
         public DateTime SignDate { get; set; }
     }
 
