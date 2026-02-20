@@ -2896,8 +2896,10 @@ namespace AnonPDF
                 Size textSize = TextRenderer.MeasureText(e.Item.Text, e.Item.Font);
                 DrawingRectangle textRect = new DrawingRectangle(e.Bounds.Left + rectangleWidth + 4, e.Bounds.Top, textSize.Width, e.Bounds.Height);
 
-                // For current page use system highlight colors
-                if (status.PageNumber == currentPage)
+                // Highlight strictly by actual ListView selection state.
+                // Using currentPage here can desync with Selected state during fast keyboard/mouse interactions
+                // (e.g. holding PageUp and clicking a row), producing a second "ghost" highlight.
+                if (e.Item.Selected)
                 {
                     using (SolidBrush highlightBrush = new SolidBrush(SystemColors.Highlight))
                     {
