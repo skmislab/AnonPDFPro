@@ -30,6 +30,7 @@
         {
             this.components = new System.ComponentModel.Container();
             System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(PDFForm));
+            System.Func<string, string> Res = key => global::AnonPDF.Properties.Resources.ResourceManager.GetString(key, global::System.Globalization.CultureInfo.CurrentUICulture) ?? key;
             this.loadPdfButton = new System.Windows.Forms.Button();
             this.pdfViewer = new System.Windows.Forms.PictureBox();
             this.mainAppSplitContainer = new System.Windows.Forms.SplitContainer();
@@ -118,6 +119,7 @@
             this.languageSystemToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.languageEnglishToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.languagePolishToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.languageGermanToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.fullScreenToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
             this.ignorePdfRestrictionsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -163,8 +165,8 @@
             this.loadPdfButton.Name = "loadPdfButton";
             this.loadPdfButton.Size = new System.Drawing.Size(128, 23);
             this.loadPdfButton.TabIndex = 0;
-            this.loadPdfButton.Text = "Otwórz PDF";
-            this.toolTip1.SetToolTip(this.loadPdfButton, "Otwórz plik pdf do anonimizacji.");
+            this.loadPdfButton.Text = Res("UI_Button_OpenPdf");
+            this.toolTip1.SetToolTip(this.loadPdfButton, Res("Tooltip_LoadPdf"));
             this.loadPdfButton.UseVisualStyleBackColor = true;
             this.loadPdfButton.Click += new System.EventHandler(this.LoadPdfButton_Click);
             // 
@@ -216,8 +218,8 @@
             this.setSavePassword.Name = "setSavePassword";
             this.setSavePassword.Size = new System.Drawing.Size(124, 17);
             this.setSavePassword.TabIndex = 3;
-            this.setSavePassword.Text = "Ustawienie hasła";
-            this.toolTip1.SetToolTip(this.setSavePassword, "Gdy zaznaczone - plik PDF zozstanie zabezpieczony hasłem.\r\n");
+            this.setSavePassword.Text = Res("UI_Check_SetPassword");
+            this.toolTip1.SetToolTip(this.setSavePassword, Res("Tooltip_SetPassword"));
             this.setSavePassword.UseVisualStyleBackColor = true;
             // 
             // safeModeCheckBox
@@ -229,8 +231,8 @@
             this.safeModeCheckBox.Name = "safeModeCheckBox";
             this.safeModeCheckBox.Size = new System.Drawing.Size(106, 17);
             this.safeModeCheckBox.TabIndex = 2;
-            this.safeModeCheckBox.Text = "Tryb graficzny";
-            this.toolTip1.SetToolTip(this.safeModeCheckBox, resources.GetString("safeModeCheckBox.ToolTip"));
+            this.safeModeCheckBox.Text = Res("UI_Check_SafeMode");
+            this.toolTip1.SetToolTip(this.safeModeCheckBox, Res("Tooltip_SafeMode"));
             this.safeModeCheckBox.UseVisualStyleBackColor = true;
             // 
             // groupBoxPagesToRemove
@@ -243,7 +245,7 @@
             this.groupBoxPagesToRemove.Size = new System.Drawing.Size(164, 85);
             this.groupBoxPagesToRemove.TabIndex = 6;
             this.groupBoxPagesToRemove.TabStop = false;
-            this.groupBoxPagesToRemove.Text = "Strony do usunięcia";
+            this.groupBoxPagesToRemove.Text = Res("UI_Group_PagesToRemove");
             // 
             // removePageButton
             // 
@@ -256,7 +258,7 @@
             this.removePageButton.Padding = new System.Windows.Forms.Padding(3, 0, 0, 0);
             this.removePageButton.Size = new System.Drawing.Size(42, 51);
             this.removePageButton.TabIndex = 35;
-            this.toolTip1.SetToolTip(this.removePageButton, "Zaznacz stronę do usuniecia.");
+            this.toolTip1.SetToolTip(this.removePageButton, Res("Tooltip_RemovePage"));
             this.removePageButton.UseVisualStyleBackColor = true;
             // 
             // removePageRangeButton
@@ -268,7 +270,7 @@
             this.removePageRangeButton.Name = "removePageRangeButton";
             this.removePageRangeButton.Size = new System.Drawing.Size(42, 51);
             this.removePageRangeButton.TabIndex = 34;
-            this.toolTip1.SetToolTip(this.removePageRangeButton, "Wybierz zakres stron do usuniecia\r\nlub do anulowania usunięcia.");
+            this.toolTip1.SetToolTip(this.removePageRangeButton, Res("Tooltip_RemovePageRange"));
             this.removePageRangeButton.UseVisualStyleBackColor = true;
             // 
             // groupBoxSignatures
@@ -282,7 +284,7 @@
             this.groupBoxSignatures.Size = new System.Drawing.Size(164, 99);
             this.groupBoxSignatures.TabIndex = 7;
             this.groupBoxSignatures.TabStop = false;
-            this.groupBoxSignatures.Text = "Podpisy";
+            this.groupBoxSignatures.Text = Res("UI_Group_Signatures");
             // 
             // signaturesReportRadioButton
             // 
@@ -293,9 +295,8 @@
             this.signaturesReportRadioButton.Size = new System.Drawing.Size(63, 17);
             this.signaturesReportRadioButton.TabIndex = 39;
             this.signaturesReportRadioButton.TabStop = true;
-            this.signaturesReportRadioButton.Text = "Raport";
-            this.toolTip1.SetToolTip(this.signaturesReportRadioButton, "Zostanie wygenerowana na dodatkowej stronie\r\n lista użytych podpisów ze źródłoweg" +
-        "o dokumentu.");
+            this.signaturesReportRadioButton.Text = Res("UI_Radio_Signatures_Report");
+            this.toolTip1.SetToolTip(this.signaturesReportRadioButton, Res("Tooltip_Signatures_Report"));
             this.signaturesReportRadioButton.UseVisualStyleBackColor = true;
             // 
             // signaturesOriginalRadioButton
@@ -307,9 +308,8 @@
             this.signaturesOriginalRadioButton.Size = new System.Drawing.Size(85, 17);
             this.signaturesOriginalRadioButton.TabIndex = 38;
             this.signaturesOriginalRadioButton.TabStop = true;
-            this.signaturesOriginalRadioButton.Text = "Oryginalne";
-            this.toolTip1.SetToolTip(this.signaturesOriginalRadioButton, "Podpisy kwalifikowane zostaną pozostawione w pliku PDF.\r\nUwaga, próba weryfikacji" +
-        " podpisów zakończy się niepowodzeniem!");
+            this.signaturesOriginalRadioButton.Text = Res("UI_Radio_Signatures_Original");
+            this.toolTip1.SetToolTip(this.signaturesOriginalRadioButton, Res("Tooltip_Signatures_Original"));
             this.signaturesOriginalRadioButton.UseVisualStyleBackColor = true;
             // 
             // signaturesRemoveRadioButton
@@ -322,8 +322,8 @@
             this.signaturesRemoveRadioButton.Size = new System.Drawing.Size(75, 17);
             this.signaturesRemoveRadioButton.TabIndex = 37;
             this.signaturesRemoveRadioButton.TabStop = true;
-            this.signaturesRemoveRadioButton.Text = "Usunięte";
-            this.toolTip1.SetToolTip(this.signaturesRemoveRadioButton, "Podpisy kwalifikowane zostaną przed zapisaniem usunięte z pliku PDF.");
+            this.signaturesRemoveRadioButton.Text = Res("UI_Radio_Signatures_Remove");
+            this.toolTip1.SetToolTip(this.signaturesRemoveRadioButton, Res("Tooltip_Signatures_Remove"));
             this.signaturesRemoveRadioButton.UseVisualStyleBackColor = true;
             // 
             // groupBoxPages
@@ -348,7 +348,7 @@
             this.groupBoxPages.Size = new System.Drawing.Size(164, 110);
             this.groupBoxPages.TabIndex = 3;
             this.groupBoxPages.TabStop = false;
-            this.groupBoxPages.Text = "Strony";
+            this.groupBoxPages.Text = Res("UI_Group_Pages");
             // 
             // pageNumberTextBox
             // 
@@ -358,7 +358,7 @@
             this.pageNumberTextBox.Size = new System.Drawing.Size(64, 21);
             this.pageNumberTextBox.TabIndex = 4;
             this.pageNumberTextBox.TextAlign = System.Windows.Forms.HorizontalAlignment.Right;
-            this.toolTip1.SetToolTip(this.pageNumberTextBox, "Wprowadź wybrany numer strony i naciśnij przycisk Enter.");
+            this.toolTip1.SetToolTip(this.pageNumberTextBox, Res("Tooltip_PageNumber"));
             this.pageNumberTextBox.Visible = false;
             this.pageNumberTextBox.Click += new System.EventHandler(this.PageNumberTextBox_Click);
             this.pageNumberTextBox.KeyDown += new System.Windows.Forms.KeyEventHandler(this.PageNumberTextBox_KeyDown);
@@ -386,7 +386,7 @@
             this.buttonFirst.Size = new System.Drawing.Size(27, 23);
             this.buttonFirst.TabIndex = 5;
             this.buttonFirst.Text = "|<";
-            this.toolTip1.SetToolTip(this.buttonFirst, "Pierwsza strona.");
+            this.toolTip1.SetToolTip(this.buttonFirst, Res("Tooltip_FirstPage"));
             this.buttonFirst.UseVisualStyleBackColor = true;
             this.buttonFirst.Click += new System.EventHandler(this.ButtonFirst_Click);
             // 
@@ -399,7 +399,7 @@
             this.buttonNextPage.Size = new System.Drawing.Size(27, 23);
             this.buttonNextPage.TabIndex = 7;
             this.buttonNextPage.Text = ">";
-            this.toolTip1.SetToolTip(this.buttonNextPage, "Następna strona.");
+            this.toolTip1.SetToolTip(this.buttonNextPage, Res("Tooltip_NextPage"));
             this.buttonNextPage.UseVisualStyleBackColor = true;
             this.buttonNextPage.Click += new System.EventHandler(this.ButtonNextPage_Click);
             // 
@@ -412,7 +412,7 @@
             this.buttonPrevious.Size = new System.Drawing.Size(27, 23);
             this.buttonPrevious.TabIndex = 6;
             this.buttonPrevious.Text = "<";
-            this.toolTip1.SetToolTip(this.buttonPrevious, "Poprzednia strona.");
+            this.toolTip1.SetToolTip(this.buttonPrevious, Res("Tooltip_PrevPage"));
             this.buttonPrevious.UseVisualStyleBackColor = true;
             this.buttonPrevious.Click += new System.EventHandler(this.ButtonPrevious_Click);
             // 
@@ -424,7 +424,7 @@
             this.zoomMinButton.Name = "zoomMinButton";
             this.zoomMinButton.Size = new System.Drawing.Size(27, 27);
             this.zoomMinButton.TabIndex = 9;
-            this.toolTip1.SetToolTip(this.zoomMinButton, "Kliknij aby zmniejszyć maksymalnie stronę. CTRL + rolka myszki w dół.");
+            this.toolTip1.SetToolTip(this.zoomMinButton, Res("Tooltip_ZoomMin"));
             this.zoomMinButton.UseVisualStyleBackColor = true;
             this.zoomMinButton.Click += new System.EventHandler(this.ZoomMinButton_Click);
             // 
@@ -437,7 +437,7 @@
             this.zoomMaxButton.Padding = new System.Windows.Forms.Padding(2, 0, 0, 0);
             this.zoomMaxButton.Size = new System.Drawing.Size(27, 27);
             this.zoomMaxButton.TabIndex = 12;
-            this.toolTip1.SetToolTip(this.zoomMaxButton, "Kliknij aby powiększyć maksymalnie stronę. CTRL + rolka myszki w górę.");
+            this.toolTip1.SetToolTip(this.zoomMaxButton, Res("Tooltip_ZoomMax"));
             this.zoomMaxButton.UseVisualStyleBackColor = true;
             this.zoomMaxButton.Click += new System.EventHandler(this.ZoomMaxButton_Click);
             // 
@@ -450,7 +450,7 @@
             this.zoomOutButton.Padding = new System.Windows.Forms.Padding(2, 0, 0, 0);
             this.zoomOutButton.Size = new System.Drawing.Size(27, 27);
             this.zoomOutButton.TabIndex = 10;
-            this.toolTip1.SetToolTip(this.zoomOutButton, "Kliknij aby zmniejszyć stronę. CTRL + rolka myszki w dół.");
+            this.toolTip1.SetToolTip(this.zoomOutButton, Res("Tooltip_ZoomOut"));
             this.zoomOutButton.UseVisualStyleBackColor = true;
             this.zoomOutButton.Click += new System.EventHandler(this.ZoomOutButton_Click);
             // 
@@ -463,7 +463,7 @@
             this.zoomInButton.Padding = new System.Windows.Forms.Padding(2, 0, 0, 0);
             this.zoomInButton.Size = new System.Drawing.Size(27, 27);
             this.zoomInButton.TabIndex = 11;
-            this.toolTip1.SetToolTip(this.zoomInButton, "Kliknij aby powiększyć stronę. CTRL + rolka myszki w górę.");
+            this.toolTip1.SetToolTip(this.zoomInButton, Res("Tooltip_ZoomIn"));
             this.zoomInButton.UseVisualStyleBackColor = true;
             this.zoomInButton.Click += new System.EventHandler(this.ZoomInButton_Click);
             // 
@@ -476,7 +476,7 @@
             this.buttonLast.Size = new System.Drawing.Size(27, 23);
             this.buttonLast.TabIndex = 8;
             this.buttonLast.Text = ">|";
-            this.toolTip1.SetToolTip(this.buttonLast, "Ostatnia strona.");
+            this.toolTip1.SetToolTip(this.buttonLast, Res("Tooltip_LastPage"));
             this.buttonLast.UseVisualStyleBackColor = true;
             this.buttonLast.Click += new System.EventHandler(this.ButtonLast_Click);
             // 
@@ -499,7 +499,7 @@
             this.groupBoxSearch.Size = new System.Drawing.Size(164, 127);
             this.groupBoxSearch.TabIndex = 4;
             this.groupBoxSearch.TabStop = false;
-            this.groupBoxSearch.Text = "Wyszukiwanie";
+            this.groupBoxSearch.Text = Res("UI_Group_Search");
             // 
             // searchButton
             // 
@@ -509,7 +509,7 @@
             this.searchButton.Padding = new System.Windows.Forms.Padding(2, 0, 0, 0);
             this.searchButton.Size = new System.Drawing.Size(27, 23);
             this.searchButton.TabIndex = 15;
-            this.toolTip1.SetToolTip(this.searchButton, "Kliknij, aby wyszukać.");
+            this.toolTip1.SetToolTip(this.searchButton, Res("Tooltip_Search"));
             this.searchButton.UseVisualStyleBackColor = true;
             this.searchButton.Click += new System.EventHandler(this.SearchButton_Click);
             // 
@@ -521,8 +521,7 @@
             this.searchToSelectionButton.Padding = new System.Windows.Forms.Padding(2, 0, 0, 0);
             this.searchToSelectionButton.Size = new System.Drawing.Size(27, 23);
             this.searchToSelectionButton.TabIndex = 19;
-            this.toolTip1.SetToolTip(this.searchToSelectionButton, "Kliknij, aby oznaczyć obszary z wynikami wyszukiwania do anonimizacji na bieżącej" +
-        " stronie.\r\nPonowne kliknięcie usunie te zaznaczenia.");
+            this.toolTip1.SetToolTip(this.searchToSelectionButton, Res("Tooltip_SearchToSelection"));
             this.searchToSelectionButton.UseVisualStyleBackColor = true;
             this.searchToSelectionButton.Click += new System.EventHandler(this.SearchToSelectionButton_Click);
             // 
@@ -545,8 +544,8 @@
             this.SearchClearButton.Name = "SearchClearButton";
             this.SearchClearButton.Size = new System.Drawing.Size(27, 23);
             this.SearchClearButton.TabIndex = 17;
-            this.SearchClearButton.Text = "X";
-            this.toolTip1.SetToolTip(this.SearchClearButton, "Wyczyść wynik wyszukiwania.");
+            this.SearchClearButton.Text = Res("UI_SearchClearGlyph");
+            this.toolTip1.SetToolTip(this.SearchClearButton, Res("Tooltip_SearchClear"));
             this.SearchClearButton.UseVisualStyleBackColor = true;
             this.SearchClearButton.Click += new System.EventHandler(this.SearchClearButton_Click);
             // 
@@ -557,9 +556,8 @@
             this.personalDataButton.Name = "personalDataButton";
             this.personalDataButton.Size = new System.Drawing.Size(96, 23);
             this.personalDataButton.TabIndex = 16;
-            this.personalDataButton.Text = "Identyfikatory";
-            this.toolTip1.SetToolTip(this.personalDataButton, "Sprawdź czy w dokumencie są identyfikatory PESEL, numery KW, numery dowodów osobi" +
-        "stych, adresy email.");
+            this.personalDataButton.Text = Res("UI_Button_PersonalData");
+            this.toolTip1.SetToolTip(this.personalDataButton, Res("Tooltip_PersonalData"));
             this.personalDataButton.UseVisualStyleBackColor = true;
             this.personalDataButton.Click += new System.EventHandler(this.PersonalDataButton_Click);
             // 
@@ -571,7 +569,7 @@
             this.searchLastButton.Size = new System.Drawing.Size(27, 23);
             this.searchLastButton.TabIndex = 23;
             this.searchLastButton.Text = ">|";
-            this.toolTip1.SetToolTip(this.searchLastButton, "Wyświetl ostatni wynik wyszukiwania.");
+            this.toolTip1.SetToolTip(this.searchLastButton, Res("Tooltip_SearchResultLast"));
             this.searchLastButton.UseVisualStyleBackColor = true;
             this.searchLastButton.Click += new System.EventHandler(this.SearchLastButton_Click);
             // 
@@ -583,7 +581,7 @@
             this.searchNextButton.Size = new System.Drawing.Size(27, 23);
             this.searchNextButton.TabIndex = 22;
             this.searchNextButton.Text = ">";
-            this.toolTip1.SetToolTip(this.searchNextButton, "Wyświetl następny wynik wyszukiwania.");
+            this.toolTip1.SetToolTip(this.searchNextButton, Res("Tooltip_SearchResultNext"));
             this.searchNextButton.UseVisualStyleBackColor = true;
             this.searchNextButton.Click += new System.EventHandler(this.SearchNextButton_Click);
             // 
@@ -595,7 +593,7 @@
             this.searchPrevButton.Size = new System.Drawing.Size(27, 23);
             this.searchPrevButton.TabIndex = 21;
             this.searchPrevButton.Text = "<";
-            this.toolTip1.SetToolTip(this.searchPrevButton, "Wyświetl poprzedni  wynik wyszukiwania.");
+            this.toolTip1.SetToolTip(this.searchPrevButton, Res("Tooltip_SearchResultPrev"));
             this.searchPrevButton.UseVisualStyleBackColor = true;
             this.searchPrevButton.Click += new System.EventHandler(this.SearchPrevButton_Click);
             // 
@@ -607,7 +605,7 @@
             this.searchFirstButton.Size = new System.Drawing.Size(27, 23);
             this.searchFirstButton.TabIndex = 20;
             this.searchFirstButton.Text = "|<";
-            this.toolTip1.SetToolTip(this.searchFirstButton, "Wyświetl pierwszy wynik wyszukiwania.");
+            this.toolTip1.SetToolTip(this.searchFirstButton, Res("Tooltip_SearchResultFirst"));
             this.searchFirstButton.UseVisualStyleBackColor = true;
             this.searchFirstButton.Click += new System.EventHandler(this.SearchFirstButton_Click);
             // 
@@ -618,7 +616,7 @@
             this.searchTextBox.Name = "searchTextBox";
             this.searchTextBox.Size = new System.Drawing.Size(96, 21);
             this.searchTextBox.TabIndex = 14;
-            this.toolTip1.SetToolTip(this.searchTextBox, "Wprowadź treść do wyszukania i naciśnij Enter");
+            this.toolTip1.SetToolTip(this.searchTextBox, Res("Tooltip_SearchInput"));
             this.searchTextBox.Click += new System.EventHandler(this.SearchTextBox_Click);
             this.searchTextBox.KeyDown += new System.Windows.Forms.KeyEventHandler(this.SearchTextBox_KeyDown);
             // 
@@ -633,9 +631,8 @@
             this.openSavedPDFCheckBox.Name = "openSavedPDFCheckBox";
             this.openSavedPDFCheckBox.Size = new System.Drawing.Size(147, 17);
             this.openSavedPDFCheckBox.TabIndex = 1;
-            this.openSavedPDFCheckBox.Text = "Podgląd po zapisaniu";
-            this.toolTip1.SetToolTip(this.openSavedPDFCheckBox, "Gdy zaznaczone - zapisany plik PDF zostanie wyświetlony do podglądu za pomocą dom" +
-        "yślnej przegladarki.");
+            this.openSavedPDFCheckBox.Text = Res("UI_Check_PreviewAfterSave");
+            this.toolTip1.SetToolTip(this.openSavedPDFCheckBox, Res("Tooltip_PreviewAfterSave"));
             this.openSavedPDFCheckBox.UseVisualStyleBackColor = true;
             // 
             // saveProjectButton
@@ -646,8 +643,8 @@
             this.saveProjectButton.Name = "saveProjectButton";
             this.saveProjectButton.Size = new System.Drawing.Size(128, 23);
             this.saveProjectButton.TabIndex = 0;
-            this.saveProjectButton.Text = "Zapisz projekt";
-            this.toolTip1.SetToolTip(this.saveProjectButton, "Zapisz projekt z oznaczeniami pod wcześniej wybraną nazwą.");
+            this.saveProjectButton.Text = Res("UI_Button_SaveProject");
+            this.toolTip1.SetToolTip(this.saveProjectButton, Res("Tooltip_SaveProject"));
             this.saveProjectButton.UseVisualStyleBackColor = true;
             this.saveProjectButton.Click += new System.EventHandler(this.SaveProjectButton_Click);
             // 
@@ -659,8 +656,8 @@
             this.saveProjectAsButton.Name = "saveProjectAsButton";
             this.saveProjectAsButton.Size = new System.Drawing.Size(128, 23);
             this.saveProjectAsButton.TabIndex = 0;
-            this.saveProjectAsButton.Text = "Zapisz projekt jako";
-            this.toolTip1.SetToolTip(this.saveProjectAsButton, "Zapisz projekt z oznaczeniami pod wybraną nazwą.");
+            this.saveProjectAsButton.Text = Res("UI_Button_SaveProjectAs");
+            this.toolTip1.SetToolTip(this.saveProjectAsButton, Res("Tooltip_SaveProjectAs"));
             this.saveProjectAsButton.UseVisualStyleBackColor = true;
             this.saveProjectAsButton.Click += new System.EventHandler(this.SaveProjectAsButton_Click);
             this.saveProjectAsButton.Visible = false;
@@ -672,8 +669,8 @@
             this.openProjectButton.Name = "openProjectButton";
             this.openProjectButton.Size = new System.Drawing.Size(128, 23);
             this.openProjectButton.TabIndex = 1;
-            this.openProjectButton.Text = "Otwórz projekt";
-            this.toolTip1.SetToolTip(this.openProjectButton, "Otwórz plik projektu z zaznaczeniami do anonimizacji.");
+            this.openProjectButton.Text = Res("UI_Button_OpenProject");
+            this.toolTip1.SetToolTip(this.openProjectButton, Res("Tooltip_OpenProject"));
             this.openProjectButton.UseVisualStyleBackColor = true;
             this.openProjectButton.Click += new System.EventHandler(this.OpenProjectButton_Click);
             // 
@@ -686,7 +683,7 @@
             this.groupBoxOpen.Size = new System.Drawing.Size(164, 74);
             this.groupBoxOpen.TabIndex = 1;
             this.groupBoxOpen.TabStop = true;
-            this.groupBoxOpen.Text = "Otwórz";
+            this.groupBoxOpen.Text = Res("UI_Group_Open");
             // 
             // groupBoxSave
             // 
@@ -698,7 +695,7 @@
             this.groupBoxSave.Size = new System.Drawing.Size(164, 74);
             this.groupBoxSave.TabIndex = 2;
             this.groupBoxSave.TabStop = true;
-            this.groupBoxSave.Text = "Zapisz";
+            this.groupBoxSave.Text = Res("UI_Group_Save");
             // 
             // groupBoxOptions
             // 
@@ -711,7 +708,7 @@
             this.groupBoxOptions.Size = new System.Drawing.Size(164, 110);
             this.groupBoxOptions.TabIndex = 8;
             this.groupBoxOptions.TabStop = true;
-            this.groupBoxOptions.Text = "Opcje";
+            this.groupBoxOptions.Text = Res("UI_Group_Options");
             // 
             // colorCheckBox
             // 
@@ -722,8 +719,8 @@
             this.colorCheckBox.Name = "colorCheckBox";
             this.colorCheckBox.Size = new System.Drawing.Size(143, 17);
             this.colorCheckBox.TabIndex = 0;
-            this.colorCheckBox.Text = "Wyróżnienie kolorem";
-            this.toolTip1.SetToolTip(this.colorCheckBox, "Gdy zaznaczone - w zapisanym pliku zaznaczenia będą wyróżnione\r\nczarnym kolorem.");
+            this.colorCheckBox.Text = Res("UI_Check_HighlightColor");
+            this.toolTip1.SetToolTip(this.colorCheckBox, Res("Tooltip_HighlightColor"));
             this.colorCheckBox.UseVisualStyleBackColor = true;
             // 
             // groupBoxSelections
@@ -742,7 +739,7 @@
             this.groupBoxSelections.Size = new System.Drawing.Size(164, 137);
             this.groupBoxSelections.TabIndex = 5;
             this.groupBoxSelections.TabStop = false;
-            this.groupBoxSelections.Text = "Zaznaczenia";
+            this.groupBoxSelections.Text = Res("UI_Group_Selections");
             // 
             // selectionLastButton
             // 
@@ -752,7 +749,7 @@
             this.selectionLastButton.Size = new System.Drawing.Size(27, 23);
             this.selectionLastButton.TabIndex = 30;
             this.selectionLastButton.Text = ">|";
-            this.toolTip1.SetToolTip(this.selectionLastButton, "Wyświetl ostatnią stronę zawierającą zaznaczenia.");
+            this.toolTip1.SetToolTip(this.selectionLastButton, Res("Tooltip_SelectionLast"));
             this.selectionLastButton.UseVisualStyleBackColor = true;
             this.selectionLastButton.Click += new System.EventHandler(this.SelectionLastButton_Click);
             // 
@@ -764,7 +761,7 @@
             this.selectionNextButton.Size = new System.Drawing.Size(27, 23);
             this.selectionNextButton.TabIndex = 29;
             this.selectionNextButton.Text = ">";
-            this.toolTip1.SetToolTip(this.selectionNextButton, "Wyświetl następną stronę zawierającą zaznaczenia.");
+            this.toolTip1.SetToolTip(this.selectionNextButton, Res("Tooltip_SelectionNext"));
             this.selectionNextButton.UseVisualStyleBackColor = true;
             this.selectionNextButton.Click += new System.EventHandler(this.SelectionNextButton_Click);
             // 
@@ -776,7 +773,7 @@
             this.selectionPrevButton.Size = new System.Drawing.Size(27, 23);
             this.selectionPrevButton.TabIndex = 28;
             this.selectionPrevButton.Text = "<";
-            this.toolTip1.SetToolTip(this.selectionPrevButton, "Wyświetl poprzednią stronę zawierającą zaznaczenia.");
+            this.toolTip1.SetToolTip(this.selectionPrevButton, Res("Tooltip_SelectionPrev"));
             this.selectionPrevButton.UseVisualStyleBackColor = true;
             this.selectionPrevButton.Click += new System.EventHandler(this.SelectionPrevButton_Click);
             // 
@@ -788,7 +785,7 @@
             this.selectionFirstButton.Size = new System.Drawing.Size(27, 23);
             this.selectionFirstButton.TabIndex = 27;
             this.selectionFirstButton.Text = "|<";
-            this.toolTip1.SetToolTip(this.selectionFirstButton, "Wyświetl pierwszą stronę zawierającą zaznaczenia.");
+            this.toolTip1.SetToolTip(this.selectionFirstButton, Res("Tooltip_SelectionFirst"));
             this.selectionFirstButton.UseVisualStyleBackColor = true;
             this.selectionFirstButton.Click += new System.EventHandler(this.SelectionFirstButton_Click);
             // 
@@ -802,8 +799,8 @@
             this.markerRadioButton.Size = new System.Drawing.Size(64, 17);
             this.markerRadioButton.TabIndex = 25;
             this.markerRadioButton.TabStop = true;
-            this.markerRadioButton.Text = "Marker";
-            this.toolTip1.SetToolTip(this.markerRadioButton, resources.GetString("markerRadioButton.ToolTip"));
+            this.markerRadioButton.Text = Res("UI_Radio_Marker");
+            this.toolTip1.SetToolTip(this.markerRadioButton, Res("Tooltip_Marker"));
             this.markerRadioButton.UseVisualStyleBackColor = true;
             // 
             // boxRadioButton
@@ -815,10 +812,8 @@
             this.boxRadioButton.Size = new System.Drawing.Size(46, 17);
             this.boxRadioButton.TabIndex = 26;
             this.boxRadioButton.TabStop = true;
-            this.boxRadioButton.Text = "Box";
-            this.toolTip1.SetToolTip(this.boxRadioButton, "Opcja dedykowana do dokumentów skanowanych.\r\nAby zaznaczyć box - kliknij lewym pr" +
-        "zyciskiem myszy, przeciągnij i puść.\r\nAby usunąć - kliknij prawym przyciskiem my" +
-        "szki na zaznaczeniu.");
+            this.boxRadioButton.Text = Res("UI_Radio_Box");
+            this.toolTip1.SetToolTip(this.boxRadioButton, Res("Tooltip_Box"));
             this.boxRadioButton.UseVisualStyleBackColor = true;
             // 
             // clearPageButton
@@ -828,8 +823,8 @@
             this.clearPageButton.Name = "clearPageButton";
             this.clearPageButton.Size = new System.Drawing.Size(129, 23);
             this.clearPageButton.TabIndex = 31;
-            this.clearPageButton.Text = "Wyczyść stronę";
-            this.toolTip1.SetToolTip(this.clearPageButton, "Usuń wszystkie zaznaczenia wprowadzone na bieżącej stronie.");
+            this.clearPageButton.Text = Res("UI_ClearPage");
+            this.toolTip1.SetToolTip(this.clearPageButton, Res("Tooltip_ClearPage"));
             this.clearPageButton.UseVisualStyleBackColor = true;
             this.clearPageButton.Click += new System.EventHandler(this.ClearPageButton_Click);
             // 
@@ -840,8 +835,8 @@
             this.clearSelectionButton.Name = "clearSelectionButton";
             this.clearSelectionButton.Size = new System.Drawing.Size(129, 23);
             this.clearSelectionButton.TabIndex = 32;
-            this.clearSelectionButton.Text = "Wyczyść wszystko";
-            this.toolTip1.SetToolTip(this.clearSelectionButton, "Usuń wszystkie zaznaczenia z dokumentu.");
+            this.clearSelectionButton.Text = Res("UI_ClearAll");
+            this.toolTip1.SetToolTip(this.clearSelectionButton, Res("Tooltip_ClearAll"));
             this.clearSelectionButton.UseVisualStyleBackColor = true;
             this.clearSelectionButton.Click += new System.EventHandler(this.ClearSelectionButton_Click);
             // 
@@ -853,8 +848,8 @@
             this.buttonRedactText.Name = "buttonRedactText";
             this.buttonRedactText.Size = new System.Drawing.Size(128, 23);
             this.buttonRedactText.TabIndex = 1;
-            this.buttonRedactText.Text = "Zapisz PDF";
-            this.toolTip1.SetToolTip(this.buttonRedactText, "Zapisz zanonimizowany plik PDF pod wybraną nazwą.");
+            this.buttonRedactText.Text = Res("UI_Button_SavePdf");
+            this.toolTip1.SetToolTip(this.buttonRedactText, Res("Tooltip_SavePdf"));
             this.buttonRedactText.UseVisualStyleBackColor = true;
             this.buttonRedactText.Click += new System.EventHandler(this.ButtonRedactText_Click);
             // 
@@ -869,7 +864,7 @@
             this.menuStrip1.Name = "menuStrip1";
             this.menuStrip1.Size = new System.Drawing.Size(165, 24);
             this.menuStrip1.TabIndex = 18;
-            this.menuStrip1.Text = "menuStrip1";
+            this.menuStrip1.Text = string.Empty;
             // 
             // menuFileItem
             // 
@@ -888,14 +883,14 @@
             this.exitMenuItem});
             this.menuFileItem.Name = "menuFileItem";
             this.menuFileItem.Size = new System.Drawing.Size(38, 20);
-            this.menuFileItem.Text = "&Plik";
+            this.menuFileItem.Text = Res("Menu_File");
             // 
             // openPdfToolStripMenuItem
             // 
             this.openPdfToolStripMenuItem.Name = "openPdfToolStripMenuItem";
             this.openPdfToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.N)));
             this.openPdfToolStripMenuItem.Size = new System.Drawing.Size(261, 22);
-            this.openPdfToolStripMenuItem.Text = "Otwórz plik PDF";
+            this.openPdfToolStripMenuItem.Text = Res("Menu_OpenPdf");
             this.openPdfToolStripMenuItem.Click += new System.EventHandler(this.LoadPdfButton_Click);
             // 
             // openProjectToolStripMenuItem
@@ -903,7 +898,7 @@
             this.openProjectToolStripMenuItem.Name = "openProjectToolStripMenuItem";
             this.openProjectToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.O)));
             this.openProjectToolStripMenuItem.Size = new System.Drawing.Size(261, 22);
-            this.openProjectToolStripMenuItem.Text = "Otwórz projekt zaznaczeń";
+            this.openProjectToolStripMenuItem.Text = Res("Menu_OpenProject");
             this.openProjectToolStripMenuItem.Click += new System.EventHandler(this.OpenProjectButton_Click);
             // 
             // openLastPdfProjectToolStripMenuItem
@@ -911,7 +906,7 @@
             this.openLastPdfProjectToolStripMenuItem.Name = "openLastPdfProjectToolStripMenuItem";
             this.openLastPdfProjectToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.L)));
             this.openLastPdfProjectToolStripMenuItem.Size = new System.Drawing.Size(261, 22);
-            this.openLastPdfProjectToolStripMenuItem.Text = "Otwórz ostatni PDF i projekt";
+            this.openLastPdfProjectToolStripMenuItem.Text = Res("Menu_OpenLast");
             this.openLastPdfProjectToolStripMenuItem.Click += new System.EventHandler(this.OpenLastPdfProjectToolStripMenuItem_Click);
             // 
             // toolStripMenuItem2
@@ -924,7 +919,7 @@
             this.saveProjectAsMenuItem.Enabled = false;
             this.saveProjectAsMenuItem.Name = "saveProjectAsMenuItem";
             this.saveProjectAsMenuItem.Size = new System.Drawing.Size(261, 22);
-            this.saveProjectAsMenuItem.Text = "Zapisz projekt jako";
+            this.saveProjectAsMenuItem.Text = Res("Menu_SaveProjectAs");
             this.saveProjectAsMenuItem.Click += new System.EventHandler(this.SaveProjectAsButton_Click);
             // 
             // saveProjectMenuItem
@@ -933,7 +928,7 @@
             this.saveProjectMenuItem.Name = "saveProjectMenuItem";
             this.saveProjectMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.S)));
             this.saveProjectMenuItem.Size = new System.Drawing.Size(261, 22);
-            this.saveProjectMenuItem.Text = "Zapisz projekt";
+            this.saveProjectMenuItem.Text = Res("Menu_SaveProject");
             this.saveProjectMenuItem.Click += new System.EventHandler(this.SaveProjectButton_Click);
             // 
             // savePdfMenuItem
@@ -943,7 +938,7 @@
             this.savePdfMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)(((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.Shift) 
             | System.Windows.Forms.Keys.S)));
             this.savePdfMenuItem.Size = new System.Drawing.Size(261, 22);
-            this.savePdfMenuItem.Text = "Zapisz plik PDF";
+            this.savePdfMenuItem.Text = Res("Menu_SavePdf");
             this.savePdfMenuItem.Click += new System.EventHandler(this.ButtonRedactText_Click);
             // 
             // toolStripMenuItem1
@@ -955,7 +950,7 @@
             // 
             this.recentFilesMenuItem.Name = "recentFilesMenuItem";
             this.recentFilesMenuItem.Size = new System.Drawing.Size(261, 22);
-            this.recentFilesMenuItem.Text = "Ostatnio otwierane pliki";
+            this.recentFilesMenuItem.Text = Res("Menu_RecentFiles");
             this.recentFilesMenuItem.DropDownOpening += new System.EventHandler(this.RecentFilesMenuItem_DropDownOpening);
             // 
             // toolStripMenuItemCloseDocumentSeparator
@@ -968,7 +963,7 @@
             this.closeDocumentMenuItem.Enabled = false;
             this.closeDocumentMenuItem.Name = "closeDocumentMenuItem";
             this.closeDocumentMenuItem.Size = new System.Drawing.Size(261, 22);
-            this.closeDocumentMenuItem.Text = "Zamknij dokument";
+            this.closeDocumentMenuItem.Text = Res("Menu_CloseDocument");
             this.closeDocumentMenuItem.Click += new System.EventHandler(this.CloseDocumentMenuItem_Click);
             // 
             // exitMenuItem
@@ -976,7 +971,7 @@
             this.exitMenuItem.Name = "exitMenuItem";
             this.exitMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Alt | System.Windows.Forms.Keys.F4)));
             this.exitMenuItem.Size = new System.Drawing.Size(261, 22);
-            this.exitMenuItem.Text = "Koniec";
+            this.exitMenuItem.Text = Res("Menu_Exit");
             this.exitMenuItem.Click += new System.EventHandler(this.ExitToolStripMenuItem_Click);
             // 
             // menuOptionsItem
@@ -998,14 +993,14 @@
             this.ignorePdfRestrictionsToolStripMenuItem});
             this.menuOptionsItem.Name = "menuOptionsItem";
             this.menuOptionsItem.Size = new System.Drawing.Size(50, 20);
-            this.menuOptionsItem.Text = "Op&cje";
+            this.menuOptionsItem.Text = Res("Menu_Options");
             // 
             // splitPdfToolStripMenuItem
             // 
             this.splitPdfToolStripMenuItem.Name = "splitPdfToolStripMenuItem";
             this.splitPdfToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.D)));
             this.splitPdfToolStripMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.splitPdfToolStripMenuItem.Text = "Podziel plik PDF";
+            this.splitPdfToolStripMenuItem.Text = Res("Menu_SplitPdf");
             this.splitPdfToolStripMenuItem.Click += new System.EventHandler(this.SplitPdfToolStripMenuItem_Click);
             // 
             // mergePdfToolStripMenuItem
@@ -1013,7 +1008,7 @@
             this.mergePdfToolStripMenuItem.Name = "mergePdfToolStripMenuItem";
             this.mergePdfToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.M)));
             this.mergePdfToolStripMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.mergePdfToolStripMenuItem.Text = "Scal pliki PDF";
+            this.mergePdfToolStripMenuItem.Text = Res("Menu_MergePdf");
             this.mergePdfToolStripMenuItem.Click += new System.EventHandler(this.MergePdfToolStripMenuItem_Click);
             // 
             // deletePageMenuItem
@@ -1022,7 +1017,7 @@
             this.deletePageMenuItem.Name = "deletePageMenuItem";
             this.deletePageMenuItem.ShortcutKeys = System.Windows.Forms.Keys.Delete;
             this.deletePageMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.deletePageMenuItem.Text = "Usuń stronę";
+            this.deletePageMenuItem.Text = Res("Menu_DeletePage");
             this.deletePageMenuItem.Click += new System.EventHandler(this.DeletePageToolStripMenuItem_Click);
             // 
             // rotatePageMenuItem
@@ -1031,7 +1026,7 @@
             this.rotatePageMenuItem.Name = "rotatePageMenuItem";
             this.rotatePageMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.R)));
             this.rotatePageMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.rotatePageMenuItem.Text = "Obróć stronę";
+            this.rotatePageMenuItem.Text = Res("Menu_RotatePage");
             this.rotatePageMenuItem.Click += new System.EventHandler(this.RotatePageMenuItem_Click);
             // 
             // addTextMenuItem
@@ -1040,7 +1035,7 @@
             this.addTextMenuItem.Name = "addTextMenuItem";
             this.addTextMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.T)));
             this.addTextMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.addTextMenuItem.Text = "Dodaj napis";
+            this.addTextMenuItem.Text = Res("Menu_AddText");
             this.addTextMenuItem.Click += new System.EventHandler(this.AddTextToolStripMenuItem_Click);
             // 
             // copyToClipboardMenuItem
@@ -1049,7 +1044,7 @@
             this.copyToClipboardMenuItem.Name = "copyToClipboardMenuItem";
             this.copyToClipboardMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.C)));
             this.copyToClipboardMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.copyToClipboardMenuItem.Text = "Kopiuj do schowka";
+            this.copyToClipboardMenuItem.Text = Res("Menu_CopyToClipboard");
             this.copyToClipboardMenuItem.Click += new System.EventHandler(this.CopyToClipboardToolStripMenuItem_Click);
             // 
             // exportGraphicsMenuItem
@@ -1057,7 +1052,7 @@
             this.exportGraphicsMenuItem.Enabled = false;
             this.exportGraphicsMenuItem.Name = "exportGraphicsMenuItem";
             this.exportGraphicsMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.exportGraphicsMenuItem.Text = "Eksport obiektów graficznych";
+            this.exportGraphicsMenuItem.Text = Res("Menu_ExportGraphics");
             this.exportGraphicsMenuItem.Click += new System.EventHandler(this.ExportGraphicsToolStripMenuItem_Click);
             // 
             // selectSignaturesToRemoveMenuItem
@@ -1065,7 +1060,7 @@
             this.selectSignaturesToRemoveMenuItem.Enabled = false;
             this.selectSignaturesToRemoveMenuItem.Name = "selectSignaturesToRemoveMenuItem";
             this.selectSignaturesToRemoveMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.selectSignaturesToRemoveMenuItem.Text = "Wybierz podpisy do usunięcia";
+            this.selectSignaturesToRemoveMenuItem.Text = Res("Menu_SelectSignaturesToRemove");
             this.selectSignaturesToRemoveMenuItem.Click += new System.EventHandler(this.SelectSignaturesToRemoveMenuItem_Click);
             // 
             // themeToolStripMenuItem
@@ -1080,55 +1075,55 @@
             this.themeOledDarkTealMenuItem});
             this.themeToolStripMenuItem.Name = "themeToolStripMenuItem";
             this.themeToolStripMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.themeToolStripMenuItem.Text = "Motyw interfejsu";
+            this.themeToolStripMenuItem.Text = Res("Menu_Options_Theme");
             // 
             // themeSoftLightMenuItem
             // 
             this.themeSoftLightMenuItem.Name = "themeSoftLightMenuItem";
             this.themeSoftLightMenuItem.Size = new System.Drawing.Size(180, 22);
-            this.themeSoftLightMenuItem.Text = "Soft Light";
+            this.themeSoftLightMenuItem.Text = Res("Theme_SoftLight");
             this.themeSoftLightMenuItem.Click += new System.EventHandler(this.ThemeSoftLightMenuItem_Click);
             // 
             // themeNordCoolLightMenuItem
             // 
             this.themeNordCoolLightMenuItem.Name = "themeNordCoolLightMenuItem";
             this.themeNordCoolLightMenuItem.Size = new System.Drawing.Size(180, 22);
-            this.themeNordCoolLightMenuItem.Text = "Nord Cool Light";
+            this.themeNordCoolLightMenuItem.Text = Res("Theme_NordCoolLight");
             this.themeNordCoolLightMenuItem.Click += new System.EventHandler(this.ThemeNordCoolLightMenuItem_Click);
             // 
             // themeBalticBreezeMenuItem
             // 
             this.themeBalticBreezeMenuItem.Name = "themeBalticBreezeMenuItem";
             this.themeBalticBreezeMenuItem.Size = new System.Drawing.Size(180, 22);
-            this.themeBalticBreezeMenuItem.Text = "Baltic Breeze";
+            this.themeBalticBreezeMenuItem.Text = Res("Theme_BalticBreeze");
             this.themeBalticBreezeMenuItem.Click += new System.EventHandler(this.ThemeBalticBreezeMenuItem_Click);
             // 
             // themeWarmSandMenuItem
             // 
             this.themeWarmSandMenuItem.Name = "themeWarmSandMenuItem";
             this.themeWarmSandMenuItem.Size = new System.Drawing.Size(180, 22);
-            this.themeWarmSandMenuItem.Text = "Warm Sand";
+            this.themeWarmSandMenuItem.Text = Res("Theme_WarmSand");
             this.themeWarmSandMenuItem.Click += new System.EventHandler(this.ThemeWarmSandMenuItem_Click);
             // 
             // themeForestGreenMenuItem
             // 
             this.themeForestGreenMenuItem.Name = "themeForestGreenMenuItem";
             this.themeForestGreenMenuItem.Size = new System.Drawing.Size(180, 22);
-            this.themeForestGreenMenuItem.Text = "Forest Green";
+            this.themeForestGreenMenuItem.Text = Res("Theme_ForestGreen");
             this.themeForestGreenMenuItem.Click += new System.EventHandler(this.ThemeForestGreenMenuItem_Click);
             // 
             // themeGraphiteDarkMenuItem
             // 
             this.themeGraphiteDarkMenuItem.Name = "themeGraphiteDarkMenuItem";
             this.themeGraphiteDarkMenuItem.Size = new System.Drawing.Size(180, 22);
-            this.themeGraphiteDarkMenuItem.Text = "Graphite Dark";
+            this.themeGraphiteDarkMenuItem.Text = Res("Theme_GraphiteDark");
             this.themeGraphiteDarkMenuItem.Click += new System.EventHandler(this.ThemeGraphiteDarkMenuItem_Click);
             // 
             // themeOledDarkTealMenuItem
             // 
             this.themeOledDarkTealMenuItem.Name = "themeOledDarkTealMenuItem";
             this.themeOledDarkTealMenuItem.Size = new System.Drawing.Size(180, 22);
-            this.themeOledDarkTealMenuItem.Text = "OLED Dark + Teal";
+            this.themeOledDarkTealMenuItem.Text = Res("Theme_OledDarkTeal");
             this.themeOledDarkTealMenuItem.Click += new System.EventHandler(this.ThemeOledDarkTealMenuItem_Click);
             // 
             // themeToolStripSeparator
@@ -1141,38 +1136,46 @@
             this.languageToolStripMenuItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.languageSystemToolStripMenuItem,
             this.languageEnglishToolStripMenuItem,
-            this.languagePolishToolStripMenuItem});
+            this.languagePolishToolStripMenuItem,
+            this.languageGermanToolStripMenuItem});
             this.languageToolStripMenuItem.Name = "languageToolStripMenuItem";
             this.languageToolStripMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.languageToolStripMenuItem.Text = "Język";
+            this.languageToolStripMenuItem.Text = Res("Menu_Language");
             // 
             // languageSystemToolStripMenuItem
             // 
             this.languageSystemToolStripMenuItem.Name = "languageSystemToolStripMenuItem";
             this.languageSystemToolStripMenuItem.Size = new System.Drawing.Size(112, 22);
-            this.languageSystemToolStripMenuItem.Text = "System";
+            this.languageSystemToolStripMenuItem.Text = Res("Menu_Language_System");
             this.languageSystemToolStripMenuItem.Click += new System.EventHandler(this.LanguageSystemToolStripMenuItem_Click);
             // 
             // languageEnglishToolStripMenuItem
             // 
             this.languageEnglishToolStripMenuItem.Name = "languageEnglishToolStripMenuItem";
             this.languageEnglishToolStripMenuItem.Size = new System.Drawing.Size(112, 22);
-            this.languageEnglishToolStripMenuItem.Text = "English";
+            this.languageEnglishToolStripMenuItem.Text = Res("Menu_Language_English");
             this.languageEnglishToolStripMenuItem.Click += new System.EventHandler(this.LanguageEnglishToolStripMenuItem_Click);
             // 
             // languagePolishToolStripMenuItem
             // 
             this.languagePolishToolStripMenuItem.Name = "languagePolishToolStripMenuItem";
             this.languagePolishToolStripMenuItem.Size = new System.Drawing.Size(112, 22);
-            this.languagePolishToolStripMenuItem.Text = "Polski";
+            this.languagePolishToolStripMenuItem.Text = Res("Menu_Language_Polish");
             this.languagePolishToolStripMenuItem.Click += new System.EventHandler(this.LanguagePolishToolStripMenuItem_Click);
+            // 
+            // languageGermanToolStripMenuItem
+            // 
+            this.languageGermanToolStripMenuItem.Name = "languageGermanToolStripMenuItem";
+            this.languageGermanToolStripMenuItem.Size = new System.Drawing.Size(112, 22);
+            this.languageGermanToolStripMenuItem.Text = Res("Menu_Language_German");
+            this.languageGermanToolStripMenuItem.Click += new System.EventHandler(this.LanguageGermanToolStripMenuItem_Click);
             // 
             // fullScreenToolStripMenuItem
             // 
             this.fullScreenToolStripMenuItem.Name = "fullScreenToolStripMenuItem";
             this.fullScreenToolStripMenuItem.ShortcutKeys = System.Windows.Forms.Keys.F11;
             this.fullScreenToolStripMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.fullScreenToolStripMenuItem.Text = "Pełny ekran";
+            this.fullScreenToolStripMenuItem.Text = Res("Menu_Options_FullScreen");
             this.fullScreenToolStripMenuItem.Click += new System.EventHandler(this.FullScreenToolStripMenuItem_Click);
             // 
             // toolStripSeparator1
@@ -1185,9 +1188,8 @@
             this.ignorePdfRestrictionsToolStripMenuItem.CheckOnClick = true;
             this.ignorePdfRestrictionsToolStripMenuItem.Name = "ignorePdfRestrictionsToolStripMenuItem";
             this.ignorePdfRestrictionsToolStripMenuItem.Size = new System.Drawing.Size(229, 22);
-            this.ignorePdfRestrictionsToolStripMenuItem.Text = "Pomijaj ograniczenia PDF";
-            this.ignorePdfRestrictionsToolStripMenuItem.ToolTipText = "Pozwala przetwarzać pliki PDF z ograniczeniami edycji ustawionymi przez właścicie" +
-    "la. Nie dotyczy plików zabezpieczonych hasłem.";
+            this.ignorePdfRestrictionsToolStripMenuItem.Text = Res("Menu_IgnorePdfRestrictions");
+            this.ignorePdfRestrictionsToolStripMenuItem.ToolTipText = Res("Menu_IgnorePdfRestrictions_Tooltip");
             this.ignorePdfRestrictionsToolStripMenuItem.CheckedChanged += new System.EventHandler(this.IgnorePdfRestrictionsToolStripMenuItem_CheckedChanged);
             // 
             // menuHelpItem
@@ -1201,28 +1203,28 @@
             this.aboutMenuItem});
             this.menuHelpItem.Name = "menuHelpItem";
             this.menuHelpItem.Size = new System.Drawing.Size(57, 20);
-            this.menuHelpItem.Text = "P&omoc";
+            this.menuHelpItem.Text = Res("Menu_Help");
             // 
             // helpMenuItem
             // 
             this.helpMenuItem.Name = "helpMenuItem";
             this.helpMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.F1)));
             this.helpMenuItem.Size = new System.Drawing.Size(216, 22);
-            this.helpMenuItem.Text = "Instrukcja";
+            this.helpMenuItem.Text = Res("Menu_Help_Help");
             this.helpMenuItem.Click += new System.EventHandler(this.HelpToolStripMenuItem_Click);
             // 
             // showLicenseToolStripMenuItem
             // 
             this.showLicenseToolStripMenuItem.Name = "showLicenseToolStripMenuItem";
             this.showLicenseToolStripMenuItem.Size = new System.Drawing.Size(216, 22);
-            this.showLicenseToolStripMenuItem.Text = "Pokaż licencję";
+            this.showLicenseToolStripMenuItem.Text = Res("Menu_Help_ShowLicense");
             this.showLicenseToolStripMenuItem.Click += new System.EventHandler(this.ShowLicenseToolStripMenuItem_Click);
             // 
             // thirdPartyNoticesToolStripMenuItem
             // 
             this.thirdPartyNoticesToolStripMenuItem.Name = "thirdPartyNoticesToolStripMenuItem";
             this.thirdPartyNoticesToolStripMenuItem.Size = new System.Drawing.Size(216, 22);
-            this.thirdPartyNoticesToolStripMenuItem.Text = "Komponenty osób trzecich";
+            this.thirdPartyNoticesToolStripMenuItem.Text = Res("Menu_Help_ThirdParty");
             this.thirdPartyNoticesToolStripMenuItem.Click += new System.EventHandler(this.ThirdPartyNoticesToolStripMenuItem_Click);
             // 
             // tutorialMenuItem
@@ -1230,7 +1232,7 @@
             this.tutorialMenuItem.Name = "tutorialMenuItem";
             this.tutorialMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.T)));
             this.tutorialMenuItem.Size = new System.Drawing.Size(216, 22);
-            this.tutorialMenuItem.Text = "Samouczek";
+            this.tutorialMenuItem.Text = Res("Menu_Help_Tutorial");
             this.tutorialMenuItem.Click += new System.EventHandler(this.TutorialToolStripMenuItem_Click);
             // 
             // diagnosticModeMenuItem
@@ -1238,14 +1240,14 @@
             this.diagnosticModeMenuItem.CheckOnClick = true;
             this.diagnosticModeMenuItem.Name = "diagnosticModeMenuItem";
             this.diagnosticModeMenuItem.Size = new System.Drawing.Size(216, 22);
-            this.diagnosticModeMenuItem.Text = "Tryb diagnostyczny";
+            this.diagnosticModeMenuItem.Text = Res("Menu_Help_DiagnosticMode");
             this.diagnosticModeMenuItem.CheckedChanged += new System.EventHandler(this.DiagnosticModeMenuItem_CheckedChanged);
             // 
             // aboutMenuItem
             // 
             this.aboutMenuItem.Name = "aboutMenuItem";
             this.aboutMenuItem.Size = new System.Drawing.Size(216, 22);
-            this.aboutMenuItem.Text = "O aplikacji";
+            this.aboutMenuItem.Text = Res("Menu_Help_About");
             this.aboutMenuItem.Click += new System.EventHandler(this.AboutToolStripMenuItem_Click);
             // 
             // 
@@ -1264,7 +1266,7 @@
             this.pagesListView.OwnerDraw = true;
             this.pagesListView.Size = new System.Drawing.Size(208, 853);
             this.pagesListView.TabIndex = 50;
-            this.toolTip1.SetToolTip(this.pagesListView, "Kliknij na wybranej pozycji aby wyświetlić stronę.");
+            this.toolTip1.SetToolTip(this.pagesListView, Res("Tooltip_PagesList"));
             this.pagesListView.UseCompatibleStateImageBehavior = false;
             this.pagesListView.View = System.Windows.Forms.View.List;
             this.pagesListView.Visible = false;
@@ -1314,7 +1316,7 @@
             this.groupBoxFilter.Size = new System.Drawing.Size(208, 43);
             this.groupBoxFilter.TabIndex = 48;
             this.groupBoxFilter.TabStop = false;
-            this.groupBoxFilter.Text = "Filtr";
+            this.groupBoxFilter.Text = Res("UI_Group_Filter");
             this.groupBoxFilter.Visible = false;
             // 
             // filterComboBox
@@ -1323,12 +1325,12 @@
             this.filterComboBox.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.filterComboBox.FormattingEnabled = true;
             this.filterComboBox.Items.AddRange(new object[] {
-            "Wszystkie strony",
-            "Wszystkie kategorie",
-            "Zaznaczenia",
-            "Wyszukania",
-            "Usunięcia",
-            "Napisy"});
+            Res("UI_Filter_AllPages"),
+            Res("UI_Filter_AllCategories"),
+            Res("UI_Filter_Selections"),
+            Res("UI_Filter_Searches"),
+            Res("UI_Filter_Deletions"),
+            Res("UI_Filter_Annotations")});
             this.filterComboBox.Location = new System.Drawing.Point(3, 16);
             this.filterComboBox.Name = "filterComboBox";
             this.filterComboBox.Size = new System.Drawing.Size(202, 21);
@@ -1342,7 +1344,7 @@
             this.Controls.Add(this.formSplitContainer);
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
             this.Name = "PDFForm";
-            this.Text = "AnonPDF Pro";
+            this.Text = global::AnonPDF.Branding.ProductName;
             this.WindowState = System.Windows.Forms.FormWindowState.Maximized;
             this.Load += new System.EventHandler(this.PDFForm_Load);
             ((System.ComponentModel.ISupportInitialize)(this.pdfViewer)).EndInit();
@@ -1470,6 +1472,7 @@
         private System.Windows.Forms.ToolStripMenuItem languageSystemToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem languageEnglishToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem languagePolishToolStripMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem languageGermanToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem fullScreenToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem splitPdfToolStripMenuItem;
         private System.Windows.Forms.ToolStripMenuItem mergePdfToolStripMenuItem;

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Globalization;
 using System.Reflection;
 using System.Windows.Forms;
 
@@ -91,7 +92,7 @@ namespace AnonPDF
 
             versionLabel = new Label
             {
-                Text = $"{GetVersionLabelText()}: {GetFileVersion()}",
+                Text = GetVersionLineText(),
                 AutoSize = true,
                 Font = new Font("Segoe UI", 9F, FontStyle.Regular),
                 ForeColor = titleColor,
@@ -244,7 +245,7 @@ namespace AnonPDF
 
             if (versionLabel != null)
             {
-                versionLabel.Text = $"{GetVersionLabelText()}: {GetFileVersion()}";
+                versionLabel.Text = GetVersionLineText();
             }
 
             if (openPdfButton != null)
@@ -367,7 +368,12 @@ namespace AnonPDF
 
         private static string GetVersionLabelText()
         {
-            return IsPolishCulture() ? "Wersja" : "Version";
+            return LocalizedText("Splash_VersionLabel");
+        }
+
+        private static string GetVersionLineText()
+        {
+            return LocalizedFormat("Splash_VersionLine", GetVersionLabelText(), GetFileVersion());
         }
 
         private static string GetLicensedToText()
@@ -379,23 +385,12 @@ namespace AnonPDF
                 customer = "-";
             }
 
-            string label = IsPolishCulture() ? "Licencja dla" : "Licensed to";
-            return $"{label}: {customer}";
+            return LocalizedFormat("LicensedTo_Line", customer);
         }
 
         private static string GetDescriptionText()
         {
-            var text = Properties.Resources.ResourceManager.GetString(
-                "About_Description",
-                System.Globalization.CultureInfo.CurrentUICulture);
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                return text;
-            }
-
-            return IsPolishCulture()
-                ? "Aplikacja dedykowana do anonimizacji plikow PDF"
-                : "Application dedicated to anonymizing PDF files";
+            return LocalizedText("About_Description");
         }
 
         private static string GetLicenseStatusText()
@@ -403,31 +398,27 @@ namespace AnonPDF
             var info = LicenseManager.Current;
             if (info == null)
             {
-                return IsPolishCulture() ? "Status licencji: brak" : "License status: missing";
+                return LocalizedText("LicenseStatus_Missing");
             }
 
             if (!info.IsSignatureValid)
             {
-                return IsPolishCulture() ? "Status licencji: nieprawidłowa" : "License status: invalid";
+                return LocalizedText("LicenseStatus_Invalid");
             }
 
             if (info.Payload == null)
             {
-                return IsPolishCulture() ? "Status licencji: brak danych" : "License status: no data";
+                return LocalizedText("LicenseStatus_NoData");
             }
 
             if (LicenseManager.IsRevoked)
             {
-                return IsPolishCulture()
-                    ? "Status licencji: DEMO (licencja cofnięta)"
-                    : "License status: DEMO (license revoked)";
+                return LocalizedText("LicenseStatus_Demo_Revoked");
             }
 
             if (LicenseManager.IsUpdateOutOfRangeForCurrentVersion)
             {
-                return IsPolishCulture()
-                    ? "Status licencji: DEMO (brak licencji na nowsze wersje)"
-                    : "License status: DEMO (updates not licensed)";
+                return LocalizedText("LicenseStatus_Demo_UpdateOutOfRange");
             }
 
             if (string.Equals(info.Payload.Edition, "demo", StringComparison.OrdinalIgnoreCase))
@@ -435,23 +426,19 @@ namespace AnonPDF
                 var demoUntil = ParseDate(info.Payload.DemoUntil);
                 if (!demoUntil.HasValue)
                 {
-                    return IsPolishCulture() ? "Status licencji: DEMO" : "License status: DEMO";
+                    return LocalizedText("LicenseStatus_Demo");
                 }
 
                 var daysLeft = (int)Math.Ceiling((demoUntil.Value.Date - DateTime.UtcNow.Date).TotalDays);
                 if (daysLeft >= 0)
                 {
-                    return IsPolishCulture()
-                        ? $"Status licencji: DEMO ({daysLeft} dni)"
-                        : $"License status: DEMO ({daysLeft} days)";
+                    return LocalizedFormat("LicenseStatus_Demo_DaysLeft", daysLeft);
                 }
 
-                return IsPolishCulture()
-                    ? $"Status licencji: DEMO (wygasła {demoUntil:yyyy-MM-dd})"
-                    : $"License status: DEMO (expired {demoUntil:yyyy-MM-dd})";
+                return LocalizedFormat("LicenseStatus_Demo_ExpiredOn", demoUntil.Value);
             }
 
-            return IsPolishCulture() ? "Status licencji: PRO" : "License status: PRO";
+            return LocalizedText("LicenseStatus_Pro");
         }
 
         private static string GetUpdateStatusText()
@@ -459,30 +446,33 @@ namespace AnonPDF
             var info = LicenseManager.Current;
             if (info == null || !info.IsSignatureValid || info.Payload == null)
             {
-                return IsPolishCulture() ? "Wsparcie: brak danych" : "Support: no data";
+                return LocalizedText("SupportStatus_NoData");
             }
 
             var supportUntil = LicenseManager.GetEffectiveSupportUntil();
             if (!supportUntil.HasValue)
             {
-                return IsPolishCulture() ? "Wsparcie: brak" : "Support: none";
+                return LocalizedText("SupportStatus_None");
             }
 
             if (supportUntil.Value.Date >= DateTime.UtcNow.Date)
             {
-                return IsPolishCulture()
-                    ? $"Wsparcie do: {supportUntil:yyyy-MM-dd}"
-                    : $"Support until: {supportUntil:yyyy-MM-dd}";
+                return LocalizedFormat("SupportStatus_Until", supportUntil.Value);
             }
 
-            return IsPolishCulture()
-                ? $"Wsparcie wygasło ({supportUntil:yyyy-MM-dd})"
-                : $"Support expired ({supportUntil:yyyy-MM-dd})";
+            return LocalizedFormat("SupportStatus_ExpiredOn", supportUntil.Value);
         }
 
-        private static bool IsPolishCulture()
+        private static string LocalizedText(string key)
         {
-            return System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pl";
+            var culture = Properties.Resources.Culture ?? CultureInfo.CurrentUICulture;
+            var text = Properties.Resources.ResourceManager.GetString(key, culture);
+            return string.IsNullOrWhiteSpace(text) ? key : text;
+        }
+
+        private static string LocalizedFormat(string key, params object[] args)
+        {
+            return string.Format(LocalizedText(key), args);
         }
 
         private static DateTime? ParseDate(string value)
@@ -505,6 +495,7 @@ namespace AnonPDF
             }
 
             return null;
-        }    }
+        }
+    }
 }
 

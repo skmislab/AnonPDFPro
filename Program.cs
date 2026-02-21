@@ -28,7 +28,10 @@ namespace AnonPDF
             // Handler for unhandled exceptions in non‑UI threads and background tasks
             AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
             {
-                Exception ex = e.ExceptionObject as Exception ?? new Exception("Unknown exception");
+                string fallback = Properties.Resources.ResourceManager.GetString(
+                    "Err_UnknownExceptionFallback",
+                    Properties.Resources.Culture ?? System.Globalization.CultureInfo.CurrentUICulture) ?? "Err_UnknownExceptionFallback";
+                Exception ex = e.ExceptionObject as Exception ?? new Exception(fallback);
                 LogUnhandledException(ex, "UnhandledException");
                 ShowError(ex);
             };

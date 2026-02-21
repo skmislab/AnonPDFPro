@@ -247,7 +247,7 @@ namespace AnonPDF
                 {
                     UiThemeKind.SoftLight,
                     new UiThemePalette(
-                        "Soft Light",
+                        Resources.Theme_SoftLight,
                         System.Drawing.Color.FromArgb(0xF5, 0xF6, 0xF8),
                         System.Drawing.Color.FromArgb(0xFF, 0xFF, 0xFF),
                         System.Drawing.Color.FromArgb(0xF1, 0xF3, 0xF6),
@@ -269,7 +269,7 @@ namespace AnonPDF
                 {
                     UiThemeKind.NordCoolLight,
                     new UiThemePalette(
-                        "Nord Cool Light",
+                        Resources.Theme_NordCoolLight,
                         System.Drawing.Color.FromArgb(0xEC, 0xEF, 0xF4),
                         System.Drawing.Color.FromArgb(0xFF, 0xFF, 0xFF),
                         System.Drawing.Color.FromArgb(0xE5, 0xE9, 0xF0),
@@ -291,7 +291,7 @@ namespace AnonPDF
                 {
                     UiThemeKind.BalticBreeze,
                     new UiThemePalette(
-                        "Baltic Breeze",
+                        Resources.Theme_BalticBreeze,
                         System.Drawing.Color.FromArgb(0xE6, 0xEF, 0xF3),
                         System.Drawing.Color.FromArgb(0x65, 0xA0, 0xB8),
                         System.Drawing.Color.FromArgb(0xE0, 0xE3, 0xE4),
@@ -313,7 +313,7 @@ namespace AnonPDF
                 {
                     UiThemeKind.WarmSand,
                     new UiThemePalette(
-                        "Warm Sand",
+                        Resources.Theme_WarmSand,
                         System.Drawing.Color.FromArgb(0xF6, 0xF1, 0xEA),
                         System.Drawing.Color.FromArgb(0xFF, 0xFC, 0xF7),
                         System.Drawing.Color.FromArgb(0xF1, 0xE8, 0xDD),
@@ -335,7 +335,7 @@ namespace AnonPDF
                 {
                     UiThemeKind.ForestGreen,
                     new UiThemePalette(
-                        "Forest Green",
+                        Resources.Theme_ForestGreen,
                         System.Drawing.Color.FromArgb(0xF3, 0xF6, 0xF4),
                         System.Drawing.Color.FromArgb(0xFF, 0xFF, 0xFF),
                         System.Drawing.Color.FromArgb(0xE7, 0xEF, 0xEA),
@@ -357,7 +357,7 @@ namespace AnonPDF
                 {
                     UiThemeKind.GraphiteDark,
                     new UiThemePalette(
-                        "Graphite Dark",
+                        Resources.Theme_GraphiteDark,
                         System.Drawing.Color.FromArgb(0x0F, 0x17, 0x2A),
                         System.Drawing.Color.FromArgb(0x11, 0x18, 0x27),
                         System.Drawing.Color.FromArgb(0x17, 0x20, 0x33),
@@ -379,7 +379,7 @@ namespace AnonPDF
                 {
                     UiThemeKind.OledDarkTeal,
                     new UiThemePalette(
-                        "Dark Teal",
+                        Resources.Theme_OledDarkTeal,
                         System.Drawing.Color.FromArgb(0x0B, 0x0F, 0x14),
                         System.Drawing.Color.FromArgb(0x0F, 0x17, 0x20),
                         System.Drawing.Color.FromArgb(0x12, 0x1E, 0x2A),
@@ -663,15 +663,16 @@ namespace AnonPDF
 
         }
 
-        private static bool IsEnglish()
+        private static string LocalizedText(string key)
         {
-            try { return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "en"; }
-            catch { return false; }
+            var culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
+            var text = Resources.ResourceManager.GetString(key, culture);
+            return string.IsNullOrWhiteSpace(text) ? key : text;
         }
 
-        private static string L(string pl, string en)
+        private static string LocalizedFormat(string key, params object[] args)
         {
-            return IsEnglish() ? en : pl;
+            return string.Format(LocalizedText(key), args);
         }
 
         private void InitializeUpdateMenu()
@@ -749,10 +750,12 @@ namespace AnonPDF
             languageSystemToolStripMenuItem.Text = Resources.Menu_Language_System;
             languageEnglishToolStripMenuItem.Text = Resources.Menu_Language_English;
             languagePolishToolStripMenuItem.Text = Resources.Menu_Language_Polish;
+            languageGermanToolStripMenuItem.Text = LocalizedText("Menu_Language_German");
             bool isSystem = string.IsNullOrWhiteSpace(Properties.Settings.Default.PreferredUICulture);
             languageSystemToolStripMenuItem.Checked = isSystem;
             languageEnglishToolStripMenuItem.Checked = !isSystem && currentCulture.TwoLetterISOLanguageName == "en";
             languagePolishToolStripMenuItem.Checked = !isSystem && currentCulture.TwoLetterISOLanguageName == "pl";
+            languageGermanToolStripMenuItem.Checked = !isSystem && currentCulture.TwoLetterISOLanguageName == "de";
 
             // File menu
             openPdfToolStripMenuItem.Text = Resources.Menu_OpenPdf;
@@ -808,11 +811,11 @@ namespace AnonPDF
             helpMenuItem.Text = Resources.Menu_Help_Help;
             if (checkForUpdatesToolStripMenuItem != null)
             {
-                checkForUpdatesToolStripMenuItem.Text = L("Sprawdź aktualizacje...", "Check for updates...");
+                checkForUpdatesToolStripMenuItem.Text = LocalizedText("Menu_Help_CheckForUpdates");
             }
             if (activateLicenseToolStripMenuItem != null)
             {
-                activateLicenseToolStripMenuItem.Text = L("Aktywuj licencję...", "Activate license...");
+                activateLicenseToolStripMenuItem.Text = LocalizedText("Menu_Help_ActivateLicense");
             }
             tutorialMenuItem.Text = Resources.Menu_Help_Tutorial;
             diagnosticModeMenuItem.Text = Resources.Menu_Help_DiagnosticMode;
@@ -838,6 +841,8 @@ namespace AnonPDF
             try { signaturesRemoveRadioButton.Text = Resources.UI_Radio_Signatures_Remove; } catch { }
             try { signaturesOriginalRadioButton.Text = Resources.UI_Radio_Signatures_Original; } catch { }
             try { signaturesReportRadioButton.Text = Resources.UI_Radio_Signatures_Report; } catch { }
+            try { markerRadioButton.Text = LocalizedText("UI_Radio_Marker"); } catch { }
+            try { boxRadioButton.Text = LocalizedText("UI_Radio_Box"); } catch { }
 
             // Group boxes
             var openGroupText = Resources.ResourceManager.GetString("UI_Group_Open", currentCulture);
@@ -890,6 +895,11 @@ namespace AnonPDF
             try { toolTip1.SetToolTip(searchButton, Resources.Tooltip_Search); } catch { }
             try { toolTip1.SetToolTip(searchToSelectionButton, Resources.Tooltip_SearchToSelection); } catch { }
             try { toolTip1.SetToolTip(SearchClearButton, Resources.Tooltip_SearchClear); } catch { }
+            try { toolTip1.SetToolTip(searchFirstButton, LocalizedText("Tooltip_SearchResultFirst")); } catch { }
+            try { toolTip1.SetToolTip(searchPrevButton, LocalizedText("Tooltip_SearchResultPrev")); } catch { }
+            try { toolTip1.SetToolTip(searchNextButton, LocalizedText("Tooltip_SearchResultNext")); } catch { }
+            try { toolTip1.SetToolTip(searchLastButton, LocalizedText("Tooltip_SearchResultLast")); } catch { }
+            try { toolTip1.SetToolTip(searchTextBox, LocalizedText("Tooltip_SearchInput")); } catch { }
             try { toolTip1.SetToolTip(personalDataButton, Resources.Tooltip_PersonalData); } catch { }
             try { toolTip1.SetToolTip(openSavedPDFCheckBox, Resources.Tooltip_PreviewAfterSave); } catch { }
             try { toolTip1.SetToolTip(saveProjectButton, Resources.Tooltip_SaveProject); } catch { }
@@ -990,6 +1000,13 @@ namespace AnonPDF
             Properties.Settings.Default.PreferredUICulture = "pl-PL";
             Properties.Settings.Default.Save();
             SetLanguage("pl-PL");
+        }
+
+        private void LanguageGermanToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            Properties.Settings.Default.PreferredUICulture = "de-DE";
+            Properties.Settings.Default.Save();
+            SetLanguage("de-DE");
         }
 
         private void LanguageSystemToolStripMenuItem_Click(object sender, EventArgs e)
@@ -1289,6 +1306,11 @@ namespace AnonPDF
 
         private void AddEditAnnotation(TextAnnotation annotation = null)
         {
+            if (!EnsureCurrentPageEditable(true))
+            {
+                return;
+            }
+
             using (EditTextDialog dlg = new EditTextDialog())
             {
                 // If we are editing an existing annotation – set default values in the dialog
@@ -1403,6 +1425,10 @@ namespace AnonPDF
         {
             if (source == null)
                 return;
+            if (!EnsureCurrentPageEditable(true))
+            {
+                return;
+            }
 
             SizeF textSize = GetAnnotationSize(source.AnnotationText, source.AnnotationFont, source.AnnotationRotation);
             TextAnnotation copy = new TextAnnotation
@@ -1730,14 +1756,14 @@ namespace AnonPDF
             catch (Exception ex)
             {
                 // if it's another error, also treat it as problem with this PDF
-                lockedFile = inputSplitPdfPath + " (error: " + ex.Message + ")";
+                lockedFile = inputSplitPdfPath + LocalizedFormat("Msg_ErrorSuffix", ex.Message);
             }
 
 
             if (!string.IsNullOrEmpty(lockedFile))
             {
                 // if file is locked, don't proceed
-                string msg = $"Cannot split file [{lockedFile}] because it has security settings.\n";
+                string msg = LocalizedFormat("Err_Split_FileHasSecurity", lockedFile);
                 MessageBox.Show(this, msg, Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
@@ -2260,7 +2286,7 @@ namespace AnonPDF
             {
                 if (source == UpdateCheckSource.Manual)
                 {
-                    ShowInfoMessage(L("Sprawdzanie aktualizacji jest już w toku.", "Update check is already in progress."));
+                    ShowInfoMessage(LocalizedText("Msg_UpdateCheckInProgress"));
                 }
                 return;
             }
@@ -2272,7 +2298,7 @@ namespace AnonPDF
                 {
                     if (source == UpdateCheckSource.Manual)
                     {
-                        ShowInfoMessage(L("Nie udało się pobrać informacji o aktualizacji.", "Could not fetch update information."));
+                        ShowInfoMessage(LocalizedText("Msg_UpdateInfoFetchFailed"));
                     }
                     return;
                 }
@@ -2281,7 +2307,7 @@ namespace AnonPDF
                 {
                     if (source == UpdateCheckSource.Manual)
                     {
-                        ShowInfoMessage(L("Masz już najnowszą wersję programu.", "You are already using the latest version."));
+                        ShowInfoMessage(LocalizedText("Msg_UpdateAlreadyLatest"));
                     }
                     return;
                 }
@@ -2349,39 +2375,33 @@ namespace AnonPDF
             string msiDownloadUrl = GetStandaloneMsiDownloadUrl(info);
             string prompt = BuildNewVersionMessage(info, msiDownloadUrl)
                 + Environment.NewLine + Environment.NewLine
-                + L("Czy pobrać i uruchomić instalator MSI teraz?", "Do you want to download and run the MSI installer now?");
-            var result = ShowQuestionMessage(prompt, L("Dostępna aktualizacja", "Update available"));
+                + LocalizedText("Msg_StandaloneUpdate_AskDownloadAndRun");
+            var result = ShowQuestionMessage(prompt, LocalizedText("Title_UpdateAvailable"));
             if (result != DialogResult.Yes)
             {
                 if (manualRequest)
                 {
-                    ShowInfoMessage(L("Aktualizacja została anulowana.", "Update was cancelled."));
+                    ShowInfoMessage(LocalizedText("Msg_UpdateCancelled"));
                 }
                 return;
             }
 
             if (!TryGetMsiFileName(msiDownloadUrl, info.Version, out string msiFileName))
             {
-                ShowInfoMessage(L(
-                    "Brak poprawnego linku do instalatora MSI w version.json (downloadUrl).",
-                    "No valid MSI installer link found in version.json (downloadUrl)."));
+                ShowInfoMessage(LocalizedText("Err_StandaloneUpdate_InvalidInstallerLink"));
                 return;
             }
 
             if (System.Threading.Interlocked.CompareExchange(ref standaloneUpdateDownloadInProgress, 1, 0) != 0)
             {
-                ShowInfoMessage(L(
-                    "Pobieranie instalatora aktualizacji już trwa. Proszę poczekać.",
-                    "Update installer download is already in progress. Please wait."));
+                ShowInfoMessage(LocalizedText("Msg_StandaloneUpdate_DownloadInProgress"));
                 return;
             }
 
             string tempDirectory = Path.Combine(Path.GetTempPath(), "AnonPDFPro", "updates");
             Directory.CreateDirectory(tempDirectory);
             string targetPath = Path.Combine(tempDirectory, msiFileName);
-            ShowInfoMessage(L(
-                "Trwa pobieranie instalatora aktualizacji. Proszę poczekać.\r\n\r\nOtrzymasz powiadomienie po zakończeniu pobierania.",
-                "Downloading update installer. Please wait.\r\n\r\nYou will be notified when the download is complete."));
+            ShowInfoMessage(LocalizedText("Msg_StandaloneUpdate_Downloading"));
             Task.Run(() => DownloadAndInstallStandaloneMsi(msiDownloadUrl, targetPath));
         }
 
@@ -2394,7 +2414,7 @@ namespace AnonPDF
                 {
                     if (!response.IsSuccessStatusCode)
                     {
-                        throw new InvalidOperationException($"HTTP {(int)response.StatusCode}");
+                        throw new InvalidOperationException(LocalizedFormat("Err_HttpStatusCode", (int)response.StatusCode));
                     }
 
                     using (var source = response.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
@@ -2411,9 +2431,7 @@ namespace AnonPDF
             catch (Exception ex)
             {
                 LogDebug("Standalone update download/install failed: " + ex);
-                ShowInfoMessage(string.Format(
-                    L("Nie udało się pobrać lub uruchomić aktualizacji: {0}", "Failed to download or start update: {0}"),
-                    ex.Message));
+                ShowInfoMessage(LocalizedFormat("Err_StandaloneUpdate_DownloadOrRunFailed", ex.Message));
             }
             finally
             {
@@ -2429,15 +2447,11 @@ namespace AnonPDF
                 return;
             }
 
-            string message = L(
-                "Instalator aktualizacji został pobrany.\r\n\r\nCzy zamknąć aplikację i uruchomić instalator teraz?",
-                "The update installer has been downloaded.\r\n\r\nClose the application and run the installer now?");
-            var result = MessageBox.Show(this, message, L("Aktualizacja gotowa", "Update ready"), MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            string message = LocalizedText("Msg_StandaloneUpdate_InstallerReadyAskClose");
+            var result = MessageBox.Show(this, message, LocalizedText("Title_UpdateReady"), MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (result != DialogResult.Yes)
             {
-                ShowInfoMessage(string.Format(
-                    L("Instalator zapisano tutaj: {0}", "Installer saved here: {0}"),
-                    msiPath));
+                ShowInfoMessage(LocalizedFormat("Msg_StandaloneUpdate_InstallerSavedPath", msiPath));
                 return;
             }
 
@@ -2468,9 +2482,7 @@ namespace AnonPDF
                 launchStandaloneInstallerAfterClose = false;
                 standaloneInstallerLaunchAttempted = false;
                 LogDebug("Standalone update installer launch failed: " + ex);
-                ShowInfoMessage(string.Format(
-                    L("Nie udało się uruchomić instalatora MSI: {0}", "Failed to start MSI installer: {0}"),
-                    ex.Message));
+                ShowInfoMessage(LocalizedFormat("Err_StandaloneUpdate_StartInstallerFailed", ex.Message));
             }
         }
 
@@ -2483,16 +2495,14 @@ namespace AnonPDF
         {
             if (LicenseManager.Config?.IsStandaloneUpdateMode != true)
             {
-                ShowInfoMessage(L(
-                    "Aktywacja licencji z pliku jest dostępna tylko w trybie standalone.",
-                    "License activation from file is available only in standalone mode."));
+                ShowInfoMessage(LocalizedText("Msg_LicenseActivation_StandaloneOnly"));
                 return;
             }
 
             using (var dialog = new OpenFileDialog())
             {
-                dialog.Title = L("Wybierz paczkę licencji", "Select license package");
-                dialog.Filter = L("Paczki licencyjne (*.zip)|*.zip|Wszystkie pliki (*.*)|*.*", "License packages (*.zip)|*.zip|All files (*.*)|*.*");
+                dialog.Title = LocalizedText("Dialog_SelectLicensePackage_Title");
+                dialog.Filter = LocalizedText("Dialog_SelectLicensePackage_Filter");
                 dialog.Multiselect = false;
                 dialog.CheckFileExists = true;
 
@@ -2525,7 +2535,7 @@ namespace AnonPDF
             {
                 if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
                 {
-                    throw new FileNotFoundException(L("Nie znaleziono wskazanej paczki licencji.", "Selected license package was not found."));
+                    throw new FileNotFoundException(LocalizedText("Err_LicensePackage_NotFound"));
                 }
 
                 Directory.CreateDirectory(tempDirectory);
@@ -2543,14 +2553,14 @@ namespace AnonPDF
                         if (!requiredSet.Contains(fileName))
                         {
                             throw new InvalidOperationException(string.Format(
-                                L("Paczka zawiera niedozwolony plik: {0}", "Package contains unsupported file: {0}"),
+                                LocalizedText("Err_LicensePackage_UnsupportedFile"),
                                 fileName));
                         }
 
                         if (extractedFiles.ContainsKey(fileName))
                         {
                             throw new InvalidOperationException(string.Format(
-                                L("Paczka zawiera zduplikowany plik: {0}", "Package contains duplicate file: {0}"),
+                                LocalizedText("Err_LicensePackage_DuplicateFile"),
                                 fileName));
                         }
 
@@ -2565,7 +2575,7 @@ namespace AnonPDF
                     if (!extractedFiles.ContainsKey(requiredFile))
                     {
                         throw new InvalidOperationException(string.Format(
-                            L("Brakuje wymaganego pliku w paczce: {0}", "Required file is missing in package: {0}"),
+                            LocalizedText("Err_LicensePackage_MissingRequiredFile"),
                             requiredFile));
                     }
                 }
@@ -2599,7 +2609,7 @@ namespace AnonPDF
                 {
                     RestoreLicenseBackup(backupDirectory, userLicenseDirectory, requiredFiles);
                     LicenseManager.Initialize(AppDomain.CurrentDomain.BaseDirectory);
-                    throw new InvalidOperationException(L("Paczka nie zawiera poprawnej licencji AnonPDFPro.", "Package does not contain a valid AnonPDFPro license."));
+                    throw new InvalidOperationException(LocalizedText("Err_LicensePackage_InvalidLicense"));
                 }
 
                 updatesOutOfRangeNotified = false;
@@ -2611,22 +2621,20 @@ namespace AnonPDF
                     {
                         ApplyLicenseStatusUi();
                         UpdateHelpMenuAvailability();
-                        ShowInfoMessage(L("Licencja została aktywowana.", "License has been activated."));
+                        ShowInfoMessage(LocalizedText("Msg_LicenseActivated"));
                     }));
                 }
                 else
                 {
                     ApplyLicenseStatusUi();
                     UpdateHelpMenuAvailability();
-                    ShowInfoMessage(L("Licencja została aktywowana.", "License has been activated."));
+                    ShowInfoMessage(LocalizedText("Msg_LicenseActivated"));
                 }
             }
             catch (Exception ex)
             {
                 LogDebug("License activation failed: " + ex);
-                ShowInfoMessage(string.Format(
-                    L("Nie udało się aktywować licencji: {0}", "Failed to activate license: {0}"),
-                    ex.Message));
+                ShowInfoMessage(LocalizedFormat("Err_LicenseActivation_Failed", ex.Message));
             }
             finally
             {
@@ -3183,7 +3191,7 @@ namespace AnonPDF
 
         private void IgnorePdfRestrictionsToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
         {
-            // Zapisz ustawienie
+            // Persist setting
             Properties.Settings.Default.IgnorePdfRestrictions = ignorePdfRestrictionsToolStripMenuItem.Checked;
             Properties.Settings.Default.Save();
         }
@@ -3384,6 +3392,27 @@ namespace AnonPDF
 
                 Size textSize = TextRenderer.MeasureText(e.Item.Text, e.Item.Font);
                 DrawingRectangle textRect = new DrawingRectangle(e.Bounds.Left + rectangleWidth + 4, e.Bounds.Top, textSize.Width, e.Bounds.Height);
+                bool isMarkedForDeletion = status.MarkedForDeletion;
+                if (isMarkedForDeletion)
+                {
+                    if (e.Item.Selected)
+                    {
+                        using (SolidBrush highlightBrush = new SolidBrush(SystemColors.Highlight))
+                        {
+                            e.Graphics.FillRectangle(highlightBrush, textRect);
+                        }
+                        TextRenderer.DrawText(e.Graphics, e.Item.Text, e.Item.Font, textRect, SystemColors.HighlightText, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+                    }
+                    else
+                    {
+                        using (SolidBrush deletedBrush = new SolidBrush(System.Drawing.Color.Black))
+                        {
+                            e.Graphics.FillRectangle(deletedBrush, textRect);
+                        }
+                        TextRenderer.DrawText(e.Graphics, e.Item.Text, e.Item.Font, textRect, System.Drawing.Color.White, TextFormatFlags.VerticalCenter | TextFormatFlags.Left);
+                    }
+                    return;
+                }
 
                 // Highlight strictly by actual ListView selection state.
                 // Using currentPage here can desync with Selected state during fast keyboard/mouse interactions
@@ -3522,7 +3551,7 @@ namespace AnonPDF
 
         private void PDFForm_DragEnter(object sender, DragEventArgs e)
         {
-            // Czy zawiera pliki?
+            // Does it contain files?
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
                 // Allow drop
@@ -3973,7 +4002,7 @@ namespace AnonPDF
         private Bitmap CombineBitmaps(Bitmap originalBmp, Bitmap overlayBmp)
         {
             if (originalBmp.Width != overlayBmp.Width || originalBmp.Height != overlayBmp.Height)
-                throw new ArgumentException("Both bitmaps must have the same dimensions.");
+                throw new ArgumentException(LocalizedText("Err_BitmapsDifferentDimensions"));
 
             DrawingRectangle rect = new DrawingRectangle(0, 0, originalBmp.Width, originalBmp.Height);
             Bitmap resultBmp = new Bitmap(originalBmp.Width, originalBmp.Height, originalBmp.PixelFormat);
@@ -4223,7 +4252,7 @@ namespace AnonPDF
             renderTimer.Start();
 
             pageNumberTextBox.Text = pageNumber.ToString();
-            numPagesLabel.Text = $"/ {numPages}";
+            numPagesLabel.Text = LocalizedFormat("UI_PageCountTotalFormat", numPages);
             
             UpdateZoomButtons();
         }
@@ -4772,9 +4801,7 @@ namespace AnonPDF
                             if (!string.IsNullOrWhiteSpace(sig.SignerOrganization))
                             {
                                 shiftStart -= shift;
-                                string organizationLabel = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pl"
-                                    ? "Instytucja"
-                                    : "Organization";
+                                string organizationLabel = LocalizedText("Signatures_Field_Organization");
                                 pdfCanvas.BeginText()
                                  .SetFontAndSize(font, 12)
                                  .MoveText(50, shiftStart)
@@ -4910,7 +4937,7 @@ namespace AnonPDF
                                                 ? signatureInfo.SignDate.ToString("yyyy-MM-dd HH:mm:ss")
                                                 : string.Empty;
 
-                                            var lines = new List<string> { "Podpis z dokumentu źródłowego" };
+                                            var lines = new List<string> { LocalizedText("Signatures_SourceDocumentSignature") };
                                             if (!string.IsNullOrWhiteSpace(signerName))
                                             {
                                                 lines.Add($"{Resources.Signatures_Report_Field_SignerName}: {signerName}");
@@ -4921,9 +4948,7 @@ namespace AnonPDF
                                             }
                                             if (!string.IsNullOrWhiteSpace(signerOrganization))
                                             {
-                                                string organizationLabel = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pl"
-                                                    ? "Instytucja"
-                                                    : "Organization";
+                                                string organizationLabel = LocalizedText("Signatures_Field_Organization");
                                                 lines.Add($"{organizationLabel}: {signerOrganization}");
                                             }
                                             if (!string.IsNullOrWhiteSpace(signDate))
@@ -5284,8 +5309,8 @@ namespace AnonPDF
                 var info = pdfDoc.GetDocumentInfo();
 
                 // Custom fields
-                info.SetMoreInfo("iTextCopyright", "This document was processed using iText Core / Community under the AGPLv3 license. Copyright (c) iText Group NV.");
-                info.SetMoreInfo("iTextLicense", "For more information see https://www.gnu.org/licenses/agpl-3.0.html and https://itextpdf.com/.");
+                info.SetMoreInfo("iTextCopyright", LocalizedText("Pdf_Metadata_iTextCopyright"));
+                info.SetMoreInfo("iTextLicense", LocalizedText("Pdf_Metadata_iTextLicense"));
 
                 ApplyDemoWatermarkIfNeeded(pdfDoc);
                 MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -5434,7 +5459,7 @@ namespace AnonPDF
         private static string GetDemoWatermarkText()
         {
             var text = Resources.ResourceManager.GetString("Demo_Watermark_Text", CultureInfo.CurrentUICulture);
-            return string.IsNullOrWhiteSpace(text) ? "WERSJA DEMONSTRACYJNA ANONPDF PRO" : text;
+            return string.IsNullOrWhiteSpace(text) ? "Demo_Watermark_Text" : text;
         }
 
         private void ClearRedactionBlocks()
@@ -5452,7 +5477,7 @@ namespace AnonPDF
                 {
                     if (item.Tag is PageItemStatus status && status.HasSelections)
                     {
-                        // Ustawienie flagi na false
+                        // Reset flag
                         status.HasSelections = false;
                         // Refresh specific item to make the change visible
                         pagesListView.Invalidate(item.Bounds);
@@ -5473,6 +5498,11 @@ namespace AnonPDF
 
         private void ClearCurrentPageRedactionBlock()
         {
+            if (!EnsureCurrentPageEditable(true))
+            {
+                return;
+            }
+
             redactionBlocks.RemoveAll(block => block.PageNumber == currentPage);
             projectWasChangedAfterLastSave = true;
 
@@ -5965,10 +5995,62 @@ namespace AnonPDF
 
             bool isMarked = pagesToRemove.Contains(numPage);
             UpdateRemovePageButtonVisual(isMarked);
+            UpdateCurrentPageEditLockState();
+        }
+
+        private bool IsCurrentPageMarkedForDeletion()
+        {
+            return currentPage >= 1 && pagesToRemove.Contains(currentPage);
+        }
+
+        private void UpdateCurrentPageEditLockState()
+        {
+            bool pdfLoaded = pdf != null && numPages > 0 && currentPage >= 1 && currentPage <= numPages;
+            bool pageMarkedForDeletion = pdfLoaded && IsCurrentPageMarkedForDeletion();
+            bool canEditCurrentPage = pdfLoaded && !pageMarkedForDeletion;
+
+            markerRadioButton.Enabled = canEditCurrentPage;
+            boxRadioButton.Enabled = canEditCurrentPage;
+            addTextMenuItem.Enabled = canEditCurrentPage;
+            rotatePageMenuItem.Enabled = canEditCurrentPage;
+            searchToSelectionButton.Enabled = canEditCurrentPage && groupBoxSearch.Enabled;
+
+            bool hasSelectionsForThisPage = pdfLoaded && redactionBlocks.Any(rb => rb.PageNumber == currentPage);
+            clearPageButton.Enabled = canEditCurrentPage && hasSelectionsForThisPage;
+
+            if (!canEditCurrentPage)
+            {
+                isDrawing = false;
+                isMoving = false;
+                annotationToMove = null;
+                currentSelection = RectangleF.Empty;
+                this.Cursor = Cursors.Default;
+            }
+
+            pdfViewer?.Invalidate();
+        }
+
+        private bool EnsureCurrentPageEditable(bool showMessage)
+        {
+            if (!IsCurrentPageMarkedForDeletion())
+            {
+                return true;
+            }
+
+            if (showMessage)
+            {
+                ShowInfoMessage(LocalizedText("Msg_PageMarkedForDeletion_UnmarkToEdit"));
+            }
+            return false;
         }
 
         private void RotateCurrentPageClockwise()
         {
+            if (!EnsureCurrentPageEditable(true))
+            {
+                return;
+            }
+
             if (pdf == null)
                 return;
 
@@ -6255,6 +6337,10 @@ namespace AnonPDF
             isClickOnIcon = false;
             clickedIconType = IconType.None;
             annotationForIcon = null;
+            if (IsCurrentPageMarkedForDeletion() && (e.Button == MouseButtons.Left || e.Button == MouseButtons.Right))
+            {
+                return;
+            }
 
             if (e.Button == MouseButtons.Right)
             {
@@ -6372,6 +6458,13 @@ namespace AnonPDF
             {
                 return;
             }
+            if (IsCurrentPageMarkedForDeletion())
+            {
+                isDrawing = false;
+                isMoving = false;
+                annotationToMove = null;
+                return;
+            }
 
             if (isDrawing)
             {
@@ -6466,6 +6559,18 @@ namespace AnonPDF
             
 
             PageItemStatus status = allPageStatuses[currentPage - 1];
+            if (IsCurrentPageMarkedForDeletion() && (e.Button == MouseButtons.Left || e.Button == MouseButtons.Right))
+            {
+                isDrawing = false;
+                isMoving = false;
+                annotationToMove = null;
+                currentSelection = RectangleF.Empty;
+                isClickOnIcon = false;
+                clickedIconType = IconType.None;
+                annotationForIcon = null;
+                pdfViewer.Invalidate();
+                return;
+            }
 
 
             if (e.Button == MouseButtons.Left)
@@ -6486,12 +6591,12 @@ namespace AnonPDF
                         {
                             annotationForIcon.AnnotationIsLocked = false;
                             pdfViewer.Invalidate();
-                            msg = "Odblokowano";
+                            msg = LocalizedText("Msg_TextAnnotation_Unlocked");
                         }
                         else
                         {
                             annotationForIcon.AnnotationIsLocked = true;
-                            msg = "Zablokowano";
+                            msg = LocalizedText("Msg_TextAnnotation_Locked");
                         }
                         pdfViewer.Invalidate();
                         MessageBox.Show(this, string.Format(Resources.Msg_TextPositionInfo, msg), Resources.Title_Info, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -6850,9 +6955,9 @@ namespace AnonPDF
 
                 // Button colors: gray background, dark gray border
                 System.Drawing.Color buttonBackground = SystemColors.Control; // gray background
-                System.Drawing.Color buttonBorder = System.Drawing.Color.DarkGray; // ciemniejsza ramka
+                System.Drawing.Color buttonBorder = System.Drawing.Color.DarkGray; // darker border
 
-                // Funkcja pomocnicza do rysowania "przycisku"
+                // Helper function to draw a "button"
                 void DrawButtonIcon(Rectangle buttonRect, string iconCode)
                 {
                     // Draw button background
@@ -6900,6 +7005,44 @@ namespace AnonPDF
                 DrawButtonIcon(deleteIconRect, "\uE74D");  // Ikonka usuwania
             }
 
+            if (IsCurrentPageMarkedForDeletion())
+            {
+                using (var overlayBrush = new SolidBrush(System.Drawing.Color.FromArgb(120, 180, 180, 180)))
+                {
+                    e.Graphics.FillRectangle(overlayBrush, pdfViewer.ClientRectangle);
+                }
+
+                string lockMessage = LocalizedText("Msg_PageMarkedForDeletion_EditLocked");
+                using (var messageFont = new Font("Segoe UI", 18f, FontStyle.Bold, GraphicsUnit.Point))
+                using (var messagePath = new System.Drawing.Drawing2D.GraphicsPath())
+                {
+                    var sf = new StringFormat
+                    {
+                        Alignment = StringAlignment.Center,
+                        LineAlignment = StringAlignment.Center
+                    };
+                    float emSize = e.Graphics.DpiY * messageFont.Size / 72f;
+                    messagePath.AddString(
+                        lockMessage,
+                        messageFont.FontFamily,
+                        (int)messageFont.Style,
+                        emSize,
+                        pdfViewer.ClientRectangle,
+                        sf);
+
+                    var state = e.Graphics.Save();
+                    e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                    using (var haloPen = new Pen(System.Drawing.Color.FromArgb(240, 255, 255, 255), 6f))
+                    using (var textBrush = new SolidBrush(System.Drawing.Color.FromArgb(235, 40, 40, 40)))
+                    {
+                        haloPen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+                        e.Graphics.DrawPath(haloPen, messagePath);
+                        e.Graphics.FillPath(textBrush, messagePath);
+                    }
+                    e.Graphics.Restore(state);
+                }
+            }
 
 
         }
@@ -6952,11 +7095,11 @@ namespace AnonPDF
             // If at least one element is selected
             if (pagesListView.SelectedItems.Count > 0)
             {
-                // Bierzemy pierwszy zaznaczony element
+                // Take the first selected item
                 ListViewItem selectedItem = pagesListView.SelectedItems[0];
 
 
-                // Tekst elementu, np. "Strona 1"
+                // Item text, e.g. "Page 1"
                 //string text = selectedItem.Text;
 
 
@@ -7063,7 +7206,7 @@ namespace AnonPDF
 
 
             // (D) Call page re-display
-            //     (ta metoda ustawi pdfViewer.Image = ... i pdfViewer.Size = ...)
+            //     (this method sets pdfViewer.Image = ... and pdfViewer.Size = ...)
             DisplayPdfPage(currentPage);
 
             // (E) Now we want to set scroll so that docCoordX/docCoordY
@@ -7465,11 +7608,12 @@ namespace AnonPDF
             selectionNextButton.Enabled = currentPage < lastSelectionPage;
             selectionLastButton.Enabled = currentPage < lastSelectionPage;
 
-                // Check whether current page has selections
+            // Check whether current page has selections
             bool hasSelectionsForThisPage = redactionBlocks.Any(rb => rb.PageNumber == currentPage);
+            bool canEditCurrentPage = !IsCurrentPageMarkedForDeletion();
 
             // Enable/disable button depending on whether there are selections
-            clearPageButton.Enabled = hasSelectionsForThisPage;
+            clearPageButton.Enabled = hasSelectionsForThisPage && canEditCurrentPage;
             clearSelectionButton.Enabled = true;
         }
 
@@ -7716,7 +7860,7 @@ namespace AnonPDF
                 var process = Process.Start(psi);
                 if (process == null)
                 {
-                    throw new InvalidOperationException("msiexec returned null process instance.");
+                    throw new InvalidOperationException(LocalizedText("Err_StandaloneUpdate_MsiexecNoProcess"));
                 }
                 LogDebug($"Standalone installer process started path={msiPath}");
             }
@@ -7726,9 +7870,7 @@ namespace AnonPDF
                 try
                 {
                     MessageBox.Show(
-                        string.Format(
-                            L("Nie udało się uruchomić instalatora MSI: {0}", "Failed to start MSI installer: {0}"),
-                            ex.Message),
+                        LocalizedFormat("Err_StandaloneUpdate_StartInstallerFailed", ex.Message),
                         Resources.Title_Error,
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
@@ -8732,7 +8874,7 @@ namespace AnonPDF
                     .FirstOrDefault(codec => codec.FormatID == ImageFormat.Tiff.Guid);
 
                 if (tiffCodec == null)
-                    throw new InvalidOperationException("TIFF codec not found on the system.");
+                    throw new InvalidOperationException(LocalizedText("Err_Codec_TiffMissing"));
 
                 // Set compression parameter to CCITT Group 4
                 var encoderParams = new EncoderParameters(2);
@@ -8759,7 +8901,7 @@ namespace AnonPDF
                     .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);
 
                 if (jpegCodec == null)
-                    throw new InvalidOperationException("JPEG codec not found on the system.");
+                    throw new InvalidOperationException(LocalizedText("Err_Codec_JpegMissing"));
 
                 // Compression parameters
                 var encoderParams = new EncoderParameters(1);
@@ -8803,7 +8945,7 @@ namespace AnonPDF
         private void UpdateWindowTitle()
         {
 
-            string titleText = $"{Branding.ProductName} - v.{fileVersion}";
+            string titleText = LocalizedFormat("Window_TitleFormat", Branding.ProductName, fileVersion);
             string demoSuffix = GetDemoTitleSuffix();
             if (!string.IsNullOrWhiteSpace(demoSuffix))
             {
@@ -8812,19 +8954,19 @@ namespace AnonPDF
             if (inputPdfPath != "")
             {
                 string pdfFileName = ShortenFileName(Path.GetFileName(inputPdfPath));
-                titleText += $"              pdf: [{pdfFileName}]";
+                titleText += LocalizedFormat("Window_Title_PdfPart", pdfFileName);
             }
             string papText = "";
             if (inputProjectPath != "")
             {
                 string papFileName = ShortenFileName(Path.GetFileName(inputProjectPath));
-                papText = $"        projekt: [{papFileName}]";
+                papText = LocalizedFormat("Window_Title_ProjectPart", papFileName);
             }
 
             if (lastSavedProjectName != "")
             {
                 string papFileName = ShortenFileName(Path.GetFileName(lastSavedProjectName));
-                papText = $"        projekt: [{papFileName}]";
+                papText = LocalizedFormat("Window_Title_ProjectPart", papFileName);
             }
 
             if (papText != "")
@@ -8873,35 +9015,27 @@ namespace AnonPDF
 
             if (LicenseManager.IsRevoked)
             {
-                return IsPolishCulture()
-                    ? " [WERSJA DEMO: licencja cofnięta]"
-                    : " [DEMO: license revoked]";
+                return LocalizedText("Demo_TitleSuffix_Revoked");
             }
 
             if (LicenseManager.IsUpdateOutOfRangeForCurrentVersion)
             {
-                return IsPolishCulture()
-                    ? " [WERSJA DEMO: brak licencji na nowsze wersje]"
-                    : " [DEMO: updates not licensed]";
+                return LocalizedText("Demo_TitleSuffix_UpdateOutOfRange");
             }
 
             var demoUntil = ParseLicenseDate(info.Payload.DemoUntil);
             if (!demoUntil.HasValue)
             {
-                return IsPolishCulture() ? " [WERSJA DEMO]" : " [DEMO VERSION]";
+                return LocalizedText("Demo_TitleSuffix_Default");
             }
 
             var daysLeft = (int)Math.Ceiling((demoUntil.Value.Date - DateTime.UtcNow.Date).TotalDays);
             if (daysLeft >= 0)
             {
-                return IsPolishCulture()
-                    ? $" [WERSJA DEMO: {daysLeft} dni]"
-                    : $" [DEMO: {daysLeft} days left]";
+                return LocalizedFormat("Demo_TitleSuffix_DaysLeft", daysLeft);
             }
 
-            return IsPolishCulture()
-                ? $" [WERSJA DEMO: wygasła {demoUntil:yyyy-MM-dd}]"
-                : $" [DEMO: expired on {demoUntil:yyyy-MM-dd}]";
+            return LocalizedFormat("Demo_TitleSuffix_ExpiredOn", demoUntil.Value);
         }
 
         private static string GetLicenseStatusLine()
@@ -8909,31 +9043,27 @@ namespace AnonPDF
             var info = LicenseManager.Current;
             if (info == null)
             {
-                return IsPolishCulture() ? "Status licencji: brak" : "License status: missing";
+                return LocalizedText("LicenseStatus_Missing");
             }
 
             if (!info.IsSignatureValid)
             {
-                return IsPolishCulture() ? "Status licencji: nieprawidłowa" : "License status: invalid";
+                return LocalizedText("LicenseStatus_Invalid");
             }
 
             if (info.Payload == null)
             {
-                return IsPolishCulture() ? "Status licencji: brak danych" : "License status: no data";
+                return LocalizedText("LicenseStatus_NoData");
             }
 
             if (LicenseManager.IsRevoked)
             {
-                return IsPolishCulture()
-                    ? "Status licencji: DEMO (licencja cofnięta)"
-                    : "License status: DEMO (license revoked)";
+                return LocalizedText("LicenseStatus_Demo_Revoked");
             }
 
             if (LicenseManager.IsUpdateOutOfRangeForCurrentVersion)
             {
-                return IsPolishCulture()
-                    ? "Status licencji: DEMO (brak licencji na nowsze wersje)"
-                    : "License status: DEMO (updates not licensed)";
+                return LocalizedText("LicenseStatus_Demo_UpdateOutOfRange");
             }
 
             if (string.Equals(info.Payload.Edition, "demo", StringComparison.OrdinalIgnoreCase))
@@ -8941,23 +9071,19 @@ namespace AnonPDF
                 var demoUntil = ParseLicenseDate(info.Payload.DemoUntil);
                 if (!demoUntil.HasValue)
                 {
-                    return IsPolishCulture() ? "Status licencji: DEMO" : "License status: DEMO";
+                    return LocalizedText("LicenseStatus_Demo");
                 }
 
                 var daysLeft = (int)Math.Ceiling((demoUntil.Value.Date - DateTime.UtcNow.Date).TotalDays);
                 if (daysLeft >= 0)
                 {
-                    return IsPolishCulture()
-                        ? $"Status licencji: DEMO ({daysLeft} dni)"
-                        : $"License status: DEMO ({daysLeft} days)";
+                    return LocalizedFormat("LicenseStatus_Demo_DaysLeft", daysLeft);
                 }
 
-                return IsPolishCulture()
-                    ? $"Status licencji: DEMO (wygasła {demoUntil:yyyy-MM-dd})"
-                    : $"License status: DEMO (expired {demoUntil:yyyy-MM-dd})";
+                return LocalizedFormat("LicenseStatus_Demo_ExpiredOn", demoUntil.Value);
             }
 
-            return IsPolishCulture() ? "Status licencji: PRO" : "License status: PRO";
+            return LocalizedText("LicenseStatus_Pro");
         }
 
         private static string GetUpdatesStatusLine()
@@ -8965,25 +9091,21 @@ namespace AnonPDF
             var info = LicenseManager.Current;
             if (info == null || !info.IsSignatureValid || info.Payload == null)
             {
-                return IsPolishCulture() ? "Wsparcie: brak danych" : "Support: no data";
+                return LocalizedText("SupportStatus_NoData");
             }
 
             var supportUntil = LicenseManager.GetEffectiveSupportUntil();
             if (!supportUntil.HasValue)
             {
-                return IsPolishCulture() ? "Wsparcie: brak" : "Support: none";
+                return LocalizedText("SupportStatus_None");
             }
 
             if (supportUntil.Value.Date >= DateTime.UtcNow.Date)
             {
-                return IsPolishCulture()
-                    ? $"Wsparcie do: {supportUntil:yyyy-MM-dd}"
-                    : $"Support until: {supportUntil:yyyy-MM-dd}";
+                return LocalizedFormat("SupportStatus_Until", supportUntil.Value);
             }
 
-            return IsPolishCulture()
-                ? $"Wsparcie wygasło ({supportUntil:yyyy-MM-dd})"
-                : $"Support expired ({supportUntil:yyyy-MM-dd})";
+            return LocalizedFormat("SupportStatus_ExpiredOn", supportUntil.Value);
         }
 
         private static string GetLicensedToLine()
@@ -8995,9 +9117,7 @@ namespace AnonPDF
                 customer = "-";
             }
 
-            return IsPolishCulture()
-                ? $"Licencja dla: {customer}"
-                : $"Licensed to: {customer}";
+            return LocalizedFormat("LicensedTo_Line", customer);
         }
 
         private static DateTime? ParseLicenseDate(string value)
@@ -9020,12 +9140,6 @@ namespace AnonPDF
 
             return null;
         }
-
-        private static bool IsPolishCulture()
-        {
-            return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pl";
-        }
-
 
         public void ExtractSignatures()
         {
@@ -9123,6 +9237,7 @@ namespace AnonPDF
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
+            UpdateNavigationButtons(currentPage);
         }
 
         private void RemovePageButton_Click(object sender, EventArgs e)
@@ -9136,7 +9251,7 @@ namespace AnonPDF
             // Check if input file exists
             if (!File.Exists(inputPdfPath))
             {
-                throw new FileNotFoundException("Input file does not exist", inputPdfPath);
+                throw new FileNotFoundException(LocalizedText("Err_InputFileDoesNotExist"), inputPdfPath);
             }
 
             using (MemoryStream outputStream = new MemoryStream())
@@ -9152,7 +9267,9 @@ namespace AnonPDF
                     // Check if page number is correct
                     if (pageNumber < 1 || pageNumber > pdfDoc.GetNumberOfPages())
                     {
-                        throw new ArgumentOutOfRangeException(nameof(pageNumber), $"Page number must be between 1 and {pdfDoc.GetNumberOfPages()}");
+                        throw new ArgumentOutOfRangeException(
+                            nameof(pageNumber),
+                            LocalizedFormat("Err_PageNumberOutOfRange", pdfDoc.GetNumberOfPages()));
                     }
 
                     // Create new PDF document for page
@@ -9256,7 +9373,7 @@ namespace AnonPDF
                             }
 
                         }
-                        // Aktualizacja interfejsu – np. oznaczenie stron w listView itp.
+                        // UI refresh is handled by per-item updates above.
 
                     }
                     else
@@ -9294,6 +9411,7 @@ namespace AnonPDF
                     }
                         
                     pagesListView.Invalidate();
+                    UpdateNavigationButtons(currentPage);
                 }
             }
         }
@@ -9344,7 +9462,7 @@ namespace AnonPDF
             var location = searchLocations[index];
             if (location.PageNumber != currentPage)
             {
-                // Zmiana strony
+                // Change page
                 currentPage = location.PageNumber;
                 if ((string)filterComboBox.SelectedItem == allComboItem)
                 {
@@ -9388,7 +9506,7 @@ namespace AnonPDF
                 groupBoxSearch.Enabled = true;
                 searchTextBox.SelectAll();
                 searchTextBox.Focus();
-                searchResultLabel.Text = $"znaleziono: {searchLocations.Count}";                
+                searchResultLabel.Text = LocalizedFormat("Search_ResultCount", searchLocations.Count);
                 foreach (var itemSl in searchLocations)
                 {
                     if (itemSl is TextLocation searchLocation)
@@ -9539,7 +9657,7 @@ namespace AnonPDF
             groupBoxSearch.Enabled = false;
             searchLocations = await Task.Run(() => PdfTextSearcher.FindTextLocations(inputPdfPath, "", true, userPassword, this));
             groupBoxSearch.Enabled = true;
-            searchResultLabel.Text = $"znaleziono: {searchLocations.Count}";
+            searchResultLabel.Text = LocalizedFormat("Search_ResultCount", searchLocations.Count);
             
 
 
@@ -9596,7 +9714,7 @@ namespace AnonPDF
                 {
                     if (item.Tag is PageItemStatus status && status.HasSearchResults)
                     {
-                        // Ustawienie flagi na false
+                        // Reset flag
                         status.HasSearchResults = false;
                         // Refresh specific item to make the change visible
                         pagesListView.Invalidate(item.Bounds);
@@ -9635,6 +9753,11 @@ namespace AnonPDF
 
         private void SearchToSelectionButton_Click(object sender, EventArgs e)
         {
+            if (!EnsureCurrentPageEditable(true))
+            {
+                return;
+            }
+
             // Get search results for the current page
             var currentPageSearchResults = searchLocations.Where(loc => loc.PageNumber == currentPage).ToList();
             if (currentPageSearchResults.Count == 0)
@@ -9997,7 +10120,28 @@ namespace AnonPDF
         public override string ToString()
         {
             // Optional, facilitates debugging and displaying annotation information.
-            return $"{AnnotationText} - {AnnotationFont.FontFamily.Name}, {AnnotationFont.Size} pt, {AnnotationColor.Name}, {AnnotationAlignment}, {AnnotationRotation}, {AnnotationIsLocked}";
+            return FormatResource(
+                "TextAnnotation_ToStringFormat",
+                AnnotationText,
+                AnnotationFont.FontFamily.Name,
+                AnnotationFont.Size,
+                AnnotationColor.Name,
+                AnnotationAlignment,
+                AnnotationRotation,
+                AnnotationIsLocked);
+        }
+
+        private static string FormatResource(string key, params object[] args)
+        {
+            string format = GetResourceText(key);
+            return string.Format(format, args);
+        }
+
+        private static string GetResourceText(string key)
+        {
+            var culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
+            string value = Resources.ResourceManager.GetString(key, culture);
+            return string.IsNullOrWhiteSpace(value) ? key : value;
         }
     }
 
@@ -10084,7 +10228,7 @@ namespace AnonPDF
             // Label showing the current font selection
             lblFontDisplay = new Label
             {
-                Text = $"{AnnotationFont.FontFamily.Name}, {AnnotationFont.Size} pt",
+                Text = FormatResource("EditText_FontDisplay", AnnotationFont.FontFamily.Name, AnnotationFont.Size),
                 AutoSize = true,
                 Location = new Point(120, 147)
             };
@@ -10244,7 +10388,7 @@ namespace AnonPDF
                 DialogResult = DialogResult.Cancel
             };
 
-            // Dodanie kontrolek do formularza
+            // Add controls to the form
             this.Controls.Add(lblText);
             this.Controls.Add(txtText);
             this.Controls.Add(btnFont);
@@ -10303,7 +10447,14 @@ namespace AnonPDF
             if (!string.IsNullOrEmpty(fontStyles))
                 fontStyles = " (" + fontStyles + ")";
 
-            lblFontDisplay.Text = $"{AnnotationFont.FontFamily.Name}, {AnnotationFont.Size} pt {fontStyles}";
+            if (string.IsNullOrEmpty(fontStyles))
+            {
+                lblFontDisplay.Text = FormatResource("EditText_FontDisplay", AnnotationFont.FontFamily.Name, AnnotationFont.Size);
+            }
+            else
+            {
+                lblFontDisplay.Text = FormatResource("EditText_FontDisplayWithStyle", AnnotationFont.FontFamily.Name, AnnotationFont.Size, fontStyles);
+            }
 
             txtText.Font = AnnotationFont;
             txtText.ForeColor = AnnotationColor;
@@ -10434,6 +10585,19 @@ namespace AnonPDF
                 return;
             AnnotationText = txtText.Text;
             ApplyChanges?.Invoke();
+        }
+
+        private static string FormatResource(string key, params object[] args)
+        {
+            string format = GetResourceText(key);
+            return string.Format(format, args);
+        }
+
+        private static string GetResourceText(string key)
+        {
+            var culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
+            string value = Resources.ResourceManager.GetString(key, culture);
+            return string.IsNullOrWhiteSpace(value) ? key : value;
         }
     }
 
@@ -10847,7 +11011,7 @@ namespace AnonPDF
                 return;
             }
 
-            // najpierw sprawdzamy wszystkie pliki
+            // First, validate all files
             List<string> lockedFiles = new List<string>();
             foreach (var file in pdfFiles)
             {
@@ -10876,14 +11040,14 @@ namespace AnonPDF
                 catch (Exception ex)
                 {
                     // if it's another error, also treat it as problem with this PDF
-                    lockedFiles.Add(file + " (error: " + ex.Message + ")");
+                    lockedFiles.Add(file + string.Format(GetLocalizedResourceText("Msg_ErrorSuffix"), ex.Message));
                 }
             }
 
             if (lockedFiles.Count > 0)
             {
                 // if any file is locked, don't merge
-                string msg = "Cannot merge files, the following files have security settings:\n\n";
+                string msg = GetLocalizedResourceText("Err_Merge_FilesHaveSecurity");
                 foreach (var f in lockedFiles)
                 {
                     msg += "- " + Path.GetFileName(f) + "\n";
@@ -10958,6 +11122,13 @@ namespace AnonPDF
             }
         }
 
+        private static string GetLocalizedResourceText(string key)
+        {
+            var culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
+            string text = Resources.ResourceManager.GetString(key, culture);
+            return string.IsNullOrWhiteSpace(text) ? key : text;
+        }
+
     }
 
     public class ZoomPanel : Panel
@@ -11004,7 +11175,13 @@ namespace AnonPDF
 
         public override string ToString()
         {
-            return $"Strona: {PageNumber}, Pozycja: {Rect}";
+            var culture = Properties.Resources.Culture ?? CultureInfo.CurrentUICulture;
+            var format = Properties.Resources.ResourceManager.GetString("TextLocation_ToStringFormat", culture);
+            if (string.IsNullOrWhiteSpace(format))
+            {
+                format = "TextLocation_ToStringFormat";
+            }
+            return string.Format(format, PageNumber, Rect);
         }
     }
 
@@ -11194,7 +11371,7 @@ namespace AnonPDF
             // By default set that we want to apply selection
             rbApply.Checked = true;
 
-            // Przyciski OK i Anuluj
+            // OK and Cancel buttons
             btnOK = new Button() { Text = Resources.Merge_OK, Left = 50, Width = 80, Top = 210, DialogResult = DialogResult.OK };
             btnCancel = new Button() { Text = Resources.Merge_Cancel, Left = 150, Width = 80, Top = 210, DialogResult = DialogResult.Cancel };
 
@@ -11303,6 +11480,18 @@ namespace AnonPDF
 
         public static event Action<string> OnCacheStatusChanged;
 
+        private static string LocalizedText(string key)
+        {
+            var culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
+            var text = Resources.ResourceManager.GetString(key, culture);
+            return string.IsNullOrWhiteSpace(text) ? key : text;
+        }
+
+        private static string LocalizedFormat(string key, params object[] args)
+        {
+            return string.Format(LocalizedText(key), args);
+        }
+
         public static List<TextLocation> FindTextLocations(string pdfPath, string searchText, bool searchPersonalData, string userPassword, IWin32Window owner = null)
         {
             // Check whether lines for this file are already cached
@@ -11338,10 +11527,10 @@ namespace AnonPDF
                     processor.ProcessPageContent(pageObj);
 
                     lines.AddRange(strategy.ExtractedLines);
-            OnCacheStatusChanged?.Invoke($"index page: {page}");
+                    OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_IndexPage", page));
                 }
             }
-            OnCacheStatusChanged?.Invoke($"");
+            OnCacheStatusChanged?.Invoke(string.Empty);
             // Save in cache
             _lineCache[pdfPath] = lines;
         }
@@ -11359,7 +11548,7 @@ namespace AnonPDF
             {
                 
                 string textLower = line.Text.ToLowerInvariant();
-                OnCacheStatusChanged?.Invoke($"search page: {line.PageNumber}");
+                OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_SearchPage", line.PageNumber));
                 if (searchPersonalData)
                 {
                     SearchPersonalData(line, locations);
@@ -11407,7 +11596,7 @@ namespace AnonPDF
                     {
                         var pageLines = pageGroup.ToList();
 
-                        OnCacheStatusChanged?.Invoke($"search page: {pageGroup.Key}");
+                        OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_SearchPage", pageGroup.Key));
 
                         var reqlines = pageLines.Select(x => new
                         {
@@ -11480,7 +11669,7 @@ namespace AnonPDF
                     .ThenByDescending(loc => loc.Rect.GetY())
                     .ToList();
             }
-            OnCacheStatusChanged?.Invoke("");
+            OnCacheStatusChanged?.Invoke(string.Empty);
 
             return locations;
         }
@@ -11644,7 +11833,7 @@ namespace AnonPDF
             return new KernelGeom.Rectangle(minX, minY, maxX - minX, maxY - minY);
         }
 
-        // Wzorce dla danych osobowych
+        // Patterns for personal data
         private static readonly Regex PeselPattern = new Regex(@"\d{11}");
         private static readonly Regex PropertyRegisterPattern = new Regex(@"([A-Z]{2}\d{1}[A-Z0-9]{1})/\d{8}/\d{1}");
         private static readonly Regex IdCardPattern = new Regex(@"[A-Z]{3}\s?\d{6}");
@@ -11656,7 +11845,7 @@ namespace AnonPDF
             if (pesel == null || pesel.Length != 11 || !pesel.All(char.IsDigit))
                 return false;
 
-            // Weryfikacja cyfry kontrolnej
+            // Check control digit
             int[] weights = { 1, 3, 7, 9, 1, 3, 7, 9, 1, 3 };
             int sum = 0;
             for (int i = 0; i < 10; i++)
@@ -11706,7 +11895,7 @@ namespace AnonPDF
                 return false; // Invalid month range
             }
 
-            // Weryfikacja daty urodzenia
+            // Birth date validation
             try
             {
                 DateTime date = new DateTime(fullYear, month, day);
@@ -11778,10 +11967,10 @@ namespace AnonPDF
             idCard = idCard.Replace(" ", "");
             if (idCard.Length != 9) return false;
 
-            int[] weights = { 7, 3, 1, 7, 3, 1, 7, 3 }; // Wagi dla 3 liter i 5 cyfr (bez cyfry kontrolnej)
+            int[] weights = { 7, 3, 1, 7, 3, 1, 7, 3 }; // Weights for 3 letters and 5 digits (without the control digit)
             int sum = 0;
 
-            // Sprawdzanie liter (pozycje 0-2)
+            // Letter check (positions 0-2)
             for (int i = 0; i < 3; i++)
             {
                 if (!char.IsUpper(idCard[i])) return false;

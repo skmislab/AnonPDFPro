@@ -222,6 +222,9 @@
   <data name="Menu_Language_Polish" xml:space="preserve">
     <value>Polish</value>
   </data>
+  <data name="Menu_Language_German" xml:space="preserve">
+    <value>German</value>
+  </data>
   <data name="Menu_Language_System" xml:space="preserve">
     <value>Use system language</value>
   </data>
@@ -421,7 +424,11 @@
     <value>When checked — the PDF will be protected with a password.</value>
   </data>
   <data name="Tooltip_SafeMode" xml:space="preserve">
-    <value>Graphic mode — without modifying PDF text content.</value>
+    <value>Enables graphic page mode instead of text mode.</value>
+  </data>
+  <data name="Msg_PageMarkedForDeletion_EditLocked" xml:space="preserve">
+    <value>PAGE MARKED FOR DELETION
+EDITING IS LOCKED</value>
   </data>
   <data name="Tooltip_RemovePage" xml:space="preserve">
     <value>Mark current page for deletion.</value>
@@ -915,5 +922,288 @@ Repository: https://github.com/misart/AnonPDFPro</value>
   </data>
   <data name="Signatures_Report_Field_SignDate" xml:space="preserve">
     <value>Sign date</value>
+  </data>
+  <data name="Menu_Help_CheckForUpdates" xml:space="preserve">
+    <value>Check for updates...</value>
+  </data>
+  <data name="Menu_Help_ActivateLicense" xml:space="preserve">
+    <value>Activate license...</value>
+  </data>
+  <data name="Msg_UpdateCheckInProgress" xml:space="preserve">
+    <value>Update check is already in progress.</value>
+  </data>
+  <data name="Msg_UpdateInfoFetchFailed" xml:space="preserve">
+    <value>Could not fetch update information.</value>
+  </data>
+  <data name="Msg_UpdateAlreadyLatest" xml:space="preserve">
+    <value>You are already using the latest version.</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_AskDownloadAndRun" xml:space="preserve">
+    <value>Do you want to download and run the installer now?</value>
+  </data>
+  <data name="Title_UpdateAvailable" xml:space="preserve">
+    <value>Update available</value>
+  </data>
+  <data name="Msg_UpdateCancelled" xml:space="preserve">
+    <value>Update was cancelled.</value>
+  </data>
+  <data name="Err_StandaloneUpdate_InvalidInstallerLink" xml:space="preserve">
+    <value>No valid installer link found in version.json (downloadUrl).</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_DownloadInProgress" xml:space="preserve">
+    <value>Update installer download is already in progress. Please wait.</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_Downloading" xml:space="preserve">
+    <value>Downloading update installer. Please wait.
+
+You will be notified when the download is complete.</value>
+  </data>
+  <data name="Err_StandaloneUpdate_DownloadOrRunFailed" xml:space="preserve">
+    <value>Failed to download or start update: {0}</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_InstallerReadyAskClose" xml:space="preserve">
+    <value>The update installer has been downloaded.
+
+Close the application and run the installer now?</value>
+  </data>
+  <data name="Title_UpdateReady" xml:space="preserve">
+    <value>Update ready</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_InstallerSavedPath" xml:space="preserve">
+    <value>Installer saved here: {0}</value>
+  </data>
+  <data name="Err_StandaloneUpdate_StartInstallerFailed" xml:space="preserve">
+    <value>Failed to start installer: {0}</value>
+  </data>
+  <data name="Msg_LicenseActivation_StandaloneOnly" xml:space="preserve">
+    <value>License activation from file is available only in single-workstation mode.</value>
+  </data>
+  <data name="Dialog_SelectLicensePackage_Title" xml:space="preserve">
+    <value>Select license package</value>
+  </data>
+  <data name="Dialog_SelectLicensePackage_Filter" xml:space="preserve">
+    <value>License packages (*.zip)|*.zip|All files (*.*)|*.*</value>
+  </data>
+  <data name="Err_LicensePackage_NotFound" xml:space="preserve">
+    <value>Selected license package was not found.</value>
+  </data>
+  <data name="Err_LicensePackage_UnsupportedFile" xml:space="preserve">
+    <value>Package contains unsupported file: {0}</value>
+  </data>
+  <data name="Err_LicensePackage_DuplicateFile" xml:space="preserve">
+    <value>Package contains duplicate file: {0}</value>
+  </data>
+  <data name="Err_LicensePackage_MissingRequiredFile" xml:space="preserve">
+    <value>Required file is missing in package: {0}</value>
+  </data>
+  <data name="Err_LicensePackage_InvalidLicense" xml:space="preserve">
+    <value>Package does not contain a valid AnonPDFPro license.</value>
+  </data>
+  <data name="Msg_LicenseActivated" xml:space="preserve">
+    <value>License has been activated.</value>
+  </data>
+  <data name="Err_LicenseActivation_Failed" xml:space="preserve">
+    <value>Failed to activate license: {0}</value>
+  </data>
+  <data name="Err_BitmapsDifferentDimensions" xml:space="preserve">
+    <value>Both bitmaps must have the same dimensions.</value>
+  </data>
+  <data name="UI_PageCountTotalFormat" xml:space="preserve">
+    <value>/ {0}</value>
+  </data>
+  <data name="Signatures_SourceDocumentSignature" xml:space="preserve">
+    <value>Signature from source document</value>
+  </data>
+  <data name="Signatures_Field_Organization" xml:space="preserve">
+    <value>Organization</value>
+  </data>
+  <data name="Msg_PageMarkedForDeletion_UnmarkToEdit" xml:space="preserve">
+    <value>This page is marked for deletion. Unmark it first to edit this page.</value>
+  </data>
+  <data name="Msg_TextAnnotation_Unlocked" xml:space="preserve">
+    <value>Unlocked</value>
+  </data>
+  <data name="Msg_TextAnnotation_Locked" xml:space="preserve">
+    <value>Locked</value>
+  </data>
+  <data name="Err_StandaloneUpdate_MsiexecNoProcess" xml:space="preserve">
+    <value>Installer start returned no process instance.</value>
+  </data>
+  <data name="Err_Codec_TiffMissing" xml:space="preserve">
+    <value>TIFF codec was not found on this system.</value>
+  </data>
+  <data name="Err_Codec_JpegMissing" xml:space="preserve">
+    <value>JPEG codec was not found on this system.</value>
+  </data>
+  <data name="Window_TitleFormat" xml:space="preserve">
+    <value>{0} - v.{1}</value>
+  </data>
+  <data name="Window_Title_PdfPart" xml:space="preserve">
+    <value>              pdf: [{0}]</value>
+  </data>
+  <data name="Window_Title_ProjectPart" xml:space="preserve">
+    <value>        project: [{0}]</value>
+  </data>
+  <data name="Demo_TitleSuffix_Revoked" xml:space="preserve">
+    <value> [DEMO: license revoked]</value>
+  </data>
+  <data name="Demo_TitleSuffix_UpdateOutOfRange" xml:space="preserve">
+    <value> [DEMO: updates not licensed]</value>
+  </data>
+  <data name="Demo_TitleSuffix_Default" xml:space="preserve">
+    <value> [DEMO VERSION]</value>
+  </data>
+  <data name="Demo_TitleSuffix_DaysLeft" xml:space="preserve">
+    <value> [DEMO: {0} days left]</value>
+  </data>
+  <data name="Demo_TitleSuffix_ExpiredOn" xml:space="preserve">
+    <value> [DEMO: expired on {0:yyyy-MM-dd}]</value>
+  </data>
+  <data name="LicenseStatus_Missing" xml:space="preserve">
+    <value>License status: missing</value>
+  </data>
+  <data name="LicenseStatus_Invalid" xml:space="preserve">
+    <value>License status: invalid</value>
+  </data>
+  <data name="LicenseStatus_NoData" xml:space="preserve">
+    <value>License status: no data</value>
+  </data>
+  <data name="LicenseStatus_Demo_Revoked" xml:space="preserve">
+    <value>License status: DEMO (license revoked)</value>
+  </data>
+  <data name="LicenseStatus_Demo_UpdateOutOfRange" xml:space="preserve">
+    <value>License status: DEMO (updates not licensed)</value>
+  </data>
+  <data name="LicenseStatus_Demo" xml:space="preserve">
+    <value>License status: DEMO</value>
+  </data>
+  <data name="LicenseStatus_Demo_DaysLeft" xml:space="preserve">
+    <value>License status: DEMO ({0} days)</value>
+  </data>
+  <data name="LicenseStatus_Demo_ExpiredOn" xml:space="preserve">
+    <value>License status: DEMO (expired {0:yyyy-MM-dd})</value>
+  </data>
+  <data name="LicenseStatus_Pro" xml:space="preserve">
+    <value>License status: PRO</value>
+  </data>
+  <data name="SupportStatus_NoData" xml:space="preserve">
+    <value>Support: no data</value>
+  </data>
+  <data name="SupportStatus_None" xml:space="preserve">
+    <value>Support: none</value>
+  </data>
+  <data name="SupportStatus_Until" xml:space="preserve">
+    <value>Support until: {0:yyyy-MM-dd}</value>
+  </data>
+  <data name="SupportStatus_ExpiredOn" xml:space="preserve">
+    <value>Support expired ({0:yyyy-MM-dd})</value>
+  </data>
+  <data name="LicensedTo_Line" xml:space="preserve">
+    <value>Licensed to: {0}</value>
+  </data>
+  <data name="Err_InputFileDoesNotExist" xml:space="preserve">
+    <value>Input file does not exist.</value>
+  </data>
+  <data name="Err_PageNumberOutOfRange" xml:space="preserve">
+    <value>Page number must be between 1 and {0}.</value>
+  </data>
+  <data name="Search_ResultCount" xml:space="preserve">
+    <value>found: {0}</value>
+  </data>
+  <data name="Msg_ErrorSuffix" xml:space="preserve">
+    <value> (error: {0})</value>
+  </data>
+  <data name="Err_Split_FileHasSecurity" xml:space="preserve">
+    <value>Cannot split file [{0}] because it has security settings.
+</value>
+  </data>
+  <data name="Err_Merge_FilesHaveSecurity" xml:space="preserve">
+    <value>Cannot merge files, the following files have security settings:
+
+</value>
+  </data>
+  <data name="TextLocation_ToStringFormat" xml:space="preserve">
+    <value>Page: {0}, Position: {1}</value>
+  </data>
+  <data name="LicenseInfo_ConfigMissing" xml:space="preserve">
+    <value>Config missing.</value>
+  </data>
+  <data name="LicenseInfo_FileNotFound" xml:space="preserve">
+    <value>License file not found.</value>
+  </data>
+  <data name="LicenseInfo_PayloadOrSignatureMissing" xml:space="preserve">
+    <value>License payload or signature missing.</value>
+  </data>
+  <data name="LicenseInfo_UnsupportedAlgorithm" xml:space="preserve">
+    <value>Unsupported signature algorithm.</value>
+  </data>
+  <data name="LicenseInfo_ParseError" xml:space="preserve">
+    <value>License parse error: {0}</value>
+  </data>
+  <data name="LicenseInfo_PublicKeyNotFound" xml:space="preserve">
+    <value>Public key file not found.</value>
+  </data>
+  <data name="LicenseInfo_SignatureNotBase64" xml:space="preserve">
+    <value>Signature is not valid base64.</value>
+  </data>
+  <data name="LicenseInfo_SignatureVerificationFailed" xml:space="preserve">
+    <value>Signature verification failed: {0}</value>
+  </data>
+  <data name="Err_UnknownExceptionFallback" xml:space="preserve">
+    <value>Unknown exception</value>
+  </data>
+  <data name="Splash_VersionLabel" xml:space="preserve">
+    <value>Version</value>
+  </data>
+  <data name="Splash_VersionLine" xml:space="preserve">
+    <value>{0}: {1}</value>
+  </data>
+  <data name="Err_HttpStatusCode" xml:space="preserve">
+    <value>HTTP {0}</value>
+  </data>
+  <data name="Pdf_Metadata_iTextCopyright" xml:space="preserve">
+    <value>This document was processed using iText Core / Community under the AGPLv3 license. Copyright (c) iText Group NV.</value>
+  </data>
+  <data name="Pdf_Metadata_iTextLicense" xml:space="preserve">
+    <value>For more information see https://www.gnu.org/licenses/agpl-3.0.html and https://itextpdf.com/.</value>
+  </data>
+  <data name="CacheStatus_IndexPage" xml:space="preserve">
+    <value>index page: {0}</value>
+  </data>
+  <data name="CacheStatus_SearchPage" xml:space="preserve">
+    <value>search page: {0}</value>
+  </data>
+  <data name="TextAnnotation_ToStringFormat" xml:space="preserve">
+    <value>{0} - {1}, {2} pt, {3}, {4}, {5}, {6}</value>
+  </data>
+  <data name="EditText_FontDisplay" xml:space="preserve">
+    <value>{0}, {1} pt</value>
+  </data>
+  <data name="EditText_FontDisplayWithStyle" xml:space="preserve">
+    <value>{0}, {1} pt {2}</value>
+  </data>
+  <data name="UI_Radio_Marker" xml:space="preserve">
+    <value>Marker</value>
+  </data>
+  <data name="UI_Radio_Box" xml:space="preserve">
+    <value>Box</value>
+  </data>
+  <data name="Tooltip_SearchResultFirst" xml:space="preserve">
+    <value>Show first search result.</value>
+  </data>
+  <data name="Tooltip_SearchResultPrev" xml:space="preserve">
+    <value>Show previous search result.</value>
+  </data>
+  <data name="Tooltip_SearchResultNext" xml:space="preserve">
+    <value>Show next search result.</value>
+  </data>
+  <data name="Tooltip_SearchResultLast" xml:space="preserve">
+    <value>Show last search result.</value>
+  </data>
+  <data name="Tooltip_SearchInput" xml:space="preserve">
+    <value>Enter text to search and press Enter.</value>
+  </data>
+  <data name="UI_SearchClearGlyph" xml:space="preserve">
+    <value>X</value>
   </data>
 </root>

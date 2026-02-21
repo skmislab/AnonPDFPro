@@ -222,6 +222,9 @@
   <data name="Menu_Language_Polish" xml:space="preserve">
     <value>Polski</value>
   </data>
+  <data name="Menu_Language_German" xml:space="preserve">
+    <value>Niemiecki</value>
+  </data>
   <data name="Menu_Language_System" xml:space="preserve">
     <value>Użyj języka systemu</value>
   </data>
@@ -421,7 +424,11 @@
     <value>Gdy zaznaczone — plik PDF zostanie zabezpieczony hasłem.</value>
   </data>
   <data name="Tooltip_SafeMode" xml:space="preserve">
-    <value>Tryb graficzny — bez bezpośredniej ingerencji w treść.</value>
+    <value>Włącza tryb graficzny strony zamiast trybu tekstowego.</value>
+  </data>
+  <data name="Msg_PageMarkedForDeletion_EditLocked" xml:space="preserve">
+    <value>STRONA OZNACZONA DO USUNIĘCIA
+EDYCJA ZABLOKOWANA</value>
   </data>
   <data name="Tooltip_RemovePage" xml:space="preserve">
     <value>Zaznacz stronę do usunięcia.</value>
@@ -915,5 +922,288 @@ Repozytorium: https://github.com/misart/AnonPDFPro</value>
   </data>
   <data name="Signatures_Report_Field_SignDate" xml:space="preserve">
     <value>Data</value>
+  </data>
+  <data name="Menu_Help_CheckForUpdates" xml:space="preserve">
+    <value>Sprawdź aktualizacje...</value>
+  </data>
+  <data name="Menu_Help_ActivateLicense" xml:space="preserve">
+    <value>Aktywuj licencję...</value>
+  </data>
+  <data name="Msg_UpdateCheckInProgress" xml:space="preserve">
+    <value>Sprawdzanie aktualizacji jest już w toku.</value>
+  </data>
+  <data name="Msg_UpdateInfoFetchFailed" xml:space="preserve">
+    <value>Nie udało się pobrać informacji o aktualizacji.</value>
+  </data>
+  <data name="Msg_UpdateAlreadyLatest" xml:space="preserve">
+    <value>Masz już najnowszą wersję programu.</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_AskDownloadAndRun" xml:space="preserve">
+    <value>Czy pobrać i uruchomić instalator teraz?</value>
+  </data>
+  <data name="Title_UpdateAvailable" xml:space="preserve">
+    <value>Dostępna aktualizacja</value>
+  </data>
+  <data name="Msg_UpdateCancelled" xml:space="preserve">
+    <value>Aktualizacja została anulowana.</value>
+  </data>
+  <data name="Err_StandaloneUpdate_InvalidInstallerLink" xml:space="preserve">
+    <value>Brak poprawnego linku do instalatora w version.json (downloadUrl).</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_DownloadInProgress" xml:space="preserve">
+    <value>Pobieranie instalatora aktualizacji już trwa. Proszę poczekać.</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_Downloading" xml:space="preserve">
+    <value>Trwa pobieranie instalatora aktualizacji. Proszę poczekać.
+
+Otrzymasz powiadomienie po zakończeniu pobierania.</value>
+  </data>
+  <data name="Err_StandaloneUpdate_DownloadOrRunFailed" xml:space="preserve">
+    <value>Nie udało się pobrać lub uruchomić aktualizacji: {0}</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_InstallerReadyAskClose" xml:space="preserve">
+    <value>Instalator aktualizacji został pobrany.
+
+Czy zamknąć aplikację i uruchomić instalator teraz?</value>
+  </data>
+  <data name="Title_UpdateReady" xml:space="preserve">
+    <value>Aktualizacja gotowa</value>
+  </data>
+  <data name="Msg_StandaloneUpdate_InstallerSavedPath" xml:space="preserve">
+    <value>Instalator zapisano tutaj: {0}</value>
+  </data>
+  <data name="Err_StandaloneUpdate_StartInstallerFailed" xml:space="preserve">
+    <value>Nie udało się uruchomić instalatora: {0}</value>
+  </data>
+  <data name="Msg_LicenseActivation_StandaloneOnly" xml:space="preserve">
+    <value>Aktywacja licencji z pliku jest dostępna tylko w trybie jednostanowiskowym.</value>
+  </data>
+  <data name="Dialog_SelectLicensePackage_Title" xml:space="preserve">
+    <value>Wybierz paczkę licencji</value>
+  </data>
+  <data name="Dialog_SelectLicensePackage_Filter" xml:space="preserve">
+    <value>Paczki licencyjne (*.zip)|*.zip|Wszystkie pliki (*.*)|*.*</value>
+  </data>
+  <data name="Err_LicensePackage_NotFound" xml:space="preserve">
+    <value>Nie znaleziono wskazanej paczki licencji.</value>
+  </data>
+  <data name="Err_LicensePackage_UnsupportedFile" xml:space="preserve">
+    <value>Paczka zawiera niedozwolony plik: {0}</value>
+  </data>
+  <data name="Err_LicensePackage_DuplicateFile" xml:space="preserve">
+    <value>Paczka zawiera zduplikowany plik: {0}</value>
+  </data>
+  <data name="Err_LicensePackage_MissingRequiredFile" xml:space="preserve">
+    <value>Brakuje wymaganego pliku w paczce: {0}</value>
+  </data>
+  <data name="Err_LicensePackage_InvalidLicense" xml:space="preserve">
+    <value>Paczka nie zawiera poprawnej licencji AnonPDFPro.</value>
+  </data>
+  <data name="Msg_LicenseActivated" xml:space="preserve">
+    <value>Licencja została aktywowana.</value>
+  </data>
+  <data name="Err_LicenseActivation_Failed" xml:space="preserve">
+    <value>Nie udało się aktywować licencji: {0}</value>
+  </data>
+  <data name="Err_BitmapsDifferentDimensions" xml:space="preserve">
+    <value>Obie bitmapy muszą mieć te same wymiary.</value>
+  </data>
+  <data name="UI_PageCountTotalFormat" xml:space="preserve">
+    <value>/ {0}</value>
+  </data>
+  <data name="Signatures_SourceDocumentSignature" xml:space="preserve">
+    <value>Podpis z dokumentu źródłowego</value>
+  </data>
+  <data name="Signatures_Field_Organization" xml:space="preserve">
+    <value>Instytucja</value>
+  </data>
+  <data name="Msg_PageMarkedForDeletion_UnmarkToEdit" xml:space="preserve">
+    <value>Ta strona jest oznaczona do usunięcia. Najpierw odznacz stronę, aby ją edytować.</value>
+  </data>
+  <data name="Msg_TextAnnotation_Unlocked" xml:space="preserve">
+    <value>Odblokowano</value>
+  </data>
+  <data name="Msg_TextAnnotation_Locked" xml:space="preserve">
+    <value>Zablokowano</value>
+  </data>
+  <data name="Err_StandaloneUpdate_MsiexecNoProcess" xml:space="preserve">
+    <value>Uruchomienie instalatora nie zwróciło procesu.</value>
+  </data>
+  <data name="Err_Codec_TiffMissing" xml:space="preserve">
+    <value>W systemie nie znaleziono kodeka TIFF.</value>
+  </data>
+  <data name="Err_Codec_JpegMissing" xml:space="preserve">
+    <value>W systemie nie znaleziono kodeka JPEG.</value>
+  </data>
+  <data name="Window_TitleFormat" xml:space="preserve">
+    <value>{0} - v.{1}</value>
+  </data>
+  <data name="Window_Title_PdfPart" xml:space="preserve">
+    <value>              pdf: [{0}]</value>
+  </data>
+  <data name="Window_Title_ProjectPart" xml:space="preserve">
+    <value>        projekt: [{0}]</value>
+  </data>
+  <data name="Demo_TitleSuffix_Revoked" xml:space="preserve">
+    <value> [WERSJA DEMO: licencja cofnięta]</value>
+  </data>
+  <data name="Demo_TitleSuffix_UpdateOutOfRange" xml:space="preserve">
+    <value> [WERSJA DEMO: brak licencji na nowsze wersje]</value>
+  </data>
+  <data name="Demo_TitleSuffix_Default" xml:space="preserve">
+    <value> [WERSJA DEMO]</value>
+  </data>
+  <data name="Demo_TitleSuffix_DaysLeft" xml:space="preserve">
+    <value> [WERSJA DEMO: {0} dni]</value>
+  </data>
+  <data name="Demo_TitleSuffix_ExpiredOn" xml:space="preserve">
+    <value> [WERSJA DEMO: wygasła {0:yyyy-MM-dd}]</value>
+  </data>
+  <data name="LicenseStatus_Missing" xml:space="preserve">
+    <value>Status licencji: brak</value>
+  </data>
+  <data name="LicenseStatus_Invalid" xml:space="preserve">
+    <value>Status licencji: nieprawidłowa</value>
+  </data>
+  <data name="LicenseStatus_NoData" xml:space="preserve">
+    <value>Status licencji: brak danych</value>
+  </data>
+  <data name="LicenseStatus_Demo_Revoked" xml:space="preserve">
+    <value>Status licencji: DEMO (licencja cofnięta)</value>
+  </data>
+  <data name="LicenseStatus_Demo_UpdateOutOfRange" xml:space="preserve">
+    <value>Status licencji: DEMO (brak licencji na nowsze wersje)</value>
+  </data>
+  <data name="LicenseStatus_Demo" xml:space="preserve">
+    <value>Status licencji: DEMO</value>
+  </data>
+  <data name="LicenseStatus_Demo_DaysLeft" xml:space="preserve">
+    <value>Status licencji: DEMO ({0} dni)</value>
+  </data>
+  <data name="LicenseStatus_Demo_ExpiredOn" xml:space="preserve">
+    <value>Status licencji: DEMO (wygasła {0:yyyy-MM-dd})</value>
+  </data>
+  <data name="LicenseStatus_Pro" xml:space="preserve">
+    <value>Status licencji: PRO</value>
+  </data>
+  <data name="SupportStatus_NoData" xml:space="preserve">
+    <value>Wsparcie: brak danych</value>
+  </data>
+  <data name="SupportStatus_None" xml:space="preserve">
+    <value>Wsparcie: brak</value>
+  </data>
+  <data name="SupportStatus_Until" xml:space="preserve">
+    <value>Wsparcie do: {0:yyyy-MM-dd}</value>
+  </data>
+  <data name="SupportStatus_ExpiredOn" xml:space="preserve">
+    <value>Wsparcie wygasło ({0:yyyy-MM-dd})</value>
+  </data>
+  <data name="LicensedTo_Line" xml:space="preserve">
+    <value>Licencja dla: {0}</value>
+  </data>
+  <data name="Err_InputFileDoesNotExist" xml:space="preserve">
+    <value>Plik wejściowy nie istnieje.</value>
+  </data>
+  <data name="Err_PageNumberOutOfRange" xml:space="preserve">
+    <value>Numer strony musi być między 1 a {0}.</value>
+  </data>
+  <data name="Search_ResultCount" xml:space="preserve">
+    <value>znaleziono: {0}</value>
+  </data>
+  <data name="Msg_ErrorSuffix" xml:space="preserve">
+    <value> (błąd: {0})</value>
+  </data>
+  <data name="Err_Split_FileHasSecurity" xml:space="preserve">
+    <value>Nie można podzielić pliku [{0}], ponieważ ma ustawienia bezpieczeństwa.
+</value>
+  </data>
+  <data name="Err_Merge_FilesHaveSecurity" xml:space="preserve">
+    <value>Nie można scalić plików. Następujące pliki mają ustawienia bezpieczeństwa:
+
+</value>
+  </data>
+  <data name="TextLocation_ToStringFormat" xml:space="preserve">
+    <value>Strona: {0}, Pozycja: {1}</value>
+  </data>
+  <data name="LicenseInfo_ConfigMissing" xml:space="preserve">
+    <value>Brak konfiguracji.</value>
+  </data>
+  <data name="LicenseInfo_FileNotFound" xml:space="preserve">
+    <value>Nie znaleziono pliku licencji.</value>
+  </data>
+  <data name="LicenseInfo_PayloadOrSignatureMissing" xml:space="preserve">
+    <value>Brak payloadu lub podpisu licencji.</value>
+  </data>
+  <data name="LicenseInfo_UnsupportedAlgorithm" xml:space="preserve">
+    <value>Nieobsługiwany algorytm podpisu.</value>
+  </data>
+  <data name="LicenseInfo_ParseError" xml:space="preserve">
+    <value>Błąd parsowania licencji: {0}</value>
+  </data>
+  <data name="LicenseInfo_PublicKeyNotFound" xml:space="preserve">
+    <value>Nie znaleziono pliku klucza publicznego.</value>
+  </data>
+  <data name="LicenseInfo_SignatureNotBase64" xml:space="preserve">
+    <value>Podpis nie jest poprawnym Base64.</value>
+  </data>
+  <data name="LicenseInfo_SignatureVerificationFailed" xml:space="preserve">
+    <value>Weryfikacja podpisu nie powiodła się: {0}</value>
+  </data>
+  <data name="Err_UnknownExceptionFallback" xml:space="preserve">
+    <value>Nieznany wyjątek</value>
+  </data>
+  <data name="Splash_VersionLabel" xml:space="preserve">
+    <value>Wersja</value>
+  </data>
+  <data name="Splash_VersionLine" xml:space="preserve">
+    <value>{0}: {1}</value>
+  </data>
+  <data name="Err_HttpStatusCode" xml:space="preserve">
+    <value>HTTP {0}</value>
+  </data>
+  <data name="Pdf_Metadata_iTextCopyright" xml:space="preserve">
+    <value>Ten dokument został przetworzony z użyciem iText Core / Community na licencji AGPLv3. Copyright (c) iText Group NV.</value>
+  </data>
+  <data name="Pdf_Metadata_iTextLicense" xml:space="preserve">
+    <value>Więcej informacji: https://www.gnu.org/licenses/agpl-3.0.html oraz https://itextpdf.com/.</value>
+  </data>
+  <data name="CacheStatus_IndexPage" xml:space="preserve">
+    <value>indeksowanie strony: {0}</value>
+  </data>
+  <data name="CacheStatus_SearchPage" xml:space="preserve">
+    <value>przeszukiwanie strony: {0}</value>
+  </data>
+  <data name="TextAnnotation_ToStringFormat" xml:space="preserve">
+    <value>{0} - {1}, {2} pt, {3}, {4}, {5}, {6}</value>
+  </data>
+  <data name="EditText_FontDisplay" xml:space="preserve">
+    <value>{0}, {1} pt</value>
+  </data>
+  <data name="EditText_FontDisplayWithStyle" xml:space="preserve">
+    <value>{0}, {1} pt {2}</value>
+  </data>
+  <data name="UI_Radio_Marker" xml:space="preserve">
+    <value>Marker</value>
+  </data>
+  <data name="UI_Radio_Box" xml:space="preserve">
+    <value>Box</value>
+  </data>
+  <data name="Tooltip_SearchResultFirst" xml:space="preserve">
+    <value>Wyświetl pierwszy wynik wyszukiwania.</value>
+  </data>
+  <data name="Tooltip_SearchResultPrev" xml:space="preserve">
+    <value>Wyświetl poprzedni wynik wyszukiwania.</value>
+  </data>
+  <data name="Tooltip_SearchResultNext" xml:space="preserve">
+    <value>Wyświetl następny wynik wyszukiwania.</value>
+  </data>
+  <data name="Tooltip_SearchResultLast" xml:space="preserve">
+    <value>Wyświetl ostatni wynik wyszukiwania.</value>
+  </data>
+  <data name="Tooltip_SearchInput" xml:space="preserve">
+    <value>Wprowadź treść do wyszukania i naciśnij Enter.</value>
+  </data>
+  <data name="UI_SearchClearGlyph" xml:space="preserve">
+    <value>X</value>
   </data>
 </root>

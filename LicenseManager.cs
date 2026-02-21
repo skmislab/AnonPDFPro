@@ -243,13 +243,13 @@ namespace AnonPDF
         {
             if (config == null)
             {
-                return Invalid("Config missing.");
+                return Invalid(Res("LicenseInfo_ConfigMissing"));
             }
 
             string licensePath = config.ResolveLicensePath();
             if (!File.Exists(licensePath))
             {
-                return Invalid("License file not found.");
+                return Invalid(Res("LicenseInfo_FileNotFound"));
             }
 
             try
@@ -261,13 +261,13 @@ namespace AnonPDF
 
                 if (payloadToken == null || string.IsNullOrWhiteSpace(signature))
                 {
-                    return Invalid("License payload or signature missing.");
+                    return Invalid(Res("LicenseInfo_PayloadOrSignatureMissing"));
                 }
 
                 if (!string.IsNullOrWhiteSpace(algorithm)
                     && !string.Equals(algorithm, "RSA-SHA256", StringComparison.OrdinalIgnoreCase))
                 {
-                    return Invalid("Unsupported signature algorithm.");
+                    return Invalid(Res("LicenseInfo_UnsupportedAlgorithm"));
                 }
 
                 var payload = LicensePayload.FromJObject(payloadToken);
@@ -278,7 +278,7 @@ namespace AnonPDF
             }
             catch (Exception ex)
             {
-                return Invalid("License parse error: " + ex.Message);
+                return Invalid(ResFormat("LicenseInfo_ParseError", ex.Message));
             }
         }
 
@@ -313,7 +313,7 @@ namespace AnonPDF
 
             if (string.IsNullOrWhiteSpace(publicKeyPath) || !File.Exists(publicKeyPath))
             {
-                error = "Public key file not found.";
+                error = Res("LicenseInfo_PublicKeyNotFound");
                 return false;
             }
 
@@ -324,7 +324,7 @@ namespace AnonPDF
             }
             catch (FormatException)
             {
-                error = "Signature is not valid base64.";
+                error = Res("LicenseInfo_SignatureNotBase64");
                 return false;
             }
 
@@ -341,9 +341,21 @@ namespace AnonPDF
             }
             catch (Exception ex)
             {
-                error = "Signature verification failed: " + ex.Message;
+                error = ResFormat("LicenseInfo_SignatureVerificationFailed", ex.Message);
                 return false;
             }
+        }
+
+        private static string Res(string key)
+        {
+            var culture = Properties.Resources.Culture ?? CultureInfo.CurrentUICulture;
+            var value = Properties.Resources.ResourceManager.GetString(key, culture);
+            return string.IsNullOrWhiteSpace(value) ? key : value;
+        }
+
+        private static string ResFormat(string key, params object[] args)
+        {
+            return string.Format(Res(key), args);
         }
     }
 
