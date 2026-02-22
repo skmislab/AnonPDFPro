@@ -306,6 +306,9 @@
   <data name="UI_Button_OpenProject" xml:space="preserve">
     <value>Open project</value>
   </data>
+  <data name="UI_Button_ResumeWork" xml:space="preserve">
+    <value>Resume work</value>
+  </data>
   <data name="UI_Button_SaveProject" xml:space="preserve">
     <value>Save Project</value>
   </data>

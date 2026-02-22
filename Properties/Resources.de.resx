@@ -482,6 +482,9 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="UI_Button_OpenProject" xml:space="preserve">
     <value>Projekt öffnen</value>
   </data>
+  <data name="UI_Button_ResumeWork" xml:space="preserve">
+    <value>Arbeit fortsetzen</value>
+  </data>
   <data name="UI_Button_SaveProject" xml:space="preserve">
     <value>Projekt speichern</value>
   </data>

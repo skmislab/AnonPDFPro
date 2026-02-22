@@ -134,6 +134,7 @@ namespace AnonPDF
         private ToolStripMenuItem checkForUpdatesToolStripMenuItem;
         private ToolStripMenuItem activateLicenseToolStripMenuItem;
         private bool pagesListTooltipShownThisSession;
+        private int busyCursorDepth;
 
         // Target scale (result of the last mouse wheel step)
         private float pendingScaleFactor;
@@ -677,6 +678,49 @@ namespace AnonPDF
             return string.Format(LocalizedText(key), args);
         }
 
+        private void BeginBusyCursor()
+        {
+            busyCursorDepth++;
+            if (busyCursorDepth != 1)
+            {
+                return;
+            }
+
+            ApplyBusyCursorState(true);
+        }
+
+        private void EndBusyCursor()
+        {
+            if (busyCursorDepth <= 0)
+            {
+                busyCursorDepth = 0;
+                return;
+            }
+
+            busyCursorDepth--;
+            if (busyCursorDepth != 0)
+            {
+                return;
+            }
+
+            ApplyBusyCursorState(false);
+        }
+
+        private void ApplyBusyCursorState(bool enabled)
+        {
+            UseWaitCursor = enabled;
+            Application.UseWaitCursor = enabled;
+            Cursor = enabled ? Cursors.WaitCursor : Cursors.Default;
+
+            if (splashForm != null && !splashForm.IsDisposed)
+            {
+                splashForm.UseWaitCursor = enabled;
+                splashForm.Cursor = enabled ? Cursors.WaitCursor : Cursors.Default;
+            }
+
+            Cursor.Current = enabled ? Cursors.WaitCursor : Cursors.Default;
+        }
+
         private void InitializeUpdateMenu()
         {
             checkForUpdatesToolStripMenuItem = new ToolStripMenuItem
@@ -714,6 +758,17 @@ namespace AnonPDF
             }
 
             OpenProjectButton_Click(this, EventArgs.Empty);
+        }
+
+        public void ResumeWorkFromSplash()
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(ResumeWorkFromSplash));
+                return;
+            }
+
+            OpenLastPdfProjectToolStripMenuItem_Click(this, EventArgs.Empty);
         }
 
         private void EnsureToolTipActive()
@@ -5582,6 +5637,12 @@ namespace AnonPDF
 
         private string PromptForPassword(string pwd = "", bool iChangeRemoveDialog = false)
         {
+            bool shouldRestoreBusyCursor = busyCursorDepth > 0;
+            if (shouldRestoreBusyCursor)
+            {
+                ApplyBusyCursorState(false);
+            }
+
             using (Form prompt = new Form())
             {
                 prompt.Width = 400;
@@ -5608,12 +5669,25 @@ namespace AnonPDF
                 prompt.Controls.Add(confirmation);
                 prompt.AcceptButton = confirmation;
 
-                return prompt.ShowDialog(this) == DialogResult.OK ? inputBox.Text : "";
+                try
+                {
+                    return prompt.ShowDialog(this) == DialogResult.OK ? inputBox.Text : "";
+                }
+                finally
+                {
+                    if (shouldRestoreBusyCursor)
+                    {
+                        ApplyBusyCursorState(true);
+                    }
+                }
             }
         }
 
         private void LoadPdf()
         {
+            BeginBusyCursor();
+            try
+            {
             userPassword = "";
             PdfReader reader = null;
             iText.Kernel.Pdf.PdfDocument pdfDoc = null;
@@ -5792,6 +5866,11 @@ namespace AnonPDF
             ExtractSignatures();
             AddRecentFile(inputPdfPath);
             CloseSplashIfVisible();
+            }
+            finally
+            {
+                EndBusyCursor();
+            }
         }
 
         private void CloseSplashIfVisible()
@@ -7395,6 +7474,9 @@ namespace AnonPDF
                 }
             }
 
+            BeginBusyCursor();
+            try
+            {
 
             if (File.Exists(inputProjectPathTemp))
             {
@@ -7586,6 +7668,11 @@ namespace AnonPDF
                     MessageBox.Show(this, Resources.Err_InvalidProjectFormat, Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
                 }
+            }
+            }
+            finally
+            {
+                EndBusyCursor();
             }
         }
 
@@ -8362,10 +8449,12 @@ namespace AnonPDF
             // Get saved paths from Properties.Settings
             string lastPdf = Properties.Settings.Default.LastPdfPath;
             string lastPap = Properties.Settings.Default.LastPapPath;
+            bool hasPdf = !string.IsNullOrWhiteSpace(lastPdf) && File.Exists(lastPdf);
+            bool hasProject = !string.IsNullOrWhiteSpace(lastPap) && File.Exists(lastPap);
 
             try
             {
-                if (!string.IsNullOrEmpty(lastPdf) && File.Exists(lastPdf))
+                if (hasPdf)
                 {
                     // Load PDF
                     inputPdfPath = lastPdf;
@@ -8373,15 +8462,36 @@ namespace AnonPDF
                     lastSavedProjectName = "";
                     LoadPdf();
                     string msg = string.Format(Resources.Msg_LoadedPdf, inputPdfPath);
-                    if (!string.IsNullOrEmpty(lastPap) && File.Exists(lastPap))
+                    if (hasProject)
                     {
-                        //inputProjectPath = lastPap;
                         LoadRedactionBlocks(lastPap);
                         if (!string.IsNullOrEmpty(inputProjectPath))
                         {
                             msg += string.Format(Resources.Msg_LoadedProjectLine, inputProjectPath);
                         }
                     }
+                    MessageBox.Show(this, $"{msg}.", Resources.Title_Info, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                else if (hasProject)
+                {
+                    LoadRedactionBlocks(lastPap);
+
+                    string msg = string.Empty;
+                    if (!string.IsNullOrEmpty(inputPdfPath))
+                    {
+                        msg = string.Format(Resources.Msg_LoadedPdf, inputPdfPath);
+                    }
+
+                    if (!string.IsNullOrEmpty(inputProjectPath))
+                    {
+                        msg += string.Format(Resources.Msg_LoadedProjectLine, inputProjectPath);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(msg))
+                    {
+                        msg = Resources.Msg_CannotLoadRecentFiles;
+                    }
+
                     MessageBox.Show(this, $"{msg}.", Resources.Title_Info, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 else
@@ -9100,7 +9210,7 @@ namespace AnonPDF
             this.Text = titleText;
         }
 
-        private static string ShortenFileName(string fileName, int maxLength = 30)
+        private static string ShortenFileName(string fileName, int maxLength = 40)
         {
             if (string.IsNullOrWhiteSpace(fileName))
             {

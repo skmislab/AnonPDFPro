@@ -23,9 +23,11 @@ namespace AnonPDF
         private readonly Label updateStatusLabel;
         private readonly Button openPdfButton;
         private readonly Button openProjectButton;
+        private readonly Button resumeWorkButton;
 
         public event EventHandler OpenPdfRequested;
         public event EventHandler OpenProjectRequested;
+        public event EventHandler ResumeWorkRequested;
 
         public SplashForm()
         {
@@ -133,8 +135,8 @@ namespace AnonPDF
             openPdfButton = new Button
             {
                 Text = Properties.Resources.UI_Button_OpenPdf,
-                Size = new Size(170, 36),
-                Anchor = AnchorStyles.Left,
+                Size = new Size(110, 36),
+                Anchor = AnchorStyles.None,
                 FlatStyle = FlatStyle.Flat,
                 UseVisualStyleBackColor = false,
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
@@ -144,24 +146,37 @@ namespace AnonPDF
             openProjectButton = new Button
             {
                 Text = Properties.Resources.UI_Button_OpenProject,
-                Size = new Size(170, 36),
-                Anchor = AnchorStyles.Right,
+                Size = new Size(110, 36),
+                Anchor = AnchorStyles.None,
                 FlatStyle = FlatStyle.Flat,
                 UseVisualStyleBackColor = false,
                 Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
             };
             openProjectButton.Click += (_, __) => OpenProjectRequested?.Invoke(this, EventArgs.Empty);
 
+            resumeWorkButton = new Button
+            {
+                Text = GetResourceText("UI_Button_ResumeWork", "Wznów pracę"),
+                Size = new Size(110, 36),
+                Anchor = AnchorStyles.None,
+                FlatStyle = FlatStyle.Flat,
+                UseVisualStyleBackColor = false,
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
+            };
+            resumeWorkButton.Click += (_, __) => ResumeWorkRequested?.Invoke(this, EventArgs.Empty);
+
             var buttonsLayout = new TableLayoutPanel
             {
-                ColumnCount = 2,
+                ColumnCount = 3,
                 RowCount = 1,
                 Dock = DockStyle.Fill
             };
-            buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
+            buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+            buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+            buttonsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34F));
             buttonsLayout.Controls.Add(openPdfButton, 0, 0);
             buttonsLayout.Controls.Add(openProjectButton, 1, 0);
+            buttonsLayout.Controls.Add(resumeWorkButton, 2, 0);
 
             layout.Controls.Add(logoBox, 0, 0);
             layout.Controls.Add(titleLabel, 0, 1);
@@ -178,6 +193,7 @@ namespace AnonPDF
 
             Controls.Add(layout);
             UpdateLocalization();
+            UpdateResumeWorkAvailability();
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -258,6 +274,13 @@ namespace AnonPDF
                 openProjectButton.Text = Properties.Resources.UI_Button_OpenProject;
             }
 
+            if (resumeWorkButton != null)
+            {
+                resumeWorkButton.Text = GetResourceText("UI_Button_ResumeWork", "Wznów pracę");
+            }
+
+            UpdateResumeWorkAvailability();
+
             if (licensedToLabel != null)
             {
                 licensedToLabel.Text = GetLicensedToText();
@@ -316,7 +339,37 @@ namespace AnonPDF
                 openProjectButton.FlatAppearance.BorderColor = border;
             }
 
+            if (resumeWorkButton != null)
+            {
+                resumeWorkButton.BackColor = secondaryButtonBack;
+                resumeWorkButton.ForeColor = secondaryButtonFore;
+                resumeWorkButton.FlatAppearance.BorderColor = border;
+            }
+
             Invalidate();
+        }
+
+        private static string GetResourceText(string key, string fallback)
+        {
+            string value = Properties.Resources.ResourceManager.GetString(
+                key,
+                Properties.Resources.Culture ?? CultureInfo.CurrentUICulture);
+            return string.IsNullOrWhiteSpace(value) ? fallback : value;
+        }
+
+        private void UpdateResumeWorkAvailability()
+        {
+            if (resumeWorkButton == null)
+            {
+                return;
+            }
+
+            string lastPdf = Properties.Settings.Default.LastPdfPath;
+            string lastProject = Properties.Settings.Default.LastPapPath;
+            bool canResume =
+                (!string.IsNullOrWhiteSpace(lastPdf) && File.Exists(lastPdf)) ||
+                (!string.IsNullOrWhiteSpace(lastProject) && File.Exists(lastProject));
+            resumeWorkButton.Enabled = canResume;
         }
 
         private static Image LoadLogoImage()
