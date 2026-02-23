@@ -761,6 +761,12 @@ Skontaktuj się z autorem aplikacji.</value>
   <data name="Msg_NoTextFromSelections" xml:space="preserve">
     <value>Nie udało się pobrać tekstu z żadnego zaznaczenia.</value>
   </data>
+  <data name="Msg_PasteGraphic_NotImplemented" xml:space="preserve">
+    <value>Wklejanie grafiki ze schowka (rastrowej i wektorowej) będzie dostępne w kolejnym etapie.</value>
+  </data>
+  <data name="Msg_ClipboardUnavailable" xml:space="preserve">
+    <value>Schowek jest chwilowo niedostępny. Spróbuj ponownie.</value>
+  </data>
   <data name="Err_InvalidPageNumberValue" xml:space="preserve">
     <value>Nieprawidłowy numer strony: '{0}'.</value>
   </data>

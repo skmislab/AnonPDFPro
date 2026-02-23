@@ -822,6 +822,31 @@ namespace AnonPDF
             pagesListTooltipShownThisSession = true;
         }
 
+        private void SortLanguageMenuItems()
+        {
+            if (languageToolStripMenuItem == null || languageSystemToolStripMenuItem == null)
+            {
+                return;
+            }
+
+            var languageItems = new[]
+            {
+                languageEnglishToolStripMenuItem,
+                languageGermanToolStripMenuItem,
+                languagePolishToolStripMenuItem
+            };
+
+            var sortedLanguageItems = languageItems
+                .Where(item => item != null)
+                .OrderBy(item => item.Text, StringComparer.CurrentCultureIgnoreCase)
+                .Cast<ToolStripItem>()
+                .ToArray();
+
+            languageToolStripMenuItem.DropDownItems.Clear();
+            languageToolStripMenuItem.DropDownItems.Add(languageSystemToolStripMenuItem);
+            languageToolStripMenuItem.DropDownItems.AddRange(sortedLanguageItems);
+        }
+
         private void ApplyLocalization()
         {
             // Use already-set Resources.Culture (SetLanguage/startup decide it)
@@ -838,6 +863,7 @@ namespace AnonPDF
             languageEnglishToolStripMenuItem.Text = Resources.Menu_Language_English;
             languagePolishToolStripMenuItem.Text = Resources.Menu_Language_Polish;
             languageGermanToolStripMenuItem.Text = LocalizedText("Menu_Language_German");
+            SortLanguageMenuItems();
             bool isSystem = string.IsNullOrWhiteSpace(Properties.Settings.Default.PreferredUICulture);
             languageSystemToolStripMenuItem.Checked = isSystem;
             languageEnglishToolStripMenuItem.Checked = !isSystem && currentCulture.TwoLetterISOLanguageName == "en";
@@ -1395,7 +1421,7 @@ namespace AnonPDF
             }
         }
 
-        private void AddEditAnnotation(TextAnnotation annotation = null)
+        private void AddEditAnnotation(TextAnnotation annotation = null, string initialText = null)
         {
             if (!EnsureCurrentPageEditable(true))
             {
@@ -1420,6 +1446,10 @@ namespace AnonPDF
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
                     };
+                }
+                else if (!string.IsNullOrWhiteSpace(initialText))
+                {
+                    dlg.AnnotationText = initialText;
                 }
 
                 if (dlg.ShowDialog(this) == DialogResult.OK)
@@ -8833,6 +8863,19 @@ namespace AnonPDF
                 return true;
             }
 
+            if (keyData == (Keys.Control | Keys.V))
+            {
+                if (IsTextInputFocused())
+                {
+                    return base.ProcessCmdKey(ref msg, keyData);
+                }
+
+                if (TryHandleGlobalPasteShortcut())
+                {
+                    return true;
+                }
+            }
+
             // Check if it's just Delete without modifiers
             if (keyData == Keys.Delete)
             {
@@ -8847,6 +8890,92 @@ namespace AnonPDF
 
             // remaining keys
             return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private bool TryHandleGlobalPasteShortcut()
+        {
+            if (pdf == null || numPages <= 0)
+            {
+                ShowInfoMessage(Resources.Msg_OpenPdfFirst);
+                return true;
+            }
+
+            try
+            {
+                IDataObject clipboardData = Clipboard.GetDataObject();
+                if (clipboardData == null)
+                {
+                    return false;
+                }
+
+                if (clipboardData.GetDataPresent(DataFormats.UnicodeText) || clipboardData.GetDataPresent(DataFormats.Text))
+                {
+                    string pastedText = Clipboard.GetText(TextDataFormat.UnicodeText)?.Trim();
+                    if (string.IsNullOrWhiteSpace(pastedText))
+                    {
+                        pastedText = Clipboard.GetText()?.Trim();
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(pastedText))
+                    {
+                        AddEditAnnotation(initialText: pastedText);
+                        return true;
+                    }
+                }
+
+                bool hasRasterGraphic = clipboardData.GetDataPresent(DataFormats.Bitmap) || Clipboard.ContainsImage();
+                bool hasVectorGraphic = clipboardData.GetDataPresent(DataFormats.EnhancedMetafile) || clipboardData.GetDataPresent(DataFormats.MetafilePict);
+
+                if (hasRasterGraphic || hasVectorGraphic)
+                {
+                    ShowInfoMessage(LocalizedText("Msg_PasteGraphic_NotImplemented"));
+                    return true;
+                }
+            }
+            catch (ExternalException)
+            {
+                ShowInfoMessage(LocalizedText("Msg_ClipboardUnavailable"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Paste shortcut handling failed: " + ex.Message);
+            }
+
+            return false;
+        }
+
+        private bool IsTextInputFocused()
+        {
+            Control focusedControl = GetFocusedControl(this);
+            if (focusedControl == null)
+            {
+                return false;
+            }
+
+            if (focusedControl is TextBoxBase || focusedControl is NumericUpDown)
+            {
+                return true;
+            }
+
+            if (focusedControl is ComboBox comboBox && comboBox.DropDownStyle != ComboBoxStyle.DropDownList)
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static Control GetFocusedControl(Control root)
+        {
+            Control current = root;
+
+            while (current is ContainerControl container && container.ActiveControl != null)
+            {
+                current = container.ActiveControl;
+            }
+
+            return current;
         }
 
 

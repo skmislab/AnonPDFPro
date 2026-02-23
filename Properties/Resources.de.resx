@@ -961,6 +961,12 @@ Bitte speichern Sie Ihre Arbeit und schließen Sie die Anwendung.
   <data name="Msg_NoTextFromSelections" xml:space="preserve">
     <value>Text konnte aus keiner Markierung gelesen werden.</value>
   </data>
+  <data name="Msg_PasteGraphic_NotImplemented" xml:space="preserve">
+    <value>Das EinfĂĽgen von Grafiken aus der Zwischenablage (Raster und Vektor) wird im nĂ¤chsten Schritt verfĂĽgbar sein.</value>
+  </data>
+  <data name="Msg_ClipboardUnavailable" xml:space="preserve">
+    <value>Die Zwischenablage ist vorĂĽbergehend nicht verfĂĽgbar. Bitte versuchen Sie es erneut.</value>
+  </data>
   <data name="Msg_NoticesNotFound" xml:space="preserve">
     <value>Die Drittanbieterhinweise "THIRD-PARTY-NOTICES.md" wurden im Anwendungsordner nicht gefunden.</value>
   </data>
