@@ -160,7 +160,7 @@ namespace AnonPDF
         private float rasterRotationStartAngle;
         private int rasterRotationStartValue;
         private const int RasterRotateHandleSize = 14;
-        private const int RasterRotateHandleOffset = 24;
+        private const int RasterRotateHandleOffset = 35;
         private const int RasterResizeHandleSize = 11;
 
         private enum RasterResizeHandleType
@@ -5616,7 +5616,21 @@ namespace AnonPDF
                             $"matrix=[{a:0.#####} {b:0.#####} {c:0.#####} {d:0.#####} {e:0.###} {f:0.###}]");
                     }
 
-                    pdfCanvas.AddImageWithTransformationMatrix(imageData, a, b, c, d, e, f, false);
+                    float opacity = NormalizeOpacity(rasterObject.Opacity);
+                    if (opacity >= 0.999f)
+                    {
+                        pdfCanvas.AddImageWithTransformationMatrix(imageData, a, b, c, d, e, f, false);
+                    }
+                    else
+                    {
+                        var extGState = new PdfExtGState()
+                            .SetFillOpacity(opacity)
+                            .SetStrokeOpacity(opacity);
+                        pdfCanvas.SaveState();
+                        pdfCanvas.SetExtGState(extGState);
+                        pdfCanvas.AddImageWithTransformationMatrix(imageData, a, b, c, d, e, f, false);
+                        pdfCanvas.RestoreState();
+                    }
                 }
 
                 if (pagesToRemove.Count > 0)
@@ -7552,7 +7566,7 @@ namespace AnonPDF
                     switch (clickedRasterIconType)
                     {
                         case RasterIconType.Edit:
-                            ReplaceRasterObjectImage(rasterObjectForIcon);
+                            EditRasterObject(rasterObjectForIcon);
                             break;
                         case RasterIconType.Lock:
                             if (EnsureCurrentPageEditable(true))
@@ -7921,7 +7935,36 @@ namespace AnonPDF
                             scaledBounds.Y + (scaledBounds.Height / 2f));
                         e.Graphics.RotateTransform(rasterObject.Rotation);
                         e.Graphics.TranslateTransform(-(scaledBounds.Width / 2f), -(scaledBounds.Height / 2f));
-                        e.Graphics.DrawImage(previewImage, new RectangleF(0f, 0f, scaledBounds.Width, scaledBounds.Height));
+                        float opacity = NormalizeOpacity(rasterObject.Opacity);
+                        if (opacity >= 0.999f)
+                        {
+                            e.Graphics.DrawImage(previewImage, new RectangleF(0f, 0f, scaledBounds.Width, scaledBounds.Height));
+                        }
+                        else
+                        {
+                            using (var imageAttributes = new ImageAttributes())
+                            {
+                                var colorMatrix = new ColorMatrix
+                                {
+                                    Matrix33 = opacity
+                                };
+                                imageAttributes.SetColorMatrix(colorMatrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+                                var drawRect = new Rectangle(
+                                    0,
+                                    0,
+                                    Math.Max(1, (int)Math.Round(scaledBounds.Width)),
+                                    Math.Max(1, (int)Math.Round(scaledBounds.Height)));
+                                e.Graphics.DrawImage(
+                                    previewImage,
+                                    drawRect,
+                                    0,
+                                    0,
+                                    previewImage.Width,
+                                    previewImage.Height,
+                                    GraphicsUnit.Pixel,
+                                    imageAttributes);
+                            }
+                        }
                         using (var borderPen = new Pen(isSelectedRaster ? System.Drawing.Color.Red : System.Drawing.Color.SteelBlue, isSelectedRaster ? 2f : 1f))
                         {
                             e.Graphics.DrawRectangle(borderPen, 0f, 0f, scaledBounds.Width, scaledBounds.Height);
@@ -8505,6 +8548,7 @@ namespace AnonPDF
                     foreach (var rasterObject in rasterObjects)
                     {
                         rasterObject.Rotation = NormalizeRotation(rasterObject.Rotation);
+                        rasterObject.Opacity = NormalizeOpacity(rasterObject.Opacity);
                         GetResolvedRasterInitialBounds(rasterObject);
                         ConstrainRasterObjectToPage(rasterObject);
                     }
@@ -9607,6 +9651,7 @@ namespace AnonPDF
                 Bounds = initialBounds,
                 InitialBounds = initialBounds,
                 Rotation = 0,
+                Opacity = 1f,
                 LockAspect = true,
                 IsLocked = false,
                 SourceType = sourceType,
@@ -9912,6 +9957,7 @@ namespace AnonPDF
                 handleCenter.Y - (RasterRotateHandleSize / 2f),
                 RasterRotateHandleSize,
                 RasterRotateHandleSize);
+
             return true;
         }
 
@@ -9923,6 +9969,26 @@ namespace AnonPDF
         private static bool HasPositiveSize(RectangleF rect)
         {
             return rect.Width > 0f && rect.Height > 0f;
+        }
+
+        private static float NormalizeOpacity(float opacity)
+        {
+            if (float.IsNaN(opacity) || float.IsInfinity(opacity))
+            {
+                return 1f;
+            }
+
+            if (opacity < 0f)
+            {
+                return 0f;
+            }
+
+            if (opacity > 1f)
+            {
+                return 1f;
+            }
+
+            return opacity;
         }
 
         private static RectangleF GetResolvedRasterInitialBounds(RasterObject rasterObject)
@@ -10183,6 +10249,7 @@ namespace AnonPDF
                 Bounds = copyBounds,
                 InitialBounds = copyBounds,
                 Rotation = source.Rotation,
+                Opacity = source.Opacity,
                 LockAspect = source.LockAspect,
                 IsLocked = source.IsLocked,
                 SourceType = source.SourceType,
@@ -10219,7 +10286,168 @@ namespace AnonPDF
             pdfViewer.Invalidate();
         }
 
-        private void ReplaceRasterObjectImage(RasterObject rasterObject)
+        private static bool AreSameFloat(float a, float b)
+        {
+            return Math.Abs(a - b) < 0.001f;
+        }
+
+        private bool RasterObjectChanged(
+            RasterObject rasterObject,
+            RectangleF newBounds,
+            int newRotation,
+            float newOpacity,
+            bool newLockAspect,
+            bool newIsLocked,
+            string newFilePath)
+        {
+            if (!AreSameFloat(rasterObject.Bounds.X, newBounds.X) ||
+                !AreSameFloat(rasterObject.Bounds.Y, newBounds.Y) ||
+                !AreSameFloat(rasterObject.Bounds.Width, newBounds.Width) ||
+                !AreSameFloat(rasterObject.Bounds.Height, newBounds.Height))
+            {
+                return true;
+            }
+
+            if (NormalizeRotation(rasterObject.Rotation) != NormalizeRotation(newRotation))
+            {
+                return true;
+            }
+
+            if (!AreSameFloat(NormalizeOpacity(rasterObject.Opacity), NormalizeOpacity(newOpacity)))
+            {
+                return true;
+            }
+
+            if (rasterObject.LockAspect != newLockAspect || rasterObject.IsLocked != newIsLocked)
+            {
+                return true;
+            }
+
+            if (!string.Equals(rasterObject.FilePath ?? string.Empty, newFilePath ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TrySelectRasterImagePath(out string selectedPath)
+        {
+            selectedPath = string.Empty;
+            using (var openFileDialog = new OpenFileDialog())
+            {
+                openFileDialog.Filter = LocalizedText("Dialog_Filter_RasterImages");
+                openFileDialog.Title = string.Format(LocalizedText("Dialog_Title_AddRasterImage"), Branding.ProductName);
+                openFileDialog.CheckFileExists = true;
+                openFileDialog.Multiselect = false;
+
+                if (openFileDialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return false;
+                }
+
+                selectedPath = openFileDialog.FileName;
+                return true;
+            }
+        }
+
+        private static bool TryGetImageAspectRatioFromRasterObject(RasterObject rasterObject, out decimal aspectRatio)
+        {
+            aspectRatio = 0m;
+            if (!TryCreateRasterPreviewImage(rasterObject, out DrawingImage previewImage))
+            {
+                return false;
+            }
+
+            using (previewImage)
+            {
+                if (previewImage.Width <= 0 || previewImage.Height <= 0)
+                {
+                    return false;
+                }
+
+                aspectRatio = (decimal)previewImage.Width / previewImage.Height;
+                return aspectRatio > 0m;
+            }
+        }
+
+        private bool ApplyRasterObjectDialogChanges(RasterObject rasterObject, EditRasterDialog dlg)
+        {
+            if (rasterObject == null || dlg == null)
+            {
+                return false;
+            }
+
+            RectangleF updatedBounds = new RectangleF(
+                dlg.PositionX,
+                dlg.PositionY,
+                dlg.WidthValue,
+                dlg.HeightValue);
+            int updatedRotation = NormalizeRotation(dlg.Rotation);
+            float updatedOpacity = NormalizeOpacity(dlg.RasterOpacity);
+            bool updatedLockAspect = dlg.LockAspect;
+            bool updatedLocked = dlg.IsLocked;
+            string selectedPathToApply = dlg.ReplacementImagePath;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(selectedPathToApply))
+                {
+                    using (var image = DrawingImage.FromFile(selectedPathToApply))
+                    {
+                        if (image.Width <= 0 || image.Height <= 0)
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                bool changed = RasterObjectChanged(
+                    rasterObject,
+                    updatedBounds,
+                    updatedRotation,
+                    updatedOpacity,
+                    updatedLockAspect,
+                    updatedLocked,
+                    string.IsNullOrWhiteSpace(selectedPathToApply) ? rasterObject.FilePath : selectedPathToApply);
+                if (!changed)
+                {
+                    return false;
+                }
+
+                rasterObject.Bounds = updatedBounds;
+                rasterObject.Rotation = updatedRotation;
+                rasterObject.Opacity = updatedOpacity;
+                rasterObject.LockAspect = updatedLockAspect;
+                rasterObject.IsLocked = updatedLocked;
+
+                if (!string.IsNullOrWhiteSpace(selectedPathToApply))
+                {
+                    rasterObject.SourceType = RasterSourceFile;
+                    rasterObject.FilePath = selectedPathToApply;
+                    rasterObject.EmbeddedBytes = null;
+                    rasterObject.MimeType = GetRasterMimeTypeFromPath(selectedPathToApply);
+                }
+
+                ConstrainRasterObjectToPage(rasterObject);
+                rasterObject.UpdatedAtUtc = DateTime.UtcNow;
+                dlg.SyncControlsFromObject(rasterObject);
+
+                projectWasChangedAfterLastSave = true;
+                saveProjectButton.Enabled = true;
+                saveProjectMenuItem.Enabled = true;
+                pdfViewer.Invalidate();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ShowInfoMessage(LocalizedFormat("Err_RasterImageLoad", ex.Message));
+                LogDebug("Edit raster object failed: " + ex);
+                return false;
+            }
+        }
+
+        private void EditRasterObject(RasterObject rasterObject)
         {
             if (rasterObject == null || rasterObject.PageNumber != currentPage)
             {
@@ -10231,45 +10459,37 @@ namespace AnonPDF
                 return;
             }
 
-            using (var openFileDialog = new OpenFileDialog())
+            using (var dlg = new EditRasterDialog())
             {
-                openFileDialog.Filter = LocalizedText("Dialog_Filter_RasterImages");
-                openFileDialog.Title = string.Format(LocalizedText("Dialog_Title_AddRasterImage"), Branding.ProductName);
-                openFileDialog.CheckFileExists = true;
-                openFileDialog.Multiselect = false;
+                dlg.PositionX = rasterObject.Bounds.X;
+                dlg.PositionY = rasterObject.Bounds.Y;
+                dlg.WidthValue = rasterObject.Bounds.Width;
+                dlg.HeightValue = rasterObject.Bounds.Height;
+                dlg.Rotation = NormalizeRotation(rasterObject.Rotation);
+                dlg.RasterOpacity = NormalizeOpacity(rasterObject.Opacity);
+                dlg.LockAspect = rasterObject.LockAspect;
+                dlg.IsLocked = rasterObject.IsLocked;
+                dlg.SourceType = rasterObject.SourceType;
+                dlg.FilePath = rasterObject.FilePath;
+                if (TryGetImageAspectRatioFromRasterObject(rasterObject, out decimal sourceAspectRatio))
+                {
+                    dlg.SourceAspectRatio = sourceAspectRatio;
+                }
+                dlg.SelectReplacementImage = () =>
+                {
+                    return TrySelectRasterImagePath(out string selectedPath) ? selectedPath : string.Empty;
+                };
+                dlg.ApplyChanges = () =>
+                {
+                    ApplyRasterObjectDialogChanges(rasterObject, dlg);
+                };
 
-                if (openFileDialog.ShowDialog(this) != DialogResult.OK)
+                if (dlg.ShowDialog(this) != DialogResult.OK)
                 {
                     return;
                 }
 
-                try
-                {
-                    string selectedPath = openFileDialog.FileName;
-                    using (var image = DrawingImage.FromFile(selectedPath))
-                    {
-                        if (image.Width <= 0 || image.Height <= 0)
-                        {
-                            return;
-                        }
-                    }
-
-                    rasterObject.SourceType = RasterSourceFile;
-                    rasterObject.FilePath = selectedPath;
-                    rasterObject.EmbeddedBytes = null;
-                    rasterObject.MimeType = GetRasterMimeTypeFromPath(selectedPath);
-                    rasterObject.UpdatedAtUtc = DateTime.UtcNow;
-
-                    projectWasChangedAfterLastSave = true;
-                    saveProjectButton.Enabled = true;
-                    saveProjectMenuItem.Enabled = true;
-                    pdfViewer.Invalidate();
-                }
-                catch (Exception ex)
-                {
-                    ShowInfoMessage(LocalizedFormat("Err_RasterImageLoad", ex.Message));
-                    LogDebug("Replace raster image failed: " + ex);
-                }
+                ApplyRasterObjectDialogChanges(rasterObject, dlg);
             }
         }
 
@@ -13064,6 +13284,564 @@ namespace AnonPDF
 
 
 
+    public class EditRasterDialog : Form
+    {
+        private GroupBox groupGeometry;
+        private Label lblX;
+        private Label lblY;
+        private Label lblWidth;
+        private Label lblHeight;
+        private NumericUpDown nudX;
+        private NumericUpDown nudY;
+        private NumericUpDown nudWidth;
+        private NumericUpDown nudHeight;
+
+        private GroupBox groupRotation;
+        private Label lblRotation;
+        private NumericUpDown nudRotation;
+        private FlowLayoutPanel rotationPresetPanel;
+
+        private GroupBox groupOptions;
+        private CheckBox chkLockAspect;
+        private CheckBox chkLocked;
+        private Label lblOpacity;
+        private NumericUpDown nudOpacity;
+
+        private GroupBox groupSource;
+        private Label lblSourceValue;
+        private Button btnReplaceImage;
+        private Button btnResetAspect;
+
+        private Button btnOK;
+        private Button btnCancel;
+
+        private bool suppressDimensionSync;
+        private bool suppressAutoApply;
+        private decimal aspectRatio = 1m;
+
+        public float PositionX { get; set; }
+        public float PositionY { get; set; }
+        public float WidthValue { get; set; }
+        public float HeightValue { get; set; }
+        public int Rotation { get; set; }
+        public float RasterOpacity { get; set; }
+        public bool LockAspect { get; set; }
+        public bool IsLocked { get; set; }
+        public string SourceType { get; set; }
+        public string FilePath { get; set; }
+        public string ReplacementImagePath { get; private set; }
+        public decimal SourceAspectRatio { get; set; }
+        public Func<string> SelectReplacementImage { get; set; }
+        public Action ApplyChanges { get; set; }
+
+        public EditRasterDialog()
+        {
+            InitializeComponents();
+        }
+
+        private void InitializeComponents()
+        {
+            Text = Resources.EditRaster_Title;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            Width = 430;
+            Height = 490;
+            MaximizeBox = false;
+            MinimizeBox = false;
+
+            groupGeometry = new GroupBox
+            {
+                Text = Resources.EditRaster_GroupGeometry,
+                Location = new Point(10, 10),
+                Size = new Size(394, 110)
+            };
+
+            lblX = new Label { Text = Resources.EditRaster_LabelX, Location = new Point(12, 27), AutoSize = true };
+            nudX = BuildNumberInput(60, 24, -100000m, 100000m, 2);
+            lblY = new Label { Text = Resources.EditRaster_LabelY, Location = new Point(205, 27), AutoSize = true };
+            nudY = BuildNumberInput(250, 24, -100000m, 100000m, 2);
+            lblWidth = new Label { Text = Resources.EditRaster_LabelWidth, Location = new Point(12, 67), AutoSize = true };
+            nudWidth = BuildNumberInput(60, 64, 1m, 100000m, 2);
+            lblHeight = new Label { Text = Resources.EditRaster_LabelHeight, Location = new Point(205, 67), AutoSize = true };
+            nudHeight = BuildNumberInput(250, 64, 1m, 100000m, 2);
+            nudX.ValueChanged += AnyControlValueChanged;
+            nudY.ValueChanged += AnyControlValueChanged;
+            nudWidth.ValueChanged += NudWidth_ValueChanged;
+            nudHeight.ValueChanged += NudHeight_ValueChanged;
+
+            groupGeometry.Controls.Add(lblX);
+            groupGeometry.Controls.Add(nudX);
+            groupGeometry.Controls.Add(lblY);
+            groupGeometry.Controls.Add(nudY);
+            groupGeometry.Controls.Add(lblWidth);
+            groupGeometry.Controls.Add(nudWidth);
+            groupGeometry.Controls.Add(lblHeight);
+            groupGeometry.Controls.Add(nudHeight);
+
+            groupRotation = new GroupBox
+            {
+                Text = Resources.EditRaster_GroupRotation,
+                Location = new Point(10, 128),
+                Size = new Size(394, 58)
+            };
+
+            lblRotation = new Label
+            {
+                Text = Resources.EditRaster_RotationLabel,
+                Location = new Point(12, 25),
+                AutoSize = true
+            };
+            nudRotation = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = 359,
+                Increment = 1,
+                Location = new Point(70, 21),
+                Size = new Size(64, 22)
+            };
+            nudRotation.ValueChanged += AnyControlValueChanged;
+            rotationPresetPanel = new FlowLayoutPanel
+            {
+                Location = new Point(145, 20),
+                Size = new Size(240, 26),
+                AutoSize = false,
+                WrapContents = false,
+                FlowDirection = FlowDirection.LeftToRight,
+                Margin = new Padding(0)
+            };
+
+            int[] presets = { 0, 30, 45, 90, 180, 270 };
+            foreach (int preset in presets)
+            {
+                Button presetButton = new Button
+                {
+                    Text = preset.ToString(CultureInfo.InvariantCulture),
+                    Tag = preset,
+                    Size = new Size(34, 24),
+                    Margin = new Padding(2, 0, 0, 0),
+                    TabStop = false
+                };
+                presetButton.Click += RotationPresetButton_Click;
+                rotationPresetPanel.Controls.Add(presetButton);
+            }
+
+            groupRotation.Controls.Add(lblRotation);
+            groupRotation.Controls.Add(nudRotation);
+            groupRotation.Controls.Add(rotationPresetPanel);
+
+            groupOptions = new GroupBox
+            {
+                Text = Resources.EditRaster_GroupOptions,
+                Location = new Point(10, 194),
+                Size = new Size(394, 86)
+            };
+            chkLockAspect = new CheckBox
+            {
+                Text = Resources.EditRaster_CheckLockAspect,
+                Location = new Point(12, 24),
+                AutoSize = true
+            };
+            chkLockAspect.CheckedChanged += ChkLockAspect_CheckedChanged;
+            chkLocked = new CheckBox
+            {
+                Text = Resources.EditRaster_CheckLocked,
+                Location = new Point(190, 24),
+                AutoSize = true
+            };
+            lblOpacity = new Label
+            {
+                Text = Resources.EditRaster_LabelOpacity,
+                Location = new Point(12, 56),
+                AutoSize = true
+            };
+            nudOpacity = new NumericUpDown
+            {
+                Minimum = 0,
+                Maximum = 100,
+                DecimalPlaces = 0,
+                Increment = 1,
+                Location = new Point(190, 52),
+                Size = new Size(70, 22),
+                ThousandsSeparator = false
+            };
+            nudOpacity.ValueChanged += AnyControlValueChanged;
+            chkLocked.CheckedChanged += AnyControlValueChanged;
+            groupOptions.Controls.Add(chkLockAspect);
+            groupOptions.Controls.Add(chkLocked);
+            groupOptions.Controls.Add(lblOpacity);
+            groupOptions.Controls.Add(nudOpacity);
+
+            groupSource = new GroupBox
+            {
+                Text = Resources.EditRaster_GroupSource,
+                Location = new Point(10, 288),
+                Size = new Size(394, 86)
+            };
+            lblSourceValue = new Label
+            {
+                Location = new Point(12, 25),
+                Size = new Size(250, 18),
+                AutoEllipsis = true
+            };
+            btnReplaceImage = new Button
+            {
+                Text = Resources.EditRaster_ButtonReplaceImage,
+                Location = new Point(268, 18),
+                Size = new Size(116, 28)
+            };
+            btnReplaceImage.Click += BtnReplaceImage_Click;
+            btnResetAspect = new Button
+            {
+                Text = Resources.EditRaster_ButtonResetAspect,
+                Location = new Point(268, 50),
+                Size = new Size(116, 28)
+            };
+            btnResetAspect.Click += BtnResetAspect_Click;
+            groupSource.Controls.Add(lblSourceValue);
+            groupSource.Controls.Add(btnReplaceImage);
+            groupSource.Controls.Add(btnResetAspect);
+
+            btnOK = new Button
+            {
+                Text = Resources.Merge_OK,
+                Location = new Point(238, 400),
+                Size = new Size(80, 30),
+                DialogResult = DialogResult.OK
+            };
+            btnOK.Click += BtnOK_Click;
+
+            btnCancel = new Button
+            {
+                Text = Resources.Merge_Cancel,
+                Location = new Point(324, 400),
+                Size = new Size(80, 30),
+                DialogResult = DialogResult.Cancel
+            };
+
+            Controls.Add(groupGeometry);
+            Controls.Add(groupRotation);
+            Controls.Add(groupOptions);
+            Controls.Add(groupSource);
+            Controls.Add(btnOK);
+            Controls.Add(btnCancel);
+
+            CancelButton = btnCancel;
+            AcceptButton = btnOK;
+        }
+
+        private static NumericUpDown BuildNumberInput(int x, int y, decimal min, decimal max, int decimals)
+        {
+            return new NumericUpDown
+            {
+                Location = new Point(x, y),
+                Size = new Size(120, 22),
+                Minimum = min,
+                Maximum = max,
+                DecimalPlaces = decimals,
+                ThousandsSeparator = true,
+                Increment = decimals > 0 ? 0.1m : 1m
+            };
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            suppressDimensionSync = true;
+            suppressAutoApply = true;
+
+            nudX.Value = ClampDecimal((decimal)PositionX, nudX.Minimum, nudX.Maximum);
+            nudY.Value = ClampDecimal((decimal)PositionY, nudY.Minimum, nudY.Maximum);
+            nudWidth.Value = ClampDecimal((decimal)Math.Max(1f, WidthValue), nudWidth.Minimum, nudWidth.Maximum);
+            nudHeight.Value = ClampDecimal((decimal)Math.Max(1f, HeightValue), nudHeight.Minimum, nudHeight.Maximum);
+            nudRotation.Value = NormalizeAngle(Rotation);
+            nudOpacity.Value = ClampDecimal((decimal)(Math.Max(0f, Math.Min(1f, RasterOpacity)) * 100f), nudOpacity.Minimum, nudOpacity.Maximum);
+            chkLockAspect.Checked = LockAspect;
+            chkLocked.Checked = IsLocked;
+            ReplacementImagePath = string.Empty;
+            btnResetAspect.Enabled = SourceAspectRatio > 0m;
+
+            RecalculateAspectRatio();
+            UpdateSourceLabel();
+
+            SyncPropertiesFromControls();
+            suppressAutoApply = false;
+            suppressDimensionSync = false;
+        }
+
+        private static decimal ClampDecimal(decimal value, decimal min, decimal max)
+        {
+            if (value < min) return min;
+            if (value > max) return max;
+            return value;
+        }
+
+        private static int NormalizeAngle(int rotation)
+        {
+            rotation %= 360;
+            if (rotation < 0)
+            {
+                rotation += 360;
+            }
+            return rotation;
+        }
+
+        private void RecalculateAspectRatio()
+        {
+            decimal height = nudHeight.Value;
+            aspectRatio = height <= 0m ? 1m : nudWidth.Value / height;
+            if (aspectRatio <= 0m)
+            {
+                aspectRatio = 1m;
+            }
+        }
+
+        private void ChkLockAspect_CheckedChanged(object sender, EventArgs e)
+        {
+            if (chkLockAspect.Checked)
+            {
+                RecalculateAspectRatio();
+            }
+            TryApplyChanges();
+        }
+
+        private void NudWidth_ValueChanged(object sender, EventArgs e)
+        {
+            if (suppressDimensionSync)
+            {
+                return;
+            }
+
+            if (chkLockAspect.Checked && aspectRatio > 0m)
+            {
+                suppressDimensionSync = true;
+                decimal height = nudWidth.Value / aspectRatio;
+                nudHeight.Value = ClampDecimal(height, nudHeight.Minimum, nudHeight.Maximum);
+                suppressDimensionSync = false;
+            }
+            TryApplyChanges();
+        }
+
+        private void NudHeight_ValueChanged(object sender, EventArgs e)
+        {
+            if (suppressDimensionSync)
+            {
+                return;
+            }
+
+            if (chkLockAspect.Checked && aspectRatio > 0m)
+            {
+                suppressDimensionSync = true;
+                decimal width = nudHeight.Value * aspectRatio;
+                nudWidth.Value = ClampDecimal(width, nudWidth.Minimum, nudWidth.Maximum);
+                suppressDimensionSync = false;
+            }
+            TryApplyChanges();
+        }
+
+        private void AnyControlValueChanged(object sender, EventArgs e)
+        {
+            TryApplyChanges();
+        }
+
+        private void RotationPresetButton_Click(object sender, EventArgs e)
+        {
+            if (sender is Button btn)
+            {
+                int value = 0;
+                if (btn.Tag is int preset)
+                {
+                    value = preset;
+                }
+                else
+                {
+                    int.TryParse(btn.Text, out value);
+                }
+
+                if (value < nudRotation.Minimum)
+                {
+                    value = (int)nudRotation.Minimum;
+                }
+                else if (value > nudRotation.Maximum)
+                {
+                    value = (int)nudRotation.Maximum;
+                }
+
+                nudRotation.Value = value;
+                nudRotation.Focus();
+            }
+        }
+
+        private void UpdateSourceLabel()
+        {
+            if (!string.IsNullOrWhiteSpace(ReplacementImagePath))
+            {
+                lblSourceValue.Text = Path.GetFileName(ReplacementImagePath);
+                return;
+            }
+
+            string sourceValue;
+            if (string.Equals(SourceType, "Clipboard", StringComparison.OrdinalIgnoreCase))
+            {
+                sourceValue = Resources.EditRaster_LabelSourceClipboard;
+            }
+            else if (string.Equals(SourceType, "File", StringComparison.OrdinalIgnoreCase))
+            {
+                sourceValue = string.IsNullOrWhiteSpace(FilePath)
+                    ? Resources.EditRaster_LabelSourceFile
+                    : Path.GetFileName(FilePath);
+            }
+            else
+            {
+                sourceValue = Resources.EditRaster_LabelSourceUnknown;
+            }
+
+            lblSourceValue.Text = sourceValue;
+        }
+
+        private void BtnReplaceImage_Click(object sender, EventArgs e)
+        {
+            if (SelectReplacementImage == null)
+            {
+                return;
+            }
+
+            string selectedPath = SelectReplacementImage();
+            if (string.IsNullOrWhiteSpace(selectedPath))
+            {
+                return;
+            }
+
+            ReplacementImagePath = selectedPath;
+            if (TryGetImageAspectRatioFromPath(selectedPath, out decimal aspectFromFile))
+            {
+                SourceAspectRatio = aspectFromFile;
+            }
+            btnResetAspect.Enabled = SourceAspectRatio > 0m;
+            UpdateSourceLabel();
+            TryApplyChanges();
+        }
+
+        private static bool TryGetImageAspectRatioFromPath(string filePath, out decimal aspectRatio)
+        {
+            aspectRatio = 0m;
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                using (var image = DrawingImage.FromFile(filePath))
+                {
+                    if (image.Width <= 0 || image.Height <= 0)
+                    {
+                        return false;
+                    }
+
+                    aspectRatio = (decimal)image.Width / image.Height;
+                    return aspectRatio > 0m;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void BtnResetAspect_Click(object sender, EventArgs e)
+        {
+            if (SourceAspectRatio <= 0m)
+            {
+                return;
+            }
+
+            decimal currentArea = nudWidth.Value * nudHeight.Value;
+            if (currentArea <= 0m)
+            {
+                currentArea = 1m;
+            }
+
+            decimal targetWidth = (decimal)Math.Sqrt((double)(currentArea * SourceAspectRatio));
+            decimal targetHeight = targetWidth / SourceAspectRatio;
+
+            suppressDimensionSync = true;
+            nudWidth.Value = ClampDecimal(targetWidth, nudWidth.Minimum, nudWidth.Maximum);
+            nudHeight.Value = ClampDecimal(targetHeight, nudHeight.Minimum, nudHeight.Maximum);
+            suppressDimensionSync = false;
+
+            aspectRatio = SourceAspectRatio;
+            TryApplyChanges();
+        }
+
+        private void BtnOK_Click(object sender, EventArgs e)
+        {
+            SyncPropertiesFromControls();
+        }
+
+        private void SyncPropertiesFromControls()
+        {
+            PositionX = (float)nudX.Value;
+            PositionY = (float)nudY.Value;
+            WidthValue = Math.Max(1f, (float)nudWidth.Value);
+            HeightValue = Math.Max(1f, (float)nudHeight.Value);
+            Rotation = NormalizeAngle((int)nudRotation.Value);
+            RasterOpacity = (float)(nudOpacity.Value / 100m);
+            LockAspect = chkLockAspect.Checked;
+            IsLocked = chkLocked.Checked;
+        }
+
+        public void SyncControlsFromObject(RasterObject rasterObject)
+        {
+            if (rasterObject == null)
+            {
+                return;
+            }
+
+            suppressAutoApply = true;
+            suppressDimensionSync = true;
+            try
+            {
+                nudX.Value = ClampDecimal((decimal)rasterObject.Bounds.X, nudX.Minimum, nudX.Maximum);
+                nudY.Value = ClampDecimal((decimal)rasterObject.Bounds.Y, nudY.Minimum, nudY.Maximum);
+                nudWidth.Value = ClampDecimal((decimal)Math.Max(1f, rasterObject.Bounds.Width), nudWidth.Minimum, nudWidth.Maximum);
+                nudHeight.Value = ClampDecimal((decimal)Math.Max(1f, rasterObject.Bounds.Height), nudHeight.Minimum, nudHeight.Maximum);
+                nudRotation.Value = NormalizeAngle(rasterObject.Rotation);
+                nudOpacity.Value = ClampDecimal((decimal)(Math.Max(0f, Math.Min(1f, rasterObject.Opacity)) * 100f), nudOpacity.Minimum, nudOpacity.Maximum);
+                chkLockAspect.Checked = rasterObject.LockAspect;
+                chkLocked.Checked = rasterObject.IsLocked;
+                SourceType = rasterObject.SourceType;
+                FilePath = rasterObject.FilePath;
+                ReplacementImagePath = string.Empty;
+                if (TryGetImageAspectRatioFromPath(FilePath, out decimal aspectFromPath))
+                {
+                    SourceAspectRatio = aspectFromPath;
+                }
+                btnResetAspect.Enabled = SourceAspectRatio > 0m;
+                RecalculateAspectRatio();
+                UpdateSourceLabel();
+                SyncPropertiesFromControls();
+            }
+            finally
+            {
+                suppressDimensionSync = false;
+                suppressAutoApply = false;
+            }
+        }
+
+        private void TryApplyChanges()
+        {
+            if (ApplyChanges == null || suppressAutoApply)
+            {
+                return;
+            }
+
+            SyncPropertiesFromControls();
+            ApplyChanges?.Invoke();
+        }
+    }
+
+
+
     public class SplitDocumentDialog : Form
     {
         private Label lblFile;
@@ -13792,6 +14570,7 @@ namespace AnonPDF
         public RectangleF Bounds { get; set; }
         public RectangleF InitialBounds { get; set; }
         public int Rotation { get; set; }
+        public float Opacity { get; set; } = 1f;
         public bool LockAspect { get; set; }
         public bool IsLocked { get; set; }
         public string SourceType { get; set; }

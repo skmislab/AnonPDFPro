@@ -291,6 +291,168 @@ namespace AnonPDF.Properties {
                 return ResourceManager.GetString("EditText_EmptyError", resourceCulture);
             }
         }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Podmień obraz.
+        /// </summary>
+        internal static string EditRaster_ButtonReplaceImage {
+            get {
+                return ResourceManager.GetString("EditRaster_ButtonReplaceImage", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Reset proporcji.
+        /// </summary>
+        internal static string EditRaster_ButtonResetAspect {
+            get {
+                return ResourceManager.GetString("EditRaster_ButtonResetAspect", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Zablokuj obiekt.
+        /// </summary>
+        internal static string EditRaster_CheckLocked {
+            get {
+                return ResourceManager.GetString("EditRaster_CheckLocked", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Zachowaj proporcje.
+        /// </summary>
+        internal static string EditRaster_CheckLockAspect {
+            get {
+                return ResourceManager.GetString("EditRaster_CheckLockAspect", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Położenie i rozmiar.
+        /// </summary>
+        internal static string EditRaster_GroupGeometry {
+            get {
+                return ResourceManager.GetString("EditRaster_GroupGeometry", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Opcje.
+        /// </summary>
+        internal static string EditRaster_GroupOptions {
+            get {
+                return ResourceManager.GetString("EditRaster_GroupOptions", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Obrót.
+        /// </summary>
+        internal static string EditRaster_GroupRotation {
+            get {
+                return ResourceManager.GetString("EditRaster_GroupRotation", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Źródło obrazu.
+        /// </summary>
+        internal static string EditRaster_GroupSource {
+            get {
+                return ResourceManager.GetString("EditRaster_GroupSource", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Wys.:.
+        /// </summary>
+        internal static string EditRaster_LabelHeight {
+            get {
+                return ResourceManager.GetString("EditRaster_LabelHeight", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Przezroczystość (%):.
+        /// </summary>
+        internal static string EditRaster_LabelOpacity {
+            get {
+                return ResourceManager.GetString("EditRaster_LabelOpacity", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Schowek.
+        /// </summary>
+        internal static string EditRaster_LabelSourceClipboard {
+            get {
+                return ResourceManager.GetString("EditRaster_LabelSourceClipboard", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Plik.
+        /// </summary>
+        internal static string EditRaster_LabelSourceFile {
+            get {
+                return ResourceManager.GetString("EditRaster_LabelSourceFile", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Nieznane.
+        /// </summary>
+        internal static string EditRaster_LabelSourceUnknown {
+            get {
+                return ResourceManager.GetString("EditRaster_LabelSourceUnknown", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Szer.:.
+        /// </summary>
+        internal static string EditRaster_LabelWidth {
+            get {
+                return ResourceManager.GetString("EditRaster_LabelWidth", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu X:.
+        /// </summary>
+        internal static string EditRaster_LabelX {
+            get {
+                return ResourceManager.GetString("EditRaster_LabelX", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Y:.
+        /// </summary>
+        internal static string EditRaster_LabelY {
+            get {
+                return ResourceManager.GetString("EditRaster_LabelY", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Kąt:.
+        /// </summary>
+        internal static string EditRaster_RotationLabel {
+            get {
+                return ResourceManager.GetString("EditRaster_RotationLabel", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Edytuj obiekt rastra.
+        /// </summary>
+        internal static string EditRaster_Title {
+            get {
+                return ResourceManager.GetString("EditRaster_Title", resourceCulture);
+            }
+        }
         
         /// <summary>
         /// Wyszukuje zlokalizowany ciąg podobny do ciągu Wyrównanie.

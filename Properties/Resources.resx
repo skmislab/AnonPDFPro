@@ -664,6 +664,60 @@ Aplikacja zostanie zamknięta.</value>
   <data name="EditText_EmptyError" xml:space="preserve">
     <value>Wprowadź jakiś tekst.</value>
   </data>
+  <data name="EditRaster_Title" xml:space="preserve">
+    <value>Edytuj obiekt rastra</value>
+  </data>
+  <data name="EditRaster_GroupGeometry" xml:space="preserve">
+    <value>Położenie i rozmiar</value>
+  </data>
+  <data name="EditRaster_LabelX" xml:space="preserve">
+    <value>X:</value>
+  </data>
+  <data name="EditRaster_LabelY" xml:space="preserve">
+    <value>Y:</value>
+  </data>
+  <data name="EditRaster_LabelWidth" xml:space="preserve">
+    <value>Szer.:</value>
+  </data>
+  <data name="EditRaster_LabelHeight" xml:space="preserve">
+    <value>Wys.:</value>
+  </data>
+  <data name="EditRaster_GroupRotation" xml:space="preserve">
+    <value>Obrót</value>
+  </data>
+  <data name="EditRaster_RotationLabel" xml:space="preserve">
+    <value>Kąt:</value>
+  </data>
+  <data name="EditRaster_GroupOptions" xml:space="preserve">
+    <value>Opcje</value>
+  </data>
+  <data name="EditRaster_CheckLockAspect" xml:space="preserve">
+    <value>Zachowaj proporcje</value>
+  </data>
+  <data name="EditRaster_CheckLocked" xml:space="preserve">
+    <value>Zablokuj obiekt</value>
+  </data>
+  <data name="EditRaster_LabelOpacity" xml:space="preserve">
+    <value>Przezroczystość (%):</value>
+  </data>
+  <data name="EditRaster_GroupSource" xml:space="preserve">
+    <value>Źródło obrazu</value>
+  </data>
+  <data name="EditRaster_LabelSourceClipboard" xml:space="preserve">
+    <value>Schowek</value>
+  </data>
+  <data name="EditRaster_LabelSourceFile" xml:space="preserve">
+    <value>Plik</value>
+  </data>
+  <data name="EditRaster_LabelSourceUnknown" xml:space="preserve">
+    <value>Nieznane</value>
+  </data>
+  <data name="EditRaster_ButtonReplaceImage" xml:space="preserve">
+    <value>Podmień obraz</value>
+  </data>
+  <data name="EditRaster_ButtonResetAspect" xml:space="preserve">
+    <value>Reset proporcji</value>
+  </data>
   <data name="Signatures_Select_Title" xml:space="preserve">
     <value>Wybierz podpisy do usunięcia</value>
   </data>

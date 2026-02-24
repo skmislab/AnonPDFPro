@@ -664,6 +664,60 @@ The application will close.</value>
   <data name="EditText_EmptyError" xml:space="preserve">
     <value>Please enter some text.</value>
   </data>
+  <data name="EditRaster_Title" xml:space="preserve">
+    <value>Edit raster object</value>
+  </data>
+  <data name="EditRaster_GroupGeometry" xml:space="preserve">
+    <value>Position and size</value>
+  </data>
+  <data name="EditRaster_LabelX" xml:space="preserve">
+    <value>X:</value>
+  </data>
+  <data name="EditRaster_LabelY" xml:space="preserve">
+    <value>Y:</value>
+  </data>
+  <data name="EditRaster_LabelWidth" xml:space="preserve">
+    <value>Width:</value>
+  </data>
+  <data name="EditRaster_LabelHeight" xml:space="preserve">
+    <value>Height:</value>
+  </data>
+  <data name="EditRaster_GroupRotation" xml:space="preserve">
+    <value>Rotation</value>
+  </data>
+  <data name="EditRaster_RotationLabel" xml:space="preserve">
+    <value>Angle:</value>
+  </data>
+  <data name="EditRaster_GroupOptions" xml:space="preserve">
+    <value>Options</value>
+  </data>
+  <data name="EditRaster_CheckLockAspect" xml:space="preserve">
+    <value>Lock aspect ratio</value>
+  </data>
+  <data name="EditRaster_CheckLocked" xml:space="preserve">
+    <value>Lock object</value>
+  </data>
+  <data name="EditRaster_LabelOpacity" xml:space="preserve">
+    <value>Opacity (%):</value>
+  </data>
+  <data name="EditRaster_GroupSource" xml:space="preserve">
+    <value>Image source</value>
+  </data>
+  <data name="EditRaster_LabelSourceClipboard" xml:space="preserve">
+    <value>Clipboard</value>
+  </data>
+  <data name="EditRaster_LabelSourceFile" xml:space="preserve">
+    <value>File</value>
+  </data>
+  <data name="EditRaster_LabelSourceUnknown" xml:space="preserve">
+    <value>Unknown</value>
+  </data>
+  <data name="EditRaster_ButtonReplaceImage" xml:space="preserve">
+    <value>Replace image</value>
+  </data>
+  <data name="EditRaster_ButtonResetAspect" xml:space="preserve">
+    <value>Reset aspect</value>
+  </data>
   <data name="Signatures_Select_Title" xml:space="preserve">
     <value>Select signatures to remove</value>
   </data>

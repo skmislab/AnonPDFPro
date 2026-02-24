@@ -724,6 +724,60 @@ Repository: https://github.com/misart/AnonPDFPro</value>
   <data name="EditText_EmptyError" xml:space="preserve">
     <value>Bitte geben Sie Text ein.</value>
   </data>
+  <data name="EditRaster_Title" xml:space="preserve">
+    <value>Rasterobjekt bearbeiten</value>
+  </data>
+  <data name="EditRaster_GroupGeometry" xml:space="preserve">
+    <value>Position und Größe</value>
+  </data>
+  <data name="EditRaster_LabelX" xml:space="preserve">
+    <value>X:</value>
+  </data>
+  <data name="EditRaster_LabelY" xml:space="preserve">
+    <value>Y:</value>
+  </data>
+  <data name="EditRaster_LabelWidth" xml:space="preserve">
+    <value>Breite:</value>
+  </data>
+  <data name="EditRaster_LabelHeight" xml:space="preserve">
+    <value>Höhe:</value>
+  </data>
+  <data name="EditRaster_GroupRotation" xml:space="preserve">
+    <value>Drehung</value>
+  </data>
+  <data name="EditRaster_RotationLabel" xml:space="preserve">
+    <value>Winkel:</value>
+  </data>
+  <data name="EditRaster_GroupOptions" xml:space="preserve">
+    <value>Optionen</value>
+  </data>
+  <data name="EditRaster_CheckLockAspect" xml:space="preserve">
+    <value>Seitenverhältnis sperren</value>
+  </data>
+  <data name="EditRaster_CheckLocked" xml:space="preserve">
+    <value>Objekt sperren</value>
+  </data>
+  <data name="EditRaster_LabelOpacity" xml:space="preserve">
+    <value>Transparenz (%):</value>
+  </data>
+  <data name="EditRaster_GroupSource" xml:space="preserve">
+    <value>Bildquelle</value>
+  </data>
+  <data name="EditRaster_LabelSourceClipboard" xml:space="preserve">
+    <value>Zwischenablage</value>
+  </data>
+  <data name="EditRaster_LabelSourceFile" xml:space="preserve">
+    <value>Datei</value>
+  </data>
+  <data name="EditRaster_LabelSourceUnknown" xml:space="preserve">
+    <value>Unbekannt</value>
+  </data>
+  <data name="EditRaster_ButtonReplaceImage" xml:space="preserve">
+    <value>Bild ersetzen</value>
+  </data>
+  <data name="EditRaster_ButtonResetAspect" xml:space="preserve">
+    <value>Seitenverhältnis zurücksetzen</value>
+  </data>
   <data name="EditText_GroupAlignment" xml:space="preserve">
     <value>Ausrichtung</value>
   </data>
