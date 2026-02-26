@@ -9557,7 +9557,7 @@ namespace AnonPDF
                             float badgeHeight = textSize.Height + (badgePaddingY * 2f);
                             float margin = 2f;
                             int rotationOffset = NormalizeRotation(GetRotationOffset(block.PageNumber));
-                            float rotationCompensation = Math.Max(0f, (badgeWidth - badgeHeight) / 2f);
+                            float halfDiff = (badgeWidth - badgeHeight) / 2f;
 
                             float badgeX;
                             float badgeY;
@@ -9565,7 +9565,7 @@ namespace AnonPDF
                             {
                                 case 90:
                                     badgeX = rect.Right - badgeWidth;
-                                    badgeY = rect.Bottom + margin + rotationCompensation;
+                                    badgeY = rect.Bottom + margin;
                                     break;
                                 case 180:
                                     badgeX = rect.Left - badgeWidth - margin;
@@ -9573,7 +9573,7 @@ namespace AnonPDF
                                     break;
                                 case 270:
                                     badgeX = rect.Left;
-                                    badgeY = rect.Top - badgeHeight - margin - rotationCompensation;
+                                    badgeY = rect.Top - badgeHeight - margin;
                                     break;
                                 default:
                                     badgeX = rect.Right + margin;
@@ -9581,10 +9581,15 @@ namespace AnonPDF
                                     break;
                             }
 
-                            const float rotatedBadgeTopNudge = 2f;
-                            if (rotationOffset == 90 || rotationOffset == 270)
+                            if (rotationOffset == 90)
                             {
-                                badgeY -= rotatedBadgeTopNudge;
+                                badgeX += halfDiff;
+                                badgeY += halfDiff;
+                            }
+                            else if (rotationOffset == 270)
+                            {
+                                badgeX -= halfDiff;
+                                badgeY -= halfDiff;
                             }
 
                             if (badgeX + badgeWidth > pdfViewer.ClientSize.Width)
@@ -9605,7 +9610,7 @@ namespace AnonPDF
                             }
 
                             RectangleF badgeRect = new RectangleF(badgeX, badgeY, badgeWidth, badgeHeight);
-                            LogFootnoteBadgeLayoutIfNeeded(block, rect, badgeRect, rotationOffset, rotationCompensation);
+                            LogFootnoteBadgeLayoutIfNeeded(block, rect, badgeRect, rotationOffset, halfDiff);
                             using (SolidBrush badgeBackground = new SolidBrush(System.Drawing.Color.FromArgb(235, 255, 255, 255)))
                             using (Pen badgeBorder = new Pen(System.Drawing.Color.FromArgb(200, 170, 0, 0), 1f))
                             using (SolidBrush badgeTextBrush = new SolidBrush(System.Drawing.Color.FromArgb(220, 120, 0, 0)))
