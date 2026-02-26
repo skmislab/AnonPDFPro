@@ -10031,7 +10031,7 @@ namespace AnonPDF
                             }
                         }
                         System.Drawing.Color borderColor = (isSelectedRaster && !multiSelectionActive)
-                            ? System.Drawing.Color.Green
+                            ? System.Drawing.Color.Red
                             : System.Drawing.Color.SteelBlue;
                         float borderWidth = (isSelectedRaster && !multiSelectionActive) ? 2f : 1f;
                         using (var borderPen = new Pen(borderColor, borderWidth))
@@ -13060,15 +13060,6 @@ namespace AnonPDF
                 return;
             }
 
-            RectangleF frameBounds = GetRasterObjectScreenFrameBounds(selectedRasterObject);
-            if (frameBounds.Width > 0f && frameBounds.Height > 0f)
-            {
-                using (var framePen = new Pen(System.Drawing.Color.Green, 2f))
-                {
-                    graphics.DrawRectangle(framePen, frameBounds.X, frameBounds.Y, frameBounds.Width, frameBounds.Height);
-                }
-            }
-
             if (TryGetRasterRotationHandleRect(selectedRasterObject, out RectangleF handleRect, out PointF connectorPoint))
             {
                 PointF handleCenter = new PointF(
@@ -13127,17 +13118,6 @@ namespace AnonPDF
 
             PointF startScreen = GetArrowScreenPoint(selectedArrowObject.Start);
             PointF endScreen = GetArrowScreenPoint(selectedArrowObject.End);
-            float minX = Math.Min(startScreen.X, endScreen.X);
-            float maxX = Math.Max(startScreen.X, endScreen.X);
-            float minY = Math.Min(startScreen.Y, endScreen.Y);
-            float maxY = Math.Max(startScreen.Y, endScreen.Y);
-            RectangleF arrowBounds = InflateRect(
-                new RectangleF(minX, minY, Math.Max(1f, maxX - minX), Math.Max(1f, maxY - minY)),
-                4f);
-            using (var framePen = new Pen(System.Drawing.Color.Green, 2f))
-            {
-                graphics.DrawRectangle(framePen, arrowBounds.X, arrowBounds.Y, arrowBounds.Width, arrowBounds.Height);
-            }
 
             RectangleF startHandle = new RectangleF(
                 startScreen.X - ArrowHandleRadius,
