@@ -110,6 +110,7 @@ namespace AnonPDF
         private const float MarkerCleanupVerticalPadding = 0.75f;
         private System.Drawing.Point startPoint;
         private bool isDrawing;
+        private bool isMarkerCtrlBoxMode;
         private bool isMoving;
         private TextAnnotation annotationToMove = null;
         private TextAnnotation selectedTextAnnotation = null;
@@ -10438,6 +10439,7 @@ namespace AnonPDF
             if (e.Button == MouseButtons.Middle)
             {
                 isDrawing = false;
+                isMarkerCtrlBoxMode = false;
                 isMoving = false;
                 annotationToMove = null;
                 textMoveMouseOffset = PointF.Empty;
@@ -10480,6 +10482,7 @@ namespace AnonPDF
             else if (e.Button == MouseButtons.Left)
             {
                 startPoint = e.Location;
+                isMarkerCtrlBoxMode = false;
 
                 float dpiX;
                 float dpiY;
@@ -11004,7 +11007,9 @@ namespace AnonPDF
                 float height;
                 if (markerRadioButton.Checked)
                 {
-                    if ((Control.ModifierKeys & Keys.Control) == Keys.Control)
+                    bool markerCtrlBoxMode = (Control.ModifierKeys & Keys.Control) == Keys.Control;
+                    isMarkerCtrlBoxMode = markerCtrlBoxMode;
+                    if (markerCtrlBoxMode)
                     {
                         y = Math.Min(startPoint.Y, e.Y);
                         height = Math.Abs(e.Y - startPoint.Y);
@@ -11017,6 +11022,7 @@ namespace AnonPDF
                 }
                 else
                 {
+                    isMarkerCtrlBoxMode = false;
                     y = Math.Min(startPoint.Y, e.Y);
                     height = Math.Abs(e.Y - startPoint.Y);
                 }
@@ -11304,7 +11310,9 @@ namespace AnonPDF
                         if (markerRadioButton.Checked)
                         {
                             renderTimer.Stop();
-                            if (isDrawing && currentSelection.Width > markerWidth * scaleFactor)
+                            bool enoughWidth = currentSelection.Width > markerWidth * scaleFactor;
+                            bool enoughHeightForCtrlBox = !isMarkerCtrlBoxMode || currentSelection.Height > markerHeight * scaleFactor;
+                            if (isDrawing && enoughWidth && enoughHeightForCtrlBox)
                             {
                                 redactionBlocks.Add(CreateRedactionBlockWithAutomaticClassification(rect, currentPage, isMarkerSelection: true));
                                 
@@ -11381,6 +11389,7 @@ namespace AnonPDF
                 TryShowRedactionContextMenu(startPoint);
             }
             isDrawing = false;
+            isMarkerCtrlBoxMode = false;
             currentSelection = System.Drawing.Rectangle.Empty;
             pdfViewer.Invalidate();
 
