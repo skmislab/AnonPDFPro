@@ -202,5 +202,29 @@ namespace AnonPDF.Properties {
                 this["PreferredUiTheme"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string ExclusionAuthorityName {
+            get {
+                return ((string)(this["ExclusionAuthorityName"]));
+            }
+            set {
+                this["ExclusionAuthorityName"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool ExclusionAuthorityVerified {
+            get {
+                return ((bool)(this["ExclusionAuthorityVerified"]));
+            }
+            set {
+                this["ExclusionAuthorityVerified"] = value;
+            }
+        }
     }
 }

@@ -72,7 +72,6 @@ namespace AnonPDF
             }
         };
         private const string FootnoteSummaryTitle = "Przypisy wyłączenia jawności:";
-        private const string FootnoteSummaryAuthorityLine = "Organ, który dokonał wyłączenia: Gmina Stare Czarnowo";
         private static bool diagnosticModeEnabled = false;
         private static bool DebugLogEnabled => diagnosticModeEnabled;
         private readonly string fileVersion;
@@ -140,6 +139,7 @@ namespace AnonPDF
         private HashSet<int> pagesToRemove = new HashSet<int>();
         private Dictionary<int, int> pageRotationOffsets = new Dictionary<int, int>();
         private bool autoFootnotesEnabled = false;
+        private string exclusionAuthorityName = string.Empty;
 
         private readonly Timer zoomTimer;
         private bool zoomPending = false;
@@ -185,6 +185,7 @@ namespace AnonPDF
         private ToolStripMenuItem addBlankPageToolStripMenuItem;
         private ToolStripMenuItem snapToGridToolStripMenuItem;
         private ToolStripMenuItem legalBasesDictionaryToolStripMenuItem;
+        private ToolStripMenuItem exclusionAuthorityToolStripMenuItem;
         private ToolStripMenuItem automaticFootnotesToolStripMenuItem;
         private bool snapToGridEnabled = true;
         private bool suppressAutomaticFootnotesMenuSync;
@@ -812,6 +813,8 @@ namespace AnonPDF
             signaturesRemoveRadioButton.Checked = Properties.Settings.Default.LastSignaturesRemoveRadioButton;
             signaturesOriginalRadioButton.Checked = Properties.Settings.Default.LastSignaturesOriginalRadioButton;
             signaturesReportRadioButton.Checked = Properties.Settings.Default.LastSignaturesRaportRadioButton;
+            exclusionAuthorityName = (Properties.Settings.Default.ExclusionAuthorityName ?? string.Empty).Trim();
+            BootstrapExclusionAuthorityFromLicenseIfMissing();
 
             mainAppSplitContainer.Panel1.AutoScroll = true;
             mainAppSplitContainer.Panel2.AutoScroll = false;
@@ -963,6 +966,13 @@ namespace AnonPDF
             };
             legalBasesDictionaryToolStripMenuItem.Click += LegalBasesDictionaryToolStripMenuItem_Click;
 
+            exclusionAuthorityToolStripMenuItem = new ToolStripMenuItem
+            {
+                Name = "exclusionAuthorityToolStripMenuItem",
+                Enabled = true
+            };
+            exclusionAuthorityToolStripMenuItem.Click += ExclusionAuthorityToolStripMenuItem_Click;
+
             automaticFootnotesToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "automaticFootnotesToolStripMenuItem",
@@ -1010,6 +1020,7 @@ namespace AnonPDF
             menuAddItem.DropDownItems.Add(new ToolStripSeparator());
             menuAddItem.DropDownItems.Add(snapToGridToolStripMenuItem);
             menuAddItem.DropDownItems.Add(new ToolStripSeparator());
+            menuAddItem.DropDownItems.Add(exclusionAuthorityToolStripMenuItem);
             menuAddItem.DropDownItems.Add(legalBasesDictionaryToolStripMenuItem);
             menuAddItem.DropDownItems.Add(automaticFootnotesToolStripMenuItem);
         }
@@ -1064,6 +1075,11 @@ namespace AnonPDF
                 legalBasesDictionaryToolStripMenuItem.Text = LocalizedText("Menu_AddLegalBasesDictionary");
             }
 
+            if (exclusionAuthorityToolStripMenuItem != null)
+            {
+                exclusionAuthorityToolStripMenuItem.Text = GetExclusionAuthorityMenuText();
+            }
+
             if (automaticFootnotesToolStripMenuItem != null)
             {
                 automaticFootnotesToolStripMenuItem.Text = LocalizedText("Menu_AddAutomaticFootnotes");
@@ -1083,6 +1099,29 @@ namespace AnonPDF
         private void LegalBasesDictionaryToolStripMenuItem_Click(object sender, EventArgs e)
         {
             OpenLegalBasesDictionary();
+        }
+
+        private void ExclusionAuthorityToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            string initialValue = GetPreferredExclusionAuthority();
+            if (!PromptForExclusionAuthority(initialValue, true, out string authorityValue))
+            {
+                return;
+            }
+
+            string previousAuthority = exclusionAuthorityName ?? string.Empty;
+            exclusionAuthorityName = authorityValue;
+            SaveExclusionAuthorityUserSetting(exclusionAuthorityName, verified: true);
+            bool changed = !string.Equals(previousAuthority.Trim(), exclusionAuthorityName.Trim(), StringComparison.Ordinal);
+            changed = ApplyInterestSubjectToRequiredBlocks(authorityValue, onlyMissing: true) || changed;
+            if (changed)
+            {
+                projectWasChangedAfterLastSave = true;
+                saveProjectButton.Enabled = true;
+                saveProjectMenuItem.Enabled = true;
+            }
+
+            pdfViewer.Invalidate();
         }
 
         private void OpenLegalBasesDictionary()
@@ -1178,9 +1217,353 @@ namespace AnonPDF
             }
 
             LoadFootnotesCatalog();
+            bool removedInvalidBasisReferences = RemoveInvalidLegalBasisReferencesFromRedactions();
+            if (removedInvalidBasisReferences)
+            {
+                projectWasChangedAfterLastSave = true;
+                saveProjectButton.Enabled = true;
+                saveProjectMenuItem.Enabled = true;
+            }
+
             ApplyAutomaticFootnotesMenuState();
             pdfViewer.Invalidate();
             ShowInfoMessage(GetLegalBasesSavedMessage());
+        }
+
+        private string GetExclusionAuthorityMenuText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Organ lub osoba dokonująca wyłączeń";
+            }
+
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Stelle oder Person, die Ausschluesse vornimmt";
+            }
+
+            return "Authority or person performing exclusions";
+        }
+
+        private string GetExclusionAuthorityDialogTitleText()
+        {
+            return GetExclusionAuthorityMenuText();
+        }
+
+        private string GetExclusionAuthorityDialogLabelText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Podaj organ lub osobę dokonującą wyłączeń:";
+            }
+
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Geben Sie die Stelle oder Person an, die Ausschluesse vornimmt:";
+            }
+
+            return "Enter authority or person performing exclusions:";
+        }
+
+        private string GetExclusionAuthorityRequiredMessage()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            {
+                return "To pole jest wymagane dla wybranych podstaw prawnych.";
+            }
+
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Dieses Feld ist fuer die ausgewaehlten Rechtsgrundlagen erforderlich.";
+            }
+
+            return "This field is required for selected legal bases.";
+        }
+
+        private string GetExclusionAuthoritySummaryLine(string authority)
+        {
+            string value = string.IsNullOrWhiteSpace(authority) ? "-" : authority.Trim();
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"Organ lub osoba dokonująca wyłączeń: {value}";
+            }
+
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return $"Stelle oder Person, die Ausschluesse vornimmt: {value}";
+            }
+
+            return $"Authority or person performing exclusions: {value}";
+        }
+
+        private string GetPreferredExclusionAuthority()
+        {
+            if (!string.IsNullOrWhiteSpace(exclusionAuthorityName))
+            {
+                return exclusionAuthorityName.Trim();
+            }
+
+            foreach (var block in redactionBlocks)
+            {
+                if (!string.IsNullOrWhiteSpace(block?.InterestSubject))
+                {
+                    return block.InterestSubject.Trim();
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private void BootstrapExclusionAuthorityFromLicenseIfMissing()
+        {
+            if (!string.IsNullOrWhiteSpace(exclusionAuthorityName))
+            {
+                return;
+            }
+
+            string customerName = (LicenseManager.Current?.Payload?.CustomerName ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(customerName))
+            {
+                return;
+            }
+
+            exclusionAuthorityName = customerName;
+            SaveExclusionAuthorityUserSetting(exclusionAuthorityName, verified: false);
+        }
+
+        private bool BlockRequiresInterestSubject(RedactionBlock block)
+        {
+            if (block == null || block.BasisIds == null || block.BasisIds.Count == 0)
+            {
+                return false;
+            }
+
+            foreach (string basisId in block.BasisIds)
+            {
+                if (string.IsNullOrWhiteSpace(basisId))
+                {
+                    continue;
+                }
+
+                if (legalBasesById.TryGetValue(basisId.Trim(), out LegalBasisDefinition basis) &&
+                    basis != null &&
+                    basis.RequiresInterestSubject)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool ApplyInterestSubjectToRequiredBlocks(string authorityValue, bool onlyMissing)
+        {
+            if (string.IsNullOrWhiteSpace(authorityValue))
+            {
+                return false;
+            }
+
+            string normalized = authorityValue.Trim();
+            bool changed = false;
+            foreach (var block in redactionBlocks)
+            {
+                if (!BlockRequiresInterestSubject(block))
+                {
+                    continue;
+                }
+
+                if (onlyMissing && !string.IsNullOrWhiteSpace(block.InterestSubject))
+                {
+                    continue;
+                }
+
+                string current = string.IsNullOrWhiteSpace(block.InterestSubject) ? string.Empty : block.InterestSubject.Trim();
+                if (string.Equals(current, normalized, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                block.InterestSubject = normalized;
+                changed = true;
+            }
+
+            return changed;
+        }
+
+        private bool EnsureInterestSubjectForRequiredBases()
+        {
+            var requiredBlocks = redactionBlocks
+                .Where(block => block != null && BlockRequiresInterestSubject(block))
+                .ToList();
+            if (requiredBlocks.Count == 0)
+            {
+                return true;
+            }
+
+            var missingBlocks = requiredBlocks
+                .Where(block => string.IsNullOrWhiteSpace(block.InterestSubject))
+                .ToList();
+
+            bool requiresVerification = !Properties.Settings.Default.ExclusionAuthorityVerified;
+            if (!requiresVerification && missingBlocks.Count == 0)
+            {
+                return true;
+            }
+
+            string initialValue = GetPreferredExclusionAuthority();
+            if (!PromptForExclusionAuthority(initialValue, true, out string authorityValue))
+            {
+                return false;
+            }
+
+            string previousAuthority = exclusionAuthorityName ?? string.Empty;
+            exclusionAuthorityName = authorityValue;
+            SaveExclusionAuthorityUserSetting(exclusionAuthorityName, verified: true);
+            bool changed = !string.Equals(previousAuthority.Trim(), exclusionAuthorityName.Trim(), StringComparison.Ordinal);
+            foreach (var block in missingBlocks)
+            {
+                string normalized = authorityValue.Trim();
+                if (string.Equals((block.InterestSubject ?? string.Empty).Trim(), normalized, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                block.InterestSubject = normalized;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                projectWasChangedAfterLastSave = true;
+                saveProjectButton.Enabled = true;
+                saveProjectMenuItem.Enabled = true;
+            }
+
+            return true;
+        }
+
+        private bool PromptForExclusionAuthority(string initialValue, bool required, out string authorityValue)
+        {
+            authorityValue = string.Empty;
+            string currentValue = initialValue ?? string.Empty;
+
+            while (true)
+            {
+                using (Form prompt = new Form())
+                {
+                    prompt.Width = 620;
+                    prompt.Height = 180;
+                    prompt.StartPosition = FormStartPosition.CenterParent;
+                    prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
+                    prompt.MinimizeBox = false;
+                    prompt.MaximizeBox = false;
+                    prompt.ShowInTaskbar = false;
+                    prompt.Text = GetExclusionAuthorityDialogTitleText();
+
+                    Label textLabel = new Label
+                    {
+                        Left = 10,
+                        Top = 16,
+                        AutoSize = true,
+                        Text = GetExclusionAuthorityDialogLabelText()
+                    };
+
+                    TextBox inputBox = new TextBox
+                    {
+                        Left = 10,
+                        Top = 44,
+                        Width = 582,
+                        Text = currentValue
+                    };
+
+                    Button confirmation = new Button
+                    {
+                        Text = "OK",
+                        Left = 432,
+                        Width = 78,
+                        Top = 82,
+                        DialogResult = DialogResult.OK
+                    };
+
+                    Button cancel = new Button
+                    {
+                        Text = GetCancelButtonText(),
+                        Left = 514,
+                        Width = 78,
+                        Top = 82,
+                        DialogResult = DialogResult.Cancel
+                    };
+
+                    prompt.Controls.Add(textLabel);
+                    prompt.Controls.Add(inputBox);
+                    prompt.Controls.Add(confirmation);
+                    prompt.Controls.Add(cancel);
+                    prompt.AcceptButton = confirmation;
+                    prompt.CancelButton = cancel;
+
+                    DialogResult result = prompt.ShowDialog(this);
+                    if (result != DialogResult.OK)
+                    {
+                        return false;
+                    }
+
+                    string normalized = (inputBox.Text ?? string.Empty).Trim();
+                    if (required && string.IsNullOrWhiteSpace(normalized))
+                    {
+                        MessageBox.Show(
+                            this,
+                            GetExclusionAuthorityRequiredMessage(),
+                            Resources.Title_Warning,
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                        currentValue = normalized;
+                        continue;
+                    }
+
+                    authorityValue = normalized;
+                    return true;
+                }
+            }
+        }
+
+        private string GetCancelButtonText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Abbrechen";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cancel";
+            }
+
+            return "Anuluj";
+        }
+
+        private void SaveExclusionAuthorityUserSetting(string authorityValue, bool? verified = null)
+        {
+            try
+            {
+                Properties.Settings.Default.ExclusionAuthorityName = string.IsNullOrWhiteSpace(authorityValue)
+                    ? string.Empty
+                    : authorityValue.Trim();
+                if (verified.HasValue)
+                {
+                    Properties.Settings.Default.ExclusionAuthorityVerified = verified.Value;
+                }
+
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Save exclusion authority user setting failed: " + ex.Message);
+            }
         }
 
         private void AddLegalBasisFromContextMenu(RedactionBlock block)
@@ -4112,7 +4495,8 @@ namespace AnonPDF
                     CurrentPage = currentPage,
                     SignaturesMode = GetSignatureModeForProject(),
                     SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
-                    AutoFootnotesEnabled = autoFootnotesEnabled
+                    AutoFootnotesEnabled = autoFootnotesEnabled,
+                    ExclusionAuthority = exclusionAuthorityName
                 };
 
                 string json = JsonConvert.SerializeObject(projectData, jsonSettings);
@@ -8254,6 +8638,309 @@ namespace AnonPDF
                 || hasCustomSignatureSelection;
         }
 
+        private bool HasOpenedOrSavedProject()
+        {
+            return !string.IsNullOrWhiteSpace(lastSavedProjectName)
+                || !string.IsNullOrWhiteSpace(inputProjectPath);
+        }
+
+        private string GetCloseProjectPromptText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Aenderungen im Projekt speichern?";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Save changes to the project?";
+            }
+
+            return "Czy zapisać zmiany w projekcie?";
+        }
+
+        private string GetCloseProjectSaveButtonText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Speichern";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Save";
+            }
+
+            return "Zapisz";
+        }
+
+        private string GetCloseProjectDontSaveButtonText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Nicht speichern";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Don't save";
+            }
+
+            return "Nie zapisuj";
+        }
+
+        private string GetCloseProjectCancelButtonText()
+        {
+            return GetCancelButtonText();
+        }
+
+        private string GetCloseAppConfirmButtonText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Ja";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Yes";
+            }
+
+            return "Tak";
+        }
+
+        private enum CloseProjectDecision
+        {
+            Save,
+            DontSave,
+            Cancel
+        }
+
+        private CloseProjectDecision PromptSaveProjectChangesOnClose()
+        {
+            using (Form prompt = new Form())
+            {
+                prompt.Width = 430;
+                prompt.Height = 170;
+                prompt.StartPosition = FormStartPosition.CenterParent;
+                prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
+                prompt.MinimizeBox = false;
+                prompt.MaximizeBox = false;
+                prompt.ShowInTaskbar = false;
+                prompt.Text = Resources.Title_Confirmation;
+
+                int iconSize = 32;
+                int iconTextGap = 4;
+                int contentWidth = 332;
+                int contentLeft = Math.Max(12, (prompt.ClientSize.Width - contentWidth) / 2);
+                float messageFontSize = prompt.Font.Size + 1.5f;
+
+                PictureBox iconPictureBox = new PictureBox
+                {
+                    Left = contentLeft,
+                    Top = 20,
+                    Width = iconSize,
+                    Height = iconSize,
+                    SizeMode = PictureBoxSizeMode.CenterImage,
+                    Image = SystemIcons.Exclamation.ToBitmap()
+                };
+
+                Label textLabel = new Label
+                {
+                    Left = contentLeft + iconSize + iconTextGap,
+                    Top = 12,
+                    Width = contentWidth - iconSize - iconTextGap,
+                    Height = 50,
+                    AutoSize = false,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Font = new Font(prompt.Font.FontFamily, messageFontSize, FontStyle.Regular),
+                    Text = GetCloseProjectPromptText()
+                };
+
+                Button saveButton = new Button
+                {
+                    Text = GetCloseProjectSaveButtonText(),
+                    Width = 100,
+                    Height = 28
+                };
+                Button dontSaveButton = new Button
+                {
+                    Text = GetCloseProjectDontSaveButtonText(),
+                    Width = 110,
+                    Height = 28
+                };
+                Button cancelButton = new Button
+                {
+                    Text = GetCloseProjectCancelButtonText(),
+                    Width = 100,
+                    Height = 28
+                };
+
+                FlowLayoutPanel buttonsPanel = new FlowLayoutPanel
+                {
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    FlowDirection = FlowDirection.LeftToRight,
+                    WrapContents = false,
+                    Margin = Padding.Empty,
+                    Padding = Padding.Empty
+                };
+                buttonsPanel.Controls.Add(saveButton);
+                buttonsPanel.Controls.Add(dontSaveButton);
+                buttonsPanel.Controls.Add(cancelButton);
+                Size panelSize = buttonsPanel.PreferredSize;
+                buttonsPanel.Left = Math.Max(12, (prompt.ClientSize.Width - panelSize.Width) / 2);
+                buttonsPanel.Top = 82;
+
+                CloseProjectDecision decision = CloseProjectDecision.Cancel;
+                saveButton.Click += (_, __) =>
+                {
+                    decision = CloseProjectDecision.Save;
+                    prompt.DialogResult = DialogResult.OK;
+                    prompt.Close();
+                };
+                dontSaveButton.Click += (_, __) =>
+                {
+                    decision = CloseProjectDecision.DontSave;
+                    prompt.DialogResult = DialogResult.OK;
+                    prompt.Close();
+                };
+                cancelButton.Click += (_, __) =>
+                {
+                    decision = CloseProjectDecision.Cancel;
+                    prompt.DialogResult = DialogResult.Cancel;
+                    prompt.Close();
+                };
+
+                prompt.Controls.Add(iconPictureBox);
+                prompt.Controls.Add(textLabel);
+                prompt.Controls.Add(buttonsPanel);
+                prompt.AcceptButton = saveButton;
+                prompt.CancelButton = cancelButton;
+
+                DialogResult result = prompt.ShowDialog(this);
+                if (result != DialogResult.OK)
+                {
+                    return CloseProjectDecision.Cancel;
+                }
+
+                return decision;
+            }
+        }
+
+        private bool PromptConfirmCloseApplication(string message)
+        {
+            using (Form prompt = new Form())
+            {
+                prompt.Width = 430;
+                prompt.Height = 170;
+                prompt.StartPosition = FormStartPosition.CenterParent;
+                prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
+                prompt.MinimizeBox = false;
+                prompt.MaximizeBox = false;
+                prompt.ShowInTaskbar = false;
+                prompt.Text = Resources.Title_Confirmation;
+
+                int iconSize = 32;
+                int iconTextGap = 4;
+                int contentWidth = 332;
+                int contentLeft = Math.Max(12, (prompt.ClientSize.Width - contentWidth) / 2);
+                float messageFontSize = prompt.Font.Size + 1.5f;
+
+                PictureBox iconPictureBox = new PictureBox
+                {
+                    Left = contentLeft,
+                    Top = 20,
+                    Width = iconSize,
+                    Height = iconSize,
+                    SizeMode = PictureBoxSizeMode.CenterImage,
+                    Image = SystemIcons.Exclamation.ToBitmap()
+                };
+
+                Label textLabel = new Label
+                {
+                    Left = contentLeft + iconSize + iconTextGap,
+                    Top = 12,
+                    Width = contentWidth - iconSize - iconTextGap,
+                    Height = 50,
+                    AutoSize = false,
+                    TextAlign = ContentAlignment.MiddleLeft,
+                    Font = new Font(prompt.Font.FontFamily, messageFontSize, FontStyle.Regular),
+                    Text = message ?? string.Empty
+                };
+
+                Button confirmButton = new Button
+                {
+                    Text = GetCloseAppConfirmButtonText(),
+                    Width = 100,
+                    Height = 28
+                };
+                Button cancelButton = new Button
+                {
+                    Text = GetCloseProjectCancelButtonText(),
+                    Width = 100,
+                    Height = 28
+                };
+
+                FlowLayoutPanel buttonsPanel = new FlowLayoutPanel
+                {
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    FlowDirection = FlowDirection.LeftToRight,
+                    WrapContents = false,
+                    Margin = Padding.Empty,
+                    Padding = Padding.Empty
+                };
+                buttonsPanel.Controls.Add(confirmButton);
+                buttonsPanel.Controls.Add(cancelButton);
+                Size panelSize = buttonsPanel.PreferredSize;
+                buttonsPanel.Left = Math.Max(12, (prompt.ClientSize.Width - panelSize.Width) / 2);
+                buttonsPanel.Top = 82;
+
+                confirmButton.Click += (_, __) =>
+                {
+                    prompt.DialogResult = DialogResult.OK;
+                    prompt.Close();
+                };
+                cancelButton.Click += (_, __) =>
+                {
+                    prompt.DialogResult = DialogResult.Cancel;
+                    prompt.Close();
+                };
+
+                prompt.Controls.Add(iconPictureBox);
+                prompt.Controls.Add(textLabel);
+                prompt.Controls.Add(buttonsPanel);
+                prompt.AcceptButton = confirmButton;
+                prompt.CancelButton = cancelButton;
+
+                return prompt.ShowDialog(this) == DialogResult.OK;
+            }
+        }
+
+        private bool SaveProjectForClose()
+        {
+            if (!HasUnsavedProjectContent())
+            {
+                return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(lastSavedProjectName) && string.IsNullOrWhiteSpace(inputProjectPath))
+            {
+                SaveProjectAs();
+            }
+            else
+            {
+                SaveProjectButton_Click(this, EventArgs.Empty);
+            }
+
+            return !HasUnsavedProjectContent();
+        }
+
         private bool HasAnyObjectsOnPage(int pageNumber)
         {
             return textAnnotations.Any(a => a.PageNumber == pageNumber)
@@ -8744,6 +9431,11 @@ namespace AnonPDF
             if (pagesToRemove.Count == numPages)
             {
                 MessageBox.Show(this, Resources.Err_AllPagesMarked, Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!EnsureInterestSubjectForRequiredBases())
+            {
                 return;
             }
 
@@ -9432,7 +10124,8 @@ namespace AnonPDF
                 ScrollY = scrollY,
                 SignaturesMode = GetSignatureModeForProject(),
                 SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
-                AutoFootnotesEnabled = autoFootnotesEnabled
+                AutoFootnotesEnabled = autoFootnotesEnabled,
+                ExclusionAuthority = exclusionAuthorityName
             };
         }
 
@@ -11104,6 +11797,51 @@ namespace AnonPDF
                 .ToList();
         }
 
+        private bool RemoveInvalidLegalBasisReferencesFromRedactions()
+        {
+            if (redactionBlocks == null || redactionBlocks.Count == 0)
+            {
+                return false;
+            }
+
+            var validBasisIds = new HashSet<string>(
+                legalBasesById.Keys.Where(id => !string.IsNullOrWhiteSpace(id)),
+                StringComparer.OrdinalIgnoreCase);
+
+            bool changed = false;
+            foreach (var block in redactionBlocks)
+            {
+                if (block == null)
+                {
+                    continue;
+                }
+
+                NormalizeRedactionBlockMetadata(block);
+                if (block.BasisIds == null || block.BasisIds.Count == 0)
+                {
+                    continue;
+                }
+
+                List<string> filteredBasisIds = block.BasisIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim())
+                    .Where(id => validBasisIds.Contains(id))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (filteredBasisIds.Count == block.BasisIds.Count)
+                {
+                    continue;
+                }
+
+                block.BasisIds = filteredBasisIds;
+                block.FootnoteNumber = null;
+                changed = true;
+            }
+
+            return changed;
+        }
+
         private RedactionBlock CreateRedactionBlockWithAutomaticClassification(RectangleF bounds, int pageNumber, bool isMarkerSelection = false)
         {
             var block = new RedactionBlock(bounds, pageNumber);
@@ -11495,6 +12233,24 @@ namespace AnonPDF
             return entries;
         }
 
+        private string ResolveExclusionAuthorityForSummary(IList<RedactionBlock> blocksWithFootnotes)
+        {
+            if (!string.IsNullOrWhiteSpace(exclusionAuthorityName))
+            {
+                return exclusionAuthorityName.Trim();
+            }
+
+            foreach (var block in blocksWithFootnotes ?? new List<RedactionBlock>())
+            {
+                if (!string.IsNullOrWhiteSpace(block?.InterestSubject))
+                {
+                    return block.InterestSubject.Trim();
+                }
+            }
+
+            return string.Empty;
+        }
+
         private void RenderFootnoteMarkersToPdf(
             iText.Kernel.Pdf.PdfDocument pdfDoc,
             ISet<int> pagesWithBakedRotation,
@@ -11684,7 +12440,7 @@ namespace AnonPDF
             pdfCanvas.BeginText();
             pdfCanvas.SetFontAndSize(italicFont, bodyFontSize);
             pdfCanvas.MoveText(left, currentY);
-            pdfCanvas.ShowText(FootnoteSummaryAuthorityLine);
+            pdfCanvas.ShowText(GetExclusionAuthoritySummaryLine(ResolveExclusionAuthorityForSummary(blocksWithFootnotes)));
             pdfCanvas.EndText();
 
             currentY -= lineHeight * 2f;
@@ -12746,6 +13502,11 @@ namespace AnonPDF
                     List<string> signaturesToRemoveJson = projectData.SignaturesToRemove;
                     string signaturesMode = projectData.SignaturesMode;
                     autoFootnotesEnabled = projectData.AutoFootnotesEnabled ?? false;
+                    if (!string.IsNullOrWhiteSpace(projectData.ExclusionAuthority))
+                    {
+                        exclusionAuthorityName = projectData.ExclusionAuthority.Trim();
+                        SaveExclusionAuthorityUserSetting(exclusionAuthorityName);
+                    }
                     ApplyAutomaticFootnotesMenuState();
 
                     if (redactionBlocksJson.Count > 0)
@@ -13027,7 +13788,8 @@ namespace AnonPDF
                             ScrollY = scrollY,
                             SignaturesMode = GetSignatureModeForProject(),
                             SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
-                            AutoFootnotesEnabled = autoFootnotesEnabled
+                            AutoFootnotesEnabled = autoFootnotesEnabled,
+                            ExclusionAuthority = exclusionAuthorityName
                         };
 
                         // Serialize list to JSON string
@@ -13309,26 +14071,35 @@ namespace AnonPDF
         {
             if (!suppressCloseConfirmation)
             {
-                // Show dialog box with confirmation question
-                string msqOutText = "";
-                if (HasUnsavedProjectContent())
+                if (HasOpenedOrSavedProject() && HasUnsavedProjectContent())
                 {
-                    msqOutText += Resources.Msg_Closing_UnsavedSelectionsPrefix;
+                    CloseProjectDecision decision = PromptSaveProjectChangesOnClose();
+                    if (decision == CloseProjectDecision.Cancel)
+                    {
+                        e.Cancel = true;
+                    }
+                    else if (decision == CloseProjectDecision.Save)
+                    {
+                        if (!SaveProjectForClose())
+                        {
+                            e.Cancel = true;
+                        }
+                    }
                 }
-                msqOutText += Resources.Msg_Confirm_CloseApp;
-
-                DialogResult result = MessageBox.Show(this,
-                    msqOutText,
-                    Resources.Title_Confirmation,
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Exclamation,
-                    MessageBoxDefaultButton.Button2
-                );
-
-                // If user selects "No", cancel closing
-                if (result == DialogResult.No)
+                else
                 {
-                    e.Cancel = true;
+                    // Show dialog box with confirmation question
+                    string msqOutText = "";
+                    if (HasUnsavedProjectContent())
+                    {
+                        msqOutText += Resources.Msg_Closing_UnsavedSelectionsPrefix;
+                    }
+                    msqOutText += Resources.Msg_Confirm_CloseApp;
+
+                    if (!PromptConfirmCloseApplication(msqOutText))
+                    {
+                        e.Cancel = true;
+                    }
                 }
             }
 
@@ -13460,7 +14231,8 @@ namespace AnonPDF
                             ScrollY = scrollY,
                             SignaturesMode = GetSignatureModeForProject(),
                             SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
-                            AutoFootnotesEnabled = autoFootnotesEnabled
+                            AutoFootnotesEnabled = autoFootnotesEnabled,
+                            ExclusionAuthority = exclusionAuthorityName
                         };
 
                         // Serialize list to JSON string
@@ -20442,6 +21214,7 @@ namespace AnonPDF
         public List<string> SignaturesToRemove { get; set; }
         public string SignaturesMode { get; set; }
         public bool? AutoFootnotesEnabled { get; set; }
+        public string ExclusionAuthority { get; set; }
         public String FilePath { get; set; }
     }
 

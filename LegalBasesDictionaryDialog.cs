@@ -165,7 +165,7 @@ namespace AnonPDF
                 RowCount = 2
             };
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
             layout.Controls.Add(tabControl, 0, 0);
             layout.Controls.Add(buttonsPanel, 0, 1);
 
@@ -333,6 +333,7 @@ namespace AnonPDF
                 return globalExclusionScopes.ToList();
             }
 
+            EnsureLocalScopesSeededForEditing();
             if (localExclusionScopes.Count > 0)
             {
                 return localExclusionScopes.ToList();
@@ -348,12 +349,7 @@ namespace AnonPDF
                 return canEditGlobalScopes;
             }
 
-            if (localExclusionScopes.Count > 0)
-            {
-                return canEditLocalScopes;
-            }
-
-            return canEditGlobalScopes;
+            return canEditLocalScopes;
         }
 
         private BindingList<ExclusionScopeDefinition> GetTargetScopeBindingForSource(LegalBasisSource sourceKind)
@@ -363,7 +359,38 @@ namespace AnonPDF
                 return globalExclusionScopes;
             }
 
+            EnsureLocalScopesSeededForEditing();
             return localExclusionScopes.Count > 0 ? localExclusionScopes : globalExclusionScopes;
+        }
+
+        private void EnsureLocalScopesSeededForEditing()
+        {
+            if (localExclusionScopes.Count > 0 || !canEditLocalScopes)
+            {
+                return;
+            }
+
+            var seenScopeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var scope in globalExclusionScopes)
+            {
+                string scopeId = (scope?.ScopeId ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(scopeId) || !seenScopeIds.Add(scopeId))
+                {
+                    continue;
+                }
+
+                localExclusionScopes.Add(new ExclusionScopeDefinition
+                {
+                    ScopeId = scopeId,
+                    FriendlyName = string.IsNullOrWhiteSpace(scope?.FriendlyName) ? scopeId : scope.FriendlyName.Trim(),
+                    Category = string.IsNullOrWhiteSpace(scope?.Category) ? string.Empty : scope.Category.Trim(),
+                    Description = string.IsNullOrWhiteSpace(scope?.Description) ? string.Empty : scope.Description.Trim(),
+                    AutoDetectTags = new List<string>(scope?.AutoDetectTags ?? new List<string>()),
+                    DefaultBasisIds = new List<string>(),
+                    UiColor = string.IsNullOrWhiteSpace(scope?.UiColor) ? string.Empty : scope.UiColor.Trim(),
+                    SourceKind = ExclusionScopeSource.Local
+                });
+            }
         }
 
         private List<string> GetAssignedScopeIds(string basisId, LegalBasisSource sourceKind)
@@ -424,7 +451,7 @@ namespace AnonPDF
             }
         }
 
-        private List<string> GetScopeUsageDescriptions(string basisId)
+        private List<string> GetScopeUsageDescriptions(string basisId, LegalBasisSource basisSourceKind)
         {
             if (string.IsNullOrWhiteSpace(basisId))
             {
@@ -433,44 +460,53 @@ namespace AnonPDF
 
             string targetId = basisId.Trim();
             var usage = new List<string>();
-            string globalSourceName = Tr("globalny", "global", "global");
-            foreach (var scope in globalExclusionScopes ?? new BindingList<ExclusionScopeDefinition>())
+            bool includeGlobalScopes = basisSourceKind == LegalBasisSource.Global;
+            bool includeLocalScopes = basisSourceKind == LegalBasisSource.Local || basisSourceKind == LegalBasisSource.Global;
+
+            if (includeGlobalScopes)
             {
-                if (scope == null)
+                string globalSourceName = Tr("globalny", "global", "global");
+                foreach (var scope in globalExclusionScopes ?? new BindingList<ExclusionScopeDefinition>())
                 {
-                    continue;
-                }
+                    if (scope == null)
+                    {
+                        continue;
+                    }
 
-                bool isAssigned = (scope.DefaultBasisIds ?? new List<string>())
-                    .Any(id => string.Equals(id?.Trim(), targetId, StringComparison.OrdinalIgnoreCase));
-                if (!isAssigned)
-                {
-                    continue;
-                }
+                    bool isAssigned = (scope.DefaultBasisIds ?? new List<string>())
+                        .Any(id => string.Equals(id?.Trim(), targetId, StringComparison.OrdinalIgnoreCase));
+                    if (!isAssigned)
+                    {
+                        continue;
+                    }
 
-                string scopeId = string.IsNullOrWhiteSpace(scope.ScopeId) ? "-" : scope.ScopeId.Trim();
-                string scopeName = string.IsNullOrWhiteSpace(scope.FriendlyName) ? scopeId : scope.FriendlyName.Trim();
-                usage.Add(string.Format("{0}: {1} ({2})", globalSourceName, scopeName, scopeId));
+                    string scopeId = string.IsNullOrWhiteSpace(scope.ScopeId) ? "-" : scope.ScopeId.Trim();
+                    string scopeName = string.IsNullOrWhiteSpace(scope.FriendlyName) ? scopeId : scope.FriendlyName.Trim();
+                    usage.Add(string.Format("{0}: {1} ({2})", globalSourceName, scopeName, scopeId));
+                }
             }
 
-            string localSourceName = Tr("użytkownika", "user", "benutzer");
-            foreach (var scope in localExclusionScopes ?? new BindingList<ExclusionScopeDefinition>())
+            if (includeLocalScopes)
             {
-                if (scope == null)
+                string localSourceName = Tr("użytkownika", "user", "benutzer");
+                foreach (var scope in localExclusionScopes ?? new BindingList<ExclusionScopeDefinition>())
                 {
-                    continue;
-                }
+                    if (scope == null)
+                    {
+                        continue;
+                    }
 
-                bool isAssigned = (scope.DefaultBasisIds ?? new List<string>())
-                    .Any(id => string.Equals(id?.Trim(), targetId, StringComparison.OrdinalIgnoreCase));
-                if (!isAssigned)
-                {
-                    continue;
-                }
+                    bool isAssigned = (scope.DefaultBasisIds ?? new List<string>())
+                        .Any(id => string.Equals(id?.Trim(), targetId, StringComparison.OrdinalIgnoreCase));
+                    if (!isAssigned)
+                    {
+                        continue;
+                    }
 
-                string scopeId = string.IsNullOrWhiteSpace(scope.ScopeId) ? "-" : scope.ScopeId.Trim();
-                string scopeName = string.IsNullOrWhiteSpace(scope.FriendlyName) ? scopeId : scope.FriendlyName.Trim();
-                usage.Add(string.Format("{0}: {1} ({2})", localSourceName, scopeName, scopeId));
+                    string scopeId = string.IsNullOrWhiteSpace(scope.ScopeId) ? "-" : scope.ScopeId.Trim();
+                    string scopeName = string.IsNullOrWhiteSpace(scope.FriendlyName) ? scopeId : scope.FriendlyName.Trim();
+                    usage.Add(string.Format("{0}: {1} ({2})", localSourceName, scopeName, scopeId));
+                }
             }
 
             return usage;
@@ -617,7 +653,8 @@ namespace AnonPDF
                 return;
             }
 
-            List<string> scopeUsage = GetScopeUsageDescriptions(selectedItem.Id);
+            LegalBasisSource selectedSource = tabControl.SelectedTab == globalTabPage ? LegalBasisSource.Global : LegalBasisSource.Local;
+            List<string> scopeUsage = GetScopeUsageDescriptions(selectedItem.Id, selectedSource);
             if (scopeUsage.Count > 0)
             {
                 string usageList = string.Join(Environment.NewLine, scopeUsage.Select(item => "- " + item));
