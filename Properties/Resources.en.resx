@@ -231,6 +231,15 @@
   <data name="Menu_AddSnapToGrid" xml:space="preserve">
     <value>Snap objects to grid</value>
   </data>
+  <data name="Menu_AddLegalBasesDictionary" xml:space="preserve">
+    <value>Legal bases dictionary</value>
+  </data>
+  <data name="Menu_AddAutomaticFootnotes" xml:space="preserve">
+    <value>Automatic footnotes</value>
+  </data>
+  <data name="Msg_LegalBasesDictionary_NotImplemented" xml:space="preserve">
+    <value>Legal bases dictionary will be available in the next phase.</value>
+  </data>
   <data name="Menu_Context_Delete" xml:space="preserve">
     <value>Delete</value>
   </data>

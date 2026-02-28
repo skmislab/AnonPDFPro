@@ -425,6 +425,15 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="Menu_AddSnapToGrid" xml:space="preserve">
     <value>Objekte am Raster ausrichten</value>
   </data>
+  <data name="Menu_AddLegalBasesDictionary" xml:space="preserve">
+    <value>Rechtsgrundlagen</value>
+  </data>
+  <data name="Menu_AddAutomaticFootnotes" xml:space="preserve">
+    <value>Automatische Fussnoten</value>
+  </data>
+  <data name="Msg_LegalBasesDictionary_NotImplemented" xml:space="preserve">
+    <value>Das Verzeichnis der Rechtsgrundlagen wird in der naechsten Phase verfuegbar sein.</value>
+  </data>
   <data name="Menu_Context_Delete" xml:space="preserve">
     <value>Loeschen</value>
   </data>

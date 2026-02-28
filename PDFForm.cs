@@ -1061,12 +1061,12 @@ namespace AnonPDF
 
             if (legalBasesDictionaryToolStripMenuItem != null)
             {
-                legalBasesDictionaryToolStripMenuItem.Text = GetLegalBasesDictionaryMenuText();
+                legalBasesDictionaryToolStripMenuItem.Text = LocalizedText("Menu_AddLegalBasesDictionary");
             }
 
             if (automaticFootnotesToolStripMenuItem != null)
             {
-                automaticFootnotesToolStripMenuItem.Text = GetAutomaticFootnotesMenuText();
+                automaticFootnotesToolStripMenuItem.Text = LocalizedText("Menu_AddAutomaticFootnotes");
             }
         }
 
@@ -1084,7 +1084,7 @@ namespace AnonPDF
         {
             MessageBox.Show(
                 this,
-                GetLegalBasesDictionaryNotImplementedMessage(),
+                LocalizedText("Msg_LegalBasesDictionary_NotImplemented"),
                 Resources.Title_Info,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -1124,57 +1124,6 @@ namespace AnonPDF
             {
                 suppressAutomaticFootnotesMenuSync = false;
             }
-        }
-
-        private string GetLegalBasesDictionaryMenuText()
-        {
-            CultureInfo culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
-            string lang = culture.TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Słownik podstaw prawnych";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Rechtsgrundlagen";
-            }
-
-            return "Legal bases dictionary";
-        }
-
-        private string GetAutomaticFootnotesMenuText()
-        {
-            CultureInfo culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
-            string lang = culture.TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Automatyczne przypisy";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Automatische Fußnoten";
-            }
-
-            return "Automatic footnotes";
-        }
-
-        private string GetLegalBasesDictionaryNotImplementedMessage()
-        {
-            CultureInfo culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
-            string lang = culture.TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Słownik podstaw prawnych będzie dostępny w kolejnym etapie.";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Das Wörterbuch der Rechtsgrundlagen wird in der nächsten Phase verfügbar sein.";
-            }
-
-            return "Legal bases dictionary will be available in the next phase.";
         }
 
         private static float SnapValueToGrid(float value, float step)

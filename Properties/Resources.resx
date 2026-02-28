@@ -231,6 +231,15 @@
   <data name="Menu_AddSnapToGrid" xml:space="preserve">
     <value>Dociagaj obiekty do siatki</value>
   </data>
+  <data name="Menu_AddLegalBasesDictionary" xml:space="preserve">
+    <value>Słownik podstaw prawnych</value>
+  </data>
+  <data name="Menu_AddAutomaticFootnotes" xml:space="preserve">
+    <value>Automatyczne przypisy</value>
+  </data>
+  <data name="Msg_LegalBasesDictionary_NotImplemented" xml:space="preserve">
+    <value>Słownik podstaw prawnych będzie dostępny w kolejnym etapie.</value>
+  </data>
   <data name="Menu_Context_Delete" xml:space="preserve">
     <value>Usuń</value>
   </data>
