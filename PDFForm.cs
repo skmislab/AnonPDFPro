@@ -1082,12 +1082,413 @@ namespace AnonPDF
 
         private void LegalBasesDictionaryToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            MessageBox.Show(
-                this,
-                LocalizedText("Msg_LegalBasesDictionary_NotImplemented"),
-                Resources.Title_Info,
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            OpenLegalBasesDictionary();
+        }
+
+        private void OpenLegalBasesDictionary()
+        {
+            string globalPath = GetGlobalLegalBasesFilePath();
+            string localPath = GetLocalLegalBasesFilePath();
+            string globalScopesPath = GetGlobalExclusionScopesFilePath();
+            string localScopesPath = GetLocalExclusionScopesFilePath();
+
+            bool canEditGlobal = HasWriteAccessToTarget(globalPath);
+            bool canEditLocal = HasWriteAccessToTarget(localPath);
+            bool canEditGlobalScopes = HasWriteAccessToTarget(globalScopesPath);
+            bool canEditLocalScopes = HasWriteAccessToTarget(localScopesPath);
+
+            if (!TryLoadLegalBasesForEditor(globalPath, LegalBasisSource.Global, out List<LegalBasisDefinition> globalBases, out string globalLoadError))
+            {
+                ShowInfoMessage(globalLoadError);
+                return;
+            }
+
+            if (!TryLoadLegalBasesForEditor(localPath, LegalBasisSource.Local, out List<LegalBasisDefinition> localBases, out string localLoadError))
+            {
+                ShowInfoMessage(localLoadError);
+                return;
+            }
+
+            if (!TryLoadExclusionScopesForEditor(globalScopesPath, ExclusionScopeSource.Global, out List<ExclusionScopeDefinition> globalScopes, out string globalScopesVersion, out string globalScopesLoadError))
+            {
+                ShowInfoMessage(globalScopesLoadError);
+                return;
+            }
+
+            if (!TryLoadExclusionScopesForEditor(localScopesPath, ExclusionScopeSource.Local, out List<ExclusionScopeDefinition> localScopes, out string localScopesVersion, out string localScopesLoadError))
+            {
+                ShowInfoMessage(localScopesLoadError);
+                return;
+            }
+
+            using (var dialog = new LegalBasesDictionaryDialog(
+                globalBases,
+                localBases,
+                globalScopes,
+                localScopes,
+                canEditGlobal,
+                canEditLocal,
+                canEditGlobalScopes,
+                canEditLocalScopes,
+                globalPath,
+                localPath))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                if (canEditGlobal &&
+                    !TrySaveLegalBasesForEditor(globalPath, "GLOBAL", LegalBasisSource.Global, dialog.GetGlobalLegalBases(), out string globalSaveError))
+                {
+                    ShowInfoMessage(globalSaveError);
+                    return;
+                }
+
+                if (canEditLocal &&
+                    !TrySaveLegalBasesForEditor(localPath, "LOCAL", LegalBasisSource.Local, dialog.GetLocalLegalBases(), out string localSaveError))
+                {
+                    ShowInfoMessage(localSaveError);
+                    return;
+                }
+
+                if (canEditGlobalScopes &&
+                    !TrySaveExclusionScopesForEditor(
+                        globalScopesPath,
+                        globalScopesVersion,
+                        ExclusionScopeSource.Global,
+                        dialog.GetGlobalExclusionScopes(),
+                        out string globalScopesSaveError))
+                {
+                    ShowInfoMessage(globalScopesSaveError);
+                    return;
+                }
+
+                if (canEditLocalScopes &&
+                    !TrySaveExclusionScopesForEditor(
+                        localScopesPath,
+                        localScopesVersion,
+                        ExclusionScopeSource.Local,
+                        dialog.GetLocalExclusionScopes(),
+                        out string localScopesSaveError))
+                {
+                    ShowInfoMessage(localScopesSaveError);
+                    return;
+                }
+            }
+
+            LoadFootnotesCatalog();
+            ApplyAutomaticFootnotesMenuState();
+            pdfViewer.Invalidate();
+            ShowInfoMessage(GetLegalBasesSavedMessage());
+        }
+
+        private void AddLegalBasisFromContextMenu(RedactionBlock block)
+        {
+            string globalPath = GetGlobalLegalBasesFilePath();
+            string localPath = GetLocalLegalBasesFilePath();
+            string globalScopesPath = GetGlobalExclusionScopesFilePath();
+            string localScopesPath = GetLocalExclusionScopesFilePath();
+
+            bool canEditGlobal = HasWriteAccessToTarget(globalPath);
+            bool canEditLocal = HasWriteAccessToTarget(localPath);
+            bool canEditGlobalScopes = HasWriteAccessToTarget(globalScopesPath);
+            bool canEditLocalScopes = HasWriteAccessToTarget(localScopesPath);
+            string addedBasisId = null;
+
+            if (!canEditGlobal && !canEditLocal)
+            {
+                ShowInfoMessage(GetLegalBasesNoWriteAccessMessage());
+                return;
+            }
+
+            if (!TryLoadLegalBasesForEditor(globalPath, LegalBasisSource.Global, out List<LegalBasisDefinition> globalBases, out string globalLoadError))
+            {
+                ShowInfoMessage(globalLoadError);
+                return;
+            }
+
+            if (!TryLoadLegalBasesForEditor(localPath, LegalBasisSource.Local, out List<LegalBasisDefinition> localBases, out string localLoadError))
+            {
+                ShowInfoMessage(localLoadError);
+                return;
+            }
+
+            if (!TryLoadExclusionScopesForEditor(globalScopesPath, ExclusionScopeSource.Global, out List<ExclusionScopeDefinition> globalScopes, out string globalScopesVersion, out string globalScopesLoadError))
+            {
+                ShowInfoMessage(globalScopesLoadError);
+                return;
+            }
+
+            if (!TryLoadExclusionScopesForEditor(localScopesPath, ExclusionScopeSource.Local, out List<ExclusionScopeDefinition> localScopes, out string localScopesVersion, out string localScopesLoadError))
+            {
+                ShowInfoMessage(localScopesLoadError);
+                return;
+            }
+
+            LegalBasisSource targetSource = ResolveTargetSourceForNewLegalBasis(block, canEditGlobal, canEditLocal);
+            bool canEditTargetScopeAssignments;
+            List<ExclusionScopeDefinition> availableScopes;
+            List<ExclusionScopeDefinition> scopesToUpdate;
+            if (targetSource == LegalBasisSource.Global)
+            {
+                availableScopes = globalScopes;
+                scopesToUpdate = globalScopes;
+                canEditTargetScopeAssignments = canEditGlobalScopes;
+            }
+            else if (localScopes.Count > 0)
+            {
+                availableScopes = localScopes;
+                scopesToUpdate = localScopes;
+                canEditTargetScopeAssignments = canEditLocalScopes;
+            }
+            else
+            {
+                availableScopes = globalScopes;
+                scopesToUpdate = globalScopes;
+                canEditTargetScopeAssignments = canEditGlobalScopes;
+            }
+
+            string nextId = GenerateNextLegalBasisIdForSource(globalBases, localBases, targetSource);
+            using (var dialog = new LegalBasisEditDialog(
+                null,
+                targetSource,
+                nextId,
+                availableScopes,
+                Enumerable.Empty<string>(),
+                canEditTargetScopeAssignments))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                LegalBasisDefinition newEntry = CloneLegalBasisDefinition(dialog.Result);
+                if (!NormalizeLegalBasisDefinition(newEntry, targetSource))
+                {
+                    ShowInfoMessage(GetLegalBasesSaveInvalidEntryMessage());
+                    return;
+                }
+
+                if (globalBases.Concat(localBases).Any(item =>
+                    string.Equals(item?.Id, newEntry.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    ShowInfoMessage(string.Format(GetLegalBasesSaveDuplicateIdMessage(), newEntry.Id));
+                    return;
+                }
+
+                if (IsDuplicateLegalBasisTitle(newEntry.Title, globalBases, localBases))
+                {
+                    ShowInfoMessage(string.Format(GetLegalBasesSaveDuplicateTitleMessage(), newEntry.Title));
+                    return;
+                }
+
+                if (targetSource == LegalBasisSource.Global)
+                {
+                    globalBases.Add(newEntry);
+                }
+                else
+                {
+                    localBases.Add(newEntry);
+                }
+
+                if (canEditTargetScopeAssignments)
+                {
+                    ApplyBasisAssignmentsToScopeList(newEntry.Id, dialog.SelectedScopeIds, scopesToUpdate);
+                }
+
+                if (canEditGlobal &&
+                    !TrySaveLegalBasesForEditor(globalPath, "GLOBAL", LegalBasisSource.Global, globalBases, out string globalSaveError))
+                {
+                    ShowInfoMessage(globalSaveError);
+                    return;
+                }
+
+                if (canEditLocal &&
+                    !TrySaveLegalBasesForEditor(localPath, "LOCAL", LegalBasisSource.Local, localBases, out string localSaveError))
+                {
+                    ShowInfoMessage(localSaveError);
+                    return;
+                }
+
+                if (canEditGlobalScopes &&
+                    !TrySaveExclusionScopesForEditor(
+                        globalScopesPath,
+                        globalScopesVersion,
+                        ExclusionScopeSource.Global,
+                        globalScopes,
+                        out string globalScopesSaveError))
+                {
+                    ShowInfoMessage(globalScopesSaveError);
+                    return;
+                }
+
+                if (canEditLocalScopes &&
+                    !TrySaveExclusionScopesForEditor(
+                        localScopesPath,
+                        localScopesVersion,
+                        ExclusionScopeSource.Local,
+                        localScopes,
+                        out string localScopesSaveError))
+                {
+                    ShowInfoMessage(localScopesSaveError);
+                    return;
+                }
+
+                addedBasisId = newEntry.Id;
+            }
+
+            AssignLegalBasisToBlock(block, addedBasisId);
+            LoadFootnotesCatalog();
+            ApplyAutomaticFootnotesMenuState();
+            pdfViewer.Invalidate();
+            ShowInfoMessage(GetLegalBasesSavedMessage());
+        }
+
+        private LegalBasisSource ResolveTargetSourceForNewLegalBasis(RedactionBlock block, bool canEditGlobal, bool canEditLocal)
+        {
+            if (block != null && !string.IsNullOrWhiteSpace(block.ScopeId))
+            {
+                if (exclusionScopesById.TryGetValue(block.ScopeId.Trim(), out ExclusionScopeDefinition scope))
+                {
+                    if (scope.SourceKind == ExclusionScopeSource.Local && canEditLocal)
+                    {
+                        return LegalBasisSource.Local;
+                    }
+
+                    if (scope.SourceKind == ExclusionScopeSource.Global && canEditGlobal)
+                    {
+                        return LegalBasisSource.Global;
+                    }
+                }
+            }
+
+            if (canEditLocal)
+            {
+                return LegalBasisSource.Local;
+            }
+
+            return LegalBasisSource.Global;
+        }
+
+        private static bool IsDuplicateLegalBasisTitle(string title, IEnumerable<LegalBasisDefinition> globalBases, IEnumerable<LegalBasisDefinition> localBases)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return false;
+            }
+
+            string targetTitle = title.Trim();
+            return (globalBases ?? Enumerable.Empty<LegalBasisDefinition>())
+                .Concat(localBases ?? Enumerable.Empty<LegalBasisDefinition>())
+                .Any(item => string.Equals((item?.Title ?? string.Empty).Trim(), targetTitle, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private void AssignLegalBasisToBlock(RedactionBlock block, string basisId)
+        {
+            if (block == null || string.IsNullOrWhiteSpace(basisId))
+            {
+                return;
+            }
+
+            if (block.BasisIds == null)
+            {
+                block.BasisIds = new List<string>();
+            }
+
+            string normalizedBasisId = basisId.Trim();
+            bool alreadyAssigned = block.BasisIds.Any(id => string.Equals(id, normalizedBasisId, StringComparison.OrdinalIgnoreCase));
+            if (alreadyAssigned)
+            {
+                return;
+            }
+
+            block.BasisIds.Add(normalizedBasisId);
+            block.ClassificationSource = ClassificationSourceManual;
+            block.MatchedTag = null;
+            block.FootnoteNumber = null;
+
+            projectWasChangedAfterLastSave = true;
+            saveProjectButton.Enabled = true;
+            saveProjectMenuItem.Enabled = true;
+        }
+
+        private static void ApplyBasisAssignmentsToScopeList(string basisId, IEnumerable<string> selectedScopeIds, IList<ExclusionScopeDefinition> scopes)
+        {
+            if (string.IsNullOrWhiteSpace(basisId) || scopes == null)
+            {
+                return;
+            }
+
+            string targetId = basisId.Trim();
+            var selected = new HashSet<string>(
+                (selectedScopeIds ?? Enumerable.Empty<string>())
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var scope in scopes)
+            {
+                if (scope == null)
+                {
+                    continue;
+                }
+
+                var defaultIds = (scope.DefaultBasisIds ?? new List<string>())
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim())
+                    .Where(id => !string.Equals(id, targetId, StringComparison.OrdinalIgnoreCase))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (selected.Contains((scope.ScopeId ?? string.Empty).Trim()))
+                {
+                    defaultIds.Add(targetId);
+                }
+
+                scope.DefaultBasisIds = defaultIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            }
+        }
+
+        private static string GenerateNextLegalBasisIdForSource(
+            IEnumerable<LegalBasisDefinition> globalBases,
+            IEnumerable<LegalBasisDefinition> localBases,
+            LegalBasisSource sourceKind)
+        {
+            string prefix = sourceKind == LegalBasisSource.Global ? "G_BASE_" : "L_BASE_";
+            var allEntries = (globalBases ?? Enumerable.Empty<LegalBasisDefinition>())
+                .Concat(localBases ?? Enumerable.Empty<LegalBasisDefinition>())
+                .ToList();
+
+            int maxNumber = 0;
+            foreach (var entry in allEntries)
+            {
+                string id = (entry?.Id ?? string.Empty).Trim();
+                if (!id.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                string numericPart = id.Substring(prefix.Length);
+                if (int.TryParse(numericPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) && parsed > maxNumber)
+                {
+                    maxNumber = parsed;
+                }
+            }
+
+            int nextNumber = Math.Max(1, maxNumber + 1);
+            while (true)
+            {
+                string candidate = prefix + nextNumber.ToString("00", CultureInfo.InvariantCulture);
+                bool exists = allEntries.Any(entry =>
+                    string.Equals((entry?.Id ?? string.Empty).Trim(), candidate, StringComparison.OrdinalIgnoreCase));
+                if (!exists)
+                {
+                    return candidate;
+                }
+
+                nextNumber++;
+            }
         }
 
         private void AutomaticFootnotesToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
@@ -1124,6 +1525,246 @@ namespace AnonPDF
             {
                 suppressAutomaticFootnotesMenuSync = false;
             }
+        }
+
+        private static string GetLegalBasesSavedMessage()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Das Rechtsgrundlagen-Woerterbuch wurde gespeichert.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Legal bases dictionary has been saved.";
+            }
+
+            return "Slownik podstaw prawnych zostal zapisany.";
+        }
+
+        private static string GetLegalBasesLoadGlobalErrorPrefix()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Globales Verzeichnis der Rechtsgrundlagen konnte nicht geladen werden.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cannot load global legal bases dictionary.";
+            }
+
+            return "Nie mozna zaladowac globalnego slownika podstaw prawnych.";
+        }
+
+        private static string GetLegalBasesLoadLocalErrorPrefix()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Benutzer-Verzeichnis der Rechtsgrundlagen konnte nicht geladen werden.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cannot load user legal bases dictionary.";
+            }
+
+            return "Nie mozna zaladowac slownika podstaw prawnych uzytkownika.";
+        }
+
+        private static string GetLegalBasesSaveGlobalErrorPrefix()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Globales Verzeichnis der Rechtsgrundlagen konnte nicht gespeichert werden.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cannot save global legal bases dictionary.";
+            }
+
+            return "Nie mozna zapisac globalnego slownika podstaw prawnych.";
+        }
+
+        private static string GetLegalBasesSaveLocalErrorPrefix()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Benutzer-Verzeichnis der Rechtsgrundlagen konnte nicht gespeichert werden.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cannot save user legal bases dictionary.";
+            }
+
+            return "Nie mozna zapisac slownika podstaw prawnych uzytkownika.";
+        }
+
+        private static string GetLegalBasesSaveInvalidEntryMessage()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Die Liste der Rechtsgrundlagen enthaelt ungueltige Eintraege.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Legal bases list contains invalid entries.";
+            }
+
+            return "Lista podstaw prawnych zawiera nieprawidlowe wpisy.";
+        }
+
+        private static string GetLegalBasesSaveDuplicateIdMessage()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Doppelte ID der Rechtsgrundlage gefunden: {0}.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Duplicate legal basis ID detected: {0}.";
+            }
+
+            return "Wykryto zduplikowane ID podstawy prawnej: {0}.";
+        }
+
+        private static string GetLegalBasesSaveDuplicateTitleMessage()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Doppelter Kurztitel der Rechtsgrundlage gefunden: {0}.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Duplicate legal basis short title detected: {0}.";
+            }
+
+            return "Wykryto zduplikowana nazwe skrocona podstawy prawnej: {0}.";
+        }
+
+        private static string GetLegalBasesNoWriteAccessMessage()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Keine Berechtigung zum Speichern des Rechtsgrundlagen-Verzeichnisses.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "No write permission for legal bases dictionary.";
+            }
+
+            return "Brak uprawnien do zapisu slownika podstaw prawnych.";
+        }
+
+        private static string GetExclusionScopesLoadGlobalErrorPrefix()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Globales Verzeichnis der Ausschlussbereiche konnte nicht geladen werden.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cannot load global exclusion scopes dictionary.";
+            }
+
+            return "Nie mozna zaladowac globalnego slownika zakresow wylaczenia.";
+        }
+
+        private static string GetExclusionScopesLoadLocalErrorPrefix()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Benutzer-Verzeichnis der Ausschlussbereiche konnte nicht geladen werden.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cannot load user exclusion scopes dictionary.";
+            }
+
+            return "Nie mozna zaladowac slownika zakresow wylaczenia uzytkownika.";
+        }
+
+        private static string GetExclusionScopesSaveGlobalErrorPrefix()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Globales Verzeichnis der Ausschlussbereiche konnte nicht gespeichert werden.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cannot save global exclusion scopes dictionary.";
+            }
+
+            return "Nie mozna zapisac globalnego slownika zakresow wylaczenia.";
+        }
+
+        private static string GetExclusionScopesSaveLocalErrorPrefix()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Benutzer-Verzeichnis der Ausschlussbereiche konnte nicht gespeichert werden.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Cannot save user exclusion scopes dictionary.";
+            }
+
+            return "Nie mozna zapisac slownika zakresow wylaczenia uzytkownika.";
+        }
+
+        private static string GetExclusionScopesSaveInvalidEntryMessage()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Lista zakresow wylaczenia zawiera nieprawidlowe wpisy.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Exclusion scopes list contains invalid entries.";
+            }
+
+            return "Lista zakresow wylaczenia zawiera nieprawidlowe wpisy.";
+        }
+
+        private static string GetExclusionScopesSaveDuplicateIdMessage()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Doppelte ID des Ausschlussbereichs gefunden: {0}.";
+            }
+
+            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Duplicate exclusion scope ID detected: {0}.";
+            }
+
+            return "Wykryto zduplikowane ID zakresu wylaczenia: {0}.";
         }
 
         private static float SnapValueToGrid(float value, float step)
@@ -8357,6 +8998,235 @@ namespace AnonPDF
             }
         }
 
+        private bool TryLoadLegalBasesForEditor(
+            string path,
+            LegalBasisSource source,
+            out List<LegalBasisDefinition> legalBases,
+            out string errorMessage)
+        {
+            legalBases = new List<LegalBasisDefinition>();
+            errorMessage = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return true;
+            }
+
+            if (!TryLoadCatalogFile(path, out LegalBasesCatalogFile catalogFile, out string loadError))
+            {
+                string prefix = source == LegalBasisSource.Global
+                    ? GetLegalBasesLoadGlobalErrorPrefix()
+                    : GetLegalBasesLoadLocalErrorPrefix();
+                errorMessage = $"{prefix}\n{loadError}";
+                return false;
+            }
+
+            foreach (var entry in catalogFile.LegalBases ?? new List<LegalBasisDefinition>())
+            {
+                var clonedEntry = CloneLegalBasisDefinition(entry);
+                if (NormalizeLegalBasisDefinition(clonedEntry, source))
+                {
+                    legalBases.Add(clonedEntry);
+                }
+            }
+
+            return true;
+        }
+
+        private bool TrySaveLegalBasesForEditor(
+            string path,
+            string sourceName,
+            LegalBasisSource sourceKind,
+            IEnumerable<LegalBasisDefinition> legalBases,
+            out string errorMessage)
+        {
+            errorMessage = string.Empty;
+            var normalizedEntries = new List<LegalBasisDefinition>();
+            var usedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in legalBases ?? Enumerable.Empty<LegalBasisDefinition>())
+            {
+                var clonedEntry = CloneLegalBasisDefinition(entry);
+                if (!NormalizeLegalBasisDefinition(clonedEntry, sourceKind))
+                {
+                    errorMessage = GetLegalBasesSaveInvalidEntryMessage();
+                    return false;
+                }
+
+                if (!usedIds.Add(clonedEntry.Id))
+                {
+                    errorMessage = string.Format(GetLegalBasesSaveDuplicateIdMessage(), clonedEntry.Id);
+                    return false;
+                }
+
+                normalizedEntries.Add(clonedEntry);
+            }
+
+            try
+            {
+                string directoryPath = Path.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(directoryPath))
+                {
+                    Directory.CreateDirectory(directoryPath);
+                }
+
+                var catalogFile = new LegalBasesCatalogFile
+                {
+                    Source = sourceName,
+                    LegalBases = normalizedEntries
+                };
+
+                string json = JsonConvert.SerializeObject(catalogFile, Formatting.Indented);
+                File.WriteAllText(path, json);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                string prefix = sourceKind == LegalBasisSource.Global
+                    ? GetLegalBasesSaveGlobalErrorPrefix()
+                    : GetLegalBasesSaveLocalErrorPrefix();
+                errorMessage = $"{prefix}\n{ex.Message}";
+                return false;
+            }
+        }
+
+        private bool TryLoadExclusionScopesForEditor(
+            string path,
+            ExclusionScopeSource source,
+            out List<ExclusionScopeDefinition> scopes,
+            out string version,
+            out string errorMessage)
+        {
+            scopes = new List<ExclusionScopeDefinition>();
+            version = "1.0";
+            errorMessage = string.Empty;
+
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return true;
+            }
+
+            if (!TryLoadCatalogFile(path, out ExclusionScopesCatalogFile catalogFile, out string loadError))
+            {
+                string prefix = source == ExclusionScopeSource.Global
+                    ? GetExclusionScopesLoadGlobalErrorPrefix()
+                    : GetExclusionScopesLoadLocalErrorPrefix();
+                errorMessage = $"{prefix}\n{loadError}";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(catalogFile.Version))
+            {
+                version = catalogFile.Version.Trim();
+            }
+
+            foreach (var entry in catalogFile.ExclusionScopes ?? new List<ExclusionScopeDefinition>())
+            {
+                var clonedEntry = CloneExclusionScopeDefinition(entry);
+                if (NormalizeScopeDefinition(clonedEntry, source))
+                {
+                    scopes.Add(clonedEntry);
+                }
+            }
+
+            return true;
+        }
+
+        private bool TrySaveExclusionScopesForEditor(
+            string path,
+            string version,
+            ExclusionScopeSource source,
+            IEnumerable<ExclusionScopeDefinition> scopes,
+            out string errorMessage)
+        {
+            errorMessage = string.Empty;
+            var normalizedScopes = new List<ExclusionScopeDefinition>();
+            var usedScopeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var entry in scopes ?? Enumerable.Empty<ExclusionScopeDefinition>())
+            {
+                var clonedEntry = CloneExclusionScopeDefinition(entry);
+                if (!NormalizeScopeDefinition(clonedEntry, source))
+                {
+                    errorMessage = GetExclusionScopesSaveInvalidEntryMessage();
+                    return false;
+                }
+
+                if (!usedScopeIds.Add(clonedEntry.ScopeId))
+                {
+                    errorMessage = string.Format(GetExclusionScopesSaveDuplicateIdMessage(), clonedEntry.ScopeId);
+                    return false;
+                }
+
+                normalizedScopes.Add(clonedEntry);
+            }
+
+            try
+            {
+                string directoryPath = Path.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(directoryPath))
+                {
+                    Directory.CreateDirectory(directoryPath);
+                }
+
+                var catalogFile = new ExclusionScopesCatalogFile
+                {
+                    Version = string.IsNullOrWhiteSpace(version) ? "1.0" : version.Trim(),
+                    ExclusionScopes = normalizedScopes
+                };
+
+                string json = JsonConvert.SerializeObject(catalogFile, Formatting.Indented);
+                File.WriteAllText(path, json);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                string prefix = source == ExclusionScopeSource.Global
+                    ? GetExclusionScopesSaveGlobalErrorPrefix()
+                    : GetExclusionScopesSaveLocalErrorPrefix();
+                errorMessage = $"{prefix}\n{ex.Message}";
+                return false;
+            }
+        }
+
+        private static LegalBasisDefinition CloneLegalBasisDefinition(LegalBasisDefinition source)
+        {
+            if (source == null)
+            {
+                return new LegalBasisDefinition();
+            }
+
+            return new LegalBasisDefinition
+            {
+                Id = source.Id,
+                Title = source.Title,
+                FullCitation = source.FullCitation,
+                RequiresInterestSubject = source.RequiresInterestSubject,
+                DescriptionHint = source.DescriptionHint,
+                SourceKind = source.SourceKind
+            };
+        }
+
+        private static ExclusionScopeDefinition CloneExclusionScopeDefinition(ExclusionScopeDefinition source)
+        {
+            if (source == null)
+            {
+                return new ExclusionScopeDefinition();
+            }
+
+            return new ExclusionScopeDefinition
+            {
+                ScopeId = source.ScopeId,
+                FriendlyName = source.FriendlyName,
+                Category = source.Category,
+                Description = source.Description,
+                AutoDetectTags = new List<string>(source.AutoDetectTags ?? new List<string>()),
+                DefaultBasisIds = new List<string>(source.DefaultBasisIds ?? new List<string>()),
+                UiColor = source.UiColor,
+                SourceKind = source.SourceKind
+            };
+        }
+
         private void AddLegalBasesToCatalog(IEnumerable<LegalBasisDefinition> legalBases, LegalBasisSource source, string sourcePath)
         {
             if (legalBases == null)
@@ -8485,9 +9355,14 @@ namespace AnonPDF
                 }
 
                 string directoryPath = Path.GetDirectoryName(targetPath);
-                if (string.IsNullOrWhiteSpace(directoryPath) || !Directory.Exists(directoryPath))
+                if (string.IsNullOrWhiteSpace(directoryPath))
                 {
                     return false;
+                }
+
+                if (!Directory.Exists(directoryPath))
+                {
+                    Directory.CreateDirectory(directoryPath);
                 }
 
                 string probeFilePath = Path.Combine(directoryPath, $".write_probe_{Guid.NewGuid():N}.tmp");
@@ -9848,7 +10723,7 @@ namespace AnonPDF
             }
 
             var menu = new ContextMenuStrip();
-            menu.Items.Add(LocalizedText("Menu_Context_Delete"), null, (_, __) => RemoveRedactionBlock(block));
+            menu.Items.Add(GetDeleteSelectionContextMenuText(), null, (_, __) => RemoveRedactionBlock(block));
             menu.Items.Add(new ToolStripSeparator());
 
             bool hasDynamicScopes = exclusionScopesCatalog.Count > 0;
@@ -9887,11 +10762,10 @@ namespace AnonPDF
             menu.Items.Add(scopeMenu);
             menu.Items.Add(new ToolStripSeparator());
 
-            var basisHeader = new ToolStripMenuItem(GetLegalBasisContextMenuText())
-            {
-                Enabled = false
-            };
-            menu.Items.Add(basisHeader);
+            var addBasisItem = new ToolStripMenuItem(GetLegalBasisAddContextMenuText());
+            addBasisItem.Click += (_, __) => BeginInvoke(new Action(() => AddLegalBasisFromContextMenu(block)));
+            menu.Items.Add(addBasisItem);
+            menu.Items.Add(new ToolStripSeparator());
 
             if (hasDynamicBases)
             {
@@ -9901,15 +10775,30 @@ namespace AnonPDF
                 };
                 clearBasisItem.Click += (_, __) => ClearRedactionBlockBasis(block);
                 menu.Items.Add(clearBasisItem);
+                menu.Items.Add(new ToolStripSeparator());
 
                 HashSet<string> selectedBasisIds = new HashSet<string>(
                     block.BasisIds ?? new List<string>(),
                     StringComparer.OrdinalIgnoreCase);
 
-                foreach (var legalBasis in legalBasesCatalog.OrderBy(b => b.Title, StringComparer.CurrentCultureIgnoreCase))
+                var sortedBases = GetOrderedLegalBasesForIndexing();
+                var basisNumberById = sortedBases
+                    .Where(b => b != null && !string.IsNullOrWhiteSpace(b.Id))
+                    .Select((basis, index) => new { BasisId = basis.Id.Trim(), Number = index + 1 })
+                    .ToDictionary(item => item.BasisId, item => item.Number, StringComparer.OrdinalIgnoreCase);
+
+                LegalBasisSource? previousSource = null;
+                foreach (var legalBasis in sortedBases)
                 {
+                    if (previousSource.HasValue && previousSource.Value != legalBasis.SourceKind)
+                    {
+                        menu.Items.Add(new ToolStripSeparator());
+                    }
+
+                    previousSource = legalBasis.SourceKind;
                     string basisId = legalBasis.Id;
-                    var basisItem = new ToolStripMenuItem(FormatLegalBasisMenuLabel(legalBasis))
+                    basisNumberById.TryGetValue((basisId ?? string.Empty).Trim(), out int basisNumber);
+                    var basisItem = new ToolStripMenuItem(FormatLegalBasisMenuLabel(legalBasis, basisNumber))
                     {
                         Checked = selectedBasisIds.Contains(basisId),
                         ToolTipText = string.IsNullOrWhiteSpace(legalBasis.FullCitation)
@@ -10041,15 +10930,25 @@ namespace AnonPDF
             pdfViewer.Invalidate();
         }
 
-        private string FormatLegalBasisMenuLabel(LegalBasisDefinition legalBasis)
+        private string FormatLegalBasisMenuLabel(LegalBasisDefinition legalBasis, int basisNumber = 0)
         {
             if (legalBasis == null)
             {
                 return string.Empty;
             }
 
-            string prefix = legalBasis.SourceKind == LegalBasisSource.Global ? "G" : "L";
-            return $"[{prefix}] {legalBasis.Title}";
+            string numberPrefix = basisNumber > 0 ? $"[{basisNumber}] " : string.Empty;
+            return $"{numberPrefix}{legalBasis.Title}";
+        }
+
+        private List<LegalBasisDefinition> GetOrderedLegalBasesForIndexing()
+        {
+            return legalBasesCatalog
+                .Where(b => b != null)
+                .OrderBy(b => b.SourceKind == LegalBasisSource.Global ? 0 : 1)
+                .ThenBy(b => b.Title, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(b => b.Id, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
         }
 
         private string GetScopeContextMenuText()
@@ -10066,6 +10965,22 @@ namespace AnonPDF
             }
 
             return "Exclusion scope";
+        }
+
+        private string GetDeleteSelectionContextMenuText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Usuń zaznaczenie";
+            }
+
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Markierung entfernen";
+            }
+
+            return "Delete selection";
         }
 
         private string GetScopeNoneContextMenuText()
@@ -10114,6 +11029,22 @@ namespace AnonPDF
             }
 
             return "No basis";
+        }
+
+        private string GetLegalBasisAddContextMenuText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Dodaj podstawę";
+            }
+
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Grundlage hinzufuegen";
+            }
+
+            return "Add legal basis";
         }
 
         private string GetCatalogUnavailableContextMenuText()
@@ -10450,37 +11381,32 @@ namespace AnonPDF
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            usedBasisIds.Sort((left, right) =>
-                string.Compare(
-                    GetLegalBasisSortKey(left),
-                    GetLegalBasisSortKey(right),
-                    StringComparison.CurrentCultureIgnoreCase));
+            if (usedBasisIds.Count == 0)
+            {
+                return map;
+            }
 
-            int number = 1;
+            var orderedAllBases = GetOrderedLegalBasesForIndexing();
+            var allBasisNumberById = orderedAllBases
+                .Where(b => !string.IsNullOrWhiteSpace(b.Id))
+                .Select((basis, index) => new { BasisId = basis.Id.Trim(), Number = index + 1 })
+                .ToDictionary(item => item.BasisId, item => item.Number, StringComparer.OrdinalIgnoreCase);
+
             foreach (string basisId in usedBasisIds)
             {
-                map[basisId] = number++;
-            }
-
-            return map;
-        }
-
-        private string GetLegalBasisSortKey(string basisId)
-        {
-            if (string.IsNullOrWhiteSpace(basisId))
-            {
-                return string.Empty;
-            }
-
-            if (legalBasesById.TryGetValue(basisId.Trim(), out LegalBasisDefinition legalBasis))
-            {
-                if (!string.IsNullOrWhiteSpace(legalBasis.Title))
+                if (allBasisNumberById.TryGetValue(basisId, out int number))
                 {
-                    return legalBasis.Title;
+                    map[basisId] = number;
                 }
             }
 
-            return basisId.Trim();
+            int nextNumber = allBasisNumberById.Count == 0 ? 1 : allBasisNumberById.Values.Max() + 1;
+            foreach (string basisId in usedBasisIds.Where(id => !map.ContainsKey(id)))
+            {
+                map[basisId] = nextNumber++;
+            }
+
+            return map;
         }
 
         private bool TryBuildFootnoteMarkerText(RedactionBlock block, IDictionary<string, int> basisNumberMap, out string markerText)

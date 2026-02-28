@@ -207,6 +207,7 @@
       <DependentUpon>PDFForm.cs</DependentUpon>
     </Compile>
     <Compile Include="LicenseManager.cs" />
+    <Compile Include="LegalBasesDictionaryDialog.cs" />
     <Compile Include="SplashForm.cs">
       <SubType>Form</SubType>
     </Compile>
