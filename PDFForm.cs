@@ -649,6 +649,7 @@ namespace AnonPDF
             }
 
             InitializeComponent();
+            autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
             InitializeUpdateMenu();
             InitializeRasterMenu();
             LoadFootnotesCatalog();
@@ -1883,12 +1884,26 @@ namespace AnonPDF
             }
 
             autoFootnotesEnabled = automaticFootnotesToolStripMenuItem.Checked;
+            SaveAutoFootnotesUserSetting(autoFootnotesEnabled);
 
             if (pdf != null)
             {
                 projectWasChangedAfterLastSave = true;
                 saveProjectButton.Enabled = true;
                 saveProjectMenuItem.Enabled = true;
+            }
+        }
+
+        private void SaveAutoFootnotesUserSetting(bool enabled)
+        {
+            try
+            {
+                Properties.Settings.Default.AutoFootnotesEnabled = enabled;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Save auto footnotes user setting failed: " + ex.Message);
             }
         }
 
@@ -8429,7 +8444,7 @@ namespace AnonPDF
             PdfTextSearcher.ClearCache();
             signaturesToRemove.Clear();
             hasCustomSignatureSelection = false;
-            autoFootnotesEnabled = false;
+            autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
 
             inputProjectPath = "";
             lastSavedProjectName = "";
@@ -9014,7 +9029,7 @@ namespace AnonPDF
             PdfTextSearcher.ClearCache();
             signaturesToRemove.Clear();
             hasCustomSignatureSelection = false;
-            autoFootnotesEnabled = false;
+            autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
             allPageStatuses.Clear();
             pagesListView.Clear();
             searchTextBox.Text = string.Empty;
@@ -13529,7 +13544,7 @@ namespace AnonPDF
                     Dictionary<int, int> rotationOffsetsJson = projectData.PageRotationOffsets ?? new Dictionary<int, int>();
                     List<string> signaturesToRemoveJson = projectData.SignaturesToRemove;
                     string signaturesMode = projectData.SignaturesMode;
-                    autoFootnotesEnabled = projectData.AutoFootnotesEnabled ?? false;
+                    autoFootnotesEnabled = projectData.AutoFootnotesEnabled ?? Properties.Settings.Default.AutoFootnotesEnabled;
                     if (!string.IsNullOrWhiteSpace(projectData.ExclusionAuthority))
                     {
                         exclusionAuthorityName = projectData.ExclusionAuthority.Trim();

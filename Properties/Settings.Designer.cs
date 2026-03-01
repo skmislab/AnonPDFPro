@@ -226,5 +226,17 @@ namespace AnonPDF.Properties {
                 this["ExclusionAuthorityVerified"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool AutoFootnotesEnabled {
+            get {
+                return ((bool)(this["AutoFootnotesEnabled"]));
+            }
+            set {
+                this["AutoFootnotesEnabled"] = value;
+            }
+        }
     }
 }
