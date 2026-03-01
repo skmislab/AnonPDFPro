@@ -414,6 +414,10 @@ namespace AnonPDF
         private enum ArrowIconType { None, Edit, Lock, Duplicate, Order, Delete }
         private ArrowIconType clickedArrowIconType = ArrowIconType.None;
         private ArrowObject arrowObjectForIcon = null;
+        private bool isClickOnVectorIcon = false;
+        private enum VectorIconType { None, Edit, Lock, Duplicate, Order, Delete }
+        private VectorIconType clickedVectorIconType = VectorIconType.None;
+        private VectorShapeObject vectorShapeForIcon = null;
 
         private MergeFilesForm mergeForm;
 
@@ -4238,6 +4242,7 @@ namespace AnonPDF
             if (selectedVectorShape != null && string.Equals(selectedVectorShape.Id, vectorShape.Id, StringComparison.Ordinal))
             {
                 selectedVectorShape = null;
+                ResetVectorInteractionState();
             }
 
             projectWasChangedAfterLastSave = true;
@@ -4324,6 +4329,44 @@ namespace AnonPDF
             return true;
         }
 
+        private bool TryReorderVectorShape(VectorShapeObject vectorShape, Func<VectorShapeObject, bool> reorderAction)
+        {
+            if (vectorShape == null || reorderAction == null)
+            {
+                return false;
+            }
+
+            EnsureVectorShapeId(vectorShape);
+
+            if (!EnsureCurrentPageEditable(true))
+            {
+                return true;
+            }
+
+            if (vectorShape.IsLocked)
+            {
+                MessageBox.Show(
+                    this,
+                    string.Format(LocalizedText("Msg_TextPositionInfo"), LocalizedText("Msg_TextAnnotation_Locked")),
+                    Resources.Title_Info,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return true;
+            }
+
+            if (!reorderAction(vectorShape))
+            {
+                return true;
+            }
+
+            vectorShape.UpdatedAtUtc = DateTime.UtcNow;
+            projectWasChangedAfterLastSave = true;
+            saveProjectButton.Enabled = true;
+            saveProjectMenuItem.Enabled = true;
+            pdfViewer.Invalidate();
+            return true;
+        }
+
         private void ShowRasterOrderMenu(RasterObject rasterObject)
         {
             if (rasterObject == null)
@@ -4356,6 +4399,123 @@ namespace AnonPDF
 
             Point location = pdfViewer.PointToClient(Cursor.Position);
             menu.Show(pdfViewer, location);
+        }
+
+        private void ShowVectorOrderMenu(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null)
+            {
+                return;
+            }
+
+            var menu = new ContextMenuStrip();
+            menu.Items.Add(LocalizedText("Order_BringToFront"), null, (_, __) => TryReorderVectorShape(vectorShape, BringVectorShapeToFront));
+            menu.Items.Add(LocalizedText("Order_MoveForward"), null, (_, __) => TryReorderVectorShape(vectorShape, MoveVectorShapeForward));
+            menu.Items.Add(LocalizedText("Order_MoveBackward"), null, (_, __) => TryReorderVectorShape(vectorShape, MoveVectorShapeBackward));
+            menu.Items.Add(LocalizedText("Order_SendToBack"), null, (_, __) => TryReorderVectorShape(vectorShape, SendVectorShapeToBack));
+
+            Point location = pdfViewer.PointToClient(Cursor.Position);
+            menu.Show(pdfViewer, location);
+        }
+
+        private bool ConstrainVectorShapeToPage(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null || vectorShape.Points == null || vectorShape.Points.Count == 0)
+            {
+                return false;
+            }
+
+            var pageSize = GetPageSizeWithOffset(vectorShape.PageNumber);
+            if (pageSize.Width <= 0f || pageSize.Height <= 0f)
+            {
+                return false;
+            }
+
+            RectangleF bounds = GetVectorShapeBounds(vectorShape.Points);
+            if (bounds.IsEmpty)
+            {
+                return false;
+            }
+
+            float dx = 0f;
+            float dy = 0f;
+
+            if (bounds.Left < 0f)
+            {
+                dx = -bounds.Left;
+            }
+            else if (bounds.Right > pageSize.Width)
+            {
+                dx = pageSize.Width - bounds.Right;
+            }
+
+            if (bounds.Top < 0f)
+            {
+                dy = -bounds.Top;
+            }
+            else if (bounds.Bottom > pageSize.Height)
+            {
+                dy = pageSize.Height - bounds.Bottom;
+            }
+
+            if (Math.Abs(dx) <= 0.0001f && Math.Abs(dy) <= 0.0001f)
+            {
+                return false;
+            }
+
+            vectorShape.Points = vectorShape.Points
+                .Select(point => new PointF(point.X + dx, point.Y + dy))
+                .ToList();
+            return true;
+        }
+
+        private void DuplicateVectorShape(VectorShapeObject source)
+        {
+            if (source == null)
+            {
+                return;
+            }
+
+            if (!EnsureCurrentPageEditable(true))
+            {
+                return;
+            }
+
+            EnsureVectorShapeId(source);
+            var copy = new VectorShapeObject
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                PageNumber = source.PageNumber,
+                ShapeType = source.ShapeType,
+                Points = (source.Points ?? new List<PointF>())
+                    .Select(point => new PointF(point.X + 12f, point.Y + 12f))
+                    .ToList(),
+                StrokeColorArgb = source.StrokeColorArgb,
+                StrokeWidth = source.StrokeWidth,
+                FillColorArgb = source.FillColorArgb,
+                FillOpacity = source.FillOpacity,
+                StrokeStyle = source.StrokeStyle,
+                IsLocked = source.IsLocked,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            NormalizeVectorShape(copy);
+            ConstrainVectorShapeToPage(copy);
+
+            vectorShapes.Add(copy);
+            selectedVectorShape = copy;
+            selectedArrowObject = null;
+            selectedRasterObject = null;
+            selectedTextAnnotation = null;
+            ClearGroupSelection();
+            EnsureObjectLayerOrder();
+            BringVectorShapeToFront(copy);
+
+            projectWasChangedAfterLastSave = true;
+            saveProjectButton.Enabled = true;
+            saveProjectMenuItem.Enabled = true;
+            UpdateCurrentPageObjectsMarker();
+            pdfViewer.Invalidate();
         }
 
         private bool TryDeleteActiveObjectByKeyboard()
@@ -4493,6 +4653,7 @@ namespace AnonPDF
             selectedRasterObject = null;
             selectedArrowObject = null;
             selectedVectorShape = null;
+            ResetVectorInteractionState();
             ClearGroupSelection();
             ResetGroupMoveState();
 
@@ -8807,6 +8968,7 @@ namespace AnonPDF
             isVectorShapeCreationMode = false;
             ResetVectorInteractionState();
             ResetGroupMoveState();
+            ClearVectorIconClickState();
             pdfViewer.Invalidate();
         }
 
@@ -11251,10 +11413,14 @@ namespace AnonPDF
             }
         }
 
-        private bool TryPromptShapeDefaults(out VectorShapeDefaults selectedDefaults)
+        private bool TryPromptShapeDefaults(
+            out VectorShapeDefaults selectedDefaults,
+            VectorShapeDefaults initialDefaults = null,
+            bool lockShapeType = false)
         {
             selectedDefaults = null;
-            VectorShapeDefaults working = activeVectorShapeDefaults?.Clone() ?? VectorShapeDefaults.CreateDefault();
+            VectorShapeDefaults sourceDefaults = initialDefaults ?? activeVectorShapeDefaults;
+            VectorShapeDefaults working = sourceDefaults?.Clone() ?? VectorShapeDefaults.CreateDefault();
             VectorShapeType selectedShape = working.ShapeType;
             string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
             bool isPl = string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase);
@@ -11331,6 +11497,11 @@ namespace AnonPDF
 
                     button.Click += (_, __) =>
                     {
+                        if (lockShapeType)
+                        {
+                            return;
+                        }
+
                         selectedShape = shapeType;
                         foreach (var pair in shapeButtons)
                         {
@@ -11435,6 +11606,18 @@ namespace AnonPDF
                 if (shapeButtons.TryGetValue(selectedShape, out Button selectedButton))
                 {
                     selectedButton.PerformClick();
+                }
+
+                if (lockShapeType)
+                {
+                    foreach (var pair in shapeButtons)
+                    {
+                        bool isSelected = pair.Key == selectedShape;
+                        pair.Value.Enabled = isSelected;
+                        pair.Value.BackColor = isSelected
+                            ? System.Drawing.Color.FromArgb(220, 240, 255)
+                            : SystemColors.Control;
+                    }
                 }
 
                 if (prompt.ShowDialog(this) != DialogResult.OK)
@@ -11562,6 +11745,7 @@ namespace AnonPDF
                 annotationForIcon = null;
                 ClearRasterIconClickState();
                 ClearArrowIconClickState();
+                ClearVectorIconClickState();
                 TryBeginMiddleMousePan();
                 return;
             }
@@ -11628,6 +11812,7 @@ namespace AnonPDF
             annotationForIcon = null;
             ClearRasterIconClickState();
             ClearArrowIconClickState();
+            ClearVectorIconClickState();
             rasterMouseActionInProgress = false;
             arrowMouseActionInProgress = false;
             vectorMouseActionInProgress = false;
@@ -11640,6 +11825,7 @@ namespace AnonPDF
                 selectedVectorShape = null;
                 ResetGroupMoveState();
                 ClearArrowIconClickState();
+                ClearVectorIconClickState();
                 return;
             }
 
@@ -11759,6 +11945,23 @@ namespace AnonPDF
                         ResetRasterInteractionState();
                         selectedVectorShape = null;
                         ResetVectorInteractionState();
+                        ClearVectorIconClickState();
+                        isDrawing = false;
+                        isMoving = false;
+                        annotationToMove = null;
+                        pdfViewer.Invalidate();
+                        return;
+                    }
+
+                    if (TryHandleVectorIconMouseDown(e.Location))
+                    {
+                        selectedArrowObject = null;
+                        ResetArrowInteractionState();
+                        ClearArrowIconClickState();
+                        selectedRasterObject = null;
+                        ResetRasterInteractionState();
+                        ClearRasterIconClickState();
+                        selectedTextAnnotation = null;
                         isDrawing = false;
                         isMoving = false;
                         annotationToMove = null;
@@ -12387,6 +12590,8 @@ namespace AnonPDF
                 clickedIconType = IconType.None;
                 annotationForIcon = null;
                 ClearRasterIconClickState();
+                ClearArrowIconClickState();
+                ClearVectorIconClickState();
                 pdfViewer.Invalidate();
                 return;
             }
@@ -12537,6 +12742,48 @@ namespace AnonPDF
                     }
 
                     ClearArrowIconClickState();
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
+                if (isClickOnVectorIcon && vectorShapeForIcon != null)
+                {
+                    switch (clickedVectorIconType)
+                    {
+                        case VectorIconType.Edit:
+                            EditVectorShapeObject(vectorShapeForIcon);
+                            break;
+                        case VectorIconType.Lock:
+                            if (EnsureCurrentPageEditable(true))
+                            {
+                                vectorShapeForIcon.IsLocked = !vectorShapeForIcon.IsLocked;
+                                vectorShapeForIcon.UpdatedAtUtc = DateTime.UtcNow;
+                                projectWasChangedAfterLastSave = true;
+                                saveProjectButton.Enabled = true;
+                                saveProjectMenuItem.Enabled = true;
+                                string msg = vectorShapeForIcon.IsLocked
+                                    ? LocalizedText("Msg_TextAnnotation_Locked")
+                                    : LocalizedText("Msg_TextAnnotation_Unlocked");
+                                MessageBox.Show(
+                                    this,
+                                    string.Format(LocalizedText("Msg_TextPositionInfo"), msg),
+                                    Resources.Title_Info,
+                                    MessageBoxButtons.OK,
+                                    MessageBoxIcon.Information);
+                            }
+                            break;
+                        case VectorIconType.Duplicate:
+                            DuplicateVectorShape(vectorShapeForIcon);
+                            break;
+                        case VectorIconType.Order:
+                            ShowVectorOrderMenu(vectorShapeForIcon);
+                            break;
+                        case VectorIconType.Delete:
+                            DeleteVectorShapeWithConfirmation(vectorShapeForIcon);
+                            break;
+                    }
+
+                    ClearVectorIconClickState();
                     pdfViewer.Invalidate();
                     return;
                 }
@@ -12694,6 +12941,7 @@ namespace AnonPDF
             annotationForIcon = null;
             ClearRasterIconClickState();
             ClearArrowIconClickState();
+            ClearVectorIconClickState();
             if (!isMovingArrowObject && !isAdjustingArrowHandle)
             {
                 arrowMouseActionInProgress = false;
@@ -14853,6 +15101,7 @@ namespace AnonPDF
             {
                 DrawSelectedRasterOverlayOnTop(e.Graphics);
                 DrawSelectedArrowOverlayOnTop(e.Graphics);
+                DrawSelectedVectorOverlayOnTop(e.Graphics);
             }
 
             if (IsCurrentPageMarkedForDeletion())
@@ -16665,6 +16914,66 @@ namespace AnonPDF
             return true;
         }
 
+        private void EditVectorShapeObject(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null || vectorShape.PageNumber != currentPage)
+            {
+                return;
+            }
+
+            if (!EnsureCurrentPageEditable(true))
+            {
+                return;
+            }
+
+            var initialDefaults = new VectorShapeDefaults
+            {
+                ShapeType = ParseVectorShapeType(vectorShape.ShapeType),
+                StrokeColorArgb = vectorShape.StrokeColorArgb,
+                StrokeWidth = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth),
+                FillColorArgb = vectorShape.FillColorArgb,
+                FillOpacity = NormalizeVectorFillOpacity(vectorShape.FillOpacity),
+                StrokeKind = ParseVectorStrokeKind(vectorShape.StrokeStyle)
+            };
+
+            if (!TryPromptShapeDefaults(out VectorShapeDefaults selectedDefaults, initialDefaults, lockShapeType: true))
+            {
+                return;
+            }
+
+            if (selectedDefaults == null)
+            {
+                return;
+            }
+
+            bool changed =
+                !string.Equals(vectorShape.ShapeType ?? string.Empty, selectedDefaults.ShapeType.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                vectorShape.StrokeColorArgb != selectedDefaults.StrokeColorArgb ||
+                !AreSameFloat(NormalizeVectorStrokeWidth(vectorShape.StrokeWidth), NormalizeVectorStrokeWidth(selectedDefaults.StrokeWidth)) ||
+                vectorShape.FillColorArgb != selectedDefaults.FillColorArgb ||
+                !AreSameFloat(NormalizeVectorFillOpacity(vectorShape.FillOpacity), NormalizeVectorFillOpacity(selectedDefaults.FillOpacity)) ||
+                !string.Equals(vectorShape.StrokeStyle ?? string.Empty, selectedDefaults.StrokeKind.ToString(), StringComparison.OrdinalIgnoreCase);
+
+            if (!changed)
+            {
+                return;
+            }
+
+            vectorShape.ShapeType = selectedDefaults.ShapeType.ToString();
+            vectorShape.StrokeColorArgb = selectedDefaults.StrokeColorArgb;
+            vectorShape.StrokeWidth = NormalizeVectorStrokeWidth(selectedDefaults.StrokeWidth);
+            vectorShape.FillColorArgb = selectedDefaults.FillColorArgb;
+            vectorShape.FillOpacity = NormalizeVectorFillOpacity(selectedDefaults.FillOpacity);
+            vectorShape.StrokeStyle = selectedDefaults.StrokeKind.ToString();
+            NormalizeVectorShape(vectorShape);
+            ConstrainVectorShapeToPage(vectorShape);
+            vectorShape.UpdatedAtUtc = DateTime.UtcNow;
+            projectWasChangedAfterLastSave = true;
+            saveProjectButton.Enabled = true;
+            saveProjectMenuItem.Enabled = true;
+            pdfViewer.Invalidate();
+        }
+
         private RectangleF GetInitialRasterBounds(int sourceWidth, int sourceHeight)
         {
             var pageSize = GetPageSizeWithOffset(currentPage);
@@ -17484,6 +17793,46 @@ namespace AnonPDF
             return MoveLayerBackward(LayerObjectType.Arrow, arrowObject.Id);
         }
 
+        private bool BringVectorShapeToFront(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null)
+            {
+                return false;
+            }
+            EnsureVectorShapeId(vectorShape);
+            return BringLayerToFront(LayerObjectType.VectorShape, vectorShape.Id);
+        }
+
+        private bool SendVectorShapeToBack(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null)
+            {
+                return false;
+            }
+            EnsureVectorShapeId(vectorShape);
+            return SendLayerToBack(LayerObjectType.VectorShape, vectorShape.Id);
+        }
+
+        private bool MoveVectorShapeForward(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null)
+            {
+                return false;
+            }
+            EnsureVectorShapeId(vectorShape);
+            return MoveLayerForward(LayerObjectType.VectorShape, vectorShape.Id);
+        }
+
+        private bool MoveVectorShapeBackward(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null)
+            {
+                return false;
+            }
+            EnsureVectorShapeId(vectorShape);
+            return MoveLayerBackward(LayerObjectType.VectorShape, vectorShape.Id);
+        }
+
         private bool ConstrainArrowToPage(ArrowObject arrowObject)
         {
             if (arrowObject == null)
@@ -17768,6 +18117,13 @@ namespace AnonPDF
             arrowObjectForIcon = null;
         }
 
+        private void ClearVectorIconClickState()
+        {
+            isClickOnVectorIcon = false;
+            clickedVectorIconType = VectorIconType.None;
+            vectorShapeForIcon = null;
+        }
+
         private bool TryGetRasterIconRects(RasterObject rasterObject, out Dictionary<RasterIconType, Rectangle> iconRects)
         {
             iconRects = null;
@@ -17894,6 +18250,73 @@ namespace AnonPDF
                 [ArrowIconType.Duplicate] = BuildRectFromRight(2),
                 [ArrowIconType.Order] = BuildRectFromRight(1),
                 [ArrowIconType.Delete] = BuildRectFromRight(0)
+            };
+
+            return true;
+        }
+
+        private bool TryGetVectorIconRects(VectorShapeObject vectorShape, out Dictionary<VectorIconType, Rectangle> iconRects)
+        {
+            iconRects = null;
+            if (vectorShape == null || vectorShape.PageNumber != currentPage || vectorShape.Points == null || vectorShape.Points.Count < 2)
+            {
+                return false;
+            }
+
+            PointF[] points = BuildVectorShapeRenderPoints(ParseVectorShapeType(vectorShape.ShapeType), vectorShape.Points)
+                .Select(p => new PointF(p.X * scaleFactor, p.Y * scaleFactor))
+                .ToArray();
+            if (points.Length < 2)
+            {
+                return false;
+            }
+
+            float minX = points.Min(p => p.X);
+            float maxX = points.Max(p => p.X);
+            float minY = points.Min(p => p.Y);
+            float maxY = points.Max(p => p.Y);
+            if ((maxX - minX) < 1f && (maxY - minY) < 1f)
+            {
+                return false;
+            }
+
+            const int buttonCount = 5;
+            int totalWidth = (buttonCount * annotationsIconSize) + ((buttonCount - 1) * annotationsIconPadding);
+            int top = (int)Math.Round(minY) - annotationsIconSize - annotationsIconPadding;
+            int right = (int)Math.Round(maxX);
+            int panelRight = Math.Max(2, pdfViewer.ClientSize.Width - 2);
+            int panelBottom = Math.Max(2, pdfViewer.ClientSize.Height - annotationsIconSize - 2);
+            if (top < 2)
+            {
+                top = (int)Math.Round(maxY) + annotationsIconPadding;
+            }
+            if (top > panelBottom)
+            {
+                top = panelBottom;
+            }
+
+            if (right > panelRight)
+            {
+                right = panelRight;
+            }
+            if (right - totalWidth < 2)
+            {
+                right = 2 + totalWidth;
+            }
+
+            Rectangle BuildRectFromRight(int indexFromRight)
+            {
+                int x = right - ((indexFromRight + 1) * annotationsIconSize) - (indexFromRight * annotationsIconPadding);
+                return new Rectangle(x, top, annotationsIconSize, annotationsIconSize);
+            }
+
+            iconRects = new Dictionary<VectorIconType, Rectangle>
+            {
+                [VectorIconType.Edit] = BuildRectFromRight(4),
+                [VectorIconType.Lock] = BuildRectFromRight(3),
+                [VectorIconType.Duplicate] = BuildRectFromRight(2),
+                [VectorIconType.Order] = BuildRectFromRight(1),
+                [VectorIconType.Delete] = BuildRectFromRight(0)
             };
 
             return true;
@@ -18037,6 +18460,26 @@ namespace AnonPDF
                 DrawIconButton(graphics, arrowIconRects[ArrowIconType.Duplicate], "\uE8C8");
                 DrawIconButton(graphics, arrowIconRects[ArrowIconType.Order], "\u2630");
                 DrawIconButton(graphics, arrowIconRects[ArrowIconType.Delete], "\uE74D");
+            }
+        }
+
+        private void DrawSelectedVectorOverlayOnTop(Graphics graphics)
+        {
+            if (graphics == null || selectedVectorShape == null || selectedVectorShape.PageNumber != currentPage || GetGroupSelectionCount() != 0)
+            {
+                return;
+            }
+
+            if (TryGetVectorIconRects(selectedVectorShape, out Dictionary<VectorIconType, Rectangle> vectorIconRects))
+            {
+                DrawIconButton(graphics, vectorIconRects[VectorIconType.Edit], "\uE70F");
+                DrawIconButton(
+                    graphics,
+                    vectorIconRects[VectorIconType.Lock],
+                    selectedVectorShape.IsLocked ? "\uE72E" : "\uE785");
+                DrawIconButton(graphics, vectorIconRects[VectorIconType.Duplicate], "\uE8C8");
+                DrawIconButton(graphics, vectorIconRects[VectorIconType.Order], "\u2630");
+                DrawIconButton(graphics, vectorIconRects[VectorIconType.Delete], "\uE74D");
             }
         }
 
@@ -18328,6 +18771,34 @@ namespace AnonPDF
                 isClickOnArrowIcon = true;
                 clickedArrowIconType = iconRect.Key;
                 arrowObjectForIcon = selectedArrowObject;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryHandleVectorIconMouseDown(Point location)
+        {
+            if (selectedVectorShape == null || selectedVectorShape.PageNumber != currentPage)
+            {
+                return false;
+            }
+
+            if (!TryGetVectorIconRects(selectedVectorShape, out Dictionary<VectorIconType, Rectangle> iconRects))
+            {
+                return false;
+            }
+
+            foreach (var iconRect in iconRects)
+            {
+                if (!iconRect.Value.Contains(location))
+                {
+                    continue;
+                }
+
+                isClickOnVectorIcon = true;
+                clickedVectorIconType = iconRect.Key;
+                vectorShapeForIcon = selectedVectorShape;
                 return true;
             }
 
