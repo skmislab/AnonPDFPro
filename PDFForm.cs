@@ -243,6 +243,7 @@ namespace AnonPDF
         private readonly HashSet<TextAnnotation> selectedTextAnnotations = new HashSet<TextAnnotation>();
         private readonly HashSet<string> selectedRasterObjectIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> selectedArrowObjectIds = new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> selectedVectorShapeIds = new HashSet<string>(StringComparer.Ordinal);
         private List<VectorShapeObject> vectorShapes = new List<VectorShapeObject>();
         private bool isVectorShapeCreationMode;
         private VectorShapeType activeVectorShapeType = VectorShapeType.Polyline;
@@ -316,7 +317,8 @@ namespace AnonPDF
         {
             Text,
             Raster,
-            Arrow
+            Arrow,
+            VectorShape
         }
 
         private sealed class GroupMoveEntry
@@ -325,9 +327,11 @@ namespace AnonPDF
             public TextAnnotation Text { get; set; }
             public RasterObject Raster { get; set; }
             public ArrowObject Arrow { get; set; }
+            public VectorShapeObject VectorShape { get; set; }
             public RectangleF Bounds { get; set; }
             public PointF Start { get; set; }
             public PointF End { get; set; }
+            public List<PointF> Points { get; set; }
         }
 
         private enum LayerObjectType
@@ -2360,13 +2364,13 @@ namespace AnonPDF
         private bool IsVectorShapeSelected(VectorShapeObject vectorShape)
         {
             return vectorShape != null &&
-                   selectedVectorShape != null &&
-                   string.Equals(selectedVectorShape.Id, vectorShape.Id, StringComparison.Ordinal);
+                   ((selectedVectorShape != null && string.Equals(selectedVectorShape.Id, vectorShape.Id, StringComparison.Ordinal)) ||
+                    (!string.IsNullOrWhiteSpace(vectorShape.Id) && selectedVectorShapeIds.Contains(vectorShape.Id)));
         }
 
         private int GetGroupSelectionCount()
         {
-            return selectedTextAnnotations.Count + selectedRasterObjectIds.Count + selectedArrowObjectIds.Count;
+            return selectedTextAnnotations.Count + selectedRasterObjectIds.Count + selectedArrowObjectIds.Count + selectedVectorShapeIds.Count;
         }
 
         private static void EnsureRasterObjectId(RasterObject rasterObject)
@@ -2766,6 +2770,15 @@ namespace AnonPDF
                 selectedObjects.Add(selectedVectorShape);
             }
 
+            foreach (string vectorId in selectedVectorShapeIds)
+            {
+                VectorShapeObject vectorShape = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == currentPage && v.Id == vectorId);
+                if (vectorShape != null)
+                {
+                    selectedObjects.Add(vectorShape);
+                }
+            }
+
             return selectedObjects.Count;
         }
 
@@ -2774,6 +2787,7 @@ namespace AnonPDF
             selectedTextAnnotations.Clear();
             selectedRasterObjectIds.Clear();
             selectedArrowObjectIds.Clear();
+            selectedVectorShapeIds.Clear();
         }
 
         private void ResetGroupMoveState()
@@ -2806,9 +2820,15 @@ namespace AnonPDF
                 selectedArrowObjectIds.Add(selectedArrowObject.Id);
             }
 
+            if (selectedVectorShape != null && selectedVectorShape.PageNumber == currentPage && !string.IsNullOrWhiteSpace(selectedVectorShape.Id))
+            {
+                selectedVectorShapeIds.Add(selectedVectorShape.Id);
+            }
+
             selectedTextAnnotation = null;
             selectedRasterObject = null;
             selectedArrowObject = null;
+            selectedVectorShape = null;
         }
 
         private void CollapseGroupSelectionToSingleIfNeeded()
@@ -2844,6 +2864,17 @@ namespace AnonPDF
                 selectedArrowObject = arrowObjects.FirstOrDefault(a => a != null && a.Id == arrowId);
                 selectedTextAnnotation = null;
                 selectedRasterObject = null;
+                ClearGroupSelection();
+                return;
+            }
+
+            string vectorId = selectedVectorShapeIds.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(vectorId))
+            {
+                selectedVectorShape = vectorShapes.FirstOrDefault(v => v != null && v.Id == vectorId);
+                selectedTextAnnotation = null;
+                selectedRasterObject = null;
+                selectedArrowObject = null;
                 ClearGroupSelection();
             }
         }
@@ -2987,6 +3018,18 @@ namespace AnonPDF
 
         private bool TryToggleGroupSelectionAtPoint(Point location, float dpiX, float dpiY)
         {
+            if (TryGetHitVectorShapeAtPoint(location, out VectorShapeObject hitVectorShape))
+            {
+                EnsureVectorShapeId(hitVectorShape);
+                PromoteSingleSelectionsToGroup();
+                if (!string.IsNullOrWhiteSpace(hitVectorShape.Id) && !selectedVectorShapeIds.Add(hitVectorShape.Id))
+                {
+                    selectedVectorShapeIds.Remove(hitVectorShape.Id);
+                }
+                CollapseGroupSelectionToSingleIfNeeded();
+                return true;
+            }
+
             if (TryGetHitArrowAtPoint(location, out ArrowObject hitArrow))
             {
                 EnsureArrowObjectId(hitArrow);
@@ -3033,7 +3076,14 @@ namespace AnonPDF
             }
 
             bool hitSelected = false;
-            if (TryGetHitArrowAtPoint(location, out ArrowObject hitArrow) &&
+            if (TryGetHitVectorShapeAtPoint(location, out VectorShapeObject hitVectorShape) &&
+                hitVectorShape != null &&
+                !string.IsNullOrWhiteSpace(hitVectorShape.Id) &&
+                selectedVectorShapeIds.Contains(hitVectorShape.Id))
+            {
+                hitSelected = true;
+            }
+            else if (TryGetHitArrowAtPoint(location, out ArrowObject hitArrow) &&
                 hitArrow != null &&
                 !string.IsNullOrWhiteSpace(hitArrow.Id) &&
                 selectedArrowObjectIds.Contains(hitArrow.Id))
@@ -3067,7 +3117,8 @@ namespace AnonPDF
             bool hasLockedSelection =
                 selectedTextAnnotations.Any(t => t != null && t.PageNumber == currentPage && t.AnnotationIsLocked) ||
                 selectedRasterObjectIds.Any(id => rasterObjects.Any(r => r != null && r.PageNumber == currentPage && r.Id == id && r.IsLocked)) ||
-                selectedArrowObjectIds.Any(id => arrowObjects.Any(a => a != null && a.PageNumber == currentPage && a.Id == id && a.IsLocked));
+                selectedArrowObjectIds.Any(id => arrowObjects.Any(a => a != null && a.PageNumber == currentPage && a.Id == id && a.IsLocked)) ||
+                selectedVectorShapeIds.Any(id => vectorShapes.Any(v => v != null && v.PageNumber == currentPage && v.Id == id && v.IsLocked));
 
             if (hasLockedSelection)
             {
@@ -3150,6 +3201,33 @@ namespace AnonPDF
                 maxY = Math.Max(maxY, arrowMaxY);
             }
 
+            foreach (var vectorId in selectedVectorShapeIds)
+            {
+                VectorShapeObject vector = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == currentPage && v.Id == vectorId && !v.IsLocked);
+                if (vector == null)
+                {
+                    continue;
+                }
+
+                RectangleF bounds = GetVectorShapeBounds(vector.Points);
+                if (bounds.IsEmpty)
+                {
+                    continue;
+                }
+                groupMoveEntries.Add(new GroupMoveEntry
+                {
+                    Type = GroupMoveObjectType.VectorShape,
+                    VectorShape = vector,
+                    Points = (vector.Points ?? new List<PointF>()).Select(p => p).ToList(),
+                    Bounds = bounds
+                });
+
+                minX = Math.Min(minX, bounds.Left);
+                minY = Math.Min(minY, bounds.Top);
+                maxX = Math.Max(maxX, bounds.Right);
+                maxY = Math.Max(maxY, bounds.Bottom);
+            }
+
             if (groupMoveEntries.Count == 0 || minX == float.MaxValue || minY == float.MaxValue)
             {
                 return true;
@@ -3194,6 +3272,12 @@ namespace AnonPDF
                         groupMoveMaxDx = Math.Min(groupMoveMaxDx, pageSize.Width - arrowMaxX);
                         groupMoveMinDy = Math.Max(groupMoveMinDy, -arrowMinY);
                         groupMoveMaxDy = Math.Min(groupMoveMaxDy, pageSize.Height - arrowMaxY);
+                        break;
+                    case GroupMoveObjectType.VectorShape:
+                        groupMoveMinDx = Math.Max(groupMoveMinDx, -entry.Bounds.Left);
+                        groupMoveMaxDx = Math.Min(groupMoveMaxDx, pageSize.Width - entry.Bounds.Right);
+                        groupMoveMinDy = Math.Max(groupMoveMinDy, -entry.Bounds.Top);
+                        groupMoveMaxDy = Math.Min(groupMoveMaxDy, pageSize.Height - entry.Bounds.Bottom);
                         break;
                 }
             }
@@ -4275,6 +4359,10 @@ namespace AnonPDF
                 selectedVectorShape = null;
                 ResetVectorInteractionState();
             }
+            if (!string.IsNullOrWhiteSpace(vectorShape.Id))
+            {
+                selectedVectorShapeIds.Remove(vectorShape.Id);
+            }
 
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
@@ -4625,6 +4713,13 @@ namespace AnonPDF
             }
 
             var vectorIdsToDelete = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string id in selectedVectorShapeIds)
+            {
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    vectorIdsToDelete.Add(id);
+                }
+            }
             if (selectedVectorShape != null && selectedVectorShape.PageNumber == currentPage)
             {
                 EnsureVectorShapeId(selectedVectorShape);
@@ -9000,6 +9095,7 @@ namespace AnonPDF
             vectorShapes.Clear();
             objectLayerOrder.RemoveAll(entry => entry != null && entry.Type == LayerObjectType.VectorShape);
             selectedVectorShape = null;
+            selectedVectorShapeIds.Clear();
             vectorShapeDraftPoints.Clear();
             vectorShapeDraftHoverActive = false;
             isVectorShapeCreationMode = false;
@@ -12093,7 +12189,6 @@ namespace AnonPDF
                         ResetRasterInteractionState();
                         ResetArrowInteractionState();
                         ResetVectorInteractionState();
-                        selectedVectorShape = null;
                         ResetGroupMoveState();
                         isDrawing = false;
                         isMoving = false;
@@ -12111,7 +12206,6 @@ namespace AnonPDF
                         ResetRasterInteractionState();
                         ResetArrowInteractionState();
                         ResetVectorInteractionState();
-                        selectedVectorShape = null;
                         isDrawing = false;
                         isMoving = false;
                         annotationToMove = null;
@@ -12394,6 +12488,15 @@ namespace AnonPDF
                                 entry.Arrow.Start = new PointF(entry.Start.X + dx, entry.Start.Y + dy);
                                 entry.Arrow.End = new PointF(entry.End.X + dx, entry.End.Y + dy);
                                 entry.Arrow.UpdatedAtUtc = DateTime.UtcNow;
+                            }
+                            break;
+                        case GroupMoveObjectType.VectorShape:
+                            if (entry.VectorShape != null && entry.Points != null)
+                            {
+                                entry.VectorShape.Points = entry.Points
+                                    .Select(point => new PointF(point.X + dx, point.Y + dy))
+                                    .ToList();
+                                entry.VectorShape.UpdatedAtUtc = DateTime.UtcNow;
                             }
                             break;
                     }
@@ -14921,7 +15024,7 @@ namespace AnonPDF
                 $"topDelta={topDelta.ToString("0.###", CultureInfo.InvariantCulture)} comp={rotationCompensation.ToString("0.###", CultureInfo.InvariantCulture)} scale={scaleFactor.ToString("0.###", CultureInfo.InvariantCulture)}");
         }
 
-        private void DrawVectorShapeOnPreview(Graphics graphics, VectorShapeObject vectorShape)
+        private void DrawVectorShapeOnPreview(Graphics graphics, VectorShapeObject vectorShape, bool multiSelectionActive)
         {
             if (graphics == null || vectorShape == null || vectorShape.PageNumber != currentPage || vectorShape.Points == null || vectorShape.Points.Count < 2)
             {
@@ -15007,6 +15110,20 @@ namespace AnonPDF
                         graphics.DrawLines(pen, points);
                     }
                 }
+            }
+
+            if (multiSelectionActive && IsVectorShapeSelected(vectorShape))
+            {
+                float minX = points.Min(p => p.X);
+                float maxX = points.Max(p => p.X);
+                float minY = points.Min(p => p.Y);
+                float maxY = points.Max(p => p.Y);
+                RectangleF vectorBounds = new RectangleF(
+                    minX,
+                    minY,
+                    Math.Max(1f, maxX - minX),
+                    Math.Max(1f, maxY - minY));
+                DrawGroupSelectionOutline(graphics, vectorBounds);
             }
         }
 
@@ -15729,7 +15846,7 @@ namespace AnonPDF
                 }
                 else if (drawableObject is VectorShapeObject vectorShapeObject)
                 {
-                    DrawVectorShapeOnPreview(e.Graphics, vectorShapeObject);
+                    DrawVectorShapeOnPreview(e.Graphics, vectorShapeObject, multiSelectionActive);
                 }
                 else if (drawableObject is TextAnnotation annotation)
                 {
