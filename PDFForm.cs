@@ -2614,9 +2614,43 @@ namespace AnonPDF
                 return false;
             }
 
-            var entry = objectLayerOrder[index];
-            objectLayerOrder.RemoveAt(index);
-            objectLayerOrder.Insert(index + 1, entry);
+            ObjectLayerEntry sourceEntry = objectLayerOrder[index];
+            if (!TryGetLayerEntryPageAndBounds(sourceEntry, out int sourcePage, out RectangleF sourceBounds))
+            {
+                return false;
+            }
+
+            int targetIndex = -1;
+            for (int i = index + 1; i < objectLayerOrder.Count; i++)
+            {
+                ObjectLayerEntry candidate = objectLayerOrder[i];
+                if (!TryGetLayerEntryPageAndBounds(candidate, out int candidatePage, out RectangleF candidateBounds))
+                {
+                    continue;
+                }
+
+                if (candidatePage != sourcePage)
+                {
+                    continue;
+                }
+
+                if (!DoLayerBoundsOverlap(sourceBounds, candidateBounds))
+                {
+                    continue;
+                }
+
+                targetIndex = i;
+                break;
+            }
+
+            if (targetIndex < 0)
+            {
+                return false;
+            }
+
+            ObjectLayerEntry targetEntry = objectLayerOrder[targetIndex];
+            objectLayerOrder[index] = targetEntry;
+            objectLayerOrder[targetIndex] = sourceEntry;
             return true;
         }
 
@@ -2628,10 +2662,169 @@ namespace AnonPDF
                 return false;
             }
 
-            var entry = objectLayerOrder[index];
-            objectLayerOrder.RemoveAt(index);
-            objectLayerOrder.Insert(index - 1, entry);
+            ObjectLayerEntry sourceEntry = objectLayerOrder[index];
+            if (!TryGetLayerEntryPageAndBounds(sourceEntry, out int sourcePage, out RectangleF sourceBounds))
+            {
+                return false;
+            }
+
+            int targetIndex = -1;
+            for (int i = index - 1; i >= 0; i--)
+            {
+                ObjectLayerEntry candidate = objectLayerOrder[i];
+                if (!TryGetLayerEntryPageAndBounds(candidate, out int candidatePage, out RectangleF candidateBounds))
+                {
+                    continue;
+                }
+
+                if (candidatePage != sourcePage)
+                {
+                    continue;
+                }
+
+                if (!DoLayerBoundsOverlap(sourceBounds, candidateBounds))
+                {
+                    continue;
+                }
+
+                targetIndex = i;
+                break;
+            }
+
+            if (targetIndex < 0)
+            {
+                return false;
+            }
+
+            ObjectLayerEntry targetEntry = objectLayerOrder[targetIndex];
+            objectLayerOrder[index] = targetEntry;
+            objectLayerOrder[targetIndex] = sourceEntry;
             return true;
+        }
+
+        private static RectangleF NormalizeLayerBounds(RectangleF bounds)
+        {
+            if (bounds.Width < 0f)
+            {
+                bounds = new RectangleF(bounds.X + bounds.Width, bounds.Y, -bounds.Width, bounds.Height);
+            }
+
+            if (bounds.Height < 0f)
+            {
+                bounds = new RectangleF(bounds.X, bounds.Y + bounds.Height, bounds.Width, -bounds.Height);
+            }
+
+            float normalizedWidth = bounds.Width;
+            float normalizedHeight = bounds.Height;
+            float normalizedX = bounds.X;
+            float normalizedY = bounds.Y;
+
+            if (normalizedWidth < 1f)
+            {
+                float delta = 1f - normalizedWidth;
+                normalizedX -= delta / 2f;
+                normalizedWidth = 1f;
+            }
+
+            if (normalizedHeight < 1f)
+            {
+                float delta = 1f - normalizedHeight;
+                normalizedY -= delta / 2f;
+                normalizedHeight = 1f;
+            }
+
+            return new RectangleF(normalizedX, normalizedY, normalizedWidth, normalizedHeight);
+        }
+
+        private static bool DoLayerBoundsOverlap(RectangleF sourceBounds, RectangleF candidateBounds)
+        {
+            RectangleF normalizedSource = NormalizeLayerBounds(sourceBounds);
+            RectangleF normalizedCandidate = NormalizeLayerBounds(candidateBounds);
+            return normalizedSource.IntersectsWith(normalizedCandidate);
+        }
+
+        private bool TryGetLayerEntryPageAndBounds(ObjectLayerEntry entry, out int pageNumber, out RectangleF bounds)
+        {
+            pageNumber = 0;
+            bounds = RectangleF.Empty;
+
+            if (entry == null || string.IsNullOrWhiteSpace(entry.Id))
+            {
+                return false;
+            }
+
+            string entryId = entry.Id.Trim();
+            switch (entry.Type)
+            {
+                case LayerObjectType.Text:
+                {
+                    TextAnnotation annotation = textAnnotations.FirstOrDefault(a => a != null && string.Equals(a.Id, entryId, StringComparison.Ordinal));
+                    if (annotation == null)
+                    {
+                        return false;
+                    }
+
+                    pageNumber = annotation.PageNumber;
+                    bounds = annotation.AnnotationBounds;
+                    return true;
+                }
+                case LayerObjectType.Raster:
+                {
+                    RasterObject raster = rasterObjects.FirstOrDefault(r => r != null && string.Equals(r.Id, entryId, StringComparison.Ordinal));
+                    if (raster == null)
+                    {
+                        return false;
+                    }
+
+                    int rotation = NormalizeRotation(raster.Rotation);
+                    RectangleF rasterBounds = raster.Bounds;
+                    if (rasterBounds.Width <= 0f || rasterBounds.Height <= 0f)
+                    {
+                        return false;
+                    }
+
+                    GetRotatedHalfExtents(rasterBounds.Width, rasterBounds.Height, rotation, out float halfExtentX, out float halfExtentY);
+                    float centerX = rasterBounds.X + (rasterBounds.Width / 2f);
+                    float centerY = rasterBounds.Y + (rasterBounds.Height / 2f);
+                    pageNumber = raster.PageNumber;
+                    bounds = RectangleF.FromLTRB(
+                        centerX - halfExtentX,
+                        centerY - halfExtentY,
+                        centerX + halfExtentX,
+                        centerY + halfExtentY);
+                    return true;
+                }
+                case LayerObjectType.Arrow:
+                {
+                    ArrowObject arrow = arrowObjects.FirstOrDefault(a => a != null && string.Equals(a.Id, entryId, StringComparison.Ordinal));
+                    if (arrow == null)
+                    {
+                        return false;
+                    }
+
+                    pageNumber = arrow.PageNumber;
+                    bounds = RectangleF.FromLTRB(
+                        Math.Min(arrow.Start.X, arrow.End.X),
+                        Math.Min(arrow.Start.Y, arrow.End.Y),
+                        Math.Max(arrow.Start.X, arrow.End.X),
+                        Math.Max(arrow.Start.Y, arrow.End.Y));
+                    return true;
+                }
+                case LayerObjectType.VectorShape:
+                {
+                    VectorShapeObject vectorShape = vectorShapes.FirstOrDefault(v => v != null && string.Equals(v.Id, entryId, StringComparison.Ordinal));
+                    if (vectorShape == null)
+                    {
+                        return false;
+                    }
+
+                    pageNumber = vectorShape.PageNumber;
+                    bounds = GetVectorShapeBounds(vectorShape.Points);
+                    return !bounds.IsEmpty || (bounds.Width == 0f && bounds.Height == 0f);
+                }
+                default:
+                    return false;
+            }
         }
 
         private IEnumerable<object> GetOrderedObjectsForCurrentPage()
