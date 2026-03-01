@@ -343,7 +343,10 @@ namespace AnonPDF
         private enum VectorShapeStrokeKind
         {
             Solid,
-            Dash
+            Dash,
+            Dot,
+            DashDot,
+            DashDotDot
         }
 
         private sealed class VectorShapeDefaults
@@ -11435,7 +11438,7 @@ namespace AnonPDF
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
                 prompt.Width = 620;
-                prompt.Height = 305;
+                prompt.Height = 340;
 
                 var shapeButtons = new Dictionary<VectorShapeType, Button>();
 
@@ -11456,6 +11459,7 @@ namespace AnonPDF
                     WrapContents = false,
                     Padding = new Padding(0)
                 };
+                Action refreshVectorStyleControls = null;
 
                 string ignoredShapeIconFamily;
                 bool useMaterialIcons = TryGetShapeIconFontFamily(out ignoredShapeIconFamily);
@@ -11509,6 +11513,7 @@ namespace AnonPDF
                                 ? System.Drawing.Color.FromArgb(220, 240, 255)
                                 : SystemColors.Control;
                         }
+                        refreshVectorStyleControls?.Invoke();
                     };
 
                     shapeButtons[shapeType] = button;
@@ -11516,7 +11521,15 @@ namespace AnonPDF
                 }
 
                 var labelStrokeColor = new Label { Left = 12, Top = 120, Width = 120, Text = isPl ? "Kolor linii:" : isDe ? "Linienfarbe:" : "Line color:" };
-                var buttonStrokeColor = new Button { Left = 140, Top = 116, Width = 140, Height = 26, BackColor = System.Drawing.Color.FromArgb(working.StrokeColorArgb) };
+                System.Drawing.Color strokeBaseColor = System.Drawing.Color.FromArgb(working.StrokeColorArgb);
+                var buttonStrokeColor = new Button
+                {
+                    Left = 140,
+                    Top = 116,
+                    Width = 140,
+                    Height = 26,
+                    BackColor = System.Drawing.Color.FromArgb(strokeBaseColor.R, strokeBaseColor.G, strokeBaseColor.B)
+                };
                 buttonStrokeColor.Click += (_, __) =>
                 {
                     using (var dlg = new ColorDialog())
@@ -11528,6 +11541,14 @@ namespace AnonPDF
                             buttonStrokeColor.BackColor = dlg.Color;
                         }
                     }
+                };
+                var checkNoStrokeColor = new CheckBox
+                {
+                    Left = 140,
+                    Top = 146,
+                    Width = 180,
+                    Text = isPl ? "Brak koloru linii" : isDe ? "Keine Linienfarbe" : "No line color",
+                    Checked = !HasVisibleVectorColor(working.StrokeColorArgb)
                 };
 
                 var labelStrokeWidth = new Label { Left = 300, Top = 120, Width = 95, Text = isPl ? "Grubość:" : isDe ? "Stärke:" : "Width:" };
@@ -11551,12 +11572,41 @@ namespace AnonPDF
                     Width = 56,
                     DropDownStyle = ComboBoxStyle.DropDownList
                 };
+                comboStrokeStyle.DropDownWidth = 170;
                 comboStrokeStyle.Items.Add(isPl ? "Ciągła" : isDe ? "Durchgezogen" : "Solid");
                 comboStrokeStyle.Items.Add(isPl ? "Przerywana" : isDe ? "Gestrichelt" : "Dash");
-                comboStrokeStyle.SelectedIndex = working.StrokeKind == VectorShapeStrokeKind.Dash ? 1 : 0;
+                comboStrokeStyle.Items.Add(isPl ? "Kropkowana" : isDe ? "Gepunktet" : "Dot");
+                comboStrokeStyle.Items.Add(isPl ? "Kreska-kropka" : isDe ? "Strich-Punkt" : "Dash-dot");
+                comboStrokeStyle.Items.Add(isPl ? "Kreska-kropka-kropka" : isDe ? "Strich-Punkt-Punkt" : "Dash-dot-dot");
+                switch (working.StrokeKind)
+                {
+                    case VectorShapeStrokeKind.Dash:
+                        comboStrokeStyle.SelectedIndex = 1;
+                        break;
+                    case VectorShapeStrokeKind.Dot:
+                        comboStrokeStyle.SelectedIndex = 2;
+                        break;
+                    case VectorShapeStrokeKind.DashDot:
+                        comboStrokeStyle.SelectedIndex = 3;
+                        break;
+                    case VectorShapeStrokeKind.DashDotDot:
+                        comboStrokeStyle.SelectedIndex = 4;
+                        break;
+                    default:
+                        comboStrokeStyle.SelectedIndex = 0;
+                        break;
+                }
 
-                var labelFillColor = new Label { Left = 12, Top = 156, Width = 120, Text = isPl ? "Kolor wypełnienia:" : isDe ? "Füllfarbe:" : "Fill color:" };
-                var buttonFillColor = new Button { Left = 140, Top = 152, Width = 140, Height = 26, BackColor = System.Drawing.Color.FromArgb(working.FillColorArgb) };
+                var labelFillColor = new Label { Left = 12, Top = 184, Width = 120, Text = isPl ? "Kolor wypełnienia:" : isDe ? "Füllfarbe:" : "Fill color:" };
+                System.Drawing.Color fillBaseColor = System.Drawing.Color.FromArgb(working.FillColorArgb);
+                var buttonFillColor = new Button
+                {
+                    Left = 140,
+                    Top = 180,
+                    Width = 140,
+                    Height = 26,
+                    BackColor = System.Drawing.Color.FromArgb(fillBaseColor.R, fillBaseColor.G, fillBaseColor.B)
+                };
                 buttonFillColor.Click += (_, __) =>
                 {
                     using (var dlg = new ColorDialog())
@@ -11569,12 +11619,20 @@ namespace AnonPDF
                         }
                     }
                 };
+                var checkNoFillColor = new CheckBox
+                {
+                    Left = 140,
+                    Top = 210,
+                    Width = 200,
+                    Text = isPl ? "Brak koloru wypełnienia" : isDe ? "Keine Füllfarbe" : "No fill color",
+                    Checked = !HasVisibleVectorColor(working.FillColorArgb) || NormalizeVectorFillOpacity(working.FillOpacity) <= 0f
+                };
 
-                var labelFillOpacity = new Label { Left = 300, Top = 156, Width = 95, Text = isPl ? "Wypełnienie (%):" : isDe ? "Füllung (%):" : "Fill (%):" };
+                var labelFillOpacity = new Label { Left = 300, Top = 184, Width = 95, Text = isPl ? "Wypełnienie (%):" : isDe ? "Füllung (%):" : "Fill (%):" };
                 var numericFillOpacity = new NumericUpDown
                 {
                     Left = 398,
-                    Top = 152,
+                    Top = 180,
                     Width = 70,
                     DecimalPlaces = 0,
                     Minimum = 0,
@@ -11582,9 +11640,29 @@ namespace AnonPDF
                     Increment = 5,
                     Value = (decimal)Math.Round(NormalizeVectorFillOpacity(working.FillOpacity) * 100f)
                 };
+                checkNoStrokeColor.CheckedChanged += (_, __) => refreshVectorStyleControls?.Invoke();
+                checkNoFillColor.CheckedChanged += (_, __) => refreshVectorStyleControls?.Invoke();
+                refreshVectorStyleControls = () =>
+                {
+                    bool supportsFill = ShapeTypeSupportsFill(selectedShape);
+                    bool hasStroke = !checkNoStrokeColor.Checked;
+                    bool hasFill = supportsFill && !checkNoFillColor.Checked;
 
-                var buttonOk = new Button { Left = 364, Top = 224, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
-                var buttonCancel = new Button { Left = 486, Top = 224, Width = 110, Text = isPl ? "Anuluj" : isDe ? "Abbrechen" : "Cancel", DialogResult = DialogResult.Cancel };
+                    buttonStrokeColor.Enabled = hasStroke;
+                    labelStrokeWidth.Enabled = hasStroke;
+                    numericStrokeWidth.Enabled = hasStroke;
+                    labelStrokeStyle.Enabled = hasStroke;
+                    comboStrokeStyle.Enabled = hasStroke;
+
+                    labelFillColor.Enabled = supportsFill;
+                    checkNoFillColor.Enabled = supportsFill;
+                    buttonFillColor.Enabled = hasFill;
+                    labelFillOpacity.Enabled = hasFill;
+                    numericFillOpacity.Enabled = hasFill;
+                };
+
+                var buttonOk = new Button { Left = 364, Top = 252, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
+                var buttonCancel = new Button { Left = 486, Top = 252, Width = 110, Text = isPl ? "Anuluj" : isDe ? "Abbrechen" : "Cancel", DialogResult = DialogResult.Cancel };
 
                 prompt.Controls.Add(labelShapes);
                 prompt.Controls.Add(shapesPanel);
@@ -11594,10 +11672,12 @@ namespace AnonPDF
                 prompt.Controls.Add(numericStrokeWidth);
                 prompt.Controls.Add(labelStrokeStyle);
                 prompt.Controls.Add(comboStrokeStyle);
+                prompt.Controls.Add(checkNoStrokeColor);
                 prompt.Controls.Add(labelFillColor);
                 prompt.Controls.Add(buttonFillColor);
                 prompt.Controls.Add(labelFillOpacity);
                 prompt.Controls.Add(numericFillOpacity);
+                prompt.Controls.Add(checkNoFillColor);
                 prompt.Controls.Add(buttonOk);
                 prompt.Controls.Add(buttonCancel);
                 prompt.AcceptButton = buttonOk;
@@ -11619,6 +11699,7 @@ namespace AnonPDF
                             : SystemColors.Control;
                     }
                 }
+                refreshVectorStyleControls?.Invoke();
 
                 if (prompt.ShowDialog(this) != DialogResult.OK)
                 {
@@ -11626,11 +11707,38 @@ namespace AnonPDF
                 }
 
                 working.ShapeType = selectedShape;
-                working.StrokeColorArgb = buttonStrokeColor.BackColor.ToArgb();
+                bool supportsFillForShape = ShapeTypeSupportsFill(selectedShape);
+                System.Drawing.Color selectedStroke = buttonStrokeColor.BackColor;
+                working.StrokeColorArgb = checkNoStrokeColor.Checked
+                    ? System.Drawing.Color.FromArgb(0, selectedStroke.R, selectedStroke.G, selectedStroke.B).ToArgb()
+                    : System.Drawing.Color.FromArgb(255, selectedStroke.R, selectedStroke.G, selectedStroke.B).ToArgb();
                 working.StrokeWidth = NormalizeVectorStrokeWidth((float)numericStrokeWidth.Value);
-                working.FillColorArgb = buttonFillColor.BackColor.ToArgb();
-                working.FillOpacity = NormalizeVectorFillOpacity((float)(numericFillOpacity.Value / 100m));
-                working.StrokeKind = comboStrokeStyle.SelectedIndex == 1 ? VectorShapeStrokeKind.Dash : VectorShapeStrokeKind.Solid;
+                System.Drawing.Color selectedFill = buttonFillColor.BackColor;
+                bool noFill = !supportsFillForShape || checkNoFillColor.Checked;
+                working.FillColorArgb = noFill
+                    ? System.Drawing.Color.FromArgb(0, selectedFill.R, selectedFill.G, selectedFill.B).ToArgb()
+                    : System.Drawing.Color.FromArgb(255, selectedFill.R, selectedFill.G, selectedFill.B).ToArgb();
+                working.FillOpacity = noFill
+                    ? 0f
+                    : NormalizeVectorFillOpacity((float)(numericFillOpacity.Value / 100m));
+                switch (comboStrokeStyle.SelectedIndex)
+                {
+                    case 1:
+                        working.StrokeKind = VectorShapeStrokeKind.Dash;
+                        break;
+                    case 2:
+                        working.StrokeKind = VectorShapeStrokeKind.Dot;
+                        break;
+                    case 3:
+                        working.StrokeKind = VectorShapeStrokeKind.DashDot;
+                        break;
+                    case 4:
+                        working.StrokeKind = VectorShapeStrokeKind.DashDotDot;
+                        break;
+                    default:
+                        working.StrokeKind = VectorShapeStrokeKind.Solid;
+                        break;
+                }
 
                 selectedDefaults = working;
                 return true;
@@ -13693,21 +13801,42 @@ namespace AnonPDF
                     continue;
                 }
 
-                System.Drawing.Color strokeColor = System.Drawing.Color.FromArgb(vectorShape.StrokeColorArgb);
-                float strokeWidth = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth);
-
-                pdfCanvas.SaveState();
-                pdfCanvas.SetStrokeColor(new DeviceRgb(strokeColor.R, strokeColor.G, strokeColor.B));
-                pdfCanvas.SetLineWidth(strokeWidth);
-                pdfCanvas.SetLineJoinStyle(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.LineJoinStyle.ROUND);
-                pdfCanvas.SetLineCapStyle(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.LineCapStyle.ROUND);
-                if (strokeKind == VectorShapeStrokeKind.Dash)
-                {
-                    pdfCanvas.SetLineDash(6f, 4f);
-                }
-
                 bool isClosed = IsShapeClosed(shapeType);
                 bool supportsFill = ShapeTypeSupportsFill(shapeType);
+                bool hasStroke = HasVisibleVectorColor(vectorShape.StrokeColorArgb);
+                float fillOpacity = supportsFill ? NormalizeVectorFillOpacity(vectorShape.FillOpacity) : 0f;
+                bool hasFill = supportsFill && HasVisibleVectorColor(vectorShape.FillColorArgb) && fillOpacity > 0f;
+                if (!hasStroke && !hasFill)
+                {
+                    continue;
+                }
+
+                pdfCanvas.SaveState();
+                if (hasStroke)
+                {
+                    System.Drawing.Color strokeColor = System.Drawing.Color.FromArgb(vectorShape.StrokeColorArgb);
+                    float strokeWidth = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth);
+                    pdfCanvas.SetStrokeColor(new DeviceRgb(strokeColor.R, strokeColor.G, strokeColor.B));
+                    pdfCanvas.SetLineWidth(strokeWidth);
+                    pdfCanvas.SetLineJoinStyle(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.LineJoinStyle.ROUND);
+                    pdfCanvas.SetLineCapStyle(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.LineCapStyle.ROUND);
+                    switch (strokeKind)
+                    {
+                        case VectorShapeStrokeKind.Dash:
+                            pdfCanvas.SetLineDash(6f, 4f);
+                            break;
+                        case VectorShapeStrokeKind.Dot:
+                            pdfCanvas.SetLineDash(1.5f, 3f);
+                            break;
+                        case VectorShapeStrokeKind.DashDot:
+                            pdfCanvas.SetLineDash(new float[] { 6f, 3f, 1.5f, 3f }, 0f);
+                            break;
+                        case VectorShapeStrokeKind.DashDotDot:
+                            pdfCanvas.SetLineDash(new float[] { 6f, 3f, 1.5f, 3f, 1.5f, 3f }, 0f);
+                            break;
+                    }
+                }
+
                 pdfCanvas.MoveTo(pdfPoints[0].X, pdfPoints[0].Y);
                 for (int i = 1; i < pdfPoints.Count; i++)
                 {
@@ -13716,8 +13845,7 @@ namespace AnonPDF
 
                 if (isClosed && pdfPoints.Count >= 3)
                 {
-                    float fillOpacity = supportsFill ? NormalizeVectorFillOpacity(vectorShape.FillOpacity) : 0f;
-                    if (supportsFill && fillOpacity > 0f)
+                    if (hasFill && hasStroke)
                     {
                         System.Drawing.Color fillColor = System.Drawing.Color.FromArgb(vectorShape.FillColorArgb);
                         pdfCanvas.SetFillColor(new DeviceRgb(fillColor.R, fillColor.G, fillColor.B));
@@ -13725,12 +13853,20 @@ namespace AnonPDF
                         pdfCanvas.SetExtGState(fillState);
                         pdfCanvas.ClosePathFillStroke();
                     }
-                    else
+                    else if (hasFill)
+                    {
+                        System.Drawing.Color fillColor = System.Drawing.Color.FromArgb(vectorShape.FillColorArgb);
+                        pdfCanvas.SetFillColor(new DeviceRgb(fillColor.R, fillColor.G, fillColor.B));
+                        var fillState = new PdfExtGState().SetFillOpacity(fillOpacity);
+                        pdfCanvas.SetExtGState(fillState);
+                        pdfCanvas.Fill();
+                    }
+                    else if (hasStroke)
                     {
                         pdfCanvas.ClosePathStroke();
                     }
                 }
-                else
+                else if (hasStroke)
                 {
                     pdfCanvas.Stroke();
                 }
@@ -14374,12 +14510,14 @@ namespace AnonPDF
             using (var pen = new Pen(System.Drawing.Color.FromArgb(vectorShape.StrokeColorArgb), NormalizeVectorStrokeWidth(vectorShape.StrokeWidth) * scaleFactor))
             {
                 bool isSelectedVector = IsVectorShapeSelected(vectorShape);
+                bool hasStrokeColor = HasVisibleVectorColor(vectorShape.StrokeColorArgb);
+                bool drawStroke = hasStrokeColor || isSelectedVector;
                 if (isSelectedVector)
                 {
                     pen.Color = System.Drawing.Color.Red;
                     pen.Width = Math.Max(pen.Width, 2f);
                 }
-                pen.DashStyle = strokeKind == VectorShapeStrokeKind.Dash ? DashStyle.Dash : DashStyle.Solid;
+                pen.DashStyle = ToDrawingDashStyle(strokeKind);
                 pen.LineJoin = LineJoin.Round;
                 pen.StartCap = LineCap.Round;
                 pen.EndCap = LineCap.Round;
@@ -14388,21 +14526,31 @@ namespace AnonPDF
                 bool supportsFill = ShapeTypeSupportsFill(shapeType);
                 if (isClosed && points.Length >= 3)
                 {
-                    if (supportsFill)
+                    bool hasFillColor = HasVisibleVectorColor(vectorShape.FillColorArgb);
+                    if (supportsFill && hasFillColor)
                     {
                         int alpha = (int)(NormalizeVectorFillOpacity(vectorShape.FillOpacity) * 255f);
                         alpha = Math.Max(0, Math.Min(255, alpha));
-                        System.Drawing.Color fillBase = System.Drawing.Color.FromArgb(vectorShape.FillColorArgb);
-                        using (var fillBrush = new SolidBrush(System.Drawing.Color.FromArgb(alpha, fillBase.R, fillBase.G, fillBase.B)))
+                        if (alpha > 0)
                         {
-                            graphics.FillPolygon(fillBrush, points);
+                            System.Drawing.Color fillBase = System.Drawing.Color.FromArgb(vectorShape.FillColorArgb);
+                            using (var fillBrush = new SolidBrush(System.Drawing.Color.FromArgb(alpha, fillBase.R, fillBase.G, fillBase.B)))
+                            {
+                                graphics.FillPolygon(fillBrush, points);
+                            }
                         }
                     }
-                    graphics.DrawPolygon(pen, points);
+                    if (drawStroke)
+                    {
+                        graphics.DrawPolygon(pen, points);
+                    }
                 }
                 else
                 {
-                    graphics.DrawLines(pen, points);
+                    if (drawStroke)
+                    {
+                        graphics.DrawLines(pen, points);
+                    }
                 }
             }
         }
@@ -17307,6 +17455,28 @@ namespace AnonPDF
             return VectorShapeStrokeKind.Solid;
         }
 
+        private static DashStyle ToDrawingDashStyle(VectorShapeStrokeKind strokeKind)
+        {
+            switch (strokeKind)
+            {
+                case VectorShapeStrokeKind.Dash:
+                    return DashStyle.Dash;
+                case VectorShapeStrokeKind.Dot:
+                    return DashStyle.Dot;
+                case VectorShapeStrokeKind.DashDot:
+                    return DashStyle.DashDot;
+                case VectorShapeStrokeKind.DashDotDot:
+                    return DashStyle.DashDotDot;
+                default:
+                    return DashStyle.Solid;
+            }
+        }
+
+        private static bool HasVisibleVectorColor(int argb)
+        {
+            return ((argb >> 24) & 0xFF) > 0;
+        }
+
         private static int GetRequiredPointsForShape(VectorShapeType type)
         {
             switch (type)
@@ -17539,6 +17709,13 @@ namespace AnonPDF
             vectorShape.Points = (vectorShape.Points ?? new List<PointF>())
                 .Where(p => !float.IsNaN(p.X) && !float.IsInfinity(p.X) && !float.IsNaN(p.Y) && !float.IsInfinity(p.Y))
                 .ToList();
+
+            if (!ShapeTypeSupportsFill(parsedType))
+            {
+                vectorShape.FillOpacity = 0f;
+                System.Drawing.Color fillColor = System.Drawing.Color.FromArgb(vectorShape.FillColorArgb);
+                vectorShape.FillColorArgb = System.Drawing.Color.FromArgb(0, fillColor.R, fillColor.G, fillColor.B).ToArgb();
+            }
         }
 
         private PointF GetArrowScreenPoint(PointF viewPoint)
