@@ -7598,7 +7598,8 @@ namespace AnonPDF
                         var pdfCoordinates = ConvertToPdfCoordinates(block.Bounds, pageNum, rotation, includeBaseRotation: !baseRotationBaked);
                         if (DebugLogEnabled)
                         {
-                            LogDebug($"Redact block page={pageNum} rect={block.Bounds} -> pdfRect={pdfCoordinates}");
+                            string selectionMode = block.IsMarkerSelection ? "marker" : "box";
+                            LogDebug($"Redact block page={pageNum} mode={selectionMode} rect={block.Bounds} -> pdfRect={pdfCoordinates}");
                         }
                         iText.Kernel.Geom.Rectangle cleanupRectangle = new iText.Kernel.Geom.Rectangle(
                             pdfCoordinates.X,
@@ -11369,7 +11370,12 @@ namespace AnonPDF
                             bool enoughHeightForCtrlBox = !isMarkerCtrlBoxMode || currentSelection.Height > markerHeight * scaleFactor;
                             if (isDrawing && enoughWidth && enoughHeightForCtrlBox)
                             {
-                                redactionBlocks.Add(CreateRedactionBlockWithAutomaticClassification(rect, currentPage, isMarkerSelection: true));
+                                // Marker + CTRL temporarily switches to box behavior.
+                                bool markerModeForBlock = !isMarkerCtrlBoxMode;
+                                redactionBlocks.Add(CreateRedactionBlockWithAutomaticClassification(
+                                    rect,
+                                    currentPage,
+                                    isMarkerSelection: markerModeForBlock));
                                 
                                 
 
@@ -18891,7 +18897,12 @@ namespace AnonPDF
                 // Add each search result to redactionBlocks
                 foreach (var cr in convertedResults)
                 {
-                    redactionBlocks.Add(CreateRedactionBlockWithAutomaticClassification(cr.ConvertedRect, cr.PageNumber));
+                    // Search results are treated as marker selections (fixed thickness),
+                    // so PDF cleanup stays exact but visual overlay can expand to full text bounds.
+                    redactionBlocks.Add(CreateRedactionBlockWithAutomaticClassification(
+                        cr.ConvertedRect,
+                        cr.PageNumber,
+                        isMarkerSelection: true));
                 }
             }
 
