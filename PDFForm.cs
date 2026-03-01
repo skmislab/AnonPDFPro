@@ -12691,10 +12691,12 @@ namespace AnonPDF
                             }
 
                             float markerThicknessPx = markerWidth * scaleFactor;
-                            bool isThinMarkerSelection = block.IsMarkerSelection &&
-                                                         markerThicknessPx > 0f &&
-                                                         (rect.Width <= markerThicknessPx * 1.4f || rect.Height <= markerThicknessPx * 1.4f);
-                            if (isThinMarkerSelection)
+                            float minSelectionDim = Math.Min(rect.Width, rect.Height);
+                            float maxSelectionDim = Math.Max(rect.Width, rect.Height);
+                            bool isThinElongatedSelection = markerThicknessPx > 0f &&
+                                                            minSelectionDim <= markerThicknessPx * 1.4f &&
+                                                            maxSelectionDim >= minSelectionDim * 3f;
+                            if (isThinElongatedSelection)
                             {
                                 bool markerAxisIsVertical = rect.Height > rect.Width;
                                 float markerAxisCenterY = rect.Top + (rect.Height / 2f);
