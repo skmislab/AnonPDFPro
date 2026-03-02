@@ -425,6 +425,9 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="Menu_AddSnapToGrid" xml:space="preserve">
     <value>Objekte am Raster ausrichten</value>
   </data>
+  <data name="Menu_AddObjectsByPageRotation" xml:space="preserve">
+    <value>Seite mit Objekten drehen</value>
+  </data>
   <data name="Menu_AddLegalBasesDictionary" xml:space="preserve">
     <value>Rechtsgrundlagen</value>
   </data>
@@ -1253,5 +1256,89 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   </data>
   <data name="UI_PageLabelFormat" xml:space="preserve">
     <value>Seite {0}</value>
+  </data>
+  <data name="Footnotes_SummaryTitle" xml:space="preserve">
+    <value>Fußnoten zur Schwärzung:</value>
+  </data>
+  <data name="Footnotes_MissingLegalBasisDescription" xml:space="preserve">
+    <value>Keine Beschreibung der Rechtsgrundlage für Fußnote [{0}] verfügbar.</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_Menu" xml:space="preserve">
+    <value>Stelle oder Person, die Ausschlüsse vornimmt</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_Label" xml:space="preserve">
+    <value>Geben Sie die Stelle oder Person an, die Ausschlüsse vornimmt:</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_Required" xml:space="preserve">
+    <value>Dieses Feld ist für die ausgewählten Rechtsgrundlagen erforderlich.</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_SummaryLine" xml:space="preserve">
+    <value>Stelle oder Person, die Ausschlüsse vornimmt: {0}</value>
+  </data>
+  <data name="Footnotes_Context_Scope" xml:space="preserve">
+    <value>Ausschlussumfang</value>
+  </data>
+  <data name="Footnotes_Context_DeleteSelection" xml:space="preserve">
+    <value>Markierung entfernen</value>
+  </data>
+  <data name="Footnotes_Context_ScopeNone" xml:space="preserve">
+    <value>Kein Umfang</value>
+  </data>
+  <data name="Footnotes_Context_LegalBasis" xml:space="preserve">
+    <value>Rechtsgrundlage</value>
+  </data>
+  <data name="Footnotes_Context_LegalBasisNone" xml:space="preserve">
+    <value>Keine Grundlage</value>
+  </data>
+  <data name="Footnotes_Context_LegalBasisAdd" xml:space="preserve">
+    <value>Grundlage hinzufügen</value>
+  </data>
+  <data name="Footnotes_Context_CatalogUnavailable" xml:space="preserve">
+    <value>Keine Wörterbuchdaten</value>
+  </data>
+  <data name="Footnotes_LegalBases_Saved" xml:space="preserve">
+    <value>Das Rechtsgrundlagen-Wörterbuch wurde gespeichert.</value>
+  </data>
+  <data name="Footnotes_LegalBases_LoadGlobalError" xml:space="preserve">
+    <value>Globales Verzeichnis der Rechtsgrundlagen konnte nicht geladen werden.</value>
+  </data>
+  <data name="Footnotes_LegalBases_LoadLocalError" xml:space="preserve">
+    <value>Benutzer-Verzeichnis der Rechtsgrundlagen konnte nicht geladen werden.</value>
+  </data>
+  <data name="Footnotes_LegalBases_SaveGlobalError" xml:space="preserve">
+    <value>Globales Verzeichnis der Rechtsgrundlagen konnte nicht gespeichert werden.</value>
+  </data>
+  <data name="Footnotes_LegalBases_SaveLocalError" xml:space="preserve">
+    <value>Benutzer-Verzeichnis der Rechtsgrundlagen konnte nicht gespeichert werden.</value>
+  </data>
+  <data name="Footnotes_LegalBases_InvalidEntry" xml:space="preserve">
+    <value>Die Liste der Rechtsgrundlagen enthält ungültige Einträge.</value>
+  </data>
+  <data name="Footnotes_LegalBases_DuplicateId" xml:space="preserve">
+    <value>Doppelte ID der Rechtsgrundlage gefunden: {0}.</value>
+  </data>
+  <data name="Footnotes_LegalBases_DuplicateTitle" xml:space="preserve">
+    <value>Doppelter Kurztitel der Rechtsgrundlage gefunden: {0}.</value>
+  </data>
+  <data name="Footnotes_LegalBases_NoWriteAccess" xml:space="preserve">
+    <value>Keine Berechtigung zum Speichern des Rechtsgrundlagen-Verzeichnisses.</value>
+  </data>
+  <data name="Footnotes_Scopes_LoadGlobalError" xml:space="preserve">
+    <value>Globales Verzeichnis der Ausschlussbereiche konnte nicht geladen werden.</value>
+  </data>
+  <data name="Footnotes_Scopes_LoadLocalError" xml:space="preserve">
+    <value>Benutzer-Verzeichnis der Ausschlussbereiche konnte nicht geladen werden.</value>
+  </data>
+  <data name="Footnotes_Scopes_SaveGlobalError" xml:space="preserve">
+    <value>Globales Verzeichnis der Ausschlussbereiche konnte nicht gespeichert werden.</value>
+  </data>
+  <data name="Footnotes_Scopes_SaveLocalError" xml:space="preserve">
+    <value>Benutzer-Verzeichnis der Ausschlussbereiche konnte nicht gespeichert werden.</value>
+  </data>
+  <data name="Footnotes_Scopes_InvalidEntry" xml:space="preserve">
+    <value>Liste der Ausschlussbereiche enthält ungültige Einträge.</value>
+  </data>
+  <data name="Footnotes_Scopes_DuplicateId" xml:space="preserve">
+    <value>Doppelte ID des Ausschlussbereichs gefunden: {0}.</value>
   </data>
 </root>

@@ -66,22 +66,6 @@ namespace AnonPDF
         private static readonly string DebugLogPath = Path.Combine(Path.GetTempPath(), "AnonPDF-debug.log");
         private static readonly string MaintenanceRecoveryDirectory = Path.Combine(Path.GetTempPath(), "AnonPDFPro");
         private static readonly string MaintenanceRecoveryProjectPath = Path.Combine(MaintenanceRecoveryDirectory, "maintenance-recovery.app");
-        private static readonly Dictionary<int, string> DemoFootnoteDetails = new Dictionary<int, string>
-        {
-            {
-                1,
-                "Ochrona innych tajemnic ustawowo chronionych - poufność informacji i dokumentacji (dot. FEdKiP; kontrola systemowa w IP w 2025 roku) - art. 5 ust. 1 ustawy z dnia 6 września 2001 r. o dostępie do informacji publicznej (Dz.U. z 2022 r. poz. 902) w związku z art. 48 ustawy z dnia 28 kwietnia 2022 r. o zasadach realizacji zadań finansowanych ze środków europejskich w perspektywie finansowej 2021-2027 (Dz.U. poz. 1079) oraz postanowieniami Instrukcji wykonawczej instytucji pośredniczącej (ZIT BydOF)."
-            },
-            {
-                2,
-                "Ochrona danych osobowych - art. 5 ust. 2 ustawy z dnia 6 września 2001 r. o dostępie do informacji publicznej (Dz.U. z 2022 r. poz. 902) w związku z art. 6 ust. 1 lit. c i e oraz art. 86 Rozporządzenia Parlamentu Europejskiego i Rady (UE) 2016/679 (RODO)."
-            },
-            {
-                3,
-                "Ochrona prywatności osób fizycznych - art. 5 ust. 2 ustawy z dnia 6 września 2001 r. o dostępie do informacji publicznej (Dz.U. z 2022 r. poz. 902) w związku z art. 23 i 24 ustawy z dnia 23 kwietnia 1964 r. Kodeks cywilny (Dz.U. z 2024 r. poz. 1061)."
-            }
-        };
-        private const string FootnoteSummaryTitle = "Przypisy wyłączenia jawności:";
         private static bool diagnosticModeEnabled = false;
         private static bool DebugLogEnabled => diagnosticModeEnabled;
         private readonly string fileVersion;
@@ -208,10 +192,12 @@ namespace AnonPDF
         private ToolStripMenuItem addCommentToolStripMenuItem;
         private ToolStripMenuItem addBlankPageToolStripMenuItem;
         private ToolStripMenuItem snapToGridToolStripMenuItem;
+        private ToolStripMenuItem addObjectsByPageRotationToolStripMenuItem;
         private ToolStripMenuItem legalBasesDictionaryToolStripMenuItem;
         private ToolStripMenuItem exclusionAuthorityToolStripMenuItem;
         private ToolStripMenuItem automaticFootnotesToolStripMenuItem;
         private bool snapToGridEnabled = true;
+        private bool addObjectsByPageRotationEnabled = false;
         private bool suppressAutomaticFootnotesMenuSync;
         private const float SnapGridStep = 5f;
         private static readonly System.Drawing.Color GroupSelectionColor = System.Drawing.Color.DeepSkyBlue;
@@ -826,10 +812,16 @@ namespace AnonPDF
 
             InitializeComponent();
             autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
+            addObjectsByPageRotationEnabled = true;
+            if (!Properties.Settings.Default.AddObjectsByPageRotationEnabled)
+            {
+                SaveAddObjectsByPageRotationUserSetting(true);
+            }
             InitializeUpdateMenu();
             InitializeRasterMenu();
             LoadFootnotesCatalog();
             ApplyAutomaticFootnotesMenuState();
+            ApplyAddObjectsByPageRotationMenuState();
             LoadPreferredTheme();
             ApplyTheme();
             this.HandleCreated += (_, __) => ApplyTitleBarColor();
@@ -1141,6 +1133,14 @@ namespace AnonPDF
                 Checked = snapToGridEnabled
             };
             snapToGridToolStripMenuItem.CheckedChanged += SnapToGridToolStripMenuItem_CheckedChanged;
+            addObjectsByPageRotationToolStripMenuItem = new ToolStripMenuItem
+            {
+                Name = "addObjectsByPageRotationToolStripMenuItem",
+                CheckOnClick = true,
+                Checked = addObjectsByPageRotationEnabled,
+                Visible = false
+            };
+            addObjectsByPageRotationToolStripMenuItem.CheckedChanged += AddObjectsByPageRotationToolStripMenuItem_CheckedChanged;
 
             legalBasesDictionaryToolStripMenuItem = new ToolStripMenuItem
             {
@@ -1218,6 +1218,7 @@ namespace AnonPDF
             menuAddItem.DropDownItems.Add(addBlankPageToolStripMenuItem);
             menuAddItem.DropDownItems.Add(new ToolStripSeparator());
             menuAddItem.DropDownItems.Add(snapToGridToolStripMenuItem);
+            menuAddItem.DropDownItems.Add(addObjectsByPageRotationToolStripMenuItem);
             menuAddItem.DropDownItems.Add(new ToolStripSeparator());
             menuAddItem.DropDownItems.Add(exclusionAuthorityToolStripMenuItem);
             menuAddItem.DropDownItems.Add(legalBasesDictionaryToolStripMenuItem);
@@ -1264,6 +1265,10 @@ namespace AnonPDF
             {
                 snapToGridToolStripMenuItem.Text = LocalizedText("Menu_AddSnapToGrid");
             }
+            if (addObjectsByPageRotationToolStripMenuItem != null)
+            {
+                addObjectsByPageRotationToolStripMenuItem.Text = LocalizedText("Menu_AddObjectsByPageRotation");
+            }
 
             if (addArrowToolStripMenuItem != null)
             {
@@ -1309,6 +1314,17 @@ namespace AnonPDF
             }
 
             snapToGridEnabled = snapToGridToolStripMenuItem.Checked;
+        }
+
+        private void AddObjectsByPageRotationToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            if (addObjectsByPageRotationToolStripMenuItem == null)
+            {
+                return;
+            }
+
+            addObjectsByPageRotationEnabled = addObjectsByPageRotationToolStripMenuItem.Checked;
+            SaveAddObjectsByPageRotationUserSetting(addObjectsByPageRotationEnabled);
         }
 
         private void LegalBasesDictionaryToolStripMenuItem_Click(object sender, EventArgs e)
@@ -1441,24 +1457,14 @@ namespace AnonPDF
             }
 
             ApplyAutomaticFootnotesMenuState();
+            ApplyAddObjectsByPageRotationMenuState();
             pdfViewer.Invalidate();
             ShowInfoMessage(GetLegalBasesSavedMessage());
         }
-
+        
         private string GetExclusionAuthorityMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Organ lub osoba dokonująca wyłączeń";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Stelle oder Person, die Ausschluesse vornimmt";
-            }
-
-            return "Authority or person performing exclusions";
+            return LocalizedText("Footnotes_ExclusionAuthority_Menu");
         }
 
         private string GetExclusionAuthorityDialogTitleText()
@@ -1468,51 +1474,18 @@ namespace AnonPDF
 
         private string GetExclusionAuthorityDialogLabelText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Podaj organ lub osobę dokonującą wyłączeń:";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Geben Sie die Stelle oder Person an, die Ausschluesse vornimmt:";
-            }
-
-            return "Enter authority or person performing exclusions:";
+            return LocalizedText("Footnotes_ExclusionAuthority_Label");
         }
 
         private string GetExclusionAuthorityRequiredMessage()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "To pole jest wymagane dla wybranych podstaw prawnych.";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Dieses Feld ist fuer die ausgewaehlten Rechtsgrundlagen erforderlich.";
-            }
-
-            return "This field is required for selected legal bases.";
+            return LocalizedText("Footnotes_ExclusionAuthority_Required");
         }
 
         private string GetExclusionAuthoritySummaryLine(string authority)
         {
             string value = string.IsNullOrWhiteSpace(authority) ? "-" : authority.Trim();
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return $"Organ lub osoba dokonująca wyłączeń: {value}";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return $"Stelle oder Person, die Ausschluesse vornimmt: {value}";
-            }
-
-            return $"Authority or person performing exclusions: {value}";
+            return LocalizedFormat("Footnotes_ExclusionAuthority_SummaryLine", value);
         }
 
         private string GetPreferredExclusionAuthority()
@@ -1624,9 +1597,29 @@ namespace AnonPDF
                 .ToList();
 
             bool requiresVerification = !Properties.Settings.Default.ExclusionAuthorityVerified;
-            if (!requiresVerification && missingBlocks.Count == 0)
+            if (!requiresVerification)
             {
-                return true;
+                string persistedAuthority = GetPreferredExclusionAuthority();
+                bool persistedApplyChanged = false;
+                if (!string.IsNullOrWhiteSpace(persistedAuthority))
+                {
+                    persistedApplyChanged = ApplyInterestSubjectToRequiredBlocks(persistedAuthority, onlyMissing: true);
+                }
+
+                if (persistedApplyChanged)
+                {
+                    projectWasChangedAfterLastSave = true;
+                    saveProjectButton.Enabled = true;
+                    saveProjectMenuItem.Enabled = true;
+                }
+
+                // User already confirmed authority once. Do not prompt again.
+                // If required blocks are still missing and there is no persisted authority,
+                // ask user now to recover a valid value.
+                if (missingBlocks.Count == 0 || !string.IsNullOrWhiteSpace(persistedAuthority))
+                {
+                    return true;
+                }
             }
 
             string initialValue = GetPreferredExclusionAuthority();
@@ -1658,6 +1651,34 @@ namespace AnonPDF
                 saveProjectMenuItem.Enabled = true;
             }
 
+            return true;
+        }
+
+        private bool TryApplyPersistedInterestSubjectToBlock(RedactionBlock block)
+        {
+            if (block == null || !Properties.Settings.Default.ExclusionAuthorityVerified)
+            {
+                return false;
+            }
+
+            if (!BlockRequiresInterestSubject(block))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(block.InterestSubject))
+            {
+                return false;
+            }
+
+            string persistedAuthority = GetPreferredExclusionAuthority();
+            if (string.IsNullOrWhiteSpace(persistedAuthority))
+            {
+                return false;
+            }
+
+            string normalized = persistedAuthority.Trim();
+            block.InterestSubject = normalized;
             return true;
         }
 
@@ -1939,6 +1960,7 @@ namespace AnonPDF
             AssignLegalBasisToBlock(block, addedBasisId);
             LoadFootnotesCatalog();
             ApplyAutomaticFootnotesMenuState();
+            ApplyAddObjectsByPageRotationMenuState();
             pdfViewer.Invalidate();
             ShowInfoMessage(GetLegalBasesSavedMessage());
         }
@@ -2005,6 +2027,7 @@ namespace AnonPDF
             block.ClassificationSource = ClassificationSourceManual;
             block.MatchedTag = null;
             block.FootnoteNumber = null;
+            TryApplyPersistedInterestSubjectToBlock(block);
 
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
@@ -2120,6 +2143,19 @@ namespace AnonPDF
             }
         }
 
+        private void SaveAddObjectsByPageRotationUserSetting(bool enabled)
+        {
+            try
+            {
+                Properties.Settings.Default.AddObjectsByPageRotationEnabled = enabled;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Save add-objects-by-page-rotation user setting failed: " + ex.Message);
+            }
+        }
+
         private void ApplyAutomaticFootnotesMenuState()
         {
             if (automaticFootnotesToolStripMenuItem == null)
@@ -2139,244 +2175,89 @@ namespace AnonPDF
             }
         }
 
+        private void ApplyAddObjectsByPageRotationMenuState()
+        {
+            if (addObjectsByPageRotationToolStripMenuItem == null)
+            {
+                return;
+            }
+
+            addObjectsByPageRotationToolStripMenuItem.Checked = addObjectsByPageRotationEnabled;
+        }
+
         private static string GetLegalBasesSavedMessage()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Das Rechtsgrundlagen-Woerterbuch wurde gespeichert.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Legal bases dictionary has been saved.";
-            }
-
-            return "Slownik podstaw prawnych zostal zapisany.";
+            return LocalizedText("Footnotes_LegalBases_Saved");
         }
 
         private static string GetLegalBasesLoadGlobalErrorPrefix()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Globales Verzeichnis der Rechtsgrundlagen konnte nicht geladen werden.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Cannot load global legal bases dictionary.";
-            }
-
-            return "Nie mozna zaladowac globalnego slownika podstaw prawnych.";
+            return LocalizedText("Footnotes_LegalBases_LoadGlobalError");
         }
 
         private static string GetLegalBasesLoadLocalErrorPrefix()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Benutzer-Verzeichnis der Rechtsgrundlagen konnte nicht geladen werden.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Cannot load user legal bases dictionary.";
-            }
-
-            return "Nie mozna zaladowac slownika podstaw prawnych uzytkownika.";
+            return LocalizedText("Footnotes_LegalBases_LoadLocalError");
         }
 
         private static string GetLegalBasesSaveGlobalErrorPrefix()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Globales Verzeichnis der Rechtsgrundlagen konnte nicht gespeichert werden.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Cannot save global legal bases dictionary.";
-            }
-
-            return "Nie mozna zapisac globalnego slownika podstaw prawnych.";
+            return LocalizedText("Footnotes_LegalBases_SaveGlobalError");
         }
 
         private static string GetLegalBasesSaveLocalErrorPrefix()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Benutzer-Verzeichnis der Rechtsgrundlagen konnte nicht gespeichert werden.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Cannot save user legal bases dictionary.";
-            }
-
-            return "Nie mozna zapisac slownika podstaw prawnych uzytkownika.";
+            return LocalizedText("Footnotes_LegalBases_SaveLocalError");
         }
 
         private static string GetLegalBasesSaveInvalidEntryMessage()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Die Liste der Rechtsgrundlagen enthaelt ungueltige Eintraege.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Legal bases list contains invalid entries.";
-            }
-
-            return "Lista podstaw prawnych zawiera nieprawidlowe wpisy.";
+            return LocalizedText("Footnotes_LegalBases_InvalidEntry");
         }
 
         private static string GetLegalBasesSaveDuplicateIdMessage()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Doppelte ID der Rechtsgrundlage gefunden: {0}.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Duplicate legal basis ID detected: {0}.";
-            }
-
-            return "Wykryto zduplikowane ID podstawy prawnej: {0}.";
+            return LocalizedText("Footnotes_LegalBases_DuplicateId");
         }
 
         private static string GetLegalBasesSaveDuplicateTitleMessage()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Doppelter Kurztitel der Rechtsgrundlage gefunden: {0}.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Duplicate legal basis short title detected: {0}.";
-            }
-
-            return "Wykryto zduplikowana nazwe skrocona podstawy prawnej: {0}.";
+            return LocalizedText("Footnotes_LegalBases_DuplicateTitle");
         }
 
         private static string GetLegalBasesNoWriteAccessMessage()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Keine Berechtigung zum Speichern des Rechtsgrundlagen-Verzeichnisses.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "No write permission for legal bases dictionary.";
-            }
-
-            return "Brak uprawnien do zapisu slownika podstaw prawnych.";
+            return LocalizedText("Footnotes_LegalBases_NoWriteAccess");
         }
 
         private static string GetExclusionScopesLoadGlobalErrorPrefix()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Globales Verzeichnis der Ausschlussbereiche konnte nicht geladen werden.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Cannot load global exclusion scopes dictionary.";
-            }
-
-            return "Nie mozna zaladowac globalnego slownika zakresow wylaczenia.";
+            return LocalizedText("Footnotes_Scopes_LoadGlobalError");
         }
 
         private static string GetExclusionScopesLoadLocalErrorPrefix()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Benutzer-Verzeichnis der Ausschlussbereiche konnte nicht geladen werden.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Cannot load user exclusion scopes dictionary.";
-            }
-
-            return "Nie mozna zaladowac slownika zakresow wylaczenia uzytkownika.";
+            return LocalizedText("Footnotes_Scopes_LoadLocalError");
         }
 
         private static string GetExclusionScopesSaveGlobalErrorPrefix()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Globales Verzeichnis der Ausschlussbereiche konnte nicht gespeichert werden.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Cannot save global exclusion scopes dictionary.";
-            }
-
-            return "Nie mozna zapisac globalnego slownika zakresow wylaczenia.";
+            return LocalizedText("Footnotes_Scopes_SaveGlobalError");
         }
 
         private static string GetExclusionScopesSaveLocalErrorPrefix()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Benutzer-Verzeichnis der Ausschlussbereiche konnte nicht gespeichert werden.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Cannot save user exclusion scopes dictionary.";
-            }
-
-            return "Nie mozna zapisac slownika zakresow wylaczenia uzytkownika.";
+            return LocalizedText("Footnotes_Scopes_SaveLocalError");
         }
 
         private static string GetExclusionScopesSaveInvalidEntryMessage()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Lista zakresow wylaczenia zawiera nieprawidlowe wpisy.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Exclusion scopes list contains invalid entries.";
-            }
-
-            return "Lista zakresow wylaczenia zawiera nieprawidlowe wpisy.";
+            return LocalizedText("Footnotes_Scopes_InvalidEntry");
         }
 
         private static string GetExclusionScopesSaveDuplicateIdMessage()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Doppelte ID des Ausschlussbereichs gefunden: {0}.";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Duplicate exclusion scope ID detected: {0}.";
-            }
-
-            return "Wykryto zduplikowane ID zakresu wylaczenia: {0}.";
+            return LocalizedText("Footnotes_Scopes_DuplicateId");
         }
 
         private static float SnapValueToGrid(float value, float step)
@@ -10247,6 +10128,7 @@ namespace AnonPDF
             signaturesToRemove.Clear();
             hasCustomSignatureSelection = false;
             autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
+            addObjectsByPageRotationEnabled = true;
 
             inputProjectPath = "";
             lastSavedProjectName = "";
@@ -10341,6 +10223,7 @@ namespace AnonPDF
                 addCommentToolStripMenuItem.Enabled = true;
             }
             ApplyAutomaticFootnotesMenuState();
+            ApplyAddObjectsByPageRotationMenuState();
             deletePageMenuItem.Enabled = true;
             rotatePageMenuItem.Enabled = true;
             copyToClipboardMenuItem.Enabled = true;
@@ -10846,6 +10729,7 @@ namespace AnonPDF
             signaturesToRemove.Clear();
             hasCustomSignatureSelection = false;
             autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
+            addObjectsByPageRotationEnabled = true;
             allPageStatuses.Clear();
             pagesListView.Clear();
             searchTextBox.Text = string.Empty;
@@ -10908,6 +10792,7 @@ namespace AnonPDF
                 addCommentToolStripMenuItem.Enabled = false;
             }
             ApplyAutomaticFootnotesMenuState();
+            ApplyAddObjectsByPageRotationMenuState();
             deletePageMenuItem.Enabled = false;
             rotatePageMenuItem.Enabled = false;
             copyToClipboardMenuItem.Enabled = false;
@@ -15461,6 +15346,8 @@ namespace AnonPDF
                 return;
             }
 
+            TryApplyPersistedInterestSubjectToBlock(block);
+
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
@@ -15501,6 +15388,7 @@ namespace AnonPDF
             block.ClassificationSource = ClassificationSourceManual;
             block.MatchedTag = null;
             block.FootnoteNumber = null;
+            TryApplyPersistedInterestSubjectToBlock(block);
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
@@ -15552,114 +15440,37 @@ namespace AnonPDF
 
         private string GetScopeContextMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Zakres wyłączenia";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Ausschlussumfang";
-            }
-
-            return "Exclusion scope";
+            return LocalizedText("Footnotes_Context_Scope");
         }
 
         private string GetDeleteSelectionContextMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Usuń zaznaczenie";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Markierung entfernen";
-            }
-
-            return "Delete selection";
+            return LocalizedText("Footnotes_Context_DeleteSelection");
         }
 
         private string GetScopeNoneContextMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Brak zakresu";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Kein Umfang";
-            }
-
-            return "No scope";
+            return LocalizedText("Footnotes_Context_ScopeNone");
         }
 
         private string GetLegalBasisContextMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Podstawa prawna";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Rechtsgrundlage";
-            }
-
-            return "Legal basis";
+            return LocalizedText("Footnotes_Context_LegalBasis");
         }
 
         private string GetLegalBasisNoneContextMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Brak podstawy";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Keine Grundlage";
-            }
-
-            return "No basis";
+            return LocalizedText("Footnotes_Context_LegalBasisNone");
         }
 
         private string GetLegalBasisAddContextMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Dodaj podstawę";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Grundlage hinzufuegen";
-            }
-
-            return "Add legal basis";
+            return LocalizedText("Footnotes_Context_LegalBasisAdd");
         }
 
         private string GetCatalogUnavailableContextMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Brak danych słownika";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Keine Wörterbuchdaten";
-            }
-
-            return "No dictionary data";
+            return LocalizedText("Footnotes_Context_CatalogUnavailable");
         }
 
         private static string NormalizeClassificationSource(string value)
@@ -15813,6 +15624,7 @@ namespace AnonPDF
             block.BasisIds = basisIds;
             block.MatchedTag = matchedTag;
             block.ClassificationSource = ClassificationSourceAuto;
+            TryApplyPersistedInterestSubjectToBlock(block);
 
             if (DebugLogEnabled)
             {
@@ -15867,11 +15679,9 @@ namespace AnonPDF
             return value.Substring(0, maxLength) + "...";
         }
 
-        private static string GetFootnoteDetailText(int footnoteNumber)
+        private static string GetFallbackFootnoteDetailText(int footnoteNumber)
         {
-            return DemoFootnoteDetails.TryGetValue(footnoteNumber, out string detail) && !string.IsNullOrWhiteSpace(detail)
-                ? detail
-                : "Brak opisu podstawy prawnej.";
+            return LocalizedFormat("Footnotes_MissingLegalBasisDescription", footnoteNumber);
         }
 
         private RectangleF CalculateFootnoteBadgeRect(
@@ -16529,7 +16339,7 @@ namespace AnonPDF
 
             foreach (int number in usedNumbers)
             {
-                entries.Add((number, GetFootnoteDetailText(number)));
+                entries.Add((number, GetFallbackFootnoteDetailText(number)));
             }
 
             return entries;
@@ -16583,6 +16393,7 @@ namespace AnonPDF
 
                 bool baseRotationBaked = pagesWithBakedRotation != null && pagesWithBakedRotation.Contains(pageNumber);
                 int rotation = baseRotationBaked ? GetRotationOffset(pageNumber) : GetEffectiveRotationDegrees(pageNumber);
+                int markerAnchorRotation = addObjectsByPageRotationEnabled ? rotation : 0;
                 bool includeBaseRotation = !baseRotationBaked;
                 iText.Kernel.Pdf.PdfPage page = pdfDoc.GetPage(pageNumber);
                 RectangleF markerAnchorRect = GetFootnoteMarkerAnchorRect(
@@ -16594,8 +16405,46 @@ namespace AnonPDF
                     redactionVisualPdfBoundsByBlock);
                 float markerWidth = Math.Max(8f, markerFont.GetWidth(markerText, markerFontSize));
                 float markerHeight = markerFontSize + 1f;
-                PointF markerViewPoint = GetFootnoteAnchorPointForPdfExport(markerAnchorRect, rotation);
-                markerViewPoint = ApplyFootnoteAnchorGapForPdfExport(markerViewPoint, rotation);
+                PointF markerViewPoint;
+                if (!addObjectsByPageRotationEnabled)
+                {
+                    // Flat mode: same visual rule as 0 deg (right side, non-rotated marker).
+                    markerViewPoint = new PointF(
+                        markerAnchorRect.Right + FootnoteMarkerGapPx,
+                        markerAnchorRect.Top + (markerAnchorRect.Height / 2f) - markerHeight);
+                }
+                else
+                {
+                    markerViewPoint = GetFootnoteAnchorPointForPdfExport(markerAnchorRect, markerAnchorRotation);
+                    markerViewPoint = ApplyFootnoteAnchorGapForPdfExport(markerViewPoint, markerAnchorRotation);
+                }
+
+                // For tall visual redaction rectangles, use edge anchoring instead of vertical centering.
+                if (addObjectsByPageRotationEnabled &&
+                    markerAnchorRect.Height >= (markerHeight * 2f))
+                {
+                    int normalizedAnchorRotation = NormalizeRotation(markerAnchorRotation);
+                    // Keep corner anchoring consistent with rotation-aware preview.
+                    // Preserve 2px gap for 90/270 like in standard anchor-gap rules.
+                    float anchoredY;
+                    if (normalizedAnchorRotation == 90)
+                    {
+                        anchoredY = markerAnchorRect.Bottom + FootnoteMarkerGapPx;
+                    }
+                    else if (normalizedAnchorRotation == 180)
+                    {
+                        anchoredY = markerAnchorRect.Bottom;
+                    }
+                    else if (normalizedAnchorRotation == 270)
+                    {
+                        anchoredY = markerAnchorRect.Top - FootnoteMarkerGapPx;
+                    }
+                    else
+                    {
+                        anchoredY = markerAnchorRect.Top;
+                    }
+                    markerViewPoint = new PointF(markerViewPoint.X, anchoredY);
+                }
                 RectangleF badgeRect = new RectangleF(
                     markerViewPoint.X,
                     markerViewPoint.Y,
@@ -16608,10 +16457,32 @@ namespace AnonPDF
                     rotation,
                     includeBaseRotation: includeBaseRotation);
 
+                float markerTextRotationRadians = 0f;
+                if (!addObjectsByPageRotationEnabled)
+                {
+                    // Flat mode: keep index orientation like 0 deg preview.
+                    // Start with explicit per-angle handling (can be tuned per rotation in next steps).
+                    switch (NormalizeRotation(rotation))
+                    {
+                        case 90:
+                            markerTextRotationRadians = (float)(Math.PI / 2.0);
+                            break;
+                        case 180:
+                            markerTextRotationRadians = (float)Math.PI;
+                            break;
+                        case 270:
+                            markerTextRotationRadians = (float)(-Math.PI / 2.0);
+                            break;
+                        default:
+                            markerTextRotationRadians = 0f;
+                            break;
+                    }
+                }
+
                 if (DebugLogEnabled)
                 {
                     LogDebug(
-                        $"FootnoteExport page={pageNumber} footnote={markerText} rot={NormalizeRotation(rotation)} " +
+                        $"FootnoteExport page={pageNumber} footnote={markerText} rot={NormalizeRotation(rotation)} anchorRot={NormalizeRotation(markerAnchorRotation)} " +
                         $"selection={FormatRectFInvariant(markerAnchorRect)} badge={FormatRectFInvariant(badgeRect)} " +
                         $"viewPoint={FormatPointFInvariant(markerViewPoint)} pdfPoint={FormatPointFInvariant(markerPdfPoint)} " +
                         $"textW={markerWidth.ToString("0.###", CultureInfo.InvariantCulture)} " +
@@ -16639,7 +16510,7 @@ namespace AnonPDF
                         pageNumber,
                         iText.Layout.Properties.TextAlignment.LEFT,
                         iText.Layout.Properties.VerticalAlignment.TOP,
-                        0f);
+                        markerTextRotationRadians);
                 }
 
                 DrawCornerDebugMarkersOnPdf(
@@ -16734,7 +16605,7 @@ namespace AnonPDF
             pdfCanvas.BeginText();
             pdfCanvas.SetFontAndSize(titleFont, titleFontSize);
             pdfCanvas.MoveText(left, currentY);
-            pdfCanvas.ShowText(FootnoteSummaryTitle);
+            pdfCanvas.ShowText(LocalizedText("Footnotes_SummaryTitle"));
             pdfCanvas.EndText();
 
             currentY -= lineHeight * 1.5f;
@@ -17753,103 +17624,115 @@ namespace AnonPDF
                                 float badgeWidth = textSize.Width + (badgePaddingX * 2f);
                                 float badgeHeight = textSize.Height + (badgePaddingY * 2f);
                                 float margin = Math.Max(2f, 2f * badgeScale);
-                                int rotationOffset = NormalizeRotation(GetRotationOffset(block.PageNumber));
+                                bool useRotationAwarePlacement = addObjectsByPageRotationEnabled;
+                                int rotationOffset = useRotationAwarePlacement
+                                    ? NormalizeRotation(GetRotationOffset(block.PageNumber))
+                                    : 0;
                                 float halfDiff = (badgeWidth - badgeHeight) / 2f;
 
                                 float badgeX;
                                 float badgeY;
-                                switch (rotationOffset)
+                                if (!useRotationAwarePlacement)
                                 {
-                                    case 90:
-                                        badgeX = rect.Right - badgeWidth;
-                                        badgeY = rect.Bottom + margin;
-                                        break;
-                                    case 180:
-                                        badgeX = rect.Left - badgeWidth - margin;
-                                        badgeY = rect.Bottom - badgeHeight;
-                                        break;
-                                    case 270:
-                                        badgeX = rect.Left;
-                                        badgeY = rect.Top - badgeHeight - margin;
-                                        break;
-                                    default:
-                                        badgeX = rect.Right + margin;
-                                        badgeY = rect.Top;
-                                        break;
-                                }
-
-                                if (rotationOffset == 90)
-                                {
-                                    badgeX += halfDiff;
-                                    badgeY += halfDiff;
-                                }
-                                else if (rotationOffset == 270)
-                                {
-                                    badgeX -= halfDiff;
-                                    badgeY -= halfDiff;
-                                }
-
-                            float badgeVerticalShift = badgeHeight / 2f;
-                            switch (rotationOffset)
-                            {
-                                case 90:
-                                    badgeX += badgeVerticalShift;
-                                        break;
-                                    case 180:
-                                        badgeY += badgeVerticalShift;
-                                        break;
-                                    case 270:
-                                        badgeX -= badgeVerticalShift;
-                                        break;
-                                    default:
-                                    badgeY -= badgeVerticalShift;
-                                    break;
-                            }
-
-                            float markerThicknessPx = markerWidth * scaleFactor;
-                            float minSelectionDim = Math.Min(rect.Width, rect.Height);
-                            float maxSelectionDim = Math.Max(rect.Width, rect.Height);
-                            bool isThinElongatedSelection = markerThicknessPx > 0f &&
-                                                            minSelectionDim <= markerThicknessPx * 1.4f &&
-                                                            maxSelectionDim >= minSelectionDim * 3f;
-                            if (isThinElongatedSelection)
-                            {
-                                bool markerAxisIsVertical = rect.Height > rect.Width;
-                                float markerAxisCenterY = rect.Top + (rect.Height / 2f);
-                                float markerAxisCenterX = rect.Left + (rect.Width / 2f);
-
-                                if (!markerAxisIsVertical)
-                                {
-                                    if (rotationOffset == 0)
-                                    {
-                                        // Bottom edge of badge sits on marker symmetry axis.
-                                        badgeY = markerAxisCenterY - badgeHeight;
-                                    }
-                                    else if (rotationOffset == 180)
-                                    {
-                                        // For 180 deg badge rotation, bottom edge maps to top edge in view space.
-                                        badgeY = markerAxisCenterY;
-                                    }
+                                    // Flat mode: always place marker on the right side (same visual rule as 0 deg).
+                                    badgeX = rect.Right + margin;
+                                    badgeY = rect.Top + (rect.Height / 2f) - badgeHeight;
                                 }
                                 else
                                 {
+                                    switch (rotationOffset)
+                                    {
+                                        case 90:
+                                            badgeX = rect.Right - badgeWidth;
+                                            badgeY = rect.Bottom + margin;
+                                            break;
+                                        case 180:
+                                            badgeX = rect.Left - badgeWidth - margin;
+                                            badgeY = rect.Bottom - badgeHeight;
+                                            break;
+                                        case 270:
+                                            badgeX = rect.Left;
+                                            badgeY = rect.Top - badgeHeight - margin;
+                                            break;
+                                        default:
+                                            badgeX = rect.Right + margin;
+                                            badgeY = rect.Top;
+                                            break;
+                                    }
+
                                     if (rotationOffset == 90)
                                     {
-                                        // For 90 deg badge rotation, bottom edge maps to left edge in view space.
-                                        badgeX = markerAxisCenterX;
+                                        badgeX += halfDiff;
+                                        badgeY += halfDiff;
                                     }
                                     else if (rotationOffset == 270)
                                     {
-                                        // For 270 deg badge rotation, bottom edge maps to right edge in view space.
-                                        badgeX = markerAxisCenterX - badgeWidth;
+                                        badgeX -= halfDiff;
+                                        badgeY -= halfDiff;
+                                    }
+
+                                    float badgeVerticalShift = badgeHeight / 2f;
+                                    switch (rotationOffset)
+                                    {
+                                        case 90:
+                                            badgeX += badgeVerticalShift;
+                                            break;
+                                        case 180:
+                                            badgeY += badgeVerticalShift;
+                                            break;
+                                        case 270:
+                                            badgeX -= badgeVerticalShift;
+                                            break;
+                                        default:
+                                            badgeY -= badgeVerticalShift;
+                                            break;
+                                    }
+
+                                    float markerThicknessPx = markerWidth * scaleFactor;
+                                    float minSelectionDim = Math.Min(rect.Width, rect.Height);
+                                    float maxSelectionDim = Math.Max(rect.Width, rect.Height);
+                                    bool isThinElongatedSelection = markerThicknessPx > 0f &&
+                                                                    minSelectionDim <= markerThicknessPx * 1.4f &&
+                                                                    maxSelectionDim >= minSelectionDim * 3f;
+                                    if (isThinElongatedSelection)
+                                    {
+                                        bool markerAxisIsVertical = rect.Height > rect.Width;
+                                        float markerAxisCenterY = rect.Top + (rect.Height / 2f);
+                                        float markerAxisCenterX = rect.Left + (rect.Width / 2f);
+
+                                        if (!markerAxisIsVertical)
+                                        {
+                                            if (rotationOffset == 0)
+                                            {
+                                                // Bottom edge of badge sits on marker symmetry axis.
+                                                badgeY = markerAxisCenterY - badgeHeight;
+                                            }
+                                            else if (rotationOffset == 180)
+                                            {
+                                                // For 180 deg badge rotation, bottom edge maps to top edge in view space.
+                                                badgeY = markerAxisCenterY;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            if (rotationOffset == 90)
+                                            {
+                                                // For 90 deg badge rotation, bottom edge maps to left edge in view space.
+                                                badgeX = markerAxisCenterX;
+                                            }
+                                            else if (rotationOffset == 270)
+                                            {
+                                                // For 270 deg badge rotation, bottom edge maps to right edge in view space.
+                                                badgeX = markerAxisCenterX - badgeWidth;
+                                            }
+                                        }
                                     }
                                 }
-                            }
 
-                            if (badgeX + badgeWidth > pdfViewer.ClientSize.Width)
-                            {
-                                badgeX = Math.Max(0f, rect.Right - badgeWidth - 2f);
-                            }
+                                if (badgeX + badgeWidth > pdfViewer.ClientSize.Width)
+                                {
+                                    badgeX = Math.Max(0f, rect.Right - badgeWidth - 2f);
+                                }
                                 if (badgeX < 0f)
                                 {
                                     badgeX = 0f;
@@ -17917,6 +17800,7 @@ namespace AnonPDF
                     }
                 }
             }
+
 
             TextLocation selectedSearchLocation = null;
             if (currentLocationIndex >= 0 && currentLocationIndex < searchLocations.Count)
@@ -18440,6 +18324,7 @@ namespace AnonPDF
                         SaveExclusionAuthorityUserSetting(exclusionAuthorityName);
                     }
                     ApplyAutomaticFootnotesMenuState();
+                    ApplyAddObjectsByPageRotationMenuState();
 
                     if (redactionBlocksJson.Count > 0)
                     {

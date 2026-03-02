@@ -231,6 +231,9 @@
   <data name="Menu_AddSnapToGrid" xml:space="preserve">
     <value>Dociagaj obiekty do siatki</value>
   </data>
+  <data name="Menu_AddObjectsByPageRotation" xml:space="preserve">
+    <value>Obracaj stronę wraz z obiektami</value>
+  </data>
   <data name="Menu_AddLegalBasesDictionary" xml:space="preserve">
     <value>Słownik podstaw prawnych</value>
   </data>
@@ -1358,5 +1361,89 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   </data>
   <data name="UI_SearchClearGlyph" xml:space="preserve">
     <value>X</value>
+  </data>
+  <data name="Footnotes_SummaryTitle" xml:space="preserve">
+    <value>Przypisy wyłączenia jawności:</value>
+  </data>
+  <data name="Footnotes_MissingLegalBasisDescription" xml:space="preserve">
+    <value>Brak opisu podstawy prawnej dla przypisu [{0}].</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_Menu" xml:space="preserve">
+    <value>Organ lub osoba dokonująca wyłączeń</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_Label" xml:space="preserve">
+    <value>Podaj organ lub osobę dokonującą wyłączeń:</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_Required" xml:space="preserve">
+    <value>To pole jest wymagane dla wybranych podstaw prawnych.</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_SummaryLine" xml:space="preserve">
+    <value>Organ lub osoba dokonująca wyłączeń: {0}</value>
+  </data>
+  <data name="Footnotes_Context_Scope" xml:space="preserve">
+    <value>Zakres wyłączenia</value>
+  </data>
+  <data name="Footnotes_Context_DeleteSelection" xml:space="preserve">
+    <value>Usuń zaznaczenie</value>
+  </data>
+  <data name="Footnotes_Context_ScopeNone" xml:space="preserve">
+    <value>Brak zakresu</value>
+  </data>
+  <data name="Footnotes_Context_LegalBasis" xml:space="preserve">
+    <value>Podstawa prawna</value>
+  </data>
+  <data name="Footnotes_Context_LegalBasisNone" xml:space="preserve">
+    <value>Brak podstawy</value>
+  </data>
+  <data name="Footnotes_Context_LegalBasisAdd" xml:space="preserve">
+    <value>Dodaj podstawę</value>
+  </data>
+  <data name="Footnotes_Context_CatalogUnavailable" xml:space="preserve">
+    <value>Brak danych słownika</value>
+  </data>
+  <data name="Footnotes_LegalBases_Saved" xml:space="preserve">
+    <value>Słownik podstaw prawnych został zapisany.</value>
+  </data>
+  <data name="Footnotes_LegalBases_LoadGlobalError" xml:space="preserve">
+    <value>Nie można załadować globalnego słownika podstaw prawnych.</value>
+  </data>
+  <data name="Footnotes_LegalBases_LoadLocalError" xml:space="preserve">
+    <value>Nie można załadować słownika podstaw prawnych użytkownika.</value>
+  </data>
+  <data name="Footnotes_LegalBases_SaveGlobalError" xml:space="preserve">
+    <value>Nie można zapisać globalnego słownika podstaw prawnych.</value>
+  </data>
+  <data name="Footnotes_LegalBases_SaveLocalError" xml:space="preserve">
+    <value>Nie można zapisać słownika podstaw prawnych użytkownika.</value>
+  </data>
+  <data name="Footnotes_LegalBases_InvalidEntry" xml:space="preserve">
+    <value>Lista podstaw prawnych zawiera nieprawidłowe wpisy.</value>
+  </data>
+  <data name="Footnotes_LegalBases_DuplicateId" xml:space="preserve">
+    <value>Wykryto zduplikowane ID podstawy prawnej: {0}.</value>
+  </data>
+  <data name="Footnotes_LegalBases_DuplicateTitle" xml:space="preserve">
+    <value>Wykryto zduplikowaną nazwę skróconą podstawy prawnej: {0}.</value>
+  </data>
+  <data name="Footnotes_LegalBases_NoWriteAccess" xml:space="preserve">
+    <value>Brak uprawnień do zapisu słownika podstaw prawnych.</value>
+  </data>
+  <data name="Footnotes_Scopes_LoadGlobalError" xml:space="preserve">
+    <value>Nie można załadować globalnego słownika zakresów wyłączenia.</value>
+  </data>
+  <data name="Footnotes_Scopes_LoadLocalError" xml:space="preserve">
+    <value>Nie można załadować słownika zakresów wyłączenia użytkownika.</value>
+  </data>
+  <data name="Footnotes_Scopes_SaveGlobalError" xml:space="preserve">
+    <value>Nie można zapisać globalnego słownika zakresów wyłączenia.</value>
+  </data>
+  <data name="Footnotes_Scopes_SaveLocalError" xml:space="preserve">
+    <value>Nie można zapisać słownika zakresów wyłączenia użytkownika.</value>
+  </data>
+  <data name="Footnotes_Scopes_InvalidEntry" xml:space="preserve">
+    <value>Lista zakresów wyłączenia zawiera nieprawidłowe wpisy.</value>
+  </data>
+  <data name="Footnotes_Scopes_DuplicateId" xml:space="preserve">
+    <value>Wykryto zduplikowane ID zakresu wyłączenia: {0}.</value>
   </data>
 </root>

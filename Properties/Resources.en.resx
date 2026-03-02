@@ -231,6 +231,9 @@
   <data name="Menu_AddSnapToGrid" xml:space="preserve">
     <value>Snap objects to grid</value>
   </data>
+  <data name="Menu_AddObjectsByPageRotation" xml:space="preserve">
+    <value>Rotate page with objects</value>
+  </data>
   <data name="Menu_AddLegalBasesDictionary" xml:space="preserve">
     <value>Legal bases dictionary</value>
   </data>
@@ -1358,5 +1361,89 @@ Close the application and run the installer now?</value>
   </data>
   <data name="UI_SearchClearGlyph" xml:space="preserve">
     <value>X</value>
+  </data>
+  <data name="Footnotes_SummaryTitle" xml:space="preserve">
+    <value>Redaction footnotes:</value>
+  </data>
+  <data name="Footnotes_MissingLegalBasisDescription" xml:space="preserve">
+    <value>No legal basis description available for footnote [{0}].</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_Menu" xml:space="preserve">
+    <value>Authority or person performing exclusions</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_Label" xml:space="preserve">
+    <value>Enter authority or person performing exclusions:</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_Required" xml:space="preserve">
+    <value>This field is required for selected legal bases.</value>
+  </data>
+  <data name="Footnotes_ExclusionAuthority_SummaryLine" xml:space="preserve">
+    <value>Authority or person performing exclusions: {0}</value>
+  </data>
+  <data name="Footnotes_Context_Scope" xml:space="preserve">
+    <value>Exclusion scope</value>
+  </data>
+  <data name="Footnotes_Context_DeleteSelection" xml:space="preserve">
+    <value>Delete selection</value>
+  </data>
+  <data name="Footnotes_Context_ScopeNone" xml:space="preserve">
+    <value>No scope</value>
+  </data>
+  <data name="Footnotes_Context_LegalBasis" xml:space="preserve">
+    <value>Legal basis</value>
+  </data>
+  <data name="Footnotes_Context_LegalBasisNone" xml:space="preserve">
+    <value>No basis</value>
+  </data>
+  <data name="Footnotes_Context_LegalBasisAdd" xml:space="preserve">
+    <value>Add legal basis</value>
+  </data>
+  <data name="Footnotes_Context_CatalogUnavailable" xml:space="preserve">
+    <value>No dictionary data</value>
+  </data>
+  <data name="Footnotes_LegalBases_Saved" xml:space="preserve">
+    <value>Legal bases dictionary has been saved.</value>
+  </data>
+  <data name="Footnotes_LegalBases_LoadGlobalError" xml:space="preserve">
+    <value>Cannot load global legal bases dictionary.</value>
+  </data>
+  <data name="Footnotes_LegalBases_LoadLocalError" xml:space="preserve">
+    <value>Cannot load user legal bases dictionary.</value>
+  </data>
+  <data name="Footnotes_LegalBases_SaveGlobalError" xml:space="preserve">
+    <value>Cannot save global legal bases dictionary.</value>
+  </data>
+  <data name="Footnotes_LegalBases_SaveLocalError" xml:space="preserve">
+    <value>Cannot save user legal bases dictionary.</value>
+  </data>
+  <data name="Footnotes_LegalBases_InvalidEntry" xml:space="preserve">
+    <value>Legal bases list contains invalid entries.</value>
+  </data>
+  <data name="Footnotes_LegalBases_DuplicateId" xml:space="preserve">
+    <value>Duplicate legal basis ID detected: {0}.</value>
+  </data>
+  <data name="Footnotes_LegalBases_DuplicateTitle" xml:space="preserve">
+    <value>Duplicate legal basis short title detected: {0}.</value>
+  </data>
+  <data name="Footnotes_LegalBases_NoWriteAccess" xml:space="preserve">
+    <value>No write permission for legal bases dictionary.</value>
+  </data>
+  <data name="Footnotes_Scopes_LoadGlobalError" xml:space="preserve">
+    <value>Cannot load global exclusion scopes dictionary.</value>
+  </data>
+  <data name="Footnotes_Scopes_LoadLocalError" xml:space="preserve">
+    <value>Cannot load user exclusion scopes dictionary.</value>
+  </data>
+  <data name="Footnotes_Scopes_SaveGlobalError" xml:space="preserve">
+    <value>Cannot save global exclusion scopes dictionary.</value>
+  </data>
+  <data name="Footnotes_Scopes_SaveLocalError" xml:space="preserve">
+    <value>Cannot save user exclusion scopes dictionary.</value>
+  </data>
+  <data name="Footnotes_Scopes_InvalidEntry" xml:space="preserve">
+    <value>Exclusion scopes list contains invalid entries.</value>
+  </data>
+  <data name="Footnotes_Scopes_DuplicateId" xml:space="preserve">
+    <value>Duplicate exclusion scope ID detected: {0}.</value>
   </data>
 </root>

@@ -238,5 +238,17 @@ namespace AnonPDF.Properties {
                 this["AutoFootnotesEnabled"] = value;
             }
         }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool AddObjectsByPageRotationEnabled {
+            get {
+                return ((bool)(this["AddObjectsByPageRotationEnabled"]));
+            }
+            set {
+                this["AddObjectsByPageRotationEnabled"] = value;
+            }
+        }
     }
 }
