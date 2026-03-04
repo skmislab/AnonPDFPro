@@ -4834,6 +4834,8 @@ namespace AnonPDF
 
         private void AddEditAnnotation(TextAnnotation annotation = null, string initialText = null)
         {
+            DeactivateObjectCreationModes();
+
             if (!EnsureCurrentPageEditable(true))
             {
                 return;
@@ -12941,6 +12943,30 @@ namespace AnonPDF
             pdfViewer.Invalidate();
         }
 
+        private void DeactivateObjectCreationModes()
+        {
+            if (isVectorShapeCreationMode)
+            {
+                EndVectorShapeCreationMode();
+            }
+
+            if (isCommentCreationMode)
+            {
+                EndCommentCreationMode();
+            }
+
+            isDrawing = false;
+            isMarkerCtrlBoxMode = false;
+            currentSelection = RectangleF.Empty;
+
+            if (!isMiddleMousePanning && !isVectorShapeCreationMode && !isCommentCreationMode)
+            {
+                this.Cursor = Cursors.Default;
+            }
+
+            pdfViewer.Invalidate();
+        }
+
         private void EndVectorShapeCreationMode(bool keepDefaults = true)
         {
             isVectorShapeCreationMode = false;
@@ -14678,6 +14704,7 @@ namespace AnonPDF
 
         private void AddCommentToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            DeactivateObjectCreationModes();
             BeginCommentCreationMode();
         }
 
@@ -19795,6 +19822,8 @@ namespace AnonPDF
 
         private void AddRasterImageFromFileDialog()
         {
+            DeactivateObjectCreationModes();
+
             if (pdf == null || numPages <= 0)
             {
                 ShowInfoMessage(Resources.Msg_OpenPdfFirst);
@@ -19910,6 +19939,8 @@ namespace AnonPDF
 
         private void AddArrowObject()
         {
+            DeactivateObjectCreationModes();
+
             if (pdf == null || numPages <= 0)
             {
                 ShowInfoMessage(Resources.Msg_OpenPdfFirst);
@@ -26753,6 +26784,7 @@ namespace AnonPDF
 
         private void AddShapeToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            DeactivateObjectCreationModes();
             if (!EnsureCurrentPageEditable(true))
             {
                 return;
