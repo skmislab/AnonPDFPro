@@ -706,6 +706,24 @@ Aplikacja zostanie zamknięta.</value>
   <data name="EditText_ButtonColor" xml:space="preserve">
     <value>Wybierz kolor</value>
   </data>
+  <data name="EditText_LabelTextColor" xml:space="preserve">
+    <value>Kolor tekstu:</value>
+  </data>
+  <data name="EditText_LabelBackgroundColor" xml:space="preserve">
+    <value>Kolor tła:</value>
+  </data>
+  <data name="EditText_ButtonChooseColor" xml:space="preserve">
+    <value>Wybierz...</value>
+  </data>
+  <data name="EditText_RichModeLabel" xml:space="preserve">
+    <value>Tryb formatowany</value>
+  </data>
+  <data name="EditText_NoBackground" xml:space="preserve">
+    <value>Brak tła</value>
+  </data>
+  <data name="EditText_RichSelectionColorLabel" xml:space="preserve">
+    <value>Kolor zaznaczenia:</value>
+  </data>
   <data name="EditText_GroupAlignment" xml:space="preserve">
     <value>Wyrównanie</value>
   </data>

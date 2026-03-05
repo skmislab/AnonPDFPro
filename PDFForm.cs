@@ -95,6 +95,8 @@ namespace AnonPDF
         private const string ShapeIconFontLegacyFileName = "materialdesignicons-webfont.ttf";
         private const string RasterSourceClipboard = "Clipboard";
         private const string RasterSourceFile = "File";
+        private static readonly System.Drawing.Color DefaultCommentHighlightColor = System.Drawing.Color.FromArgb(255, 235, 59);
+        private static readonly System.Drawing.Color DefaultCommentTextColor = System.Drawing.Color.Black;
         private readonly PrivateFontCollection shapeIconPrivateFontCollection = new PrivateFontCollection();
         private string shapeIconPrivateFontFamilyName = string.Empty;
         private string shapeIconPrivateFontPath = string.Empty;
@@ -3211,6 +3213,9 @@ namespace AnonPDF
                             AnnotationText = textAnnotation.AnnotationText,
                             AnnotationFont = CloneFontSafe(textAnnotation.AnnotationFont),
                             AnnotationColor = textAnnotation.AnnotationColor,
+                            AnnotationBackgroundColorArgb = textAnnotation.AnnotationBackgroundColorArgb,
+                            AnnotationContentMode = textAnnotation.AnnotationContentMode,
+                            AnnotationRichText = textAnnotation.AnnotationRichText,
                             AnnotationAlignment = textAnnotation.AnnotationAlignment,
                             AnnotationRotation = textAnnotation.AnnotationRotation,
                             AnnotationIsLocked = textAnnotation.AnnotationIsLocked
@@ -3418,6 +3423,12 @@ namespace AnonPDF
                 return true;
             }
 
+            bool isSingleRasterPaste =
+                objectClipboardSnapshot.Items.Count == 1 &&
+                objectClipboardSnapshot.Items[0] != null &&
+                objectClipboardSnapshot.Items[0].Type == ObjectClipboardItemType.Raster &&
+                objectClipboardSnapshot.Items[0].Raster != null;
+
             float offset = 12f * (objectClipboardPasteCount + 1);
             float baseX = objectClipboardSnapshot.SourceBounds.X + offset;
             float baseY = objectClipboardSnapshot.SourceBounds.Y + offset;
@@ -3457,6 +3468,9 @@ namespace AnonPDF
                             AnnotationText = item.Text.AnnotationText,
                             AnnotationFont = CloneFontSafe(item.Text.AnnotationFont),
                             AnnotationColor = item.Text.AnnotationColor,
+                            AnnotationBackgroundColorArgb = item.Text.AnnotationBackgroundColorArgb,
+                            AnnotationContentMode = item.Text.AnnotationContentMode,
+                            AnnotationRichText = item.Text.AnnotationRichText,
                             AnnotationAlignment = item.Text.AnnotationAlignment,
                             AnnotationRotation = item.Text.AnnotationRotation,
                             AnnotationBounds = bounds,
@@ -3473,11 +3487,27 @@ namespace AnonPDF
                             break;
                         }
 
-                        RectangleF bounds = new RectangleF(
-                            baseX + item.Bounds.X,
-                            baseY + item.Bounds.Y,
-                            item.Bounds.Width,
-                            item.Bounds.Height);
+                        RectangleF bounds;
+                        if (isSingleRasterPaste)
+                        {
+                            var pageSize = GetPageSizeWithOffset(currentPage);
+                            float centerX = pageSize.Width / 2f;
+                            float centerY = pageSize.Height / 2f;
+                            bounds = new RectangleF(
+                                centerX - (item.Bounds.Width / 2f),
+                                centerY - (item.Bounds.Height / 2f),
+                                item.Bounds.Width,
+                                item.Bounds.Height);
+                        }
+                        else
+                        {
+                            bounds = new RectangleF(
+                                baseX + item.Bounds.X,
+                                baseY + item.Bounds.Y,
+                                item.Bounds.Width,
+                                item.Bounds.Height);
+                        }
+
                         var rasterCopy = new RasterObject
                         {
                             Id = Guid.NewGuid().ToString("N"),
@@ -3875,6 +3905,29 @@ namespace AnonPDF
                     hitVectorShape = candidate;
                     return true;
                 }
+            }
+
+            return false;
+        }
+
+        private bool TryHandleObjectDoubleClick(Point location)
+        {
+            if (TryGetHitVectorShapeAtPoint(location, out VectorShapeObject hitVectorShape) && hitVectorShape != null)
+            {
+                EditVectorShapeObject(hitVectorShape);
+                return true;
+            }
+
+            if (TryGetHitArrowAtPoint(location, out ArrowObject hitArrow) && hitArrow != null)
+            {
+                EditArrowObject(hitArrow);
+                return true;
+            }
+
+            if (TryGetHitRasterAtPoint(location, out RasterObject hitRaster) && hitRaster != null)
+            {
+                EditRasterObject(hitRaster);
+                return true;
             }
 
             return false;
@@ -4707,6 +4760,222 @@ namespace AnonPDF
             return new SizeF(rotatedWidth, rotatedHeight);
         }
 
+        private static SizeF RotateSize(SizeF size, int rotation)
+        {
+            rotation = NormalizeRotation(rotation);
+            if (rotation == 0)
+            {
+                return size;
+            }
+
+            float angle = (float)(rotation * Math.PI / 180.0);
+            float cos = Math.Abs((float)Math.Cos(angle));
+            float sin = Math.Abs((float)Math.Sin(angle));
+            float rotatedWidth = (size.Width * cos) + (size.Height * sin);
+            float rotatedHeight = (size.Width * sin) + (size.Height * cos);
+            return new SizeF(rotatedWidth, rotatedHeight);
+        }
+
+        private static SizeF GetRichAnnotationSize(string plainText, string richText, Font fallbackFont, int rotation)
+        {
+            if (fallbackFont == null)
+            {
+                fallbackFont = SystemFonts.DefaultFont;
+            }
+
+            // Deterministic sizing: rich mode uses the same bounds model as plain mode.
+            // This keeps preview stable across font-size changes and alignment switches.
+            string content = plainText ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(richText))
+            {
+                try
+                {
+                    using (var rtb = new RichTextBox())
+                    {
+                        rtb.Rtf = richText;
+                        content = rtb.Text ?? string.Empty;
+                    }
+                }
+                catch
+                {
+                    content = string.Empty;
+                }
+            }
+
+            SizeF baseSize = GetAnnotationSize(content, fallbackFont, 0);
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            using (StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone())
+            {
+                format.FormatFlags |= StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces;
+                format.Trimming = StringTrimming.None;
+
+                // Add one character (width) and one line (height), scaled by current font.
+                float extraWidth = g.MeasureString("M", fallbackFont, int.MaxValue, format).Width;
+                float extraHeight = fallbackFont.GetHeight(g);
+                SizeF paddedSize = new SizeF(
+                    Math.Max(1f, baseSize.Width + extraWidth),
+                    Math.Max(1f, baseSize.Height + extraHeight));
+                return RotateSize(paddedSize, rotation);
+            }
+        }
+
+        private static SizeF MeasureRichInkBounds(RichTextBox richTextBox, float minWidthPx, float minHeightPx)
+        {
+            if (richTextBox == null)
+            {
+                return SizeF.Empty;
+            }
+
+            int width = Math.Max(1, (int)Math.Ceiling(minWidthPx) + 8);
+            int height = Math.Max(1, (int)Math.Ceiling(minHeightPx) + 8);
+
+            using (Bitmap black = new Bitmap(width, height, PixelFormat.Format32bppArgb))
+            using (Bitmap white = new Bitmap(width, height, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics gBlack = Graphics.FromImage(black))
+                using (Graphics gWhite = Graphics.FromImage(white))
+                {
+                    gBlack.Clear(System.Drawing.Color.Black);
+                    gWhite.Clear(System.Drawing.Color.White);
+                }
+
+                var previousBack = richTextBox.BackColor;
+                var previousSize = richTextBox.Size;
+                try
+                {
+                    richTextBox.BackColor = System.Drawing.Color.Black;
+                    richTextBox.Size = new Size(width, height);
+                    richTextBox.CreateControl();
+                    richTextBox.DrawToBitmap(black, new Rectangle(0, 0, width, height));
+
+                    richTextBox.BackColor = System.Drawing.Color.White;
+                    richTextBox.Size = new Size(width, height);
+                    richTextBox.CreateControl();
+                    richTextBox.DrawToBitmap(white, new Rectangle(0, 0, width, height));
+                }
+                finally
+                {
+                    richTextBox.BackColor = previousBack;
+                    richTextBox.Size = previousSize;
+                }
+
+                int maxX = -1;
+                int maxY = -1;
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        System.Drawing.Color cb = black.GetPixel(x, y);
+                        System.Drawing.Color cw = white.GetPixel(x, y);
+                        int alpha = 255 - (((cw.R - cb.R) + (cw.G - cb.G) + (cw.B - cb.B)) / 3);
+                        if (alpha > 0)
+                        {
+                            if (x > maxX) maxX = x;
+                            if (y > maxY) maxY = y;
+                        }
+                    }
+                }
+
+                if (maxX < 0 || maxY < 0)
+                {
+                    return SizeF.Empty;
+                }
+
+                return new SizeF(maxX + 1f, maxY + 1f);
+            }
+        }
+
+        private static void ApplyGlobalRichFont(RichTextBox richTextBox, Font baseFont)
+        {
+            if (richTextBox == null || baseFont == null || richTextBox.TextLength <= 0)
+            {
+                return;
+            }
+
+            int selectionStart = richTextBox.SelectionStart;
+            int selectionLength = richTextBox.SelectionLength;
+            var fontCache = new Dictionary<FontStyle, Font>();
+
+            try
+            {
+                for (int i = 0; i < richTextBox.TextLength; i++)
+                {
+                    richTextBox.Select(i, 1);
+                    Font currentFont = richTextBox.SelectionFont ?? baseFont;
+                    FontStyle style = currentFont.Style;
+                    if (!fontCache.TryGetValue(style, out Font targetFont))
+                    {
+                        targetFont = new Font(baseFont.FontFamily, baseFont.Size, style);
+                        fontCache[style] = targetFont;
+                    }
+
+                    bool sameFamily = string.Equals(
+                        currentFont.FontFamily.Name,
+                        baseFont.FontFamily.Name,
+                        StringComparison.OrdinalIgnoreCase);
+                    bool sameSize = Math.Abs(currentFont.Size - baseFont.Size) < 0.05f;
+
+                    if (!sameFamily || !sameSize)
+                    {
+                        richTextBox.SelectionFont = targetFont;
+                    }
+                }
+            }
+            finally
+            {
+                richTextBox.Select(selectionStart, selectionLength);
+                foreach (Font cachedFont in fontCache.Values)
+                {
+                    cachedFont.Dispose();
+                }
+            }
+        }
+
+        private static void NormalizeRichParagraphAlignmentLeft(RichTextBox richTextBox)
+        {
+            if (richTextBox == null || richTextBox.TextLength <= 0)
+            {
+                return;
+            }
+
+            int selectionStart = richTextBox.SelectionStart;
+            int selectionLength = richTextBox.SelectionLength;
+            try
+            {
+                richTextBox.SelectAll();
+                richTextBox.SelectionAlignment = System.Windows.Forms.HorizontalAlignment.Left;
+            }
+            finally
+            {
+                richTextBox.Select(selectionStart, selectionLength);
+            }
+        }
+
+        private static void ApplyRichParagraphAlignment(RichTextBox richTextBox, System.Windows.Forms.HorizontalAlignment alignment)
+        {
+            if (richTextBox == null || richTextBox.TextLength <= 0)
+            {
+                return;
+            }
+
+            int selectionStart = richTextBox.SelectionStart;
+            int selectionLength = richTextBox.SelectionLength;
+            try
+            {
+                richTextBox.SelectAll();
+                richTextBox.SelectionAlignment = alignment;
+            }
+            finally
+            {
+                richTextBox.Select(selectionStart, selectionLength);
+            }
+        }
+
+        private static float GetRichAlignmentOffset(float dpiX, System.Windows.Forms.HorizontalAlignment alignment)
+        {
+            return 0f;
+        }
+
         private static PointF GetRotationOffsetForBounds(int rotation, float width, float height)
         {
             rotation = NormalizeRotation(rotation);
@@ -4742,10 +5011,15 @@ namespace AnonPDF
 
         private static void ApplyAnnotationFromDialog(TextAnnotation annotation, EditTextDialog dlg)
         {
-            SizeF textSize = GetAnnotationSize(dlg.AnnotationText, dlg.AnnotationFont, dlg.AnnotationRotation);
+            SizeF textSize = dlg.IsRichTextMode
+                ? GetRichAnnotationSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont, dlg.AnnotationRotation)
+                : GetAnnotationSize(dlg.AnnotationText, dlg.AnnotationFont, dlg.AnnotationRotation);
             annotation.AnnotationText = dlg.AnnotationText;
             annotation.AnnotationFont = dlg.AnnotationFont;
             annotation.AnnotationColor = dlg.AnnotationColor;
+            annotation.AnnotationBackgroundColorArgb = dlg.AnnotationBackgroundColor.ToArgb();
+            annotation.AnnotationContentMode = dlg.IsRichTextMode ? "rich" : "plain";
+            annotation.AnnotationRichText = dlg.IsRichTextMode ? dlg.AnnotationRichText : null;
             annotation.AnnotationAlignment = dlg.AnnotationAlignment;
             annotation.AnnotationRotation = dlg.AnnotationRotation;
             annotation.AnnotationBounds = new RectangleF(
@@ -4754,6 +5028,30 @@ namespace AnonPDF
                 textSize.Width,
                 textSize.Height
             );
+        }
+
+        private static System.Drawing.Color GetAnnotationBackgroundColor(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return System.Drawing.Color.Transparent;
+            }
+
+            try
+            {
+                return System.Drawing.Color.FromArgb(annotation.AnnotationBackgroundColorArgb);
+            }
+            catch
+            {
+                return System.Drawing.Color.Transparent;
+            }
+        }
+
+        private static bool IsRichTextMode(TextAnnotation annotation)
+        {
+            return annotation != null &&
+                   string.Equals(annotation.AnnotationContentMode, "rich", StringComparison.OrdinalIgnoreCase) &&
+                   !string.IsNullOrWhiteSpace(annotation.AnnotationRichText);
         }
 
         private static void LogDebug(string message)
@@ -4849,6 +5147,9 @@ namespace AnonPDF
                     dlg.AnnotationText = annotation.AnnotationText;
                     dlg.AnnotationFont = annotation.AnnotationFont;
                     dlg.AnnotationColor = annotation.AnnotationColor;
+                    dlg.AnnotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
+                    dlg.IsRichTextMode = string.Equals(annotation.AnnotationContentMode, "rich", StringComparison.OrdinalIgnoreCase);
+                    dlg.AnnotationRichText = annotation.AnnotationRichText;
                     dlg.AnnotationAlignment = annotation.AnnotationAlignment;
                     dlg.AnnotationRotation = annotation.AnnotationRotation;
                     dlg.ApplyChanges = () =>
@@ -4868,7 +5169,9 @@ namespace AnonPDF
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     // Calculate text size using the selected font
-                    SizeF textSize = GetAnnotationSize(dlg.AnnotationText, dlg.AnnotationFont, dlg.AnnotationRotation);
+                    SizeF textSize = dlg.IsRichTextMode
+                        ? GetRichAnnotationSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont, dlg.AnnotationRotation)
+                        : GetAnnotationSize(dlg.AnnotationText, dlg.AnnotationFont, dlg.AnnotationRotation);
 
                     float boxWidth = textSize.Width;
                     float boxHeight = textSize.Height;
@@ -4888,6 +5191,9 @@ namespace AnonPDF
                             AnnotationText = dlg.AnnotationText,
                             AnnotationFont = dlg.AnnotationFont,
                             AnnotationColor = dlg.AnnotationColor,
+                            AnnotationBackgroundColorArgb = dlg.AnnotationBackgroundColor.ToArgb(),
+                            AnnotationContentMode = dlg.IsRichTextMode ? "rich" : "plain",
+                            AnnotationRichText = dlg.IsRichTextMode ? dlg.AnnotationRichText : null,
                             AnnotationAlignment = dlg.AnnotationAlignment,
                             AnnotationRotation = dlg.AnnotationRotation
                         };
@@ -4975,6 +5281,9 @@ namespace AnonPDF
                 AnnotationText = source.AnnotationText,
                 AnnotationFont = source.AnnotationFont,
                 AnnotationColor = source.AnnotationColor,
+                AnnotationBackgroundColorArgb = source.AnnotationBackgroundColorArgb,
+                AnnotationContentMode = source.AnnotationContentMode,
+                AnnotationRichText = source.AnnotationRichText,
                 AnnotationAlignment = source.AnnotationAlignment,
                 AnnotationRotation = source.AnnotationRotation,
                 AnnotationIsLocked = source.AnnotationIsLocked,
@@ -9581,6 +9890,12 @@ namespace AnonPDF
                     int lineCount = Math.Max(lines.Length, 1);
                     float layoutWidth = maxGdiWidthPt;
                     float layoutHeight = lineHeightPt * lineCount;
+                    bool isRichAnnotation = IsRichTextMode(annotation);
+                    if (isRichAnnotation)
+                    {
+                        layoutWidth = Math.Max(1f, scaledAnnotationBounds.Width);
+                        layoutHeight = Math.Max(1f, scaledAnnotationBounds.Height);
+                    }
                     float horizontalScaling = 1f;
                     if (maxPdfWidth > 0f && maxGdiWidthPt > 0f)
                     {
@@ -9599,6 +9914,101 @@ namespace AnonPDF
                     float rotCos = (float)Math.Cos(annotationRotationRadians);
                     float rotSin = (float)Math.Sin(annotationRotationRadians);
                     PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
+                    System.Drawing.Color annotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
+
+                    if (!isRichAnnotation && annotationBackgroundColor.A > 0)
+                    {
+                        PointF TransformCorner(float x, float y)
+                        {
+                            float tx = (x * rotCos) - (y * rotSin) + rotationOffset.X;
+                            float ty = (x * rotSin) + (y * rotCos) + rotationOffset.Y;
+                            return new PointF(
+                                scaledAnnotationBounds.X + tx,
+                                scaledAnnotationBounds.Y + ty);
+                        }
+
+                        PointF[] viewCorners = new[]
+                        {
+                            TransformCorner(0f, 0f),
+                            TransformCorner(layoutWidth, 0f),
+                            TransformCorner(layoutWidth, layoutHeight),
+                            TransformCorner(0f, layoutHeight)
+                        };
+
+                        PointF[] pdfCorners = viewCorners
+                            .Select(point => ConvertPointToPdfCoordinates(point, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked))
+                            .ToArray();
+
+                        pdfCanvas.SaveState();
+                        if (annotationBackgroundColor.A < 255)
+                        {
+                            var fillState = new PdfExtGState().SetFillOpacity(annotationBackgroundColor.A / 255f);
+                            pdfCanvas.SetExtGState(fillState);
+                        }
+                        pdfCanvas.SetFillColor(new DeviceRgb(annotationBackgroundColor.R, annotationBackgroundColor.G, annotationBackgroundColor.B));
+                        pdfCanvas.MoveTo(pdfCorners[0].X, pdfCorners[0].Y);
+                        pdfCanvas.LineTo(pdfCorners[1].X, pdfCorners[1].Y);
+                        pdfCanvas.LineTo(pdfCorners[2].X, pdfCorners[2].Y);
+                        pdfCanvas.LineTo(pdfCorners[3].X, pdfCorners[3].Y);
+                        pdfCanvas.ClosePath();
+                        pdfCanvas.Fill();
+                        pdfCanvas.RestoreState();
+                    }
+
+                    if (isRichAnnotation)
+                    {
+                        float richDpiX;
+                        float richDpiY;
+                        using (Graphics gRich = Graphics.FromHwnd(IntPtr.Zero))
+                        {
+                            richDpiX = gRich.DpiX;
+                            richDpiY = gRich.DpiY;
+                        }
+                        int bitmapWidth = Math.Max(1, (int)Math.Ceiling(layoutWidth * (richDpiX / 72f) * 2f));
+                        int bitmapHeight = Math.Max(1, (int)Math.Ceiling(layoutHeight * (richDpiY / 72f) * 2f));
+                        float richAlignmentOffset = GetRichAlignmentOffset(richDpiX, annotation.AnnotationAlignment);
+                        using (Bitmap richBitmap = RenderRichTextToBitmap(
+                            annotation,
+                            bitmapWidth,
+                            bitmapHeight,
+                            annotationBackgroundColor,
+                            2f))
+                        using (var pngStream = new MemoryStream())
+                        {
+                            richBitmap.Save(pngStream, ImageFormat.Png);
+                            var imageData = iText.IO.Image.ImageDataFactory.Create(pngStream.ToArray());
+
+                            PointF TransformCorner(float x, float y)
+                            {
+                                float tx = ((x - richAlignmentOffset) * rotCos) - (y * rotSin) + rotationOffset.X;
+                                float ty = (x * rotSin) + (y * rotCos) + rotationOffset.Y;
+                                return new PointF(
+                                    scaledAnnotationBounds.X + tx,
+                                    scaledAnnotationBounds.Y + ty);
+                            }
+
+                            PointF topLeftView = TransformCorner(0f, 0f);
+                            PointF topRightView = TransformCorner(layoutWidth, 0f);
+                            PointF bottomLeftView = TransformCorner(0f, layoutHeight);
+                            PointF bottomRightView = TransformCorner(layoutWidth, layoutHeight);
+
+                            PointF topLeftPdf = ConvertPointToPdfCoordinates(topLeftView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                            PointF topRightPdf = ConvertPointToPdfCoordinates(topRightView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                            PointF bottomLeftPdf = ConvertPointToPdfCoordinates(bottomLeftView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                            PointF bottomRightPdf = ConvertPointToPdfCoordinates(bottomRightView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+
+                            float a = bottomRightPdf.X - bottomLeftPdf.X;
+                            float b = bottomRightPdf.Y - bottomLeftPdf.Y;
+                            float c = topLeftPdf.X - bottomLeftPdf.X;
+                            float d = topLeftPdf.Y - bottomLeftPdf.Y;
+                            float e = bottomLeftPdf.X;
+                            float f = bottomLeftPdf.Y;
+
+                            pdfCanvas.AddImageWithTransformationMatrix(imageData, a, b, c, d, e, f, false);
+                        }
+
+                        continue;
+                    }
 
                     pdfCanvas.SaveState();
                     pdfCanvas.BeginText();
@@ -13334,6 +13744,17 @@ namespace AnonPDF
                     selectedTextAnnotation = hitAnnotation;
                     isDrawing = false;
 
+                    if (e.Clicks >= 2)
+                    {
+                        AddEditAnnotation(hitAnnotation);
+                        annotationToMove = null;
+                        isMoving = false;
+                        textMoveMouseOffset = PointF.Empty;
+                        this.Cursor = Cursors.Default;
+                        pdfViewer.Invalidate();
+                        return;
+                    }
+
                     if (!hitAnnotation.AnnotationIsLocked)
                     {
                         annotationToMove = hitAnnotation;
@@ -13354,6 +13775,17 @@ namespace AnonPDF
                 }
                 else
                 {
+                    if (e.Clicks >= 2 && TryHandleObjectDoubleClick(e.Location))
+                    {
+                        selectedTextAnnotation = null;
+                        annotationToMove = null;
+                        isMoving = false;
+                        textMoveMouseOffset = PointF.Empty;
+                        isDrawing = false;
+                        pdfViewer.Invalidate();
+                        return;
+                    }
+
                     if (TryHandleArrowIconMouseDown(e.Location))
                     {
                         selectedTextAnnotation = null;
@@ -13670,7 +14102,9 @@ namespace AnonPDF
                 int updatedRotation = NormalizeRotation(textRotationStartValue + (int)Math.Round(delta));
                 int previousRotation = NormalizeRotation(annotationToRotate.AnnotationRotation);
                 annotationToRotate.AnnotationRotation = updatedRotation;
-                SizeF rotatedSize = GetAnnotationSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationFont, updatedRotation);
+                SizeF rotatedSize = IsRichTextMode(annotationToRotate)
+                    ? GetRichAnnotationSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationRichText, annotationToRotate.AnnotationFont, updatedRotation)
+                    : GetAnnotationSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationFont, updatedRotation);
                 annotationToRotate.AnnotationBounds = new RectangleF(
                     textRotationStartCenterDoc.X - (rotatedSize.Width / 2f),
                     textRotationStartCenterDoc.Y - (rotatedSize.Height / 2f),
@@ -14561,7 +14995,13 @@ namespace AnonPDF
                             bool enoughHeightForCtrlBox = !isMarkerCtrlBoxMode || currentSelection.Height > markerHeight * scaleFactor;
                             if (isDrawing && enoughWidth && enoughHeightForCtrlBox)
                             {
-                                if (PromptForCommentText(string.Empty, out string commentText))
+                                if (PromptForCommentText(
+                                    string.Empty,
+                                    DefaultCommentHighlightColor,
+                                    DefaultCommentTextColor,
+                                    out string commentText,
+                                    out System.Drawing.Color highlightColor,
+                                    out System.Drawing.Color textColor))
                                 {
                                     var comment = new CommentAnnotation
                                     {
@@ -14569,6 +15009,8 @@ namespace AnonPDF
                                         PageNumber = currentPage,
                                         Bounds = rect,
                                         CommentText = commentText,
+                                        HighlightColorArgb = highlightColor.ToArgb(),
+                                        TextColorArgb = textColor.ToArgb(),
                                         IsMarkerSelection = !isMarkerCtrlBoxMode,
                                         CreatedAtUtc = DateTime.UtcNow,
                                         UpdatedAtUtc = DateTime.UtcNow
@@ -14924,6 +15366,16 @@ namespace AnonPDF
                 ? string.Empty
                 : comment.CommentText.Trim();
 
+            if (comment.HighlightColorArgb == 0)
+            {
+                comment.HighlightColorArgb = DefaultCommentHighlightColor.ToArgb();
+            }
+
+            if (comment.TextColorArgb == 0)
+            {
+                comment.TextColorArgb = DefaultCommentTextColor.ToArgb();
+            }
+
             if (comment.NoteX.HasValue && (float.IsNaN(comment.NoteX.Value) || float.IsInfinity(comment.NoteX.Value)))
             {
                 comment.NoteX = null;
@@ -14958,6 +15410,43 @@ namespace AnonPDF
                 {
                     comment.NoteHeight = Math.Max(12f, Math.Min(200f, height));
                 }
+            }
+        }
+
+        private static System.Drawing.Color GetCommentHighlightColor(CommentAnnotation comment)
+        {
+            if (comment == null)
+            {
+                return DefaultCommentHighlightColor;
+            }
+
+            try
+            {
+                System.Drawing.Color parsed = System.Drawing.Color.FromArgb(comment.HighlightColorArgb);
+                return parsed.A == 0
+                    ? System.Drawing.Color.FromArgb(255, parsed.R, parsed.G, parsed.B)
+                    : parsed;
+            }
+            catch
+            {
+                return DefaultCommentHighlightColor;
+            }
+        }
+
+        private static System.Drawing.Color GetCommentTextColor(CommentAnnotation comment)
+        {
+            if (comment == null)
+            {
+                return DefaultCommentTextColor;
+            }
+
+            try
+            {
+                return System.Drawing.Color.FromArgb(comment.TextColorArgb);
+            }
+            catch
+            {
+                return DefaultCommentTextColor;
             }
         }
 
@@ -15009,6 +15498,54 @@ namespace AnonPDF
             return "Comment";
         }
 
+        private string GetCommentHighlightColorLabelText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Kolor zaznaczenia:";
+            }
+
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Markierungsfarbe:";
+            }
+
+            return "Highlight color:";
+        }
+
+        private string GetCommentTextColorLabelText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Kolor tekstu:";
+            }
+
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Textfarbe:";
+            }
+
+            return "Text color:";
+        }
+
+        private string GetChooseColorText()
+        {
+            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
+            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Wybierz...";
+            }
+
+            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Wählen...";
+            }
+
+            return "Choose...";
+        }
+
         private string GetEditCommentContextMenuText()
         {
             string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
@@ -15041,9 +15578,17 @@ namespace AnonPDF
             return "Delete comment";
         }
 
-        private bool PromptForCommentText(string initialValue, out string commentText)
+        private bool PromptForCommentText(
+            string initialValue,
+            System.Drawing.Color initialHighlightColor,
+            System.Drawing.Color initialTextColor,
+            out string commentText,
+            out System.Drawing.Color highlightColor,
+            out System.Drawing.Color textColor)
         {
             commentText = string.Empty;
+            highlightColor = initialHighlightColor;
+            textColor = initialTextColor;
 
             using (Form prompt = new Form())
             {
@@ -15053,7 +15598,7 @@ namespace AnonPDF
                 prompt.MinimizeBox = false;
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
-                prompt.ClientSize = new Size(460, 250);
+                prompt.ClientSize = new Size(460, 310);
 
                 var label = new Label
                 {
@@ -15068,9 +15613,77 @@ namespace AnonPDF
                     AcceptsReturn = true,
                     ScrollBars = ScrollBars.Vertical,
                     Location = new Point(12, 34),
-                    Size = new Size(prompt.ClientSize.Width - 24, 150),
+                    Size = new Size(prompt.ClientSize.Width - 24, 160),
                     Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
                     Text = initialValue ?? string.Empty
+                };
+
+                var highlightLabel = new Label
+                {
+                    Text = GetCommentHighlightColorLabelText(),
+                    AutoSize = true,
+                    Location = new Point(12, 202)
+                };
+
+                var highlightPreview = new Panel
+                {
+                    BackColor = initialHighlightColor,
+                    BorderStyle = BorderStyle.FixedSingle,
+                    Location = new Point(160, 198),
+                    Size = new Size(28, 24)
+                };
+
+                var highlightButton = new Button
+                {
+                    Text = GetChooseColorText(),
+                    Size = new Size(98, 26),
+                    Location = new Point(196, 197)
+                };
+                highlightButton.Click += (_, __) =>
+                {
+                    using (var colorDialog = new ColorDialog())
+                    {
+                        colorDialog.FullOpen = true;
+                        colorDialog.Color = highlightPreview.BackColor;
+                        if (colorDialog.ShowDialog(prompt) == DialogResult.OK)
+                        {
+                            highlightPreview.BackColor = colorDialog.Color;
+                        }
+                    }
+                };
+
+                var textColorLabel = new Label
+                {
+                    Text = GetCommentTextColorLabelText(),
+                    AutoSize = true,
+                    Location = new Point(12, 233)
+                };
+
+                var textColorPreview = new Panel
+                {
+                    BackColor = initialTextColor,
+                    BorderStyle = BorderStyle.FixedSingle,
+                    Location = new Point(160, 229),
+                    Size = new Size(28, 24)
+                };
+
+                var textColorButton = new Button
+                {
+                    Text = GetChooseColorText(),
+                    Size = new Size(98, 26),
+                    Location = new Point(196, 228)
+                };
+                textColorButton.Click += (_, __) =>
+                {
+                    using (var colorDialog = new ColorDialog())
+                    {
+                        colorDialog.FullOpen = true;
+                        colorDialog.Color = textColorPreview.BackColor;
+                        if (colorDialog.ShowDialog(prompt) == DialogResult.OK)
+                        {
+                            textColorPreview.BackColor = colorDialog.Color;
+                        }
+                    }
                 };
 
                 var okButton = new Button
@@ -15093,6 +15706,12 @@ namespace AnonPDF
 
                 prompt.Controls.Add(label);
                 prompt.Controls.Add(textBox);
+                prompt.Controls.Add(highlightLabel);
+                prompt.Controls.Add(highlightPreview);
+                prompt.Controls.Add(highlightButton);
+                prompt.Controls.Add(textColorLabel);
+                prompt.Controls.Add(textColorPreview);
+                prompt.Controls.Add(textColorButton);
                 prompt.Controls.Add(okButton);
                 prompt.Controls.Add(cancelButton);
                 // Enter in multiline textbox inserts a new line instead of closing dialog.
@@ -15110,6 +15729,8 @@ namespace AnonPDF
                     commentText = GetDefaultCommentText();
                 }
 
+                highlightColor = highlightPreview.BackColor;
+                textColor = textColorPreview.BackColor;
                 return true;
             }
         }
@@ -15195,18 +15816,28 @@ namespace AnonPDF
                 return;
             }
 
-            if (!PromptForCommentText(comment.CommentText, out string updatedText))
+            if (!PromptForCommentText(
+                comment.CommentText,
+                GetCommentHighlightColor(comment),
+                GetCommentTextColor(comment),
+                out string updatedText,
+                out System.Drawing.Color updatedHighlightColor,
+                out System.Drawing.Color updatedTextColor))
             {
                 return;
             }
 
             bool textChanged = !string.Equals(comment.CommentText ?? string.Empty, updatedText ?? string.Empty, StringComparison.Ordinal);
-            if (!textChanged)
+            bool highlightChanged = comment.HighlightColorArgb != updatedHighlightColor.ToArgb();
+            bool textColorChanged = comment.TextColorArgb != updatedTextColor.ToArgb();
+            if (!textChanged && !highlightChanged && !textColorChanged)
             {
                 return;
             }
 
             comment.CommentText = updatedText;
+            comment.HighlightColorArgb = updatedHighlightColor.ToArgb();
+            comment.TextColorArgb = updatedTextColor.ToArgb();
             comment.UpdatedAtUtc = DateTime.UtcNow;
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
@@ -15389,6 +16020,12 @@ namespace AnonPDF
             };
             duplicateSelectionMenuItem.Click += (_, __) => DuplicateRedactionBlock(block);
             menu.Items.Add(duplicateSelectionMenuItem);
+            var deleteDuplicatedSelectionsItem = new ToolStripMenuItem(GetDeleteDuplicatedObjectsContextMenuText())
+            {
+                Enabled = !string.IsNullOrWhiteSpace(block.DuplicateGroupId)
+            };
+            deleteDuplicatedSelectionsItem.Click += (_, __) => DeleteDuplicatedObjectsByGroupId(block.DuplicateGroupId, block.PageNumber);
+            menu.Items.Add(deleteDuplicatedSelectionsItem);
             menu.Items.Add(new ToolStripSeparator());
 
             bool hasDynamicScopes = exclusionScopesCatalog.Count > 0;
@@ -16957,7 +17594,6 @@ namespace AnonPDF
             var highlightState = new PdfExtGState().SetFillOpacity(1f);
             highlightState.GetPdfObject().Put(PdfName.BM, PdfName.Multiply);
             var noteFillState = new PdfExtGState().SetFillOpacity(0.82f);
-            var noteColor = new DeviceRgb(255, 235, 59);
 
             foreach (var pageGroup in exportComments.GroupBy(c => c.PageNumber))
             {
@@ -16985,6 +17621,10 @@ namespace AnonPDF
                     int noteIndex = 0;
                     foreach (var comment in pageGroup.OrderBy(c => c.Bounds.Top).ThenBy(c => c.Bounds.Left))
                     {
+                        System.Drawing.Color highlightColorDrawing = GetCommentHighlightColor(comment);
+                        System.Drawing.Color textColorDrawing = GetCommentTextColor(comment);
+                        var noteColor = new DeviceRgb(highlightColorDrawing.R, highlightColorDrawing.G, highlightColorDrawing.B);
+                        var noteTextColor = new DeviceRgb(textColorDrawing.R, textColorDrawing.G, textColorDrawing.B);
                         RectangleF sourcePdfRect = ConvertToPdfCoordinates(
                             comment.Bounds,
                             pageNumber,
@@ -17138,7 +17778,7 @@ namespace AnonPDF
 
                         pdfCanvas.SaveState();
                         pdfCanvas.BeginText();
-                        pdfCanvas.SetFillColor(new DeviceRgb(0, 0, 0));
+                        pdfCanvas.SetFillColor(noteTextColor);
                         pdfCanvas.SetFontAndSize(noteFont, noteFontSize);
 
                         for (int lineIndex = 0; lineIndex < wrappedLinesPdf.Count; lineIndex++)
@@ -17677,15 +18317,27 @@ namespace AnonPDF
             );
 
             bool isSelectedAnnotation = IsTextAnnotationSelected(annotation);
+            PointF[] textFrameCorners = null;
+            bool hasTextFrame = TryGetAnnotationTextFrameGeometry(
+                annotation,
+                graphics.DpiX,
+                graphics.DpiY,
+                out textFrameCorners,
+                out _,
+                out _,
+                out _);
+            System.Drawing.Color annotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
+            bool isRich = IsRichTextMode(annotation);
 
-            if (TryGetAnnotationTextFrameGeometry(
-                    annotation,
-                    graphics.DpiX,
-                    graphics.DpiY,
-                    out PointF[] textFrameCorners,
-                    out _,
-                    out _,
-                    out _))
+            if (!isRich && hasTextFrame && annotationBackgroundColor.A > 0)
+            {
+                using (SolidBrush backgroundBrush = new SolidBrush(annotationBackgroundColor))
+                {
+                    graphics.FillPolygon(backgroundBrush, textFrameCorners);
+                }
+            }
+
+            if (hasTextFrame)
             {
                 System.Drawing.Color frameColor = (isSelectedAnnotation && !multiSelectionActive)
                     ? System.Drawing.Color.Red
@@ -17724,9 +18376,56 @@ namespace AnonPDF
 
             float dpiCorrection = 72f / graphics.DpiY;
             int annotationRotation = NormalizeRotation(annotation.AnnotationRotation);
-            SizeF baseSize = GetAnnotationSize(annotation.AnnotationText, annotation.AnnotationFont, 0);
-            float layoutWidth = baseSize.Width * scaleFactor * 72f / graphics.DpiX;
-            float layoutHeight = baseSize.Height * scaleFactor * 72f / graphics.DpiY;
+            float layoutWidth;
+            float layoutHeight;
+            if (isRich)
+            {
+                layoutWidth = annotation.AnnotationBounds.Width * scaleFactor * 72f / graphics.DpiX;
+                layoutHeight = annotation.AnnotationBounds.Height * scaleFactor * 72f / graphics.DpiY;
+            }
+            else
+            {
+                SizeF baseSize = GetAnnotationSize(annotation.AnnotationText, annotation.AnnotationFont, 0);
+                layoutWidth = baseSize.Width * scaleFactor * 72f / graphics.DpiX;
+                layoutHeight = baseSize.Height * scaleFactor * 72f / graphics.DpiY;
+            }
+
+            if (isRich)
+            {
+                int bitmapWidth = Math.Max(1, (int)Math.Ceiling(layoutWidth));
+                int bitmapHeight = Math.Max(1, (int)Math.Ceiling(layoutHeight));
+                bitmapWidth = Math.Max(1, (int)Math.Ceiling(layoutWidth * (graphics.DpiX / 72f)));
+                bitmapHeight = Math.Max(1, (int)Math.Ceiling(layoutHeight * (graphics.DpiY / 72f)));
+                float richAlignmentOffset = GetRichAlignmentOffset(graphics.DpiX, annotation.AnnotationAlignment);
+                using (Bitmap richBitmap = RenderRichTextToBitmap(
+                    annotation,
+                    bitmapWidth,
+                    bitmapHeight,
+                    annotationBackgroundColor,
+                    Math.Max(0.1f, scaleFactor)))
+                {
+                    float rotationRadians = (float)(annotationRotation * Math.PI / 180.0);
+                    float rotCos = (float)Math.Cos(rotationRadians);
+                    float rotSin = (float)Math.Sin(rotationRadians);
+                    PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
+                    float offsetX = rotationOffset.X;
+                    float offsetY = rotationOffset.Y;
+
+                    var state = graphics.Save();
+                    graphics.Transform = new System.Drawing.Drawing2D.Matrix(
+                        rotCos, rotSin, -rotSin, rotCos,
+                        rect.X + offsetX, rect.Y + offsetY);
+                    graphics.DrawImage(richBitmap, new RectangleF(-richAlignmentOffset, 0f, layoutWidth, layoutHeight));
+                    graphics.Restore(state);
+                }
+
+                if (multiSelectionActive && isSelectedAnnotation)
+                {
+                    DrawGroupSelectionOutline(graphics, rect);
+                }
+
+                return;
+            }
 
             using (SolidBrush brush = new SolidBrush((isSelectedAnnotation && !multiSelectionActive) ? System.Drawing.Color.Red : annotation.AnnotationColor))
             {
@@ -17782,14 +18481,8 @@ namespace AnonPDF
             float connectorThickness = Math.Max(2.6f, scaleFactor * 1.6f);
             float borderThickness = Math.Max(1.2f, scaleFactor * 0.7f);
             float fontSize = Math.Max(6.5f, Math.Min(8.5f, this.Font.SizeInPoints * 0.72f));
-            var highlightColor = System.Drawing.Color.FromArgb(255, 255, 235, 59);
             using (Font noteFont = new Font(this.Font.FontFamily, fontSize, FontStyle.Regular))
-            using (SolidBrush noteBack = new SolidBrush(System.Drawing.Color.FromArgb(215, highlightColor)))
-            using (Pen noteBorder = new Pen(highlightColor, borderThickness))
-            using (Pen connectorPen = new Pen(highlightColor, connectorThickness))
-            using (SolidBrush noteTextBrush = new SolidBrush(System.Drawing.Color.Black))
             {
-                connectorPen.DashStyle = DashStyle.Solid;
                 var noteRectsDoc = BuildCommentNoteRectanglesDoc(currentPage, graphics);
                 commentNoteRectsDoc.Clear();
                 foreach (var pair in noteRectsDoc)
@@ -17820,30 +18513,155 @@ namespace AnonPDF
                         noteRectDoc.Width * scaleFactor,
                         noteRectDoc.Height * scaleFactor);
 
-                    PointF from = new PointF(
-                        highlightRect.Right,
-                        highlightRect.Top + (highlightRect.Height / 2f));
-                    PointF to = new PointF(noteRect.Left, noteRect.Top + (noteRect.Height / 2f));
-                    graphics.DrawLine(connectorPen, from, to);
+                    System.Drawing.Color highlightColor = GetCommentHighlightColor(comment);
+                    System.Drawing.Color textColor = GetCommentTextColor(comment);
+                    using (SolidBrush noteBack = new SolidBrush(System.Drawing.Color.FromArgb(215, highlightColor)))
+                    using (Pen noteBorder = new Pen(highlightColor, borderThickness))
+                    using (Pen connectorPen = new Pen(highlightColor, connectorThickness))
+                    using (SolidBrush noteTextBrush = new SolidBrush(textColor))
+                    {
+                        connectorPen.DashStyle = DashStyle.Solid;
+                        PointF from = new PointF(
+                            highlightRect.Right,
+                            highlightRect.Top + (highlightRect.Height / 2f));
+                        PointF to = new PointF(noteRect.Left, noteRect.Top + (noteRect.Height / 2f));
+                        graphics.DrawLine(connectorPen, from, to);
 
-                    graphics.FillRectangle(noteBack, noteRect);
-                    graphics.DrawRectangle(noteBorder, noteRect.X, noteRect.Y, noteRect.Width, noteRect.Height);
-                    float handleSize = Math.Max(8f, CommentNoteResizeHandleSizePx);
-                    RectangleF handleRect = new RectangleF(
-                        noteRect.Right - handleSize,
-                        noteRect.Bottom - handleSize,
-                        handleSize,
-                        handleSize);
-                    graphics.FillRectangle(noteBorder.Brush, handleRect);
-                    float textPadding = Math.Max(2f, 2f * Math.Min(1.4f, scaleFactor));
-                    RectangleF textRect = new RectangleF(
-                        noteRect.X + textPadding,
-                        noteRect.Y + textPadding,
-                        Math.Max(1f, noteRect.Width - (textPadding * 2f)),
-                        Math.Max(1f, noteRect.Height - (textPadding * 2f)));
-                    graphics.DrawString(noteText, noteFont, noteTextBrush, textRect);
+                        graphics.FillRectangle(noteBack, noteRect);
+                        graphics.DrawRectangle(noteBorder, noteRect.X, noteRect.Y, noteRect.Width, noteRect.Height);
+                        float handleSize = Math.Max(8f, CommentNoteResizeHandleSizePx);
+                        RectangleF handleRect = new RectangleF(
+                            noteRect.Right - handleSize,
+                            noteRect.Bottom - handleSize,
+                            handleSize,
+                            handleSize);
+                        graphics.FillRectangle(noteBorder.Brush, handleRect);
+                        float textPadding = Math.Max(2f, 2f * Math.Min(1.4f, scaleFactor));
+                        RectangleF textRect = new RectangleF(
+                            noteRect.X + textPadding,
+                            noteRect.Y + textPadding,
+                            Math.Max(1f, noteRect.Width - (textPadding * 2f)),
+                            Math.Max(1f, noteRect.Height - (textPadding * 2f)));
+                        graphics.DrawString(noteText, noteFont, noteTextBrush, textRect);
+                    }
                 }
             }
+        }
+
+        private Bitmap RenderRichTextToBitmap(TextAnnotation annotation, int widthPx, int heightPx, System.Drawing.Color backgroundColor, float fontScale = 1f)
+        {
+            int safeWidth = Math.Max(1, widthPx);
+            int safeHeight = Math.Max(1, heightPx);
+            if (backgroundColor.A > 0)
+            {
+                return RenderRichTextToBitmapOpaque(annotation, safeWidth, safeHeight, backgroundColor, fontScale);
+            }
+
+            using (Bitmap black = RenderRichTextToBitmapOpaque(annotation, safeWidth, safeHeight, System.Drawing.Color.Black, fontScale))
+            using (Bitmap white = RenderRichTextToBitmapOpaque(annotation, safeWidth, safeHeight, System.Drawing.Color.White, fontScale))
+            {
+                var bitmap = new Bitmap(safeWidth, safeHeight, PixelFormat.Format32bppArgb);
+                for (int y = 0; y < safeHeight; y++)
+                {
+                    for (int x = 0; x < safeWidth; x++)
+                    {
+                        System.Drawing.Color cb = black.GetPixel(x, y);
+                        System.Drawing.Color cw = white.GetPixel(x, y);
+
+                        int alphaR = 255 - (cw.R - cb.R);
+                        int alphaG = 255 - (cw.G - cb.G);
+                        int alphaB = 255 - (cw.B - cb.B);
+                        int alpha = Math.Max(0, Math.Min(255, (alphaR + alphaG + alphaB) / 3));
+                        if (alpha <= 0)
+                        {
+                            bitmap.SetPixel(x, y, System.Drawing.Color.Transparent);
+                            continue;
+                        }
+
+                        int r = Math.Max(0, Math.Min(255, (cb.R * 255) / alpha));
+                        int g = Math.Max(0, Math.Min(255, (cb.G * 255) / alpha));
+                        int b = Math.Max(0, Math.Min(255, (cb.B * 255) / alpha));
+                        bitmap.SetPixel(x, y, System.Drawing.Color.FromArgb(alpha, r, g, b));
+                    }
+                }
+
+                return bitmap;
+            }
+        }
+
+        private Bitmap RenderRichTextToBitmapOpaque(TextAnnotation annotation, int safeWidth, int safeHeight, System.Drawing.Color backgroundColor, float fontScale)
+        {
+            int renderInsetPx = 0;
+            if (annotation != null &&
+                (annotation.AnnotationAlignment == System.Windows.Forms.HorizontalAlignment.Center ||
+                 annotation.AnnotationAlignment == System.Windows.Forms.HorizontalAlignment.Right))
+            {
+                renderInsetPx = 6;
+            }
+
+            int renderWidth = safeWidth + renderInsetPx;
+            var renderBitmap = new Bitmap(renderWidth, safeHeight, PixelFormat.Format32bppArgb);
+            using (var graphics = Graphics.FromImage(renderBitmap))
+            {
+                graphics.Clear(backgroundColor);
+            }
+
+            using (var richTextBox = new RichTextBox())
+            {
+                richTextBox.BorderStyle = BorderStyle.None;
+                richTextBox.ScrollBars = RichTextBoxScrollBars.None;
+                richTextBox.Multiline = true;
+                richTextBox.WordWrap = false;
+                richTextBox.DetectUrls = false;
+                richTextBox.ReadOnly = true;
+                richTextBox.Font = annotation?.AnnotationFont ?? this.Font;
+                richTextBox.ForeColor = annotation?.AnnotationColor ?? System.Drawing.Color.Black;
+                richTextBox.BackColor = backgroundColor;
+                richTextBox.Size = new Size(renderWidth, safeHeight);
+                richTextBox.Location = Point.Empty;
+
+                bool richLoaded = false;
+                if (annotation != null && !string.IsNullOrWhiteSpace(annotation.AnnotationRichText))
+                {
+                    try
+                    {
+                        richTextBox.Rtf = annotation.AnnotationRichText;
+                        richLoaded = true;
+                    }
+                    catch
+                    {
+                        richLoaded = false;
+                    }
+                }
+
+                if (!richLoaded)
+                {
+                    richTextBox.Text = annotation?.AnnotationText ?? string.Empty;
+                }
+                ApplyRichParagraphAlignment(
+                    richTextBox,
+                    annotation?.AnnotationAlignment ?? System.Windows.Forms.HorizontalAlignment.Left);
+                ApplyGlobalRichFont(richTextBox, annotation?.AnnotationFont ?? this.Font);
+
+                float safeZoom = Math.Max(0.1f, Math.Min(8f, fontScale));
+                richTextBox.ZoomFactor = safeZoom;
+
+                richTextBox.CreateControl();
+                richTextBox.DrawToBitmap(renderBitmap, new Rectangle(0, 0, renderWidth, safeHeight));
+            }
+
+            var bitmap = new Bitmap(safeWidth, safeHeight, PixelFormat.Format32bppArgb);
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(backgroundColor);
+                graphics.DrawImage(
+                    renderBitmap,
+                    new Rectangle(0, 0, safeWidth, safeHeight),
+                    new Rectangle(renderInsetPx, 0, safeWidth, safeHeight),
+                    GraphicsUnit.Pixel);
+            }
+            renderBitmap.Dispose();
+            return bitmap;
         }
 
         private void OnPaint(object sender, PaintEventArgs e)
@@ -19683,19 +20501,26 @@ namespace AnonPDF
                     return base.ProcessCmdKey(ref msg, keyData);
                 }
 
-                if (preferObjectClipboardPaste && TryPasteObjectsFromInternalClipboard())
-                {
-                    return true;
-                }
-
-                if (TryHandleGlobalPasteShortcut())
+                bool externalClipboardContentAvailable = IsExternalClipboardContentAvailable();
+                if (externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
                 {
                     preferObjectClipboardPaste = false;
                     return true;
                 }
 
+                if (preferObjectClipboardPaste && TryPasteObjectsFromInternalClipboard())
+                {
+                    return true;
+                }
+
                 if (TryPasteObjectsFromInternalClipboard())
                 {
+                    return true;
+                }
+
+                if (!externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
+                {
+                    preferObjectClipboardPaste = false;
                     return true;
                 }
             }
@@ -19776,6 +20601,29 @@ namespace AnonPDF
             }
 
             return false;
+        }
+
+        private static bool IsExternalClipboardContentAvailable()
+        {
+            try
+            {
+                IDataObject clipboardData = Clipboard.GetDataObject();
+                if (clipboardData == null)
+                {
+                    return false;
+                }
+
+                return clipboardData.GetDataPresent(DataFormats.UnicodeText) ||
+                       clipboardData.GetDataPresent(DataFormats.Text) ||
+                       clipboardData.GetDataPresent(DataFormats.Bitmap) ||
+                       clipboardData.GetDataPresent(DataFormats.EnhancedMetafile) ||
+                       clipboardData.GetDataPresent(DataFormats.MetafilePict) ||
+                       Clipboard.ContainsImage();
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private bool TryAddRasterObjectFromClipboard()
@@ -21588,6 +22436,9 @@ namespace AnonPDF
                     AnnotationText = sourceAnnotation.AnnotationText,
                     AnnotationFont = CloneFontSafe(sourceAnnotation.AnnotationFont),
                     AnnotationColor = sourceAnnotation.AnnotationColor,
+                    AnnotationBackgroundColorArgb = sourceAnnotation.AnnotationBackgroundColorArgb,
+                    AnnotationContentMode = sourceAnnotation.AnnotationContentMode,
+                    AnnotationRichText = sourceAnnotation.AnnotationRichText,
                     AnnotationAlignment = sourceAnnotation.AnnotationAlignment,
                     AnnotationRotation = sourceAnnotation.AnnotationRotation,
                     AnnotationBounds = sourceAnnotation.AnnotationBounds,
@@ -21806,6 +22657,8 @@ namespace AnonPDF
                     PageNumber = targetPage,
                     Bounds = sourceComment.Bounds,
                     CommentText = sourceComment.CommentText,
+                    HighlightColorArgb = sourceComment.HighlightColorArgb,
+                    TextColorArgb = sourceComment.TextColorArgb,
                     IsMarkerSelection = sourceComment.IsMarkerSelection,
                     NoteX = sourceComment.NoteX,
                     NoteY = sourceComment.NoteY,
@@ -23387,9 +24240,19 @@ namespace AnonPDF
 
             float dpiCorrection = 72f / dpiY;
             int rotation = NormalizeRotation(annotation.AnnotationRotation);
-            SizeF baseSize = GetAnnotationSize(annotation.AnnotationText, annotation.AnnotationFont, 0);
-            float layoutWidth = baseSize.Width * scaleFactor * 72f / dpiX;
-            float layoutHeight = baseSize.Height * scaleFactor * dpiCorrection;
+            float layoutWidth;
+            float layoutHeight;
+            if (IsRichTextMode(annotation))
+            {
+                layoutWidth = annotation.AnnotationBounds.Width * scaleFactor * 72f / dpiX;
+                layoutHeight = annotation.AnnotationBounds.Height * scaleFactor * dpiCorrection;
+            }
+            else
+            {
+                SizeF baseSize = GetAnnotationSize(annotation.AnnotationText, annotation.AnnotationFont, 0);
+                layoutWidth = baseSize.Width * scaleFactor * 72f / dpiX;
+                layoutHeight = baseSize.Height * scaleFactor * dpiCorrection;
+            }
             if (layoutWidth <= 0f || layoutHeight <= 0f)
             {
                 return false;
@@ -25002,12 +25865,6 @@ namespace AnonPDF
         {
             Properties.Settings.Default.LastOutlineCheckBoxState = outlineCheckBox.Checked;
             Properties.Settings.Default.Save();
-
-            if (outlineCheckBox.Enabled)
-            {
-                renderTimer.Stop();
-                renderTimer.Start();
-            }
         }
 
         private void OpenSavedPdfCheckBox_CheckedChanged(object sender, EventArgs e)
@@ -25838,7 +26695,6 @@ namespace AnonPDF
             }
 
             Rectangle imageBounds = new Rectangle(0, 0, resultBitmap.Width, resultBitmap.Height);
-            System.Drawing.Color highlightColor = System.Drawing.Color.FromArgb(255, 255, 235, 59);
             const float blendFactor = 0.86f;
 
             BitmapData data = resultBitmap.LockBits(
@@ -25853,6 +26709,7 @@ namespace AnonPDF
 
                 foreach (var comment in comments)
                 {
+                    System.Drawing.Color highlightColor = GetCommentHighlightColor(comment);
                     RectangleF visualBounds = visualBoundsByComment.TryGetValue(comment, out RectangleF cachedBounds)
                         ? cachedBounds
                         : comment.Bounds;
@@ -26800,18 +27657,27 @@ namespace AnonPDF
 
         private void PasteObjectFromClipboardToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (preferObjectClipboardPaste && TryPasteObjectsFromInternalClipboard())
-            {
-                return;
-            }
-
-            if (TryHandleGlobalPasteShortcut())
+            bool externalClipboardContentAvailable = IsExternalClipboardContentAvailable();
+            if (externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
             {
                 preferObjectClipboardPaste = false;
                 return;
             }
 
-            TryPasteObjectsFromInternalClipboard();
+            if (preferObjectClipboardPaste && TryPasteObjectsFromInternalClipboard())
+            {
+                return;
+            }
+
+            if (TryPasteObjectsFromInternalClipboard())
+            {
+                return;
+            }
+
+            if (!externalClipboardContentAvailable)
+            {
+                TryHandleGlobalPasteShortcut();
+            }
         }
 
         private void DeletePageToolStripMenuItem_Click(object sender, EventArgs e)
@@ -26852,6 +27718,12 @@ namespace AnonPDF
 
         public System.Drawing.Color AnnotationColor { get; set; }
 
+        public int AnnotationBackgroundColorArgb { get; set; }
+
+        public string AnnotationContentMode { get; set; }
+
+        public string AnnotationRichText { get; set; }
+
         public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
 
         public int AnnotationRotation { get; set; }
@@ -26869,6 +27741,9 @@ namespace AnonPDF
             AnnotationText = "";
             AnnotationFont = new Font("Arial", 12);
             AnnotationColor = System.Drawing.Color.Black;
+            AnnotationBackgroundColorArgb = System.Drawing.Color.Transparent.ToArgb();
+            AnnotationContentMode = "plain";
+            AnnotationRichText = null;
             AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Left; // Default left alignment
             AnnotationRotation = 0;
             AnnotationBounds = new RectangleF(0, 0, 100, 30); // Example rectangular area
@@ -26884,6 +27759,9 @@ namespace AnonPDF
             AnnotationText = text;
             AnnotationFont = font;
             AnnotationColor = color;
+            AnnotationBackgroundColorArgb = System.Drawing.Color.Transparent.ToArgb();
+            AnnotationContentMode = "plain";
+            AnnotationRichText = null;
             AnnotationAlignment = alignment;
             AnnotationRotation = 0;
             AnnotationBounds = bounds;
@@ -26923,8 +27801,19 @@ namespace AnonPDF
     {
         private Label lblText;
         private RichTextBox txtText;
+        private CheckBox chkRichTextMode;
+        private FlowLayoutPanel richTextToolbarPanel;
+        private Button btnBold;
+        private Button btnItalic;
+        private Button btnUnderline;
+        private Label lblRichTextColor;
+        private Button btnRichTextColor;
         private Button btnFont;
+        private Label lblTextColor;
         private Button btnColor;
+        private Label lblBackgroundColor;
+        private Button btnBackgroundColor;
+        private CheckBox chkNoBackgroundColor;
         private Label lblFontDisplay;
         private GroupBox groupBoxAlignment;
         private RadioButton rbLeft;
@@ -26938,11 +27827,15 @@ namespace AnonPDF
         private FlowLayoutPanel symbolsPanel;
         private Button btnOK;
         private Button btnCancel;
+        private System.Drawing.Color lastBackgroundColorBeforeTransparent = System.Drawing.Color.White;
 
         // Properties that allow reading values set by the user
         public string AnnotationText { get; set; }
         public Font AnnotationFont { get; set; }
         public System.Drawing.Color AnnotationColor { get; set; }
+        public System.Drawing.Color AnnotationBackgroundColor { get; set; }
+        public bool IsRichTextMode { get; set; }
+        public string AnnotationRichText { get; set; }
         public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
         public int AnnotationRotation { get; set; }
         public Action ApplyChanges { get; set; }
@@ -26955,6 +27848,12 @@ namespace AnonPDF
             if (AnnotationText == null) AnnotationText = "";
             if (AnnotationFont == null) AnnotationFont = new Font("Arial", 12);
             if (AnnotationColor == System.Drawing.Color.Empty) AnnotationColor = System.Drawing.Color.Black;
+            if (AnnotationBackgroundColor == System.Drawing.Color.Empty) AnnotationBackgroundColor = System.Drawing.Color.Transparent;
+            if (AnnotationRichText == null) AnnotationRichText = string.Empty;
+            if (AnnotationBackgroundColor.A > 0)
+            {
+                lastBackgroundColorBeforeTransparent = AnnotationBackgroundColor;
+            }
             AnnotationRotation = NormalizeAngle(AnnotationRotation);
 
             InitializeComponents();
@@ -26965,8 +27864,7 @@ namespace AnonPDF
             this.Text = Resources.EditText_Title;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
-            this.Width = 440;
-            this.Height = 500;
+            this.ClientSize = new Size(420, 560);
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
@@ -26988,13 +27886,76 @@ namespace AnonPDF
                 WordWrap = false
             };
             txtText.TextChanged += TxtText_TextChanged;
-            
+
+            chkRichTextMode = new CheckBox
+            {
+                Text = GetRichModeLabelText(),
+                AutoSize = true,
+                Location = new Point(10, 138)
+            };
+            chkRichTextMode.CheckedChanged += RichModeCheckedChanged;
+
+            richTextToolbarPanel = new FlowLayoutPanel
+            {
+                Location = new Point(10, 160),
+                Size = new Size(400, 32),
+                FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false,
+                Visible = false
+            };
+
+            btnBold = new Button
+            {
+                Text = "B",
+                Size = new Size(32, 28),
+                Font = new Font(Font, FontStyle.Bold),
+                TabStop = false
+            };
+            btnBold.Click += (_, __) => ToggleRichSelectionFontStyle(FontStyle.Bold);
+
+            btnItalic = new Button
+            {
+                Text = "I",
+                Size = new Size(32, 28),
+                Font = new Font(Font, FontStyle.Italic),
+                TabStop = false
+            };
+            btnItalic.Click += (_, __) => ToggleRichSelectionFontStyle(FontStyle.Italic);
+
+            btnUnderline = new Button
+            {
+                Text = "U",
+                Size = new Size(32, 28),
+                Font = new Font(Font, FontStyle.Underline),
+                TabStop = false
+            };
+            btnUnderline.Click += (_, __) => ToggleRichSelectionFontStyle(FontStyle.Underline);
+
+            btnRichTextColor = new Button
+            {
+                Text = GetChooseColorButtonText(),
+                Size = new Size(90, 28),
+                TabStop = false
+            };
+            btnRichTextColor.Click += BtnRichTextColor_Click;
+
+            richTextToolbarPanel.Controls.Add(btnBold);
+            richTextToolbarPanel.Controls.Add(btnItalic);
+            richTextToolbarPanel.Controls.Add(btnUnderline);
+            lblRichTextColor = new Label
+            {
+                Text = GetRichSelectionColorLabelText(),
+                AutoSize = true,
+                Margin = new Padding(8, 7, 0, 0)
+            };
+            richTextToolbarPanel.Controls.Add(lblRichTextColor);
+            richTextToolbarPanel.Controls.Add(btnRichTextColor);
 
             // Font picker button
             btnFont = new Button
             {
                 Text = Resources.EditText_ButtonFont,
-                Location = new Point(10, 140),
+                Location = new Point(10, 198),
                 Size = new Size(100, 30)
             };
             btnFont.Click += BtnFont_Click;
@@ -27004,23 +27965,53 @@ namespace AnonPDF
             {
                 Text = FormatResource("EditText_FontDisplay", AnnotationFont.FontFamily.Name, AnnotationFont.Size),
                 AutoSize = true,
-                Location = new Point(120, 147)
+                Location = new Point(120, 205)
             };
 
             // Button to choose color
+            lblTextColor = new Label
+            {
+                Text = GetTextColorLabelText(),
+                AutoSize = true,
+                Location = new Point(10, 237)
+            };
+
             btnColor = new Button
             {
                 Text = Resources.EditText_ButtonColor,
-                Location = new Point(300, 140),
-                Size = new Size(100, 30)
+                Location = new Point(145, 230),
+                Size = new Size(120, 30)
             };
             btnColor.Click += BtnColor_Click;
+
+            lblBackgroundColor = new Label
+            {
+                Text = GetBackgroundColorLabelText(),
+                AutoSize = true,
+                Location = new Point(10, 271)
+            };
+
+            btnBackgroundColor = new Button
+            {
+                Text = GetChooseColorButtonText(),
+                Location = new Point(145, 264),
+                Size = new Size(120, 30)
+            };
+            btnBackgroundColor.Click += BtnBackgroundColor_Click;
+
+            chkNoBackgroundColor = new CheckBox
+            {
+                Text = GetNoBackgroundLabelText(),
+                AutoSize = true,
+                Location = new Point(276, 271)
+            };
+            chkNoBackgroundColor.CheckedChanged += NoBackgroundColorCheckedChanged;
 
             // GroupBox for alignment selection
             groupBoxAlignment = new GroupBox
             {
                 Text = Resources.EditText_GroupAlignment,
-                Location = new Point(10, 200),
+                Location = new Point(10, 304),
                 Size = new Size(400, 50)
             };
 
@@ -27061,7 +28052,7 @@ namespace AnonPDF
             groupBoxRotation = new GroupBox
             {
                 Text = Resources.EditText_GroupRotation,
-                Location = new Point(10, 260),
+                Location = new Point(10, 364),
                 Size = new Size(400, 55)
             };
 
@@ -27116,7 +28107,7 @@ namespace AnonPDF
             groupBoxSymbols = new GroupBox
             {
                 Text = Resources.EditText_GroupSymbols,
-                Location = new Point(10, 330),
+                Location = new Point(10, 434),
                 Size = new Size(400, 65)
             };
 
@@ -27129,7 +28120,19 @@ namespace AnonPDF
                 Padding = new Padding(6, 5, 6, 5)
             };
 
-            string[] symbols = { "â”€", "Â°", "Â˛", "Âł", "Â§", "â€˘", "âś“", "âś—", "â†’", "Â±" };
+            string[] symbols =
+            {
+                "\u2500", // ─
+                "\u00B0", // °
+                "\u00B2", // ²
+                "\u0142", // ł
+                "\u00A7", // §
+                "\u2022", // •
+                "\u2713", // ✓
+                "\u2717", // ✗
+                "\u2192", // →
+                "\u00B1"  // ±
+            };
             foreach (string symbol in symbols)
             {
                 Button btnSymbol = new Button
@@ -27148,7 +28151,7 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(240, 420),
+                Location = new Point(240, 510),
                 Size = new Size(80, 30),
                 DialogResult = DialogResult.OK
             };
@@ -27157,7 +28160,7 @@ namespace AnonPDF
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(330, 420),
+                Location = new Point(330, 510),
                 Size = new Size(80, 30),
                 DialogResult = DialogResult.Cancel
             };
@@ -27165,9 +28168,15 @@ namespace AnonPDF
             // Add controls to the form
             this.Controls.Add(lblText);
             this.Controls.Add(txtText);
+            this.Controls.Add(chkRichTextMode);
+            this.Controls.Add(richTextToolbarPanel);
             this.Controls.Add(btnFont);
             this.Controls.Add(lblFontDisplay);
+            this.Controls.Add(lblTextColor);
             this.Controls.Add(btnColor);
+            this.Controls.Add(lblBackgroundColor);
+            this.Controls.Add(btnBackgroundColor);
+            this.Controls.Add(chkNoBackgroundColor);
             this.Controls.Add(groupBoxAlignment);
             this.Controls.Add(groupBoxRotation);
             this.Controls.Add(groupBoxSymbols);
@@ -27203,7 +28212,132 @@ namespace AnonPDF
             }
 
             nudRotation.Value = NormalizeAngle(AnnotationRotation);
+            if (chkNoBackgroundColor != null)
+            {
+                chkNoBackgroundColor.Checked = AnnotationBackgroundColor.A <= 0;
+            }
+            chkRichTextMode.Checked = IsRichTextMode;
+            if (IsRichTextMode && !string.IsNullOrWhiteSpace(AnnotationRichText))
+            {
+                try
+                {
+                    txtText.Rtf = AnnotationRichText;
+                }
+                catch
+                {
+                    txtText.Text = AnnotationText;
+                }
+            }
+            SetRichMode(IsRichTextMode, updateState: false);
             suppressAutoApply = false;
+        }
+
+        private static System.Drawing.Color GetContrastingTextColor(System.Drawing.Color color)
+        {
+            int luminance = (int)((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B));
+            return luminance >= 140 ? System.Drawing.Color.Black : System.Drawing.Color.White;
+        }
+
+        private string GetTextColorLabelText()
+        {
+            return GetResourceText("EditText_LabelTextColor");
+        }
+
+        private string GetBackgroundColorLabelText()
+        {
+            return GetResourceText("EditText_LabelBackgroundColor");
+        }
+
+        private string GetChooseColorButtonText()
+        {
+            return GetResourceText("EditText_ButtonChooseColor");
+        }
+
+        private string GetRichModeLabelText()
+        {
+            return GetResourceText("EditText_RichModeLabel");
+        }
+
+        private string GetNoBackgroundLabelText()
+        {
+            return GetResourceText("EditText_NoBackground");
+        }
+
+        private string GetRichSelectionColorLabelText()
+        {
+            return GetResourceText("EditText_RichSelectionColorLabel");
+        }
+
+        private void UpdateColorControls()
+        {
+            if (lblTextColor != null) lblTextColor.ForeColor = SystemColors.ControlText;
+
+            if (btnColor != null)
+            {
+                btnColor.BackColor = AnnotationColor;
+                btnColor.ForeColor = GetContrastingTextColor(AnnotationColor);
+                btnColor.Text = GetChooseColorButtonText();
+                btnColor.UseVisualStyleBackColor = false;
+            }
+
+            if (lblBackgroundColor != null) lblBackgroundColor.ForeColor = SystemColors.ControlText;
+
+            if (btnBackgroundColor != null)
+            {
+                System.Drawing.Color previewColor = AnnotationBackgroundColor.A > 0
+                    ? AnnotationBackgroundColor
+                    : System.Drawing.Color.White;
+                btnBackgroundColor.BackColor = previewColor;
+                btnBackgroundColor.ForeColor = GetContrastingTextColor(previewColor);
+                btnBackgroundColor.Text = GetChooseColorButtonText();
+                btnBackgroundColor.UseVisualStyleBackColor = false;
+                btnBackgroundColor.Enabled = chkNoBackgroundColor == null || !chkNoBackgroundColor.Checked;
+            }
+        }
+
+        private void SetRichMode(bool richMode, bool updateState)
+        {
+            IsRichTextMode = richMode;
+            richTextToolbarPanel.Visible = richMode;
+
+            // Global font must remain available in both modes.
+            btnFont.Enabled = true;
+            lblFontDisplay.Enabled = true;
+            lblTextColor.Enabled = !richMode;
+            btnColor.Enabled = !richMode;
+            lblBackgroundColor.Enabled = true;
+            btnBackgroundColor.Enabled = chkNoBackgroundColor == null || !chkNoBackgroundColor.Checked;
+            if (chkNoBackgroundColor != null)
+            {
+                chkNoBackgroundColor.Enabled = true;
+            }
+
+            if (richMode)
+            {
+                if (!string.IsNullOrWhiteSpace(AnnotationRichText))
+                {
+                    try
+                    {
+                        txtText.Rtf = AnnotationRichText;
+                    }
+                    catch
+                    {
+                        txtText.Text = AnnotationText ?? string.Empty;
+                    }
+                }
+            }
+            else
+            {
+                AnnotationRichText = null;
+                AnnotationText = txtText.Text;
+            }
+
+            if (updateState)
+            {
+                TryApplyChanges();
+            }
+
+            UpdateColorControls();
         }
 
         private void UpdateFontDisplay()
@@ -27231,7 +28365,7 @@ namespace AnonPDF
             }
 
             txtText.Font = AnnotationFont;
-            txtText.ForeColor = AnnotationColor;
+            UpdateColorControls();
         }
 
         private void TxtText_TextChanged(object sender, EventArgs e)
@@ -27254,9 +28388,10 @@ namespace AnonPDF
             {
                 AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Right;
             }
-            txtText.SelectAll();
-            txtText.SelectionAlignment = AnnotationAlignment;
-            txtText.DeselectAll();
+
+            // Alignment is kept as annotation metadata (rendering property).
+            // Do not rewrite RichTextBox paragraph alignment here, because it
+            // can distort rich text width calculation in auto-sized annotations.
             TryApplyChanges();
 
         }
@@ -27317,7 +28452,94 @@ namespace AnonPDF
                 if (colorDialog.ShowDialog(this) == DialogResult.OK)
                 {
                     AnnotationColor = colorDialog.Color;
-                    txtText.ForeColor = AnnotationColor;
+                    UpdateColorControls();
+                    TryApplyChanges();
+                }
+            }
+        }
+
+        private void BtnBackgroundColor_Click(object sender, EventArgs e)
+        {
+            using (ColorDialog colorDialog = new ColorDialog())
+            {
+                colorDialog.Color = AnnotationBackgroundColor.A > 0
+                    ? AnnotationBackgroundColor
+                    : System.Drawing.Color.White;
+                if (colorDialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    AnnotationBackgroundColor = colorDialog.Color;
+                    lastBackgroundColorBeforeTransparent = colorDialog.Color;
+                    if (chkNoBackgroundColor != null)
+                    {
+                        chkNoBackgroundColor.Checked = false;
+                    }
+                    UpdateColorControls();
+                    TryApplyChanges();
+                }
+            }
+        }
+
+        private void NoBackgroundColorCheckedChanged(object sender, EventArgs e)
+        {
+            if (chkNoBackgroundColor == null)
+            {
+                return;
+            }
+
+            if (chkNoBackgroundColor.Checked)
+            {
+                if (AnnotationBackgroundColor.A > 0)
+                {
+                    lastBackgroundColorBeforeTransparent = AnnotationBackgroundColor;
+                }
+                AnnotationBackgroundColor = System.Drawing.Color.Transparent;
+            }
+            else if (AnnotationBackgroundColor.A <= 0)
+            {
+                AnnotationBackgroundColor = lastBackgroundColorBeforeTransparent.A > 0
+                    ? lastBackgroundColorBeforeTransparent
+                    : System.Drawing.Color.White;
+            }
+
+            UpdateColorControls();
+            TryApplyChanges();
+        }
+
+        private void RichModeCheckedChanged(object sender, EventArgs e)
+        {
+            SetRichMode(chkRichTextMode.Checked, updateState: true);
+        }
+
+        private void ToggleRichSelectionFontStyle(FontStyle style)
+        {
+            if (!IsRichTextMode)
+            {
+                return;
+            }
+
+            Font selectionFont = txtText.SelectionFont ?? txtText.Font ?? AnnotationFont ?? this.Font;
+            FontStyle newStyle = selectionFont.Style.HasFlag(style)
+                ? (selectionFont.Style & ~style)
+                : (selectionFont.Style | style);
+            txtText.SelectionFont = new Font(selectionFont, newStyle);
+            txtText.Focus();
+            TryApplyChanges();
+        }
+
+        private void BtnRichTextColor_Click(object sender, EventArgs e)
+        {
+            if (!IsRichTextMode)
+            {
+                return;
+            }
+
+            using (ColorDialog colorDialog = new ColorDialog())
+            {
+                colorDialog.Color = txtText.SelectionColor.IsEmpty ? AnnotationColor : txtText.SelectionColor;
+                if (colorDialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    txtText.SelectionColor = colorDialog.Color;
+                    txtText.Focus();
                     TryApplyChanges();
                 }
             }
@@ -27332,6 +28554,7 @@ namespace AnonPDF
                 return;
             }
             AnnotationText = txtText.Text.Trim();
+            AnnotationRichText = IsRichTextMode ? txtText.Rtf : null;
         }
 
         private static int NormalizeAngle(int rotation)
@@ -27358,6 +28581,7 @@ namespace AnonPDF
             if (string.IsNullOrWhiteSpace(txtText.Text))
                 return;
             AnnotationText = txtText.Text;
+            AnnotationRichText = IsRichTextMode ? txtText.Rtf : null;
             ApplyChanges?.Invoke();
         }
 
@@ -28851,6 +30075,8 @@ namespace AnonPDF
         public int PageNumber { get; set; }
         public RectangleF Bounds { get; set; }
         public string CommentText { get; set; }
+        public int HighlightColorArgb { get; set; } = System.Drawing.Color.FromArgb(255, 235, 59).ToArgb();
+        public int TextColorArgb { get; set; } = System.Drawing.Color.Black.ToArgb();
         public bool IsMarkerSelection { get; set; }
         public float? NoteX { get; set; }
         public float? NoteY { get; set; }

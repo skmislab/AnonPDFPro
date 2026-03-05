@@ -706,6 +706,24 @@ The application will close.</value>
   <data name="EditText_ButtonColor" xml:space="preserve">
     <value>Choose color</value>
   </data>
+  <data name="EditText_LabelTextColor" xml:space="preserve">
+    <value>Text color:</value>
+  </data>
+  <data name="EditText_LabelBackgroundColor" xml:space="preserve">
+    <value>Background color:</value>
+  </data>
+  <data name="EditText_ButtonChooseColor" xml:space="preserve">
+    <value>Choose...</value>
+  </data>
+  <data name="EditText_RichModeLabel" xml:space="preserve">
+    <value>Rich formatting mode</value>
+  </data>
+  <data name="EditText_NoBackground" xml:space="preserve">
+    <value>No background</value>
+  </data>
+  <data name="EditText_RichSelectionColorLabel" xml:space="preserve">
+    <value>Selection color:</value>
+  </data>
   <data name="EditText_GroupAlignment" xml:space="preserve">
     <value>Alignment</value>
   </data>
