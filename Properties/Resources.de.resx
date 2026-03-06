@@ -1317,6 +1317,12 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="Footnotes_Context_DeleteObject" xml:space="preserve">
     <value>Objekt löschen</value>
   </data>
+  <data name="Footnotes_Context_CutObject" xml:space="preserve">
+    <value>Ausschneiden</value>
+  </data>
+  <data name="Footnotes_Context_DeleteSelectedObjects" xml:space="preserve">
+    <value>Ausgewählte Objekte löschen</value>
+  </data>
   <data name="Footnotes_Context_ScopeNone" xml:space="preserve">
     <value>Kein Umfang</value>
   </data>

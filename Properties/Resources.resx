@@ -1422,6 +1422,12 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="Footnotes_Context_DeleteObject" xml:space="preserve">
     <value>Usuń obiekt</value>
   </data>
+  <data name="Footnotes_Context_CutObject" xml:space="preserve">
+    <value>Wytnij</value>
+  </data>
+  <data name="Footnotes_Context_DeleteSelectedObjects" xml:space="preserve">
+    <value>Usuń zaznaczone obiekty</value>
+  </data>
   <data name="Footnotes_Context_ScopeNone" xml:space="preserve">
     <value>Brak zakresu</value>
   </data>

@@ -238,6 +238,7 @@ namespace AnonPDF
         private ObjectClipboardSnapshot objectClipboardSnapshot;
         private int objectClipboardPasteCount;
         private bool preferObjectClipboardPaste;
+        private uint clipboardSequenceAtLastInternalObjectCopy;
         private List<VectorShapeObject> vectorShapes = new List<VectorShapeObject>();
         private bool isVectorShapeCreationMode;
         private bool isCommentCreationMode;
@@ -776,6 +777,9 @@ namespace AnonPDF
 
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetClipboardSequenceNumber();
 
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
@@ -2313,6 +2317,31 @@ namespace AnonPDF
                     (!string.IsNullOrWhiteSpace(vectorShape.Id) && selectedVectorShapeIds.Contains(vectorShape.Id)));
         }
 
+        private bool IsObjectSelectedInCurrentSelection(object obj)
+        {
+            if (obj is TextAnnotation textAnnotation)
+            {
+                return IsTextAnnotationSelected(textAnnotation);
+            }
+
+            if (obj is RasterObject rasterObject)
+            {
+                return IsRasterObjectSelected(rasterObject);
+            }
+
+            if (obj is ArrowObject arrowObject)
+            {
+                return IsArrowObjectSelected(arrowObject);
+            }
+
+            if (obj is VectorShapeObject vectorShapeObject)
+            {
+                return IsVectorShapeSelected(vectorShapeObject);
+            }
+
+            return false;
+        }
+
         private int GetGroupSelectionCount()
         {
             return selectedTextAnnotations.Count + selectedRasterObjectIds.Count + selectedArrowObjectIds.Count + selectedVectorShapeIds.Count;
@@ -3305,7 +3334,67 @@ namespace AnonPDF
             objectClipboardSnapshot = snapshot;
             objectClipboardPasteCount = 0;
             preferObjectClipboardPaste = true;
+            clipboardSequenceAtLastInternalObjectCopy = TryGetClipboardSequenceNumberSafe();
             return true;
+        }
+
+        private void CutSelectedObjectsFromContext(bool useGroupSelection, object hitObject = null)
+        {
+            if (useGroupSelection)
+            {
+                if (GetTotalSelectedObjectsCount() <= 0)
+                {
+                    return;
+                }
+
+                if (!TryCopySelectedObjectsToInternalClipboard())
+                {
+                    return;
+                }
+
+                DeleteSelectedGroupObjectsWithConfirmation();
+                return;
+            }
+
+            if (hitObject == null)
+            {
+                return;
+            }
+
+            if (!TryCopySelectedObjectsToInternalClipboard())
+            {
+                return;
+            }
+
+            DeleteObjectFromContext(hitObject);
+        }
+
+        private static uint TryGetClipboardSequenceNumberSafe()
+        {
+            try
+            {
+                return GetClipboardSequenceNumber();
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private bool HasNewerExternalClipboardData(bool externalClipboardContentAvailable)
+        {
+            if (!externalClipboardContentAvailable || !preferObjectClipboardPaste)
+            {
+                return false;
+            }
+
+            uint currentSequence = TryGetClipboardSequenceNumberSafe();
+            if (currentSequence == 0 || clipboardSequenceAtLastInternalObjectCopy == 0)
+            {
+                return false;
+            }
+
+            return currentSequence != clipboardSequenceAtLastInternalObjectCopy;
         }
 
         private bool BringTextAnnotationToFront(TextAnnotation annotation)
@@ -14702,8 +14791,6 @@ namespace AnonPDF
                         saveProjectMenuItem.Enabled = true;
                         commentNoteRectsDoc.Clear();
                     }
-                    renderTimer.Stop();
-                    renderTimer.Start();
                     pdfViewer.Invalidate();
                     return;
                 }
@@ -14720,8 +14807,6 @@ namespace AnonPDF
                         saveProjectMenuItem.Enabled = true;
                         commentNoteRectsDoc.Clear();
                     }
-                    renderTimer.Stop();
-                    renderTimer.Start();
                     pdfViewer.Invalidate();
                     return;
                 }
@@ -15764,11 +15849,7 @@ namespace AnonPDF
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
-            commentNoteRectsDoc.Clear();
-            commentPreviewOverlayReady = false;
-            renderTimer.Stop();
-            renderTimer.Start();
-            pdfViewer.Invalidate();
+            RefreshPreviewAfterCommentChange();
         }
 
         private void RemoveCommentAnnotation(CommentAnnotation comment)
@@ -15802,11 +15883,7 @@ namespace AnonPDF
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
-            commentNoteRectsDoc.Clear();
-            commentPreviewOverlayReady = false;
-            renderTimer.Stop();
-            renderTimer.Start();
-            pdfViewer.Invalidate();
+            RefreshPreviewAfterCommentChange();
         }
 
         private void EditCommentAnnotation(CommentAnnotation comment)
@@ -15842,10 +15919,35 @@ namespace AnonPDF
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
+            RefreshPreviewAfterCommentChange();
+        }
+
+        private void RefreshPreviewAfterCommentChange()
+        {
             commentNoteRectsDoc.Clear();
             commentPreviewOverlayReady = false;
-            renderTimer.Stop();
-            renderTimer.Start();
+
+            if (IsDisposed || Disposing || pdf == null || numPages <= 0)
+            {
+                return;
+            }
+
+            if (IsHandleCreated)
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed || Disposing || pdf == null || numPages <= 0)
+                    {
+                        return;
+                    }
+
+                    ShowRedactPreview();
+                    pdfViewer.Invalidate();
+                }));
+                return;
+            }
+
+            ShowRedactPreview();
             pdfViewer.Invalidate();
         }
 
@@ -15856,21 +15958,8 @@ namespace AnonPDF
                 return false;
             }
 
-            string duplicateGroupId = string.IsNullOrWhiteSpace(comment.DuplicateGroupId) ? null : comment.DuplicateGroupId.Trim();
             var menu = new ContextMenuStrip();
             menu.Items.Add(GetEditCommentContextMenuText(), null, (_, __) => EditCommentAnnotation(comment));
-            var duplicateObjectItem = new ToolStripMenuItem(GetDuplicateObjectContextMenuText())
-            {
-                Enabled = numPages > 1
-            };
-            duplicateObjectItem.Click += (_, __) => DuplicateCommentAnnotationAcrossPages(comment);
-            menu.Items.Add(duplicateObjectItem);
-            var deleteDuplicatedObjectsItem = new ToolStripMenuItem(GetDeleteDuplicatedObjectsContextMenuText())
-            {
-                Enabled = !string.IsNullOrWhiteSpace(duplicateGroupId)
-            };
-            deleteDuplicatedObjectsItem.Click += (_, __) => DeleteDuplicatedObjectsByGroupId(duplicateGroupId, comment.PageNumber);
-            menu.Items.Add(deleteDuplicatedObjectsItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(GetDeleteObjectContextMenuText(), null, (_, __) => DeleteObjectFromContext(comment));
             menu.Show(pdfViewer, location);
@@ -15929,6 +16018,25 @@ namespace AnonPDF
                 return false;
             }
 
+            bool multiSelectionActive = GetTotalSelectedObjectsCount() > 1;
+            bool hitObjectIsPartOfSelection = IsObjectSelectedInCurrentSelection(hitObject);
+            if (multiSelectionActive && hitObjectIsPartOfSelection)
+            {
+                var groupMenu = new ContextMenuStrip();
+                var copySelectedItem = new ToolStripMenuItem(Resources.Menu_CopyToClipboard);
+                copySelectedItem.Click += (_, __) => TryCopySelectedObjectsToInternalClipboard();
+                groupMenu.Items.Add(copySelectedItem);
+
+                var cutSelectedItem = new ToolStripMenuItem(GetCutObjectContextMenuText());
+                cutSelectedItem.Click += (_, __) => CutSelectedObjectsFromContext(useGroupSelection: true);
+                groupMenu.Items.Add(cutSelectedItem);
+
+                groupMenu.Items.Add(new ToolStripSeparator());
+                groupMenu.Items.Add(GetDeleteSelectedObjectsContextMenuText(), null, (_, __) => DeleteSelectedGroupObjectsWithConfirmation());
+                groupMenu.Show(pdfViewer, location);
+                return true;
+            }
+
             string duplicateGroupId = GetDuplicateGroupIdForObject(hitObject);
 
             var menu = new ContextMenuStrip();
@@ -15981,6 +16089,9 @@ namespace AnonPDF
             var copyObjectItem = new ToolStripMenuItem(Resources.Menu_CopyToClipboard);
             copyObjectItem.Click += (_, __) => TryCopySelectedObjectsToInternalClipboard();
             menu.Items.Add(copyObjectItem);
+            var cutObjectItem = new ToolStripMenuItem(GetCutObjectContextMenuText());
+            cutObjectItem.Click += (_, __) => CutSelectedObjectsFromContext(useGroupSelection: false, hitObject: hitObject);
+            menu.Items.Add(cutObjectItem);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(duplicateObjectItem);
             var deleteDuplicatedObjectsItem = new ToolStripMenuItem(GetDeleteDuplicatedObjectsContextMenuText())
@@ -16328,6 +16439,11 @@ namespace AnonPDF
             return LocalizedText("Footnotes_Context_DeleteDuplicatedObjects");
         }
 
+        private string GetCutObjectContextMenuText()
+        {
+            return LocalizedText("Footnotes_Context_CutObject");
+        }
+
         private string GetDeleteDuplicatedObjectsDialogTitle()
         {
             return LocalizedText("Footnotes_DeleteDuplicatedObjects_Title");
@@ -16336,6 +16452,11 @@ namespace AnonPDF
         private string GetDeleteObjectContextMenuText()
         {
             return LocalizedText("Footnotes_Context_DeleteObject");
+        }
+
+        private string GetDeleteSelectedObjectsContextMenuText()
+        {
+            return LocalizedText("Footnotes_Context_DeleteSelectedObjects");
         }
 
         private string GetDuplicateSelectionAllPagesText()
@@ -18337,8 +18458,13 @@ namespace AnonPDF
                 }
             }
 
-            if (hasTextFrame)
+            void DrawTextFrameOverlay()
             {
+                if (!hasTextFrame)
+                {
+                    return;
+                }
+
                 System.Drawing.Color frameColor = (isSelectedAnnotation && !multiSelectionActive)
                     ? System.Drawing.Color.Red
                     : System.Drawing.Color.SteelBlue;
@@ -18347,6 +18473,7 @@ namespace AnonPDF
                     : 1f;
                 using (Pen textFramePen = new Pen(frameColor, frameWidth))
                 {
+                    textFramePen.Alignment = System.Drawing.Drawing2D.PenAlignment.Inset;
                     graphics.DrawPolygon(textFramePen, textFrameCorners);
                 }
             }
@@ -18380,8 +18507,13 @@ namespace AnonPDF
             float layoutHeight;
             if (isRich)
             {
-                layoutWidth = annotation.AnnotationBounds.Width * scaleFactor * 72f / graphics.DpiX;
-                layoutHeight = annotation.AnnotationBounds.Height * scaleFactor * 72f / graphics.DpiY;
+                SizeF richBaseSize = GetRichAnnotationSize(
+                    annotation.AnnotationText,
+                    annotation.AnnotationRichText,
+                    annotation.AnnotationFont,
+                    0);
+                layoutWidth = richBaseSize.Width * scaleFactor * 72f / graphics.DpiX;
+                layoutHeight = richBaseSize.Height * scaleFactor * 72f / graphics.DpiY;
             }
             else
             {
@@ -18419,6 +18551,8 @@ namespace AnonPDF
                     graphics.Restore(state);
                 }
 
+                DrawTextFrameOverlay();
+
                 if (multiSelectionActive && isSelectedAnnotation)
                 {
                     DrawGroupSelectionOutline(graphics, rect);
@@ -18427,7 +18561,7 @@ namespace AnonPDF
                 return;
             }
 
-            using (SolidBrush brush = new SolidBrush((isSelectedAnnotation && !multiSelectionActive) ? System.Drawing.Color.Red : annotation.AnnotationColor))
+            using (SolidBrush brush = new SolidBrush(annotation.AnnotationColor))
             {
                 float scaledFontSize = annotation.AnnotationFont.Size * scaleFactor * dpiCorrection;
                 using (Font scaledFont = new Font(annotation.AnnotationFont.FontFamily, scaledFontSize, annotation.AnnotationFont.Style))
@@ -18454,6 +18588,8 @@ namespace AnonPDF
                     graphics.Restore(state);
                 }
             }
+
+            DrawTextFrameOverlay();
 
             if (multiSelectionActive && isSelectedAnnotation)
             {
@@ -20502,14 +20638,23 @@ namespace AnonPDF
                 }
 
                 bool externalClipboardContentAvailable = IsExternalClipboardContentAvailable();
-                if (externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
+                if (HasNewerExternalClipboardData(externalClipboardContentAvailable) &&
+                    TryHandleGlobalPasteShortcut())
                 {
                     preferObjectClipboardPaste = false;
                     return true;
                 }
 
+                // If user previously copied app object(s), prefer pasting them
+                // unless system clipboard changed afterwards.
                 if (preferObjectClipboardPaste && TryPasteObjectsFromInternalClipboard())
                 {
+                    return true;
+                }
+
+                if (externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
+                {
+                    preferObjectClipboardPaste = false;
                     return true;
                 }
 
@@ -20781,8 +20926,6 @@ namespace AnonPDF
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
             pdfViewer.Invalidate();
-            renderTimer.Stop();
-            renderTimer.Start();
         }
 
         private void AddArrowObject()
@@ -22004,6 +22147,11 @@ namespace AnonPDF
                 return false;
             }
 
+            if (GetTotalSelectedObjectsCount() > 1)
+            {
+                return false;
+            }
+
             VectorShapeObject target = null;
             if (selectedVectorShape != null &&
                 selectedVectorShape.PageNumber == currentPage &&
@@ -22056,6 +22204,13 @@ namespace AnonPDF
             removeNodeItem.Click += (_, __) => RemoveVectorNode(target, nodeIndex);
             menu.Items.Add(removeNodeItem);
 
+            menu.Items.Add(new ToolStripSeparator());
+            var copyObjectItem = new ToolStripMenuItem(Resources.Menu_CopyToClipboard);
+            copyObjectItem.Click += (_, __) => TryCopySelectedObjectsToInternalClipboard();
+            menu.Items.Add(copyObjectItem);
+            var cutObjectItem = new ToolStripMenuItem(GetCutObjectContextMenuText());
+            cutObjectItem.Click += (_, __) => CutSelectedObjectsFromContext(useGroupSelection: false, hitObject: target);
+            menu.Items.Add(cutObjectItem);
             menu.Items.Add(new ToolStripSeparator());
             var duplicateObjectItem = new ToolStripMenuItem(GetDuplicateObjectContextMenuText())
             {
@@ -24244,8 +24399,13 @@ namespace AnonPDF
             float layoutHeight;
             if (IsRichTextMode(annotation))
             {
-                layoutWidth = annotation.AnnotationBounds.Width * scaleFactor * 72f / dpiX;
-                layoutHeight = annotation.AnnotationBounds.Height * scaleFactor * dpiCorrection;
+                SizeF richBaseSize = GetRichAnnotationSize(
+                    annotation.AnnotationText,
+                    annotation.AnnotationRichText,
+                    annotation.AnnotationFont,
+                    0);
+                layoutWidth = richBaseSize.Width * scaleFactor * 72f / dpiX;
+                layoutHeight = richBaseSize.Height * scaleFactor * dpiCorrection;
             }
             else
             {
@@ -27658,7 +27818,8 @@ namespace AnonPDF
         private void PasteObjectFromClipboardToolStripMenuItem_Click(object sender, EventArgs e)
         {
             bool externalClipboardContentAvailable = IsExternalClipboardContentAvailable();
-            if (externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
+            if (HasNewerExternalClipboardData(externalClipboardContentAvailable) &&
+                TryHandleGlobalPasteShortcut())
             {
                 preferObjectClipboardPaste = false;
                 return;
@@ -27666,6 +27827,12 @@ namespace AnonPDF
 
             if (preferObjectClipboardPaste && TryPasteObjectsFromInternalClipboard())
             {
+                return;
+            }
+
+            if (externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
+            {
+                preferObjectClipboardPaste = false;
                 return;
             }
 
@@ -28229,6 +28396,7 @@ namespace AnonPDF
                 }
             }
             SetRichMode(IsRichTextMode, updateState: false);
+            ApplyAlignmentToEditor();
             suppressAutoApply = false;
         }
 
@@ -28332,6 +28500,8 @@ namespace AnonPDF
                 AnnotationText = txtText.Text;
             }
 
+            ApplyAlignmentToEditor();
+
             if (updateState)
             {
                 TryApplyChanges();
@@ -28388,12 +28558,29 @@ namespace AnonPDF
             {
                 AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Right;
             }
-
-            // Alignment is kept as annotation metadata (rendering property).
-            // Do not rewrite RichTextBox paragraph alignment here, because it
-            // can distort rich text width calculation in auto-sized annotations.
+            ApplyAlignmentToEditor();
             TryApplyChanges();
 
+        }
+
+        private void ApplyAlignmentToEditor()
+        {
+            if (txtText == null)
+            {
+                return;
+            }
+
+            int selectionStart = txtText.SelectionStart;
+            int selectionLength = txtText.SelectionLength;
+            try
+            {
+                txtText.SelectAll();
+                txtText.SelectionAlignment = AnnotationAlignment;
+            }
+            finally
+            {
+                txtText.Select(selectionStart, selectionLength);
+            }
         }
 
         private void RotationValueChanged(object sender, EventArgs e)
