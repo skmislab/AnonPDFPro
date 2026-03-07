@@ -33140,17 +33140,17 @@ namespace AnonPDF
             Console.WriteLine(text);
             foreach (Match match in PeselPattern.Matches(text))
             {
-                if (ValidatePesel(match.Value))
+                if (ValidatePesel(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
                     AddLocationForMatch(line, match, locations);
             }
             foreach (Match match in PropertyRegisterPattern.Matches(text))
             {
-                if (ValidatePropertyRegister(match.Value))
+                if (ValidatePropertyRegister(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
                     AddLocationForMatch(line, match, locations);
             }
             foreach (Match match in IdCardPattern.Matches(text))
             {
-                if (ValidateIdCard(match.Value))
+                if (ValidateIdCard(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
                     AddLocationForMatch(line, match, locations);
             }
             foreach (Match match in EmailPattern.Matches(text))
@@ -33158,6 +33158,52 @@ namespace AnonPDF
                 AddLocationForMatch(line, match, locations);
             }
 
+        }
+
+        private static bool IsIdentifierMatchGeometryCompact(CachedLine line, int startIndex, int length)
+        {
+            if (line?.Characters == null || length <= 1 || startIndex < 0)
+            {
+                return true;
+            }
+
+            int endExclusive = startIndex + length;
+            if (endExclusive > line.Characters.Count)
+            {
+                // For identifier detection prefer precision over recall:
+                // when mapping text index -> glyphs is uncertain, skip the match.
+                return false;
+            }
+
+            var widths = new List<float>(length);
+            for (int i = startIndex; i < endExclusive; i++)
+            {
+                var rect = line.Characters[i].BoundingBox;
+                float width = Math.Max(0f, rect.GetWidth());
+                if (width > 0.1f)
+                {
+                    widths.Add(width);
+                }
+            }
+
+            float medianWidth = widths.Count > 0
+                ? widths.OrderBy(w => w).ElementAt(widths.Count / 2)
+                : 0f;
+            float maxAllowedGap = Math.Max(2f, medianWidth * 1.6f);
+
+            for (int i = startIndex; i < endExclusive - 1; i++)
+            {
+                var current = line.Characters[i].BoundingBox;
+                var next = line.Characters[i + 1].BoundingBox;
+                float currentRight = current.GetX() + current.GetWidth();
+                float gap = next.GetX() - currentRight;
+                if (gap > maxAllowedGap)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static void AddLocationForMatch(CachedLine line, Match match, List<TextLocation> locations)
