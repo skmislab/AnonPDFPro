@@ -48,6 +48,7 @@ using iText.Layout;
 using TesseractOCR;
 using System.Data.SqlClient;
 using System.Drawing.Drawing2D;
+using System.Drawing.Printing;
 using MediaGlyphTypeface = System.Windows.Media.GlyphTypeface;
 using MediaDrawingVisual = System.Windows.Media.DrawingVisual;
 using MediaBrushes = System.Windows.Media.Brushes;
@@ -4687,6 +4688,14 @@ namespace AnonPDF
             saveProjectAsMenuItem.Text = Resources.Menu_SaveProjectAs;
             saveProjectMenuItem.Text = Resources.Menu_SaveProject;
             savePdfMenuItem.Text = Resources.Menu_SavePdf;
+            if (savePdfPageRangeMenuItem != null)
+            {
+                savePdfPageRangeMenuItem.Text = LocalizedText("Menu_SavePdfPageRange");
+            }
+            if (printPdfMenuItem != null)
+            {
+                printPdfMenuItem.Text = LocalizedText("Menu_Print");
+            }
             recentFilesMenuItem.Text = Resources.Menu_RecentFiles;
             importProjectMenuItem.Text = LocalizedText("Menu_ImportProject");
             closeDocumentMenuItem.Text = Resources.Menu_CloseDocument;
@@ -9735,7 +9744,7 @@ namespace AnonPDF
             return false;
         }
 
-        private HashSet<int> DetermineFlattenPagesForScanMerge(iText.Kernel.Pdf.PdfDocument pdfDoc)
+        private HashSet<int> DetermineFlattenPagesForScanMerge(iText.Kernel.Pdf.PdfDocument pdfDoc, ISet<int> removedPages)
         {
             var flattenPages = new HashSet<int>();
             if (pdfDoc == null || !combineObjectsWithScanPagesEnabled)
@@ -9752,7 +9761,7 @@ namespace AnonPDF
             var candidatePages = new HashSet<int>();
             foreach (TextAnnotation annotation in textAnnotations.Where(a => a != null))
             {
-                if (annotation.PageNumber >= 1 && annotation.PageNumber <= pageCount && !pagesToRemove.Contains(annotation.PageNumber))
+                if (annotation.PageNumber >= 1 && annotation.PageNumber <= pageCount && !removedPages.Contains(annotation.PageNumber))
                 {
                     candidatePages.Add(annotation.PageNumber);
                 }
@@ -9760,7 +9769,7 @@ namespace AnonPDF
 
             foreach (RasterObject rasterObject in rasterObjects.Where(r => r != null))
             {
-                if (rasterObject.PageNumber >= 1 && rasterObject.PageNumber <= pageCount && !pagesToRemove.Contains(rasterObject.PageNumber))
+                if (rasterObject.PageNumber >= 1 && rasterObject.PageNumber <= pageCount && !removedPages.Contains(rasterObject.PageNumber))
                 {
                     candidatePages.Add(rasterObject.PageNumber);
                 }
@@ -9768,7 +9777,7 @@ namespace AnonPDF
 
             foreach (VectorShapeObject vectorShape in vectorShapes.Where(v => v != null))
             {
-                if (vectorShape.PageNumber >= 1 && vectorShape.PageNumber <= pageCount && !pagesToRemove.Contains(vectorShape.PageNumber))
+                if (vectorShape.PageNumber >= 1 && vectorShape.PageNumber <= pageCount && !removedPages.Contains(vectorShape.PageNumber))
                 {
                     candidatePages.Add(vectorShape.PageNumber);
                 }
@@ -10024,7 +10033,11 @@ namespace AnonPDF
             }
         }
 
-        void RedactText(string inputFile, string outputFile, ISet<int> pagesWithBakedRotation = null)
+        void RedactText(
+            string inputFile,
+            string outputFile,
+            ISet<int> pagesWithBakedRotation = null,
+            ISet<int> additionalPagesToRemove = null)
         {
             iText.Kernel.Colors.Color cleanUpColorBlack = new DeviceRgb(0, 0, 0);
             iText.Kernel.Colors.Color cleanUpColorWhite = new DeviceRgb(255, 255, 255);
@@ -10076,6 +10089,17 @@ namespace AnonPDF
             }
 
             var flattenPages = new HashSet<int>();
+            var effectivePagesToRemove = new HashSet<int>(pagesToRemove);
+            if (additionalPagesToRemove != null)
+            {
+                foreach (int pageNum in additionalPagesToRemove)
+                {
+                    if (pageNum >= 1 && pageNum <= numPages)
+                    {
+                        effectivePagesToRemove.Add(pageNum);
+                    }
+                }
+            }
 
             using (PdfReader reader = new PdfReader(inputFile, readerProps).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
             using (PdfWriter writer = new PdfWriter(outputFile, writerProps))
@@ -10086,7 +10110,7 @@ namespace AnonPDF
 
                 if (combineObjectsWithScanPagesEnabled)
                 {
-                    flattenPages = DetermineFlattenPagesForScanMerge(pdfDoc);
+                    flattenPages = DetermineFlattenPagesForScanMerge(pdfDoc, effectivePagesToRemove);
                 }
 
                 if (signatures.Count > 0 && !signaturesOriginalRadioButton.Checked)
@@ -10471,7 +10495,7 @@ namespace AnonPDF
                     }
                 }
 
-                RenderCommentAnnotationsToPdf(pdfDoc, pagesWithBakedRotation, flattenPages);
+                RenderCommentAnnotationsToPdf(pdfDoc, pagesWithBakedRotation, effectivePagesToRemove, flattenPages);
 
                 // --- Section for rendering captions from textAnnotations list ---
                 // Iterate over each annotation to be rendered on the given page.
@@ -10805,7 +10829,7 @@ namespace AnonPDF
                 List<RedactionBlock> footnoteBlocksForExport = redactionBlocks
                     .Where(block =>
                         block != null &&
-                        !pagesToRemove.Contains(block.PageNumber))
+                        !effectivePagesToRemove.Contains(block.PageNumber))
                     .ToList();
 
                 Dictionary<string, int> footnoteBasisNumberMap = BuildLegalBasisFootnoteNumberMap(footnoteBlocksForExport);
@@ -10819,9 +10843,9 @@ namespace AnonPDF
 
                 RenderFootnoteMarkersToPdf(pdfDoc, pagesWithBakedRotation, footnoteRenderableBlocks, footnoteBasisNumberMap, redactionVisualPdfBoundsByBlock);
 
-                if (pagesToRemove.Count > 0)
+                if (effectivePagesToRemove.Count > 0)
                 {
-                    var pagesToRemoveSorted = pagesToRemove.OrderByDescending(p => p);
+                    var pagesToRemoveSorted = effectivePagesToRemove.OrderByDescending(p => p);
                     foreach (var p in pagesToRemoveSorted)
                     {
                         if (p >= 1 && p <= pdfDoc.GetNumberOfPages())
@@ -11348,6 +11372,14 @@ namespace AnonPDF
             
             saveProjectAsMenuItem.Enabled = true;
             savePdfMenuItem.Enabled = true;
+            if (savePdfPageRangeMenuItem != null)
+            {
+                savePdfPageRangeMenuItem.Enabled = true;
+            }
+            if (printPdfMenuItem != null)
+            {
+                printPdfMenuItem.Enabled = true;
+            }
             addTextMenuItem.Enabled = true;
             if (addRasterImageToolStripMenuItem != null)
             {
@@ -11884,6 +11916,14 @@ namespace AnonPDF
             saveProjectAsMenuItem.Enabled = false;
             saveProjectMenuItem.Enabled = false;
             savePdfMenuItem.Enabled = false;
+            if (savePdfPageRangeMenuItem != null)
+            {
+                savePdfPageRangeMenuItem.Enabled = false;
+            }
+            if (printPdfMenuItem != null)
+            {
+                printPdfMenuItem.Enabled = false;
+            }
             addTextMenuItem.Enabled = false;
             if (addRasterImageToolStripMenuItem != null)
             {
@@ -12327,54 +12367,275 @@ namespace AnonPDF
 
                 if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
                 {
+                    SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove: null);
+                }
+            }
+        }
+
+        private void SavePdfPageRangeMenuItem_Click(object sender, EventArgs e)
+        {
+            if (numPages <= 0 || string.IsNullOrWhiteSpace(inputPdfPath))
+            {
+                return;
+            }
+
+            if (!PromptForDuplicateSelectionOptions(
+                    numPages,
+                    LocalizedText("Menu_SavePdfPageRange"),
+                    out int fromPage,
+                    out int toPage,
+                    defaultFromPage: currentPage,
+                    defaultToPage: currentPage))
+            {
+                return;
+            }
+
+            var additionalPagesToRemove = BuildPagesOutsideRange(numPages, fromPage, toPage);
+            var effectivePagesToRemove = new HashSet<int>(pagesToRemove);
+            effectivePagesToRemove.UnionWith(additionalPagesToRemove);
+            if (effectivePagesToRemove.Count >= numPages)
+            {
+                MessageBox.Show(this, Resources.Err_AllPagesMarked, Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!EnsureInterestSubjectForRequiredBases())
+            {
+                return;
+            }
+
+            using (SaveFileDialog saveFileDialog = new SaveFileDialog())
+            {
+                saveFileDialog.Filter = Resources.Dialog_Filter_PDF;
+                saveFileDialog.Title = Resources.Dialog_Title_SavePdfAs;
+                saveFileDialog.FileName = $"{System.IO.Path.GetFileNameWithoutExtension(inputPdfPath)}_anon_p{fromPage}-{toPage}.pdf";
+
+                if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove);
+                }
+            }
+        }
+
+        private HashSet<int> BuildPagesOutsideRange(int totalPages, int fromPage, int toPage)
+        {
+            var pagesOutsideRange = new HashSet<int>();
+            if (totalPages <= 0)
+            {
+                return pagesOutsideRange;
+            }
+
+            int startPage = Math.Max(1, Math.Min(totalPages, Math.Min(fromPage, toPage)));
+            int endPage = Math.Max(1, Math.Min(totalPages, Math.Max(fromPage, toPage)));
+
+            for (int pageNumber = 1; pageNumber <= totalPages; pageNumber++)
+            {
+                if (pageNumber < startPage || pageNumber > endPage)
+                {
+                    pagesOutsideRange.Add(pageNumber);
+                }
+            }
+
+            return pagesOutsideRange;
+        }
+
+        private void SaveRedactedPdfToFile(string outputFilePath, ISet<int> additionalPagesToRemove)
+        {
+            try
+            {
+                this.Cursor = Cursors.WaitCursor;
+
+                string tempFile = Path.Combine(Path.GetTempPath(), $"pdfreencoded_{DateTime.Now.Ticks}.pdf");
+                bool retReencoding = ReencodePdfKeepOriginalCompression(inputPdfPath, tempFile);
+
+                if (retReencoding)
+                {
+                    RedactText(tempFile, outputFilePath, reencodedPages, additionalPagesToRemove);
+                }
+                else
+                {
+                    RedactText(inputPdfPath, outputFilePath, additionalPagesToRemove: additionalPagesToRemove);
+                }
+
+                if (File.Exists(tempFile))
+                {
+                    File.Delete(tempFile);
+                }
+
+                this.Cursor = Cursors.Default;
+                if (openSavedPDFCheckBox.Checked)
+                {
                     try
                     {
-                        this.Cursor = Cursors.WaitCursor;
+                        // Temporarily exit fullscreen to allow external viewer to show
+                        ExitFullScreenIfNeeded();
 
-                        string tempFile = Path.Combine(Path.GetTempPath(), $"pdfreencoded_{DateTime.Now.Ticks}.pdf");
-                        bool retReencoding = ReencodePdfKeepOriginalCompression(inputPdfPath, tempFile);
-
-                        if (retReencoding)
+                        var psi = new ProcessStartInfo
                         {
-                            RedactText(tempFile, saveFileDialog.FileName, reencodedPages);
-                        }
-                        else
-                        {
-                            RedactText(inputPdfPath, saveFileDialog.FileName);
-                        }
-
-
-                        // Delete existing file if it exists
-                        if (File.Exists(tempFile))
-                        {
-                            File.Delete(tempFile);
-                        }
-                        this.Cursor = Cursors.Default;
-                        if (openSavedPDFCheckBox.Checked)
-                        {
-                            try
-                            {
-                                // Temporarily exit fullscreen to allow external viewer to show
-                                ExitFullScreenIfNeeded();
-
-                                var psi = new ProcessStartInfo
-                                {
-                                    FileName = saveFileDialog.FileName,
-                                    UseShellExecute = true
-                                };
-                                Process.Start(psi);
-                            }
-                            catch (System.ComponentModel.Win32Exception wex)
-                            {
-                                MessageBox.Show(this, string.Format(Resources.Err_NoAssociatedPdfApp, wex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                            }
-                        }
-                        OpenDiagnosticLogIfEnabled();
+                            FileName = outputFilePath,
+                            UseShellExecute = true
+                        };
+                        Process.Start(psi);
                     }
-                    catch (Exception ex)
+                    catch (System.ComponentModel.Win32Exception wex)
                     {
-                        MessageBox.Show(this, string.Format(Resources.Err_Save, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        this.Cursor = Cursors.Default;
+                        MessageBox.Show(this, string.Format(Resources.Err_NoAssociatedPdfApp, wex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+
+                OpenDiagnosticLogIfEnabled();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, string.Format(Resources.Err_Save, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                this.Cursor = Cursors.Default;
+            }
+        }
+
+        private void PrintPdfMenuItem_Click(object sender, EventArgs e)
+        {
+            if (pdf == null || numPages <= 0 || string.IsNullOrWhiteSpace(inputPdfPath))
+            {
+                return;
+            }
+
+            using (var printDocument = new PrintDocument())
+            {
+                printDocument.DocumentName = Path.GetFileName(inputPdfPath);
+                printDocument.PrinterSettings.MinimumPage = 1;
+                printDocument.PrinterSettings.MaximumPage = numPages;
+                printDocument.PrinterSettings.FromPage = currentPage;
+                printDocument.PrinterSettings.ToPage = currentPage;
+
+                using (var printDialog = new PrintDialog())
+                {
+                    printDialog.UseEXDialog = true;
+                    printDialog.AllowCurrentPage = true;
+                    printDialog.AllowSomePages = true;
+                    printDialog.AllowSelection = false;
+                    printDialog.Document = printDocument;
+
+                    if (printDialog.ShowDialog(this) != DialogResult.OK)
+                    {
+                        return;
+                    }
+                }
+
+                int fromPage;
+                int toPage;
+                switch (printDocument.PrinterSettings.PrintRange)
+                {
+                    case PrintRange.CurrentPage:
+                        fromPage = currentPage;
+                        toPage = currentPage;
+                        break;
+                    case PrintRange.SomePages:
+                        fromPage = Math.Max(1, Math.Min(numPages, printDocument.PrinterSettings.FromPage));
+                        toPage = Math.Max(1, Math.Min(numPages, printDocument.PrinterSettings.ToPage));
+                        if (fromPage > toPage)
+                        {
+                            int swap = fromPage;
+                            fromPage = toPage;
+                            toPage = swap;
+                        }
+                        break;
+                    default:
+                        fromPage = 1;
+                        toPage = numPages;
+                        break;
+                }
+
+                int pageToPrint = fromPage;
+                printDocument.PrintPage += (_, args) =>
+                {
+                    using (Bitmap pageBitmap = RenderPageBitmapForPrint(pageToPrint, args.MarginBounds.Size))
+                    {
+                        if (pageBitmap != null)
+                        {
+                            int x = args.MarginBounds.Left + Math.Max(0, (args.MarginBounds.Width - pageBitmap.Width) / 2);
+                            int y = args.MarginBounds.Top + Math.Max(0, (args.MarginBounds.Height - pageBitmap.Height) / 2);
+                            args.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                            args.Graphics.DrawImage(pageBitmap, x, y, pageBitmap.Width, pageBitmap.Height);
+                        }
+                    }
+
+                    pageToPrint++;
+                    args.HasMorePages = pageToPrint <= toPage;
+                };
+
+                try
+                {
+                    this.Cursor = Cursors.WaitCursor;
+                    printDocument.Print();
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        this,
+                        string.Format(LocalizedText("Err_Print"), ex.Message),
+                        Resources.Title_Error,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+                finally
+                {
+                    this.Cursor = Cursors.Default;
+                }
+            }
+        }
+
+        private Bitmap RenderPageBitmapForPrint(int pageNumber, Size targetBounds)
+        {
+            if (pdf == null || pageNumber < 1 || pageNumber > pdf.Pages.Count)
+            {
+                return null;
+            }
+
+            int targetWidth = Math.Max(1, targetBounds.Width);
+            int targetHeight = Math.Max(1, targetBounds.Height);
+
+            lock (pdfRenderSync)
+            {
+                if (pdf == null || pageNumber < 1 || pageNumber > pdf.Pages.Count)
+                {
+                    return null;
+                }
+
+                var page = pdf.Pages[pageNumber - 1];
+                int offset = GetRotationOffset(pageNumber);
+                bool swapForOffset = offset == 90 || offset == 270;
+
+                float pageWidth = Math.Max(1f, (float)page.Width);
+                float pageHeight = Math.Max(1f, (float)page.Height);
+                float viewWidth = swapForOffset ? pageHeight : pageWidth;
+                float viewHeight = swapForOffset ? pageWidth : pageHeight;
+
+                float fitScale = Math.Min(targetWidth / viewWidth, targetHeight / viewHeight);
+                if (fitScale <= 0f || float.IsNaN(fitScale) || float.IsInfinity(fitScale))
+                {
+                    fitScale = 1f;
+                }
+
+                int finalWidth = Math.Max(1, (int)Math.Round(viewWidth * fitScale));
+                int finalHeight = Math.Max(1, (int)Math.Round(viewHeight * fitScale));
+                int rawWidth = swapForOffset ? finalHeight : finalWidth;
+                int rawHeight = swapForOffset ? finalWidth : finalHeight;
+
+                using (var pdfBitmap = new PDFiumBitmap(rawWidth, rawHeight, true))
+                {
+                    pdfBitmap.FillRectangle(0, 0, rawWidth, rawHeight, 0xFFFFFFFF);
+                    page.Render(renderTarget: pdfBitmap, flags: RenderingFlags.Annotations);
+
+                    using (var ms = new MemoryStream())
+                    {
+                        pdfBitmap.Save(ms);
+                        ms.Position = 0;
+                        using (var sourceBitmap = new Bitmap(ms))
+                        {
+                            Bitmap printBitmap = new Bitmap(sourceBitmap);
+                            ApplyRotationOffset(printBitmap, offset);
+                            return printBitmap;
+                        }
                     }
                 }
             }
@@ -18655,6 +18916,7 @@ namespace AnonPDF
         private void RenderCommentAnnotationsToPdf(
             iText.Kernel.Pdf.PdfDocument pdfDoc,
             ISet<int> pagesWithBakedRotation,
+            ISet<int> removedPages,
             ISet<int> excludedPages = null)
         {
             if (pdfDoc == null || commentAnnotations == null || commentAnnotations.Count == 0)
@@ -18664,7 +18926,7 @@ namespace AnonPDF
 
             List<CommentAnnotation> exportComments = commentAnnotations
                 .Where(c => c != null && c.PageNumber >= 1 && c.PageNumber <= pdfDoc.GetNumberOfPages())
-                .Where(c => !pagesToRemove.Contains(c.PageNumber))
+                .Where(c => removedPages == null || !removedPages.Contains(c.PageNumber))
                 .Where(c => excludedPages == null || !excludedPages.Contains(c.PageNumber))
                 .OrderBy(c => c.PageNumber)
                 .ThenBy(c => c.Bounds.Top)
@@ -25736,10 +25998,23 @@ namespace AnonPDF
             int totalPages,
             string dialogTitle,
             out int fromPage,
-            out int toPage)
+            out int toPage,
+            int? defaultFromPage = null,
+            int? defaultToPage = null)
         {
-            fromPage = 1;
-            toPage = totalPages;
+            int normalizedDefaultFrom = defaultFromPage ?? 1;
+            int normalizedDefaultTo = defaultToPage ?? totalPages;
+            normalizedDefaultFrom = Math.Max(1, Math.Min(totalPages, normalizedDefaultFrom));
+            normalizedDefaultTo = Math.Max(1, Math.Min(totalPages, normalizedDefaultTo));
+            if (normalizedDefaultFrom > normalizedDefaultTo)
+            {
+                int swap = normalizedDefaultFrom;
+                normalizedDefaultFrom = normalizedDefaultTo;
+                normalizedDefaultTo = swap;
+            }
+
+            fromPage = normalizedDefaultFrom;
+            toPage = normalizedDefaultTo;
 
             using (Form prompt = new Form())
             {
@@ -25776,7 +26051,7 @@ namespace AnonPDF
                     Width = 70,
                     Minimum = 1,
                     Maximum = totalPages,
-                    Value = 1
+                    Value = normalizedDefaultFrom
                 };
 
                 var toPageLabel = new Label
@@ -25794,7 +26069,7 @@ namespace AnonPDF
                     Width = 66,
                     Minimum = 1,
                     Maximum = totalPages,
-                    Value = totalPages
+                    Value = normalizedDefaultTo
                 };
 
                 var buttonOk = new Button

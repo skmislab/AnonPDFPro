@@ -368,6 +368,12 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="Menu_SavePdf" xml:space="preserve">
     <value>PDF speichern</value>
   </data>
+  <data name="Menu_SavePdfPageRange" xml:space="preserve">
+    <value>Seitenbereich als PDF speichern</value>
+  </data>
+  <data name="Menu_Print" xml:space="preserve">
+    <value>Drucken</value>
+  </data>
   <data name="Menu_SelectSignaturesToRemove" xml:space="preserve">
     <value>Signaturen zum Entfernen wählen</value>
   </data>
@@ -1106,6 +1112,9 @@ Kontaktieren Sie den Autor der Anwendung.</value>
   </data>
   <data name="Err_Save" xml:space="preserve">
     <value>Fehler beim Speichern: {0}</value>
+  </data>
+  <data name="Err_Print" xml:space="preserve">
+    <value>Druckfehler: {0}</value>
   </data>
   <data name="Err_SelectValidProjectFile" xml:space="preserve">
     <value>Wählen Sie eine gültige Projektdatei aus.</value>

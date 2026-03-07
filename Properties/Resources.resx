@@ -171,6 +171,12 @@
   <data name="Menu_SavePdf" xml:space="preserve">
     <value>Zapisz PDF</value>
   </data>
+  <data name="Menu_SavePdfPageRange" xml:space="preserve">
+    <value>Zapisz zakres stron do PDF</value>
+  </data>
+  <data name="Menu_Print" xml:space="preserve">
+    <value>Drukuj</value>
+  </data>
   <data name="Menu_SelectSignaturesToRemove" xml:space="preserve">
     <value>Wybierz podpisy do usunięcia</value>
   </data>
@@ -791,6 +797,9 @@ Ponowne kliknięcie usunie zaznaczenia.</value>
   </data>
   <data name="Err_Save" xml:space="preserve">
     <value>Błąd podczas zapisywania: {0}</value>
+  </data>
+  <data name="Err_Print" xml:space="preserve">
+    <value>Błąd drukowania: {0}</value>
   </data>
   <data name="Tutorial_NotFound" xml:space="preserve">
     <value>Samouczek nie został odnaleziony w lokalizacji:

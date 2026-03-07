@@ -93,6 +93,8 @@
             this.saveProjectAsMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.saveProjectMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.savePdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.savePdfPageRangeMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.printPdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuItem1 = new System.Windows.Forms.ToolStripSeparator();
             this.recentFilesMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.importProjectMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -900,6 +902,8 @@
             this.saveProjectAsMenuItem,
             this.saveProjectMenuItem,
             this.savePdfMenuItem,
+            this.savePdfPageRangeMenuItem,
+            this.printPdfMenuItem,
             this.toolStripMenuItem1,
             this.recentFilesMenuItem,
             this.importProjectMenuItem,
@@ -965,6 +969,23 @@
             this.savePdfMenuItem.Size = new System.Drawing.Size(261, 22);
             this.savePdfMenuItem.Text = Res("Menu_SavePdf");
             this.savePdfMenuItem.Click += new System.EventHandler(this.ButtonRedactText_Click);
+            // 
+            // savePdfPageRangeMenuItem
+            // 
+            this.savePdfPageRangeMenuItem.Enabled = false;
+            this.savePdfPageRangeMenuItem.Name = "savePdfPageRangeMenuItem";
+            this.savePdfPageRangeMenuItem.Size = new System.Drawing.Size(261, 22);
+            this.savePdfPageRangeMenuItem.Text = Res("Menu_SavePdfPageRange");
+            this.savePdfPageRangeMenuItem.Click += new System.EventHandler(this.SavePdfPageRangeMenuItem_Click);
+            // 
+            // printPdfMenuItem
+            // 
+            this.printPdfMenuItem.Enabled = false;
+            this.printPdfMenuItem.Name = "printPdfMenuItem";
+            this.printPdfMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.P)));
+            this.printPdfMenuItem.Size = new System.Drawing.Size(261, 22);
+            this.printPdfMenuItem.Text = Res("Menu_Print");
+            this.printPdfMenuItem.Click += new System.EventHandler(this.PrintPdfMenuItem_Click);
             // 
             // toolStripMenuItem1
             // 
@@ -1515,6 +1536,8 @@
         private System.Windows.Forms.ToolStripMenuItem saveProjectAsMenuItem;
         private System.Windows.Forms.ToolStripMenuItem saveProjectMenuItem;
         private System.Windows.Forms.ToolStripMenuItem savePdfMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem savePdfPageRangeMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem printPdfMenuItem;
         private System.Windows.Forms.ToolStripSeparator toolStripMenuItem1;
         private System.Windows.Forms.ToolStripMenuItem recentFilesMenuItem;
         private System.Windows.Forms.ToolStripMenuItem importProjectMenuItem;

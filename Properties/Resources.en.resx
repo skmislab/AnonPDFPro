@@ -171,6 +171,12 @@
   <data name="Menu_SavePdf" xml:space="preserve">
     <value>Save PDF</value>
   </data>
+  <data name="Menu_SavePdfPageRange" xml:space="preserve">
+    <value>Save page range to PDF</value>
+  </data>
+  <data name="Menu_Print" xml:space="preserve">
+    <value>Print</value>
+  </data>
   <data name="Menu_SelectSignaturesToRemove" xml:space="preserve">
     <value>Select signatures to remove</value>
   </data>
@@ -791,6 +797,9 @@ Click again to remove marks.</value>
   </data>
   <data name="Err_Save" xml:space="preserve">
     <value>Error while saving: {0}</value>
+  </data>
+  <data name="Err_Print" xml:space="preserve">
+    <value>Printing error: {0}</value>
   </data>
   <data name="Tutorial_NotFound" xml:space="preserve">
     <value>Tutorial was not found at:
