@@ -229,7 +229,7 @@ namespace AnonPDF.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
-        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool AutoFootnotesEnabled {
             get {
                 return ((bool)(this["AutoFootnotesEnabled"]));
@@ -248,6 +248,30 @@ namespace AnonPDF.Properties {
             }
             set {
                 this["AddObjectsByPageRotationEnabled"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool CombineObjectsWithScanPagesEnabled {
+            get {
+                return ((bool)(this["CombineObjectsWithScanPagesEnabled"]));
+            }
+            set {
+                this["CombineObjectsWithScanPagesEnabled"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool UseThumbnailsTabInRightPanel {
+            get {
+                return ((bool)(this["UseThumbnailsTabInRightPanel"]));
+            }
+            set {
+                this["UseThumbnailsTabInRightPanel"] = value;
             }
         }
     }

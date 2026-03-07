@@ -200,12 +200,20 @@ namespace AnonPDF
         private ToolStripMenuItem legalBasesDictionaryToolStripMenuItem;
         private ToolStripMenuItem exclusionAuthorityToolStripMenuItem;
         private ToolStripMenuItem automaticFootnotesToolStripMenuItem;
+        private ToolStripMenuItem combineObjectsWithScanPagesToolStripMenuItem;
         private bool snapToGridEnabled = true;
         private bool addObjectsByPageRotationEnabled = false;
+        private bool combineObjectsWithScanPagesEnabled = false;
         private bool suppressAutomaticFootnotesMenuSync;
         private const float SnapGridStep = 5f;
         private static readonly System.Drawing.Color GroupSelectionColor = System.Drawing.Color.DeepSkyBlue;
         private bool pagesListTooltipShownThisSession;
+        private bool syncPageSelectionFromThumbnail;
+        private bool syncThumbnailSelectionFromPage;
+        private bool thumbnailGenerationStarted;
+        private System.Threading.CancellationTokenSource thumbnailGenerationCts;
+        private string thumbnailGenerationSourcePdfPath = string.Empty;
+        private readonly Dictionary<int, Size> thumbnailContentSizeByPage = new Dictionary<int, Size>();
         private string lastFootnoteBadgeLayoutLogKey = string.Empty;
         private int busyCursorDepth;
         private bool isMiddleMousePanning;
@@ -781,11 +789,16 @@ namespace AnonPDF
         [DllImport("user32.dll")]
         private static extern uint GetClipboardSequenceNumber();
 
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
         private const int SW_RESTORE = 9;
         private const int DWMWA_CAPTION_COLOR = 35;
+        private const int LVM_FIRST = 0x1000;
+        private const int LVM_SETICONSPACING = LVM_FIRST + 53;
 
         public PDFForm(SplashForm splash = null)
         {
@@ -820,6 +833,7 @@ namespace AnonPDF
 
             InitializeComponent();
             autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
+            combineObjectsWithScanPagesEnabled = Properties.Settings.Default.CombineObjectsWithScanPagesEnabled;
             addObjectsByPageRotationEnabled = true;
             if (!Properties.Settings.Default.AddObjectsByPageRotationEnabled)
             {
@@ -912,6 +926,13 @@ namespace AnonPDF
             pagesListView.View = View.List;
             pagesListView.MultiSelect = false;
             pagesListView.MouseUp += PagesListView_MouseUp;
+            thumbnailsListView.MultiSelect = false;
+            thumbnailsListView.Font = pagesListView.Font;
+            thumbnailsListView.LabelWrap = false;
+            thumbnailsListView.HandleCreated += (_, __) => ApplyThumbnailIconSpacing();
+            thumbnailsListView.SizeChanged += (_, __) => ApplyThumbnailIconSpacing();
+
+            ApplyRightPanelTabSelectionFromSettings();
 
             filterComboBox.SelectedIndex = 0;            
             filterComboBox.DrawMode = DrawMode.OwnerDrawFixed;
@@ -1173,6 +1194,15 @@ namespace AnonPDF
             };
             automaticFootnotesToolStripMenuItem.CheckedChanged += AutomaticFootnotesToolStripMenuItem_CheckedChanged;
 
+            combineObjectsWithScanPagesToolStripMenuItem = new ToolStripMenuItem
+            {
+                Name = "combineObjectsWithScanPagesToolStripMenuItem",
+                CheckOnClick = true,
+                Checked = combineObjectsWithScanPagesEnabled,
+                Enabled = false
+            };
+            combineObjectsWithScanPagesToolStripMenuItem.CheckedChanged += CombineObjectsWithScanPagesToolStripMenuItem_CheckedChanged;
+
             if (rotatePageMenuItem != null)
             {
                 rotatePageMenuItem.ShortcutKeys = Keys.Control | Keys.R;
@@ -1211,6 +1241,25 @@ namespace AnonPDF
             if (copyToClipboardMenuItem.OwnerItem is ToolStripDropDownItem copyOwner && copyOwner.DropDownItems.Contains(copyToClipboardMenuItem))
             {
                 copyOwner.DropDownItems.Remove(copyToClipboardMenuItem);
+            }
+
+            if (menuOptionsItem != null && combineObjectsWithScanPagesToolStripMenuItem != null)
+            {
+                if (combineObjectsWithScanPagesToolStripMenuItem.OwnerItem is ToolStripDropDownItem combineOwner &&
+                    combineOwner.DropDownItems.Contains(combineObjectsWithScanPagesToolStripMenuItem))
+                {
+                    combineOwner.DropDownItems.Remove(combineObjectsWithScanPagesToolStripMenuItem);
+                }
+
+                int ignoreRestrictionsIndex = menuOptionsItem.DropDownItems.IndexOf(ignorePdfRestrictionsToolStripMenuItem);
+                if (ignoreRestrictionsIndex >= 0)
+                {
+                    menuOptionsItem.DropDownItems.Insert(ignoreRestrictionsIndex, combineObjectsWithScanPagesToolStripMenuItem);
+                }
+                else
+                {
+                    menuOptionsItem.DropDownItems.Add(combineObjectsWithScanPagesToolStripMenuItem);
+                }
             }
 
             menuAddItem.DropDownItems.Clear();
@@ -2138,6 +2187,17 @@ namespace AnonPDF
             }
         }
 
+        private void CombineObjectsWithScanPagesToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            if (combineObjectsWithScanPagesToolStripMenuItem == null)
+            {
+                return;
+            }
+
+            combineObjectsWithScanPagesEnabled = combineObjectsWithScanPagesToolStripMenuItem.Checked;
+            SaveCombineObjectsWithScanPagesUserSetting(combineObjectsWithScanPagesEnabled);
+        }
+
         private void SaveAutoFootnotesUserSetting(bool enabled)
         {
             try
@@ -2161,6 +2221,19 @@ namespace AnonPDF
             catch (Exception ex)
             {
                 LogDebug("Save add-objects-by-page-rotation user setting failed: " + ex.Message);
+            }
+        }
+
+        private void SaveCombineObjectsWithScanPagesUserSetting(bool enabled)
+        {
+            try
+            {
+                Properties.Settings.Default.CombineObjectsWithScanPagesEnabled = enabled;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Save combine-objects-with-scan-pages user setting failed: " + ex.Message);
             }
         }
 
@@ -2399,6 +2472,146 @@ namespace AnonPDF
             }
         }
 
+        private static void EnsureTextAnnotationTimestamps(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return;
+            }
+
+            DateTime created = NormalizeUtcTimestamp(annotation.CreatedAtUtc);
+            DateTime updated = NormalizeUtcTimestamp(annotation.UpdatedAtUtc);
+
+            if (created == DateTime.MinValue && updated == DateTime.MinValue)
+            {
+                return;
+            }
+
+            if (created == DateTime.MinValue)
+            {
+                created = updated;
+            }
+
+            if (updated == DateTime.MinValue)
+            {
+                updated = created;
+            }
+
+            if (updated < created)
+            {
+                updated = created;
+            }
+
+            annotation.CreatedAtUtc = created;
+            annotation.UpdatedAtUtc = updated;
+        }
+
+        private static void StampTextAnnotationCreated(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return;
+            }
+
+            DateTime now = DateTime.UtcNow;
+            DateTime created = NormalizeUtcTimestamp(annotation.CreatedAtUtc);
+            DateTime updated = NormalizeUtcTimestamp(annotation.UpdatedAtUtc);
+
+            if (created == DateTime.MinValue)
+            {
+                created = now;
+            }
+
+            if (updated == DateTime.MinValue || updated < created)
+            {
+                updated = created;
+            }
+
+            annotation.CreatedAtUtc = created;
+            annotation.UpdatedAtUtc = updated;
+        }
+
+        private static void TouchTextAnnotation(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return;
+            }
+
+            StampTextAnnotationCreated(annotation);
+            annotation.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        private static void EnsureRedactionBlockTimestamps(RedactionBlock block)
+        {
+            if (block == null)
+            {
+                return;
+            }
+
+            DateTime created = NormalizeUtcTimestamp(block.CreatedAtUtc);
+            DateTime updated = NormalizeUtcTimestamp(block.UpdatedAtUtc);
+
+            if (created == DateTime.MinValue && updated == DateTime.MinValue)
+            {
+                return;
+            }
+
+            if (created == DateTime.MinValue)
+            {
+                created = updated;
+            }
+
+            if (updated == DateTime.MinValue)
+            {
+                updated = created;
+            }
+
+            if (updated < created)
+            {
+                updated = created;
+            }
+
+            block.CreatedAtUtc = created;
+            block.UpdatedAtUtc = updated;
+        }
+
+        private static void StampRedactionBlockCreated(RedactionBlock block)
+        {
+            if (block == null)
+            {
+                return;
+            }
+
+            DateTime now = DateTime.UtcNow;
+            DateTime created = NormalizeUtcTimestamp(block.CreatedAtUtc);
+            DateTime updated = NormalizeUtcTimestamp(block.UpdatedAtUtc);
+
+            if (created == DateTime.MinValue)
+            {
+                created = now;
+            }
+
+            if (updated == DateTime.MinValue || updated < created)
+            {
+                updated = created;
+            }
+
+            block.CreatedAtUtc = created;
+            block.UpdatedAtUtc = updated;
+        }
+
+        private static void TouchRedactionBlock(RedactionBlock block)
+        {
+            if (block == null)
+            {
+                return;
+            }
+
+            StampRedactionBlockCreated(block);
+            block.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
         private void EnsureObjectLayerOrder()
         {
             if (objectLayerOrder == null)
@@ -2409,6 +2622,7 @@ namespace AnonPDF
             foreach (var annotation in textAnnotations)
             {
                 EnsureTextAnnotationId(annotation);
+                EnsureTextAnnotationTimestamps(annotation);
             }
             foreach (var rasterObject in rasterObjects)
             {
@@ -3565,6 +3779,7 @@ namespace AnonPDF
                             AnnotationBounds = bounds,
                             AnnotationIsLocked = item.Text.AnnotationIsLocked
                         };
+                        StampTextAnnotationCreated(textCopy);
                         textAnnotations.Add(textCopy);
                         pastedTextAnnotations.Add(textCopy);
                         break;
@@ -4430,6 +4645,7 @@ namespace AnonPDF
             saveProjectMenuItem.Text = Resources.Menu_SaveProject;
             savePdfMenuItem.Text = Resources.Menu_SavePdf;
             recentFilesMenuItem.Text = Resources.Menu_RecentFiles;
+            importProjectMenuItem.Text = LocalizedText("Menu_ImportProject");
             closeDocumentMenuItem.Text = Resources.Menu_CloseDocument;
             exitMenuItem.Text = Resources.Menu_Exit;
 
@@ -4440,6 +4656,10 @@ namespace AnonPDF
               rotatePageMenuItem.Text = Resources.Menu_RotatePage;
               copyToClipboardMenuItem.Text = Resources.Menu_CopyToClipboard;
               exportGraphicsMenuItem.Text = Resources.Menu_ExportGraphics;
+              if (combineObjectsWithScanPagesToolStripMenuItem != null)
+              {
+                  combineObjectsWithScanPagesToolStripMenuItem.Text = LocalizedText("Menu_CombineObjectsWithScanPages");
+              }
               selectSignaturesToRemoveMenuItem.Text = Resources.Menu_SelectSignaturesToRemove;
               ignorePdfRestrictionsToolStripMenuItem.Text = Resources.Menu_IgnorePdfRestrictions;
               var ignoreTooltip = Resources.ResourceManager.GetString("Menu_IgnorePdfRestrictions_Tooltip", currentCulture);
@@ -4531,6 +4751,8 @@ namespace AnonPDF
             try { groupBoxPages.Text = Resources.UI_Group_Pages; } catch { }
             try { groupBoxPagesToRemove.Text = Resources.UI_Group_PagesToRemove; } catch { }
             try { groupBoxFilter.Text = Resources.UI_Group_Filter; } catch { }
+            try { pagesListTabPage.Text = LocalizedText("UI_Tab_PagesList"); } catch { }
+            try { thumbnailsTabPage.Text = LocalizedText("UI_Tab_Thumbnails"); } catch { }
 
             UpdateWindowTitle();
             if (splashForm != null && !splashClosed && !splashForm.IsDisposed)
@@ -4582,6 +4804,7 @@ namespace AnonPDF
             try { toolTip1.SetToolTip(clearSelectionButton, Resources.Tooltip_ClearAll); } catch { }
             try { toolTip1.SetToolTip(buttonRedactText, Resources.Tooltip_SavePdf); } catch { }
             try { toolTip1.SetToolTip(pagesListView, Resources.Tooltip_PagesList); } catch { }
+            try { toolTip1.SetToolTip(thumbnailsListView, LocalizedText("Tooltip_PageThumbnails")); } catch { }
 
             // Filter combo: localized items and colors
             allComboItem = Resources.UI_Filter_AllPages;
@@ -5117,6 +5340,7 @@ namespace AnonPDF
                 textSize.Width,
                 textSize.Height
             );
+            TouchTextAnnotation(annotation);
         }
 
         private static System.Drawing.Color GetAnnotationBackgroundColor(TextAnnotation annotation)
@@ -5289,6 +5513,7 @@ namespace AnonPDF
                         newAnnotation.AnnotationBounds = GetCenteredAnnotationBounds(boxWidth, boxHeight);
 
                         // Add the new annotation to the list
+                        StampTextAnnotationCreated(newAnnotation);
                         textAnnotations.Add(newAnnotation);
 
                         
@@ -5380,6 +5605,7 @@ namespace AnonPDF
                 DuplicateGroupId = duplicateGroupId
             };
 
+            StampTextAnnotationCreated(copy);
             textAnnotations.Add(copy);
             ClearGroupSelection();
             selectedTextAnnotation = copy;
@@ -7494,6 +7720,14 @@ namespace AnonPDF
 
             pagesListView.BackColor = theme.SectionBackColor;
             pagesListView.ForeColor = theme.TextPrimaryColor;
+            thumbnailsListView.BackColor = theme.SectionBackColor;
+            thumbnailsListView.ForeColor = theme.TextPrimaryColor;
+            pagesTabControl.BackColor = theme.SectionBackColor;
+            pagesTabControl.ForeColor = theme.TextPrimaryColor;
+            pagesListTabPage.BackColor = theme.SectionBackColor;
+            pagesListTabPage.ForeColor = theme.TextPrimaryColor;
+            thumbnailsTabPage.BackColor = theme.SectionBackColor;
+            thumbnailsTabPage.ForeColor = theme.TextPrimaryColor;
             tableLayoutPanel1.BackColor = theme.SectionBackColor;
 
             ApplyThemeToControls(mainAppSplitContainer.Panel1.Controls, theme);
@@ -7599,7 +7833,7 @@ namespace AnonPDF
                 }
                 else if (control is ListView listView)
                 {
-                    listView.BackColor = listView == pagesListView
+                    listView.BackColor = (listView == pagesListView || listView == thumbnailsListView)
                         ? theme.SectionBackColor
                         : theme.PanelBackColor;
                     listView.ForeColor = theme.TextPrimaryColor;
@@ -9408,6 +9642,295 @@ namespace AnonPDF
             return false;
         }
 
+        private HashSet<int> DetermineFlattenPagesForScanMerge(iText.Kernel.Pdf.PdfDocument pdfDoc)
+        {
+            var flattenPages = new HashSet<int>();
+            if (pdfDoc == null || !combineObjectsWithScanPagesEnabled)
+            {
+                return flattenPages;
+            }
+
+            int pageCount = pdfDoc.GetNumberOfPages();
+            if (pageCount <= 0)
+            {
+                return flattenPages;
+            }
+
+            var candidatePages = new HashSet<int>();
+            foreach (TextAnnotation annotation in textAnnotations.Where(a => a != null))
+            {
+                if (annotation.PageNumber >= 1 && annotation.PageNumber <= pageCount && !pagesToRemove.Contains(annotation.PageNumber))
+                {
+                    candidatePages.Add(annotation.PageNumber);
+                }
+            }
+
+            foreach (RasterObject rasterObject in rasterObjects.Where(r => r != null))
+            {
+                if (rasterObject.PageNumber >= 1 && rasterObject.PageNumber <= pageCount && !pagesToRemove.Contains(rasterObject.PageNumber))
+                {
+                    candidatePages.Add(rasterObject.PageNumber);
+                }
+            }
+
+            foreach (VectorShapeObject vectorShape in vectorShapes.Where(v => v != null))
+            {
+                if (vectorShape.PageNumber >= 1 && vectorShape.PageNumber <= pageCount && !pagesToRemove.Contains(vectorShape.PageNumber))
+                {
+                    candidatePages.Add(vectorShape.PageNumber);
+                }
+            }
+
+            foreach (int pageNumber in candidatePages)
+            {
+                iText.Kernel.Pdf.PdfPage page = pdfDoc.GetPage(pageNumber);
+                if (PageContainsRasterContent(page))
+                {
+                    flattenPages.Add(pageNumber);
+                }
+            }
+
+            return flattenPages;
+        }
+
+        private static bool PageContainsRasterContent(iText.Kernel.Pdf.PdfPage page)
+        {
+            if (page == null)
+            {
+                return false;
+            }
+
+            var visitedResourceDictionaries = new HashSet<PdfDictionary>();
+            return ResourceTreeContainsRasterXObject(page.GetResources(), visitedResourceDictionaries);
+        }
+
+        private static bool ResourceTreeContainsRasterXObject(PdfResources resources, ISet<PdfDictionary> visitedResourceDictionaries)
+        {
+            if (resources == null)
+            {
+                return false;
+            }
+
+            PdfDictionary resourcesDictionary = resources.GetPdfObject();
+            if (resourcesDictionary == null)
+            {
+                return false;
+            }
+
+            if (visitedResourceDictionaries != null && !visitedResourceDictionaries.Add(resourcesDictionary))
+            {
+                return false;
+            }
+
+            PdfDictionary xObjects = resources.GetResource(PdfName.XObject);
+            if (xObjects == null)
+            {
+                return false;
+            }
+
+            foreach (PdfName xName in xObjects.KeySet())
+            {
+                PdfStream xStream = xObjects.GetAsStream(xName);
+                if (xStream == null)
+                {
+                    continue;
+                }
+
+                PdfName subtype = xStream.GetAsName(PdfName.Subtype);
+                if (PdfName.Image.Equals(subtype))
+                {
+                    return true;
+                }
+
+                if (!PdfName.Form.Equals(subtype))
+                {
+                    continue;
+                }
+
+                PdfDictionary nestedResourcesDictionary = xStream.GetAsDictionary(PdfName.Resources);
+                if (nestedResourcesDictionary == null)
+                {
+                    continue;
+                }
+
+                if (ResourceTreeContainsRasterXObject(new PdfResources(nestedResourcesDictionary), visitedResourceDictionaries))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void TryFlattenMergedScanPages(string outputFile, ISet<int> pagesToFlatten)
+        {
+            if (!combineObjectsWithScanPagesEnabled ||
+                pagesToFlatten == null ||
+                pagesToFlatten.Count == 0 ||
+                string.IsNullOrWhiteSpace(outputFile) ||
+                !File.Exists(outputFile))
+            {
+                return;
+            }
+
+            var normalizedPages = pagesToFlatten
+                .Where(page => page > 0)
+                .Distinct()
+                .OrderBy(page => page)
+                .ToList();
+            if (normalizedPages.Count == 0)
+            {
+                return;
+            }
+
+            bool outputIsEncrypted = setSavePassword.Checked && !string.IsNullOrWhiteSpace(userNewPassword);
+            string outputPassword = outputIsEncrypted ? userNewPassword : null;
+            var renderedPageImages = new Dictionary<int, byte[]>();
+
+            try
+            {
+                using (var pdfiumDocument = string.IsNullOrWhiteSpace(outputPassword)
+                    ? new PDFiumSharp.PdfDocument(outputFile)
+                    : new PDFiumSharp.PdfDocument(outputFile, outputPassword))
+                {
+                    const int flattenDpi = 220;
+                    int totalPages = pdfiumDocument.Pages.Count;
+                    foreach (int pageNumber in normalizedPages)
+                    {
+                        if (pageNumber < 1 || pageNumber > totalPages)
+                        {
+                            continue;
+                        }
+
+                        using (var page = pdfiumDocument.Pages[pageNumber - 1])
+                        {
+                            int widthPx = Math.Max(1, (int)Math.Round(page.Width * flattenDpi / 72.0));
+                            int heightPx = Math.Max(1, (int)Math.Round(page.Height * flattenDpi / 72.0));
+                            using (var bitmap = new PDFiumBitmap(widthPx, heightPx, false))
+                            {
+                                bitmap.FillRectangle(0, 0, widthPx, heightPx, 0xFFFFFFFF);
+                                page.Render(renderTarget: bitmap, flags: RenderingFlags.Annotations);
+                                using (var sourceStream = bitmap.AsBmpStream())
+                                using (var renderedImage = System.Drawing.Image.FromStream(sourceStream))
+                                using (var pngStream = new MemoryStream())
+                                {
+                                    renderedImage.Save(pngStream, ImageFormat.Png);
+                                    renderedPageImages[pageNumber] = pngStream.ToArray();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Scan-page merge rasterization failed: " + ex.Message);
+                ShowInfoMessage(LocalizedText("Err_CannotAnonymizePdf"));
+                return;
+            }
+
+            if (renderedPageImages.Count == 0)
+            {
+                return;
+            }
+
+            string outputDirectory = Path.GetDirectoryName(outputFile);
+            string outputFileName = Path.GetFileNameWithoutExtension(outputFile);
+            string outputExtension = Path.GetExtension(outputFile);
+            string tempFlattenedPath = Path.Combine(outputDirectory, outputFileName + ".flatten" + outputExtension);
+
+            try
+            {
+                if (File.Exists(tempFlattenedPath))
+                {
+                    File.Delete(tempFlattenedPath);
+                }
+
+                var readerProps = new ReaderProperties();
+                if (!string.IsNullOrWhiteSpace(outputPassword))
+                {
+                    readerProps.SetPassword(System.Text.Encoding.UTF8.GetBytes(outputPassword));
+                }
+
+                var writerProps = new WriterProperties();
+                if (outputIsEncrypted)
+                {
+                    byte[] pwdSaveBytes = System.Text.Encoding.UTF8.GetBytes(outputPassword);
+                    writerProps.SetStandardEncryption(
+                        userPassword: pwdSaveBytes,
+                        ownerPassword: pwdSaveBytes,
+                        permissions: EncryptionConstants.ALLOW_PRINTING | EncryptionConstants.ALLOW_COPY,
+                        encryptionAlgorithm: EncryptionConstants.ENCRYPTION_AES_256);
+                }
+
+                using (var reader = new PdfReader(outputFile, readerProps).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+                using (var writer = new PdfWriter(tempFlattenedPath, writerProps))
+                using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader, writer))
+                {
+                    foreach (var pair in renderedPageImages)
+                    {
+                        int pageNumber = pair.Key;
+                        if (pageNumber < 1 || pageNumber > pdfDoc.GetNumberOfPages())
+                        {
+                            continue;
+                        }
+
+                        var page = pdfDoc.GetPage(pageNumber);
+                        if (page == null)
+                        {
+                            continue;
+                        }
+
+                        int originalRotation = NormalizeRotation(page.GetRotation());
+                        iText.Kernel.Geom.Rectangle targetPageRect = (originalRotation == 90 || originalRotation == 270)
+                            ? page.GetPageSizeWithRotation()
+                            : page.GetPageSize();
+
+                        page.GetPdfObject().Remove(PdfName.Contents);
+                        page.SetRotation(0);
+
+                        // Keep visual orientation exactly as rendered by PDFium.
+                        // For rotated pages (90/270), normalize page boxes to the rotated size
+                        // before placing the flattened bitmap.
+                        if (originalRotation == 90 || originalRotation == 270)
+                        {
+                            var normalizedRect = new iText.Kernel.Geom.Rectangle(0, 0, targetPageRect.GetWidth(), targetPageRect.GetHeight());
+                            page.SetMediaBox(normalizedRect);
+                            if (page.GetCropBox() != null)
+                            {
+                                page.SetCropBox(new iText.Kernel.Geom.Rectangle(0, 0, normalizedRect.GetWidth(), normalizedRect.GetHeight()));
+                            }
+                            targetPageRect = normalizedRect;
+                        }
+
+                        var imageData = iText.IO.Image.ImageDataFactory.Create(pair.Value);
+                        var canvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page.NewContentStreamAfter(), page.GetResources(), pdfDoc);
+                        canvas.AddImageFittedIntoRectangle(imageData, targetPageRect, false);
+                    }
+                }
+
+                File.Copy(tempFlattenedPath, outputFile, true);
+                File.Delete(tempFlattenedPath);
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Scan-page merge write failed: " + ex.Message);
+                if (File.Exists(tempFlattenedPath))
+                {
+                    try
+                    {
+                        File.Delete(tempFlattenedPath);
+                    }
+                    catch
+                    {
+                        // Ignore cleanup failure.
+                    }
+                }
+
+                ShowInfoMessage(LocalizedText("Err_CannotAnonymizePdf"));
+            }
+        }
+
         void RedactText(string inputFile, string outputFile, ISet<int> pagesWithBakedRotation = null)
         {
             iText.Kernel.Colors.Color cleanUpColorBlack = new DeviceRgb(0, 0, 0);
@@ -9459,12 +9982,19 @@ namespace AnonPDF
                 }
             }
 
+            var flattenPages = new HashSet<int>();
+
             using (PdfReader reader = new PdfReader(inputFile, readerProps).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
             using (PdfWriter writer = new PdfWriter(outputFile, writerProps))
             using (iText.Kernel.Pdf.PdfDocument pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader, writer))
             {
                 ApplyRotationOffsetsToDocument(pdfDoc, pagesWithBakedRotation);
                 LogDebug($"RedactText input={inputFile} output={outputFile} safeMode={safeModeCheckBox.Checked} cleanupError={pdfCleanUpToolError} blocks={redactionBlocks.Count} bakedPages={(pagesWithBakedRotation == null ? 0 : pagesWithBakedRotation.Count)}");
+
+                if (combineObjectsWithScanPagesEnabled)
+                {
+                    flattenPages = DetermineFlattenPagesForScanMerge(pdfDoc);
+                }
 
                 if (signatures.Count > 0 && !signaturesOriginalRadioButton.Checked)
                 {
@@ -9848,7 +10378,7 @@ namespace AnonPDF
                     }
                 }
 
-                RenderCommentAnnotationsToPdf(pdfDoc, pagesWithBakedRotation);
+                RenderCommentAnnotationsToPdf(pdfDoc, pagesWithBakedRotation, flattenPages);
 
                 // --- Section for rendering captions from textAnnotations list ---
                 // Iterate over each annotation to be rendered on the given page.
@@ -10167,6 +10697,10 @@ namespace AnonPDF
                     }
                     else if (drawable is ArrowObject arrowObject)
                     {
+                        if (flattenPages.Contains(arrowObject.PageNumber))
+                        {
+                            continue;
+                        }
                         RenderArrowObjectToPdf(pdfDoc, pagesWithBakedRotation, arrowObject);
                     }
                     else if (drawable is VectorShapeObject vectorShape)
@@ -10213,8 +10747,14 @@ namespace AnonPDF
                 info.SetMoreInfo("iTextLicense", LocalizedText("Pdf_Metadata_iTextLicense"));
 
                 ApplyDemoWatermarkIfNeeded(pdfDoc);
-                MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+
+            if (combineObjectsWithScanPagesEnabled && flattenPages.Count > 0)
+            {
+                TryFlattenMergedScanPages(outputFile, flattenPages);
+            }
+
+            MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         internal void SuspendTopMostForExternalLaunch()
@@ -10608,7 +11148,7 @@ namespace AnonPDF
 
             pdfCleanUpToolError = false;
             groupBoxFilter.Visible = false;
-            pagesListView.Visible = false;
+            pagesTabControl.Visible = false;
             currentPage = 1;
             scaleFactor = 0;
 
@@ -10678,12 +11218,17 @@ namespace AnonPDF
 
                 pagesListView.Items.Add(item);
             }
+
+            InitializeThumbnailPanelItems();
             
             groupBoxFilter.Visible = true;
             groupBoxFilter.Refresh();
-            pagesListView.Visible = true;
+            pagesTabControl.Visible = true;
+            ApplyRightPanelTabSelectionFromSettings();
+            EnsureThumbnailGeneration();
             pagesListView.Items[currentPage - 1].Selected = true;
             pagesListView.Items[currentPage - 1].EnsureVisible();
+            SelectThumbnailItemForCurrentPage(ensureVisible: true);
 
             groupBoxSelections.Enabled = true;
             groupBoxPagesToRemove.Enabled = true;
@@ -10735,6 +11280,10 @@ namespace AnonPDF
             rotatePageMenuItem.Enabled = true;
             copyToClipboardMenuItem.Enabled = true;
             exportGraphicsMenuItem.Enabled = true;
+            if (combineObjectsWithScanPagesToolStripMenuItem != null)
+            {
+                combineObjectsWithScanPagesToolStripMenuItem.Enabled = true;
+            }
             closeDocumentMenuItem.Enabled = true;
 
             removePageButton.Enabled = true;
@@ -11258,7 +11807,8 @@ namespace AnonPDF
             }
 
             groupBoxFilter.Visible = false;
-            pagesListView.Visible = false;
+            pagesTabControl.Visible = false;
+            ResetThumbnailPanel();
             groupBoxPages.Enabled = false;
             groupBoxSelections.Enabled = false;
             groupBoxPagesToRemove.Enabled = false;
@@ -11304,6 +11854,10 @@ namespace AnonPDF
             rotatePageMenuItem.Enabled = false;
             copyToClipboardMenuItem.Enabled = false;
             exportGraphicsMenuItem.Enabled = false;
+            if (combineObjectsWithScanPagesToolStripMenuItem != null)
+            {
+                combineObjectsWithScanPagesToolStripMenuItem.Enabled = false;
+            }
             closeDocumentMenuItem.Enabled = false;
 
             removePageButton.Enabled = false;
@@ -11453,6 +12007,7 @@ namespace AnonPDF
             foreach (var block in redactionBlocks.Where(b => b.PageNumber == currentPage))
             {
                 block.Bounds = RotateRectClockwise(block.Bounds, pageSize.Width, pageSize.Height);
+                TouchRedactionBlock(block);
             }
 
             // Comment annotations are intentionally not rotated with page rotation.
@@ -11478,6 +12033,7 @@ namespace AnonPDF
 
                 // Keep annotation rotation relative to the page orientation
                 annotation.AnnotationRotation = NormalizeRotation(annotation.AnnotationRotation + 90);
+                TouchTextAnnotation(annotation);
             }
 
             // Update page rotation offset before object constraints.
@@ -12373,6 +12929,16 @@ namespace AnonPDF
                 zoomFactor = zf > 0 ? zf : (float?)null;
                 scrollX = sx;
                 scrollY = sy;
+            }
+
+            foreach (RedactionBlock block in redactionBlocks ?? Enumerable.Empty<RedactionBlock>())
+            {
+                StampRedactionBlockCreated(block);
+            }
+
+            foreach (TextAnnotation annotation in textAnnotations ?? Enumerable.Empty<TextAnnotation>())
+            {
+                StampTextAnnotationCreated(annotation);
             }
 
             return new ProjectData
@@ -14126,6 +14692,7 @@ namespace AnonPDF
                                     entry.Bounds.Y + dy,
                                     entry.Bounds.Width,
                                     entry.Bounds.Height);
+                                TouchTextAnnotation(entry.Text);
                             }
                             break;
                         case GroupMoveObjectType.Raster:
@@ -14199,6 +14766,7 @@ namespace AnonPDF
                     textRotationStartCenterDoc.Y - (rotatedSize.Height / 2f),
                     rotatedSize.Width,
                     rotatedSize.Height);
+                TouchTextAnnotation(annotationToRotate);
                 if (updatedRotation != previousRotation)
                 {
                     textRotationInteractionChanged = true;
@@ -14723,6 +15291,7 @@ namespace AnonPDF
 
                     // Update annotation position
                     annotationToMove.AnnotationBounds = new RectangleF(newX, newY, bounds.Width, bounds.Height);
+                    TouchTextAnnotation(annotationToMove);
                     pdfViewer.Invalidate();
                 }
 
@@ -15038,6 +15607,7 @@ namespace AnonPDF
                             annotationForIcon.AnnotationIsLocked = true;
                             msg = LocalizedText("Msg_TextAnnotation_Locked");
                         }
+                        TouchTextAnnotation(annotationForIcon);
                         pdfViewer.Invalidate();
                         MessageBox.Show(this, string.Format(Resources.Msg_TextPositionInfo, msg), Resources.Title_Info, MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
@@ -16313,6 +16883,7 @@ namespace AnonPDF
             }
 
             TryApplyPersistedInterestSubjectToBlock(block);
+            TouchRedactionBlock(block);
 
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
@@ -16355,6 +16926,7 @@ namespace AnonPDF
             block.MatchedTag = null;
             block.FootnoteNumber = null;
             TryApplyPersistedInterestSubjectToBlock(block);
+            TouchRedactionBlock(block);
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
@@ -16377,6 +16949,7 @@ namespace AnonPDF
             block.ClassificationSource = ClassificationSourceManual;
             block.MatchedTag = null;
             block.FootnoteNumber = null;
+            TouchRedactionBlock(block);
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
@@ -16535,14 +17108,17 @@ namespace AnonPDF
             if (block.BasisIds == null)
             {
                 block.BasisIds = new List<string>();
-                return;
+            }
+            else
+            {
+                block.BasisIds = block.BasisIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .Select(id => id.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
             }
 
-            block.BasisIds = block.BasisIds
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Select(id => id.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            EnsureRedactionBlockTimestamps(block);
         }
 
         private bool RemoveInvalidLegalBasisReferencesFromRedactions()
@@ -16584,6 +17160,7 @@ namespace AnonPDF
 
                 block.BasisIds = filteredBasisIds;
                 block.FootnoteNumber = null;
+                TouchRedactionBlock(block);
                 changed = true;
             }
 
@@ -16594,6 +17171,7 @@ namespace AnonPDF
         {
             var block = new RedactionBlock(bounds, pageNumber);
             block.IsMarkerSelection = isMarkerSelection;
+            StampRedactionBlockCreated(block);
             NormalizeRedactionBlockMetadata(block);
             TryApplyAutomaticFootnoteClassification(block);
             return block;
@@ -16656,6 +17234,7 @@ namespace AnonPDF
             block.MatchedTag = matchedTag;
             block.ClassificationSource = ClassificationSourceAuto;
             TryApplyPersistedInterestSubjectToBlock(block);
+            TouchRedactionBlock(block);
 
             if (DebugLogEnabled)
             {
@@ -17690,7 +18269,8 @@ namespace AnonPDF
 
         private void RenderCommentAnnotationsToPdf(
             iText.Kernel.Pdf.PdfDocument pdfDoc,
-            ISet<int> pagesWithBakedRotation)
+            ISet<int> pagesWithBakedRotation,
+            ISet<int> excludedPages = null)
         {
             if (pdfDoc == null || commentAnnotations == null || commentAnnotations.Count == 0)
             {
@@ -17700,6 +18280,7 @@ namespace AnonPDF
             List<CommentAnnotation> exportComments = commentAnnotations
                 .Where(c => c != null && c.PageNumber >= 1 && c.PageNumber <= pdfDoc.GetNumberOfPages())
                 .Where(c => !pagesToRemove.Contains(c.PageNumber))
+                .Where(c => excludedPages == null || !excludedPages.Contains(c.PageNumber))
                 .OrderBy(c => c.PageNumber)
                 .ThenBy(c => c.Bounds.Top)
                 .ThenBy(c => c.Bounds.Left)
@@ -19192,6 +19773,450 @@ namespace AnonPDF
             ClearCurrentPageRedactionBlock();
         }
 
+        private void ApplyRightPanelTabSelectionFromSettings()
+        {
+            try
+            {
+                if (pagesTabControl == null || pagesListTabPage == null || thumbnailsTabPage == null)
+                {
+                    return;
+                }
+
+                bool useThumbnails = Properties.Settings.Default.UseThumbnailsTabInRightPanel;
+                pagesTabControl.SelectedTab = useThumbnails ? thumbnailsTabPage : pagesListTabPage;
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Apply right-panel tab selection failed: " + ex.Message);
+            }
+        }
+
+        private void SaveRightPanelTabSelectionUserSetting(bool useThumbnails)
+        {
+            try
+            {
+                Properties.Settings.Default.UseThumbnailsTabInRightPanel = useThumbnails;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Save right-panel tab selection failed: " + ex.Message);
+            }
+        }
+
+        private bool IsThumbnailsTabSelected()
+        {
+            return pagesTabControl != null && thumbnailsTabPage != null && pagesTabControl.SelectedTab == thumbnailsTabPage;
+        }
+
+        private void PagesTabControl_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (pagesTabControl == null || pagesTabControl.SelectedTab == null)
+            {
+                return;
+            }
+
+            SaveRightPanelTabSelectionUserSetting(IsThumbnailsTabSelected());
+
+            if (IsThumbnailsTabSelected())
+            {
+                EnsureThumbnailGeneration();
+                SelectThumbnailItemForCurrentPage(ensureVisible: true);
+            }
+        }
+
+        private void InitializeThumbnailPanelItems()
+        {
+            if (thumbnailsListView == null || thumbnailsImageList == null)
+            {
+                return;
+            }
+
+            CancelThumbnailGeneration();
+            thumbnailGenerationStarted = false;
+            thumbnailGenerationSourcePdfPath = inputPdfPath ?? string.Empty;
+            thumbnailContentSizeByPage.Clear();
+
+            thumbnailsListView.BeginUpdate();
+            try
+            {
+                thumbnailsListView.Items.Clear();
+                thumbnailsImageList.Images.Clear();
+                Bitmap placeholder = CreateThumbnailPlaceholderImage(thumbnailsImageList.ImageSize);
+                thumbnailsImageList.Images.Add("placeholder", placeholder);
+
+                for (int i = 1; i <= numPages; i++)
+                {
+                    var item = new ListViewItem(string.Format(Resources.UI_PageLabelFormat, i))
+                    {
+                        Tag = i,
+                        ImageKey = "placeholder"
+                    };
+                    thumbnailsListView.Items.Add(item);
+                    thumbnailContentSizeByPage[i] = thumbnailsImageList.ImageSize;
+                }
+            }
+            finally
+            {
+                thumbnailsListView.EndUpdate();
+            }
+
+            ApplyThumbnailIconSpacing();
+            SelectThumbnailItemForCurrentPage(ensureVisible: false);
+        }
+
+        private void ResetThumbnailPanel()
+        {
+            CancelThumbnailGeneration();
+            thumbnailGenerationStarted = false;
+            thumbnailGenerationSourcePdfPath = string.Empty;
+
+            if (thumbnailsListView != null)
+            {
+                thumbnailsListView.Items.Clear();
+            }
+
+            if (thumbnailsImageList != null)
+            {
+                thumbnailsImageList.Images.Clear();
+            }
+
+            thumbnailContentSizeByPage.Clear();
+        }
+
+        private void ApplyThumbnailIconSpacing()
+        {
+            try
+            {
+                if (thumbnailsListView == null || thumbnailsImageList == null || !thumbnailsListView.IsHandleCreated)
+                {
+                    return;
+                }
+
+                int iconWidth = Math.Max(1, thumbnailsImageList.ImageSize.Width);
+                int iconHeight = Math.Max(1, thumbnailsImageList.ImageSize.Height);
+                int horizontalSpacing = Math.Max(iconWidth + 8, iconWidth);
+                int verticalSpacing = Math.Max(iconHeight + Math.Max(thumbnailsListView.Font.Height + 18, 34), iconHeight + 24);
+                int lParam = (verticalSpacing << 16) | (horizontalSpacing & 0xFFFF);
+                SendMessage(thumbnailsListView.Handle, LVM_SETICONSPACING, IntPtr.Zero, (IntPtr)lParam);
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Apply thumbnail spacing failed: " + ex.Message);
+            }
+        }
+
+        private void EnsureThumbnailGeneration()
+        {
+            if (!IsThumbnailsTabSelected() ||
+                pdf == null ||
+                numPages <= 0 ||
+                string.IsNullOrWhiteSpace(inputPdfPath) ||
+                !File.Exists(inputPdfPath))
+            {
+                return;
+            }
+
+            if (thumbnailsListView.Items.Count != numPages)
+            {
+                InitializeThumbnailPanelItems();
+            }
+
+            if (thumbnailGenerationStarted && ArePathsEqual(thumbnailGenerationSourcePdfPath, inputPdfPath))
+            {
+                return;
+            }
+
+            StartThumbnailGenerationAsync(inputPdfPath, numPages, userPassword);
+        }
+
+        private void CancelThumbnailGeneration()
+        {
+            var cts = thumbnailGenerationCts;
+            thumbnailGenerationCts = null;
+
+            try
+            {
+                cts?.Cancel();
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private async void StartThumbnailGenerationAsync(string sourcePdfPath, int pageCount, string password)
+        {
+            CancelThumbnailGeneration();
+            thumbnailGenerationSourcePdfPath = sourcePdfPath ?? string.Empty;
+            thumbnailGenerationStarted = true;
+
+            var cts = new System.Threading.CancellationTokenSource();
+            thumbnailGenerationCts = cts;
+            System.Threading.CancellationToken token = cts.Token;
+            Size thumbnailSize = thumbnailsImageList.ImageSize;
+
+            try
+            {
+                await Task.Run(() =>
+                {
+                    using (var thumbPdf = string.IsNullOrWhiteSpace(password)
+                        ? new PDFiumSharp.PdfDocument(sourcePdfPath)
+                        : new PDFiumSharp.PdfDocument(sourcePdfPath, password))
+                    {
+                        int maxPages = Math.Min(pageCount, thumbPdf.Pages.Count);
+                        for (int pageIndex = 0; pageIndex < maxPages; pageIndex++)
+                        {
+                            token.ThrowIfCancellationRequested();
+                            Bitmap thumbBitmap;
+                            int renderedWidth = 1;
+                            int renderedHeight = 1;
+                            using (var page = thumbPdf.Pages[pageIndex])
+                            {
+                                float pageWidth = Math.Max(1f, (float)page.Width);
+                                float pageHeight = Math.Max(1f, (float)page.Height);
+                                float scale = Math.Min(
+                                    thumbnailSize.Width / pageWidth,
+                                    thumbnailSize.Height / pageHeight);
+                                int renderWidth = Math.Max(1, (int)Math.Round(pageWidth * scale));
+                                int renderHeight = Math.Max(1, (int)Math.Round(pageHeight * scale));
+                                renderedWidth = renderWidth;
+                                renderedHeight = renderHeight;
+
+                                thumbBitmap = new Bitmap(thumbnailSize.Width, thumbnailSize.Height, PixelFormat.Format32bppArgb);
+                                using (Graphics g = Graphics.FromImage(thumbBitmap))
+                                {
+                                    g.Clear(System.Drawing.Color.Transparent);
+                                    int left = (thumbnailSize.Width - renderWidth) / 2;
+                                    int top = (thumbnailSize.Height - renderHeight) / 2;
+                                    using (var pdfBitmap = new PDFiumBitmap(renderWidth, renderHeight, false))
+                                    {
+                                        pdfBitmap.FillRectangle(0, 0, renderWidth, renderHeight, 0xFFFFFFFF);
+                                        page.Render(renderTarget: pdfBitmap, flags: RenderingFlags.Annotations);
+                                        using (var bmpStream = pdfBitmap.AsBmpStream())
+                                        using (var rendered = DrawingImage.FromStream(bmpStream))
+                                        {
+                                            g.DrawImage(rendered, left, top, renderWidth, renderHeight);
+                                        }
+                                    }
+
+                                }
+                            }
+
+                            int pageNumber = pageIndex + 1;
+                            if (!IsHandleCreated || IsDisposed)
+                            {
+                                thumbBitmap.Dispose();
+                                return;
+                            }
+
+                            BeginInvoke(new Action(() =>
+                            {
+                                if (thumbBitmap == null)
+                                {
+                                    return;
+                                }
+
+                                if (!ArePathsEqual(sourcePdfPath, inputPdfPath) ||
+                                    pageNumber < 1 ||
+                                    pageNumber > thumbnailsListView.Items.Count)
+                                {
+                                    thumbBitmap.Dispose();
+                                    return;
+                                }
+
+                                string key = $"thumb_{pageNumber}";
+                                if (thumbnailsImageList.Images.ContainsKey(key))
+                                {
+                                    thumbnailsImageList.Images.RemoveByKey(key);
+                                }
+
+                                thumbnailsImageList.Images.Add(key, thumbBitmap);
+                                thumbnailsListView.Items[pageNumber - 1].ImageKey = key;
+                                thumbnailContentSizeByPage[pageNumber] = new Size(renderedWidth, renderedHeight);
+                            }));
+                        }
+                    }
+                }, token);
+            }
+            catch (OperationCanceledException)
+            {
+                // ignored
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Thumbnail generation failed: " + ex.Message);
+            }
+            finally
+            {
+                if (ReferenceEquals(thumbnailGenerationCts, cts))
+                {
+                    thumbnailGenerationCts = null;
+                }
+                cts.Dispose();
+            }
+        }
+
+        private static Bitmap CreateThumbnailPlaceholderImage(Size size)
+        {
+            Bitmap bitmap = new Bitmap(Math.Max(1, size.Width), Math.Max(1, size.Height), PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(System.Drawing.Color.Transparent);
+            }
+
+            return bitmap;
+        }
+
+        private void SelectThumbnailItemForCurrentPage(bool ensureVisible)
+        {
+            if (thumbnailsListView == null || currentPage < 1 || currentPage > thumbnailsListView.Items.Count)
+            {
+                return;
+            }
+
+            if (syncThumbnailSelectionFromPage)
+            {
+                return;
+            }
+
+            syncThumbnailSelectionFromPage = true;
+            try
+            {
+                var item = thumbnailsListView.Items[currentPage - 1];
+                if (thumbnailsListView.SelectedItems.Count != 1 || thumbnailsListView.SelectedItems[0] != item)
+                {
+                    thumbnailsListView.SelectedItems.Clear();
+                    item.Selected = true;
+                }
+
+                if (ensureVisible)
+                {
+                    item.EnsureVisible();
+                }
+            }
+            finally
+            {
+                syncThumbnailSelectionFromPage = false;
+            }
+        }
+
+        private void ThumbnailsListView_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (syncThumbnailSelectionFromPage || syncPageSelectionFromThumbnail)
+            {
+                return;
+            }
+
+            if (thumbnailsListView.SelectedItems.Count == 0)
+            {
+                return;
+            }
+
+            if (!(thumbnailsListView.SelectedItems[0].Tag is int selectedPage) || selectedPage < 1 || selectedPage > numPages)
+            {
+                return;
+            }
+
+            ListViewItem target = FindListViewItemByPageNumber(selectedPage);
+            if (target != null)
+            {
+                syncPageSelectionFromThumbnail = true;
+                try
+                {
+                    ForcePageListSelection(target);
+                }
+                finally
+                {
+                    syncPageSelectionFromThumbnail = false;
+                }
+                return;
+            }
+
+            currentPage = selectedPage;
+            ReloadRefreshCurrentPage();
+            UpdateNavigationButtons(currentPage);
+            UpdateSelectionNavigationButtons();
+            UpdateSearchNavigationButtons();
+        }
+
+        private void ThumbnailsListView_DrawItem(object sender, DrawListViewItemEventArgs e)
+        {
+            if (e?.Item == null)
+            {
+                return;
+            }
+
+            bool isSelected = e.Item.Selected;
+            var theme = CurrentTheme;
+            System.Drawing.Color itemBackColor = isSelected ? SystemColors.Highlight : thumbnailsListView.BackColor;
+            System.Drawing.Color itemTextColor = isSelected ? SystemColors.HighlightText : thumbnailsListView.ForeColor;
+            using (var backBrush = new SolidBrush(itemBackColor))
+            {
+                e.Graphics.FillRectangle(backBrush, e.Bounds);
+            }
+
+            Image image = null;
+            if (e.Item.ImageIndex >= 0 && e.Item.ImageIndex < thumbnailsImageList.Images.Count)
+            {
+                image = thumbnailsImageList.Images[e.Item.ImageIndex];
+            }
+            else if (!string.IsNullOrEmpty(e.Item.ImageKey) && thumbnailsImageList.Images.ContainsKey(e.Item.ImageKey))
+            {
+                image = thumbnailsImageList.Images[e.Item.ImageKey];
+            }
+
+            int maxThumbWidth = Math.Max(1, e.Bounds.Width - 2);
+            int maxThumbHeight = Math.Max(1, e.Bounds.Height - 32);
+            int thumbWidth = Math.Min(image?.Width ?? thumbnailsImageList.ImageSize.Width, maxThumbWidth);
+            int thumbHeight = Math.Min(image?.Height ?? thumbnailsImageList.ImageSize.Height, maxThumbHeight);
+            int thumbX = e.Bounds.Left + Math.Max(0, (e.Bounds.Width - thumbWidth) / 2);
+            int thumbY = e.Bounds.Top + 4;
+            var thumbRect = new DrawingRectangle(thumbX, thumbY, thumbWidth, thumbHeight);
+
+            if (image != null)
+            {
+                e.Graphics.DrawImage(image, thumbRect);
+            }
+
+            int pageNumber = e.Item.Tag is int taggedPage ? taggedPage : -1;
+            Size contentSize = thumbnailContentSizeByPage.TryGetValue(pageNumber, out var cachedSize)
+                ? cachedSize
+                : thumbnailsImageList.ImageSize;
+            int contentWidth = Math.Max(1, Math.Min(contentSize.Width, thumbRect.Width));
+            int contentHeight = Math.Max(1, Math.Min(contentSize.Height, thumbRect.Height));
+            int contentX = thumbRect.Left + (thumbRect.Width - contentWidth) / 2;
+            int contentY = thumbRect.Top + (thumbRect.Height - contentHeight) / 2;
+            var contentRect = new DrawingRectangle(contentX, contentY, contentWidth, contentHeight);
+
+            using (var borderPen = new Pen(isSelected ? theme.DangerBackColor : theme.BorderColor, isSelected ? 2f : 1.25f))
+            {
+                e.Graphics.DrawRectangle(borderPen, contentRect.X, contentRect.Y, Math.Max(1, contentRect.Width - 1), Math.Max(1, contentRect.Height - 1));
+            }
+
+            int fontHeight = (e.Item.Font ?? thumbnailsListView.Font).Height;
+            int textHeight = Math.Max(fontHeight + 4, 20);
+            int textY = Math.Min(thumbRect.Bottom + 8, e.Bounds.Bottom - textHeight - 2);
+            var textRect = new DrawingRectangle(
+                e.Bounds.Left + 2,
+                textY,
+                Math.Max(1, e.Bounds.Width - 4),
+                textHeight);
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                e.Item.Text ?? string.Empty,
+                e.Item.Font ?? thumbnailsListView.Font,
+                textRect,
+                itemTextColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+
+            if ((e.State & ListViewItemStates.Focused) == ListViewItemStates.Focused)
+            {
+                ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds, itemTextColor, itemBackColor);
+            }
+        }
+
         private void ReloadRefreshCurrentPage()
         {
             pageNumberTextBox.Text = currentPage.ToString();
@@ -19210,6 +20235,7 @@ namespace AnonPDF
             }
             pagingTimer.Stop();
             pagingTimer.Start();
+            SelectThumbnailItemForCurrentPage(ensureVisible: IsThumbnailsTabSelected());
         }
 
 
@@ -19568,6 +20594,7 @@ namespace AnonPDF
                     foreach (var block in redactionBlocks)
                     {
                         NormalizeRedactionBlockMetadata(block);
+                        EnsureRedactionBlockTimestamps(block);
                     }
 
                     ClearCommentAnnotations();
@@ -19582,6 +20609,10 @@ namespace AnonPDF
 
                     ClearTextAnnotations();
                     textAnnotations = textAnnotationsJson; 
+                    foreach (var annotation in textAnnotations)
+                    {
+                        EnsureTextAnnotationTimestamps(annotation);
+                    }
 
                     ClearRasterObjects();
                     rasterObjects = rasterObjectsJson;
@@ -19930,6 +20961,643 @@ namespace AnonPDF
 
                 LoadRedactionBlocks(openFileDialog.FileName);
             }
+        }
+
+        private void ImportProjectMenuItem_Click(object sender, EventArgs e)
+        {
+            using (OpenFileDialog openFileDialog = new OpenFileDialog
+            {
+                Filter = Resources.Dialog_Filter_PAP,
+                Title = LocalizedText("Dialog_Title_ImportProjects"),
+                Multiselect = true
+            })
+            {
+                if (openFileDialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                string[] projectPaths = openFileDialog.FileNames
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                if (projectPaths.Length == 0)
+                {
+                    return;
+                }
+
+                ImportProjects(projectPaths);
+            }
+        }
+
+        private void ImportProjects(string[] projectPaths)
+        {
+            var sourceProjects = new List<ProjectData>();
+            string commonPdfPath = null;
+
+            if (HasAnyProjectContent() && !string.IsNullOrWhiteSpace(inputPdfPath))
+            {
+                ProjectData currentProjectSnapshot = BuildCurrentProjectDataSnapshot(includeViewState: true);
+                sourceProjects.Add(currentProjectSnapshot);
+                commonPdfPath = currentProjectSnapshot.FilePath;
+            }
+
+            foreach (string projectPath in projectPaths)
+            {
+                string json = File.ReadAllText(projectPath);
+                ProjectData projectData = JsonConvert.DeserializeObject<ProjectData>(json);
+
+                if (projectData == null)
+                {
+                    MessageBox.Show(this, Resources.Err_InvalidProjectFormat, Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(projectData.FilePath))
+                {
+                    MessageBox.Show(this, LocalizedText("Err_ImportProjects_NoPdfPath"), Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(commonPdfPath))
+                {
+                    commonPdfPath = projectData.FilePath;
+                }
+                else if (!ArePathsEqual(commonPdfPath, projectData.FilePath))
+                {
+                    MessageBox.Show(this, LocalizedText("Err_ImportProjects_DifferentPdf"), Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+                    return;
+                }
+
+                sourceProjects.Add(projectData);
+            }
+
+            if (sourceProjects.Count == 0)
+            {
+                return;
+            }
+
+            var mergedProject = new ProjectData
+            {
+                FilePath = commonPdfPath,
+                RedactionBlocks = new List<RedactionBlock>(),
+                CommentAnnotations = new List<CommentAnnotation>(),
+                PagesToRemove = new HashSet<int>(),
+                TextAnnotations = new List<TextAnnotation>(),
+                RasterObjects = new List<RasterObject>(),
+                ArrowObjects = new List<ArrowObject>(),
+                VectorShapes = new List<VectorShapeObject>(),
+                ObjectLayers = new List<ProjectObjectLayer>(),
+                PageRotationOffsets = new Dictionary<int, int>(),
+                SignaturesToRemove = new List<string>()
+            };
+
+            var layerKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (ProjectData project in sourceProjects)
+            {
+                if (project.RedactionBlocks != null)
+                {
+                    foreach (RedactionBlock block in project.RedactionBlocks.Where(block => block != null))
+                    {
+                        AddOrReplaceRedactionBlock(mergedProject.RedactionBlocks, block);
+                    }
+                }
+
+                if (project.CommentAnnotations != null)
+                {
+                    foreach (CommentAnnotation comment in project.CommentAnnotations.Where(comment => comment != null))
+                    {
+                        AddOrReplaceCommentAnnotation(mergedProject.CommentAnnotations, comment);
+                    }
+                }
+
+                if (project.PagesToRemove != null)
+                {
+                    foreach (int page in project.PagesToRemove)
+                    {
+                        mergedProject.PagesToRemove.Add(page);
+                    }
+                }
+
+                if (project.TextAnnotations != null)
+                {
+                    foreach (TextAnnotation annotation in project.TextAnnotations.Where(annotation => annotation != null))
+                    {
+                        AddOrReplaceTextAnnotation(mergedProject.TextAnnotations, annotation);
+                    }
+                }
+
+                if (project.RasterObjects != null)
+                {
+                    foreach (RasterObject obj in project.RasterObjects.Where(obj => obj != null))
+                    {
+                        AddOrReplaceRasterObject(mergedProject.RasterObjects, obj);
+                    }
+                }
+
+                if (project.ArrowObjects != null)
+                {
+                    foreach (ArrowObject obj in project.ArrowObjects.Where(obj => obj != null))
+                    {
+                        AddOrReplaceArrowObject(mergedProject.ArrowObjects, obj);
+                    }
+                }
+
+                if (project.VectorShapes != null)
+                {
+                    foreach (VectorShapeObject obj in project.VectorShapes.Where(obj => obj != null))
+                    {
+                        AddOrReplaceVectorShapeObject(mergedProject.VectorShapes, obj);
+                    }
+                }
+
+                if (project.ObjectLayers != null)
+                {
+                    foreach (ProjectObjectLayer layer in project.ObjectLayers.Where(layer => layer != null && !string.IsNullOrWhiteSpace(layer.Id)))
+                    {
+                        string key = $"{layer.Type}|{layer.Id}";
+                        if (layerKeys.Add(key))
+                        {
+                            mergedProject.ObjectLayers.Add(layer);
+                        }
+                    }
+                }
+
+                if (project.PageRotationOffsets != null)
+                {
+                    foreach (var kvp in project.PageRotationOffsets)
+                    {
+                        if (!mergedProject.PageRotationOffsets.ContainsKey(kvp.Key))
+                        {
+                            mergedProject.PageRotationOffsets[kvp.Key] = kvp.Value;
+                        }
+                    }
+                }
+
+                if (project.SignaturesToRemove != null)
+                {
+                    foreach (string signature in project.SignaturesToRemove.Where(signature => !string.IsNullOrWhiteSpace(signature)))
+                    {
+                        if (!mergedProject.SignaturesToRemove.Contains(signature))
+                        {
+                            mergedProject.SignaturesToRemove.Add(signature);
+                        }
+                    }
+                }
+
+                if (mergedProject.CurrentPage <= 0 && project.CurrentPage > 0)
+                {
+                    mergedProject.CurrentPage = project.CurrentPage;
+                }
+
+                if (!mergedProject.ZoomFactor.HasValue && project.ZoomFactor.HasValue)
+                {
+                    mergedProject.ZoomFactor = project.ZoomFactor;
+                }
+
+                if (!mergedProject.ScrollX.HasValue && project.ScrollX.HasValue)
+                {
+                    mergedProject.ScrollX = project.ScrollX;
+                }
+
+                if (!mergedProject.ScrollY.HasValue && project.ScrollY.HasValue)
+                {
+                    mergedProject.ScrollY = project.ScrollY;
+                }
+
+                if (string.IsNullOrWhiteSpace(mergedProject.SignaturesMode) && !string.IsNullOrWhiteSpace(project.SignaturesMode))
+                {
+                    mergedProject.SignaturesMode = project.SignaturesMode;
+                }
+
+                if (!mergedProject.AutoFootnotesEnabled.HasValue && project.AutoFootnotesEnabled.HasValue)
+                {
+                    mergedProject.AutoFootnotesEnabled = project.AutoFootnotesEnabled;
+                }
+
+                if (string.IsNullOrWhiteSpace(mergedProject.ExclusionAuthority) && !string.IsNullOrWhiteSpace(project.ExclusionAuthority))
+                {
+                    mergedProject.ExclusionAuthority = project.ExclusionAuthority;
+                }
+            }
+
+            string tempProjectPath = Path.Combine(Path.GetTempPath(), $"anonpdf-import-{Guid.NewGuid():N}.app");
+            try
+            {
+                string json = JsonConvert.SerializeObject(mergedProject, Formatting.Indented);
+                File.WriteAllText(tempProjectPath, json);
+                LoadRedactionBlocks(tempProjectPath, registerAsProject: false);
+            }
+            catch (Exception)
+            {
+                MessageBox.Show(this, Resources.Err_InvalidProjectFormat, Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(tempProjectPath))
+                    {
+                        File.Delete(tempProjectPath);
+                    }
+                }
+                catch
+                {
+                    // Ignore temp cleanup errors.
+                }
+            }
+        }
+
+        private static void AddOrReplaceRedactionBlock(List<RedactionBlock> target, RedactionBlock candidate)
+        {
+            if (target == null || candidate == null)
+            {
+                return;
+            }
+
+            EnsureRedactionBlockTimestamps(candidate);
+
+            int equivalentIndex = target.FindIndex(item => AreEquivalentRedactionBlocks(item, candidate));
+            if (equivalentIndex >= 0)
+            {
+                EnsureRedactionBlockTimestamps(target[equivalentIndex]);
+                if (IsIncomingObjectNewer(target[equivalentIndex].UpdatedAtUtc, candidate.UpdatedAtUtc))
+                {
+                    target[equivalentIndex] = candidate;
+                }
+                return;
+            }
+
+            target.Add(candidate);
+        }
+
+        private static void AddOrReplaceCommentAnnotation(List<CommentAnnotation> target, CommentAnnotation candidate)
+        {
+            if (target == null || candidate == null)
+            {
+                return;
+            }
+
+            string id = candidate.Id?.Trim();
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                int byIdIndex = target.FindIndex(item => item != null && string.Equals(item.Id?.Trim(), id, StringComparison.OrdinalIgnoreCase));
+                if (byIdIndex >= 0)
+                {
+                    if (IsIncomingObjectNewer(target[byIdIndex].UpdatedAtUtc, candidate.UpdatedAtUtc))
+                    {
+                        target[byIdIndex] = candidate;
+                    }
+                    return;
+                }
+            }
+
+            if (!target.Any(item => AreEquivalentCommentAnnotations(item, candidate)))
+            {
+                target.Add(candidate);
+            }
+        }
+
+        private static void AddOrReplaceTextAnnotation(List<TextAnnotation> target, TextAnnotation candidate)
+        {
+            if (target == null || candidate == null)
+            {
+                return;
+            }
+
+            EnsureTextAnnotationTimestamps(candidate);
+
+            string id = candidate.Id?.Trim();
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                int byIdIndex = target.FindIndex(item => item != null && string.Equals(item.Id?.Trim(), id, StringComparison.OrdinalIgnoreCase));
+                if (byIdIndex >= 0)
+                {
+                    EnsureTextAnnotationTimestamps(target[byIdIndex]);
+                    if (IsIncomingObjectNewer(target[byIdIndex].UpdatedAtUtc, candidate.UpdatedAtUtc))
+                    {
+                        target[byIdIndex] = candidate;
+                    }
+                    return;
+                }
+            }
+
+            if (!target.Any(item => AreEquivalentTextAnnotations(item, candidate)))
+            {
+                target.Add(candidate);
+            }
+        }
+
+        private static void AddOrReplaceRasterObject(List<RasterObject> target, RasterObject candidate)
+        {
+            if (target == null || candidate == null)
+            {
+                return;
+            }
+
+            string id = candidate.Id?.Trim();
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                int byIdIndex = target.FindIndex(item => item != null && string.Equals(item.Id?.Trim(), id, StringComparison.OrdinalIgnoreCase));
+                if (byIdIndex >= 0)
+                {
+                    if (IsIncomingObjectNewer(target[byIdIndex].UpdatedAtUtc, candidate.UpdatedAtUtc))
+                    {
+                        target[byIdIndex] = candidate;
+                    }
+                    return;
+                }
+            }
+
+            if (!target.Any(item => AreEquivalentRasterObjects(item, candidate)))
+            {
+                target.Add(candidate);
+            }
+        }
+
+        private static void AddOrReplaceArrowObject(List<ArrowObject> target, ArrowObject candidate)
+        {
+            if (target == null || candidate == null)
+            {
+                return;
+            }
+
+            string id = candidate.Id?.Trim();
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                int byIdIndex = target.FindIndex(item => item != null && string.Equals(item.Id?.Trim(), id, StringComparison.OrdinalIgnoreCase));
+                if (byIdIndex >= 0)
+                {
+                    if (IsIncomingObjectNewer(target[byIdIndex].UpdatedAtUtc, candidate.UpdatedAtUtc))
+                    {
+                        target[byIdIndex] = candidate;
+                    }
+                    return;
+                }
+            }
+
+            if (!target.Any(item => AreEquivalentArrowObjects(item, candidate)))
+            {
+                target.Add(candidate);
+            }
+        }
+
+        private static void AddOrReplaceVectorShapeObject(List<VectorShapeObject> target, VectorShapeObject candidate)
+        {
+            if (target == null || candidate == null)
+            {
+                return;
+            }
+
+            string id = candidate.Id?.Trim();
+            if (!string.IsNullOrWhiteSpace(id))
+            {
+                int byIdIndex = target.FindIndex(item => item != null && string.Equals(item.Id?.Trim(), id, StringComparison.OrdinalIgnoreCase));
+                if (byIdIndex >= 0)
+                {
+                    target[byIdIndex] = candidate;
+                    return;
+                }
+            }
+
+            if (!target.Any(item => AreEquivalentVectorShapes(item, candidate)))
+            {
+                target.Add(candidate);
+            }
+        }
+
+        private static bool AreEquivalentRedactionBlocks(RedactionBlock left, RedactionBlock right)
+        {
+            if (left == null || right == null)
+            {
+                return false;
+            }
+
+            if (left.PageNumber != right.PageNumber ||
+                !AreSameRectangle(left.Bounds, right.Bounds) ||
+                left.FootnoteNumber != right.FootnoteNumber ||
+                !string.Equals(left.ScopeId?.Trim(), right.ScopeId?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(left.ClassificationSource?.Trim(), right.ClassificationSource?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(left.MatchedTag?.Trim(), right.MatchedTag?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(left.InterestSubject?.Trim(), right.InterestSubject?.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                left.IsMarkerSelection != right.IsMarkerSelection)
+            {
+                return false;
+            }
+
+            List<string> leftBasis = (left.BasisIds ?? new List<string>()).Select(b => b?.Trim()).Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+            List<string> rightBasis = (right.BasisIds ?? new List<string>()).Select(b => b?.Trim()).Where(b => !string.IsNullOrWhiteSpace(b)).ToList();
+            if (leftBasis.Count != rightBasis.Count)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < leftBasis.Count; i++)
+            {
+                if (!string.Equals(leftBasis[i], rightBasis[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool AreEquivalentCommentAnnotations(CommentAnnotation left, CommentAnnotation right)
+        {
+            return left != null && right != null &&
+                   left.PageNumber == right.PageNumber &&
+                   AreSameRectangle(left.Bounds, right.Bounds) &&
+                   string.Equals(left.CommentText, right.CommentText, StringComparison.Ordinal) &&
+                   left.HighlightColorArgb == right.HighlightColorArgb &&
+                   left.TextColorArgb == right.TextColorArgb &&
+                   left.IsMarkerSelection == right.IsMarkerSelection &&
+                   AreSameNullableFloat(left.NoteX, right.NoteX) &&
+                   AreSameNullableFloat(left.NoteY, right.NoteY) &&
+                   AreSameNullableFloat(left.NoteWidth, right.NoteWidth) &&
+                   AreSameNullableFloat(left.NoteHeight, right.NoteHeight);
+        }
+
+        private static bool AreEquivalentTextAnnotations(TextAnnotation left, TextAnnotation right)
+        {
+            return left != null && right != null &&
+                   left.PageNumber == right.PageNumber &&
+                   string.Equals(left.AnnotationText, right.AnnotationText, StringComparison.Ordinal) &&
+                   AreSameRectangle(left.AnnotationBounds, right.AnnotationBounds) &&
+                   left.AnnotationColor.ToArgb() == right.AnnotationColor.ToArgb() &&
+                   left.AnnotationBackgroundColorArgb == right.AnnotationBackgroundColorArgb &&
+                   string.Equals(left.AnnotationContentMode, right.AnnotationContentMode, StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(left.AnnotationRichText, right.AnnotationRichText, StringComparison.Ordinal) &&
+                   left.AnnotationAlignment == right.AnnotationAlignment &&
+                   left.AnnotationRotation == right.AnnotationRotation &&
+                   left.AnnotationIsLocked == right.AnnotationIsLocked &&
+                   AreEquivalentFonts(left.AnnotationFont, right.AnnotationFont);
+        }
+
+        private static bool AreEquivalentRasterObjects(RasterObject left, RasterObject right)
+        {
+            return left != null && right != null &&
+                   left.PageNumber == right.PageNumber &&
+                   AreSameRectangle(left.Bounds, right.Bounds) &&
+                   AreSameRectangle(left.InitialBounds, right.InitialBounds) &&
+                   NormalizeRotationStatic(left.Rotation) == NormalizeRotationStatic(right.Rotation) &&
+                   AreSameFloat(NormalizeOpacityStatic(left.Opacity), NormalizeOpacityStatic(right.Opacity)) &&
+                   left.TransparentBackground == right.TransparentBackground &&
+                   left.LockAspect == right.LockAspect &&
+                   left.IsLocked == right.IsLocked &&
+                   string.Equals(left.SourceType, right.SourceType, StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(left.FilePath, right.FilePath, StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(left.MimeType, right.MimeType, StringComparison.OrdinalIgnoreCase) &&
+                   ((left.EmbeddedBytes == null && right.EmbeddedBytes == null) ||
+                    (left.EmbeddedBytes != null && right.EmbeddedBytes != null && left.EmbeddedBytes.SequenceEqual(right.EmbeddedBytes)));
+        }
+
+        private static bool AreEquivalentArrowObjects(ArrowObject left, ArrowObject right)
+        {
+            return left != null && right != null &&
+                   left.PageNumber == right.PageNumber &&
+                   AreSamePoint(left.Start, right.Start) &&
+                   AreSamePoint(left.End, right.End) &&
+                   left.LineColorArgb == right.LineColorArgb &&
+                   AreSameFloat(left.Thickness, right.Thickness) &&
+                   AreSameFloat(left.HeadLength, right.HeadLength) &&
+                   AreSameFloat(left.HeadWidth, right.HeadWidth) &&
+                   left.IsLocked == right.IsLocked;
+        }
+
+        private static bool AreEquivalentVectorShapes(VectorShapeObject left, VectorShapeObject right)
+        {
+            if (left == null || right == null ||
+                left.PageNumber != right.PageNumber ||
+                !string.Equals(left.ShapeType, right.ShapeType, StringComparison.OrdinalIgnoreCase) ||
+                left.StrokeColorArgb != right.StrokeColorArgb ||
+                !AreSameFloat(left.StrokeWidth, right.StrokeWidth) ||
+                left.FillColorArgb != right.FillColorArgb ||
+                left.FillPatternColorArgb != right.FillPatternColorArgb ||
+                !AreSameFloat(left.FillOpacity, right.FillOpacity) ||
+                !string.Equals(left.StrokeStyle, right.StrokeStyle, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(left.FillPattern, right.FillPattern, StringComparison.OrdinalIgnoreCase) ||
+                left.IsLocked != right.IsLocked)
+            {
+                return false;
+            }
+
+            List<PointF> leftPoints = left.Points ?? new List<PointF>();
+            List<PointF> rightPoints = right.Points ?? new List<PointF>();
+            if (leftPoints.Count != rightPoints.Count)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < leftPoints.Count; i++)
+            {
+                if (!AreSamePoint(leftPoints[i], rightPoints[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool AreEquivalentFonts(Font left, Font right)
+        {
+            if (left == null || right == null)
+            {
+                return left == right;
+            }
+
+            return string.Equals(left.FontFamily?.Name, right.FontFamily?.Name, StringComparison.OrdinalIgnoreCase) &&
+                   AreSameFloat(left.SizeInPoints, right.SizeInPoints) &&
+                   left.Style == right.Style;
+        }
+
+        private static bool IsIncomingObjectNewer(DateTime existingUpdatedAtUtc, DateTime incomingUpdatedAtUtc)
+        {
+            DateTime existing = NormalizeUtcTimestamp(existingUpdatedAtUtc);
+            DateTime incoming = NormalizeUtcTimestamp(incomingUpdatedAtUtc);
+
+            if (existing == DateTime.MinValue)
+            {
+                return true;
+            }
+
+            if (incoming == DateTime.MinValue)
+            {
+                return false;
+            }
+
+            return incoming > existing;
+        }
+
+        private static DateTime NormalizeUtcTimestamp(DateTime value)
+        {
+            if (value == DateTime.MinValue || value == DateTime.MaxValue)
+            {
+                return DateTime.MinValue;
+            }
+
+            if (value.Kind == DateTimeKind.Utc)
+            {
+                return value;
+            }
+
+            if (value.Kind == DateTimeKind.Unspecified)
+            {
+                return DateTime.SpecifyKind(value, DateTimeKind.Utc);
+            }
+
+            return value.ToUniversalTime();
+        }
+
+        private static bool AreSameRectangle(RectangleF left, RectangleF right)
+        {
+            return AreSameFloat(left.X, right.X) &&
+                   AreSameFloat(left.Y, right.Y) &&
+                   AreSameFloat(left.Width, right.Width) &&
+                   AreSameFloat(left.Height, right.Height);
+        }
+
+        private static bool AreSamePoint(PointF left, PointF right)
+        {
+            return AreSameFloat(left.X, right.X) && AreSameFloat(left.Y, right.Y);
+        }
+
+        private static bool AreSameNullableFloat(float? left, float? right)
+        {
+            if (!left.HasValue && !right.HasValue)
+            {
+                return true;
+            }
+
+            if (left.HasValue != right.HasValue)
+            {
+                return false;
+            }
+
+            return AreSameFloat(left.Value, right.Value);
+        }
+
+        private static int NormalizeRotationStatic(int rotation)
+        {
+            int normalized = rotation % 360;
+            if (normalized < 0)
+            {
+                normalized += 360;
+            }
+
+            return normalized;
+        }
+
+        private static float NormalizeOpacityStatic(float opacity)
+        {
+            if (float.IsNaN(opacity) || float.IsInfinity(opacity))
+            {
+                return 1f;
+            }
+
+            return Math.Max(0f, Math.Min(1f, opacity));
         }
 
         private List<int> GetPagesWithBlocks()
@@ -22600,6 +24268,7 @@ namespace AnonPDF
                     AnnotationIsLocked = sourceAnnotation.AnnotationIsLocked,
                     DuplicateGroupId = duplicateGroupId
                 };
+                StampTextAnnotationCreated(clone);
                 textAnnotations.Add(clone);
                 changedPages.Add(targetPage);
             }
@@ -27901,6 +29570,10 @@ namespace AnonPDF
 
         public string DuplicateGroupId { get; set; }
 
+        public DateTime CreatedAtUtc { get; set; }
+
+        public DateTime UpdatedAtUtc { get; set; }
+
         public TextAnnotation()
         {
             Id = Guid.NewGuid().ToString("N");
@@ -27916,6 +29589,8 @@ namespace AnonPDF
             AnnotationBounds = new RectangleF(0, 0, 100, 30); // Example rectangular area
             AnnotationIsLocked = false;
             DuplicateGroupId = null;
+            CreatedAtUtc = DateTime.MinValue;
+            UpdatedAtUtc = DateTime.MinValue;
         }
 
 
@@ -27934,6 +29609,8 @@ namespace AnonPDF
             AnnotationBounds = bounds;
             AnnotationIsLocked = isLocked;
             DuplicateGroupId = null;
+            CreatedAtUtc = DateTime.MinValue;
+            UpdatedAtUtc = DateTime.MinValue;
         }
 
         public override string ToString()
@@ -30240,11 +31917,11 @@ namespace AnonPDF
         public string InterestSubject { get; set; }
         public bool IsMarkerSelection { get; set; }
         public string DuplicateGroupId { get; set; }
+        public DateTime CreatedAtUtc { get; set; }
+        public DateTime UpdatedAtUtc { get; set; }
 
-        public RedactionBlock(System.Drawing.RectangleF bounds, int pageNumber)
+        public RedactionBlock()
         {
-            Bounds = bounds;
-            PageNumber = pageNumber;
             FootnoteNumber = null;
             ScopeId = null;
             BasisIds = new List<string>();
@@ -30253,6 +31930,17 @@ namespace AnonPDF
             InterestSubject = null;
             IsMarkerSelection = false;
             DuplicateGroupId = null;
+            CreatedAtUtc = DateTime.MinValue;
+            UpdatedAtUtc = DateTime.MinValue;
+        }
+
+        public RedactionBlock(System.Drawing.RectangleF bounds, int pageNumber)
+            : this()
+        {
+            Bounds = bounds;
+            PageNumber = pageNumber;
+            CreatedAtUtc = DateTime.UtcNow;
+            UpdatedAtUtc = DateTime.UtcNow;
         }
     }
 

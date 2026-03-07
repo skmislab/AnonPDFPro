@@ -95,6 +95,7 @@
             this.savePdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuItem1 = new System.Windows.Forms.ToolStripSeparator();
             this.recentFilesMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.importProjectMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuItemCloseDocumentSeparator = new System.Windows.Forms.ToolStripSeparator();
             this.closeDocumentMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.exitMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -137,6 +138,11 @@
             this.tableLayoutPanel1 = new System.Windows.Forms.TableLayoutPanel();
             this.groupBoxFilter = new ThemedGroupBox();
             this.filterComboBox = new System.Windows.Forms.ComboBox();
+            this.pagesTabControl = new System.Windows.Forms.TabControl();
+            this.pagesListTabPage = new System.Windows.Forms.TabPage();
+            this.thumbnailsTabPage = new System.Windows.Forms.TabPage();
+            this.thumbnailsListView = new System.Windows.Forms.ListView();
+            this.thumbnailsImageList = new System.Windows.Forms.ImageList(this.components);
             ((System.ComponentModel.ISupportInitialize)(this.pdfViewer)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.mainAppSplitContainer)).BeginInit();
             this.mainAppSplitContainer.Panel1.SuspendLayout();
@@ -157,6 +163,9 @@
             this.formSplitContainer.SuspendLayout();
             this.tableLayoutPanel1.SuspendLayout();
             this.groupBoxFilter.SuspendLayout();
+            this.pagesTabControl.SuspendLayout();
+            this.pagesListTabPage.SuspendLayout();
+            this.thumbnailsTabPage.SuspendLayout();
             this.SuspendLayout();
             // 
             // loadPdfButton
@@ -893,6 +902,7 @@
             this.savePdfMenuItem,
             this.toolStripMenuItem1,
             this.recentFilesMenuItem,
+            this.importProjectMenuItem,
             this.toolStripMenuItemCloseDocumentSeparator,
             this.closeDocumentMenuItem,
             this.exitMenuItem});
@@ -967,6 +977,13 @@
             this.recentFilesMenuItem.Size = new System.Drawing.Size(261, 22);
             this.recentFilesMenuItem.Text = Res("Menu_RecentFiles");
             this.recentFilesMenuItem.DropDownOpening += new System.EventHandler(this.RecentFilesMenuItem_DropDownOpening);
+            // 
+            // importProjectMenuItem
+            // 
+            this.importProjectMenuItem.Name = "importProjectMenuItem";
+            this.importProjectMenuItem.Size = new System.Drawing.Size(261, 22);
+            this.importProjectMenuItem.Text = Res("Menu_ImportProject");
+            this.importProjectMenuItem.Click += new System.EventHandler(this.ImportProjectMenuItem_Click);
             // 
             // toolStripMenuItemCloseDocumentSeparator
             // 
@@ -1275,18 +1292,75 @@
             this.pagesListView.Dock = System.Windows.Forms.DockStyle.Fill;
             this.pagesListView.Font = new System.Drawing.Font("Microsoft Sans Serif", 9.75F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(238)));
             this.pagesListView.HideSelection = false;
-            this.pagesListView.Location = new System.Drawing.Point(3, 52);
+            this.pagesListView.Location = new System.Drawing.Point(0, 0);
             this.pagesListView.MultiSelect = false;
             this.pagesListView.Name = "pagesListView";
             this.pagesListView.OwnerDraw = true;
-            this.pagesListView.Size = new System.Drawing.Size(208, 853);
+            this.pagesListView.Size = new System.Drawing.Size(200, 827);
             this.pagesListView.TabIndex = 50;
             this.toolTip1.SetToolTip(this.pagesListView, Res("Tooltip_PagesList"));
             this.pagesListView.UseCompatibleStateImageBehavior = false;
             this.pagesListView.View = System.Windows.Forms.View.List;
-            this.pagesListView.Visible = false;
             this.pagesListView.DrawItem += new System.Windows.Forms.DrawListViewItemEventHandler(this.PagesListView_DrawItem);
             this.pagesListView.SelectedIndexChanged += new System.EventHandler(this.PagesListView_SelectedIndexChanged);
+            // 
+            // pagesTabControl
+            // 
+            this.pagesTabControl.Controls.Add(this.pagesListTabPage);
+            this.pagesTabControl.Controls.Add(this.thumbnailsTabPage);
+            this.pagesTabControl.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.pagesTabControl.Location = new System.Drawing.Point(3, 52);
+            this.pagesTabControl.Name = "pagesTabControl";
+            this.pagesTabControl.SelectedIndex = 0;
+            this.pagesTabControl.Size = new System.Drawing.Size(208, 853);
+            this.pagesTabControl.TabIndex = 51;
+            this.pagesTabControl.Visible = false;
+            this.pagesTabControl.SelectedIndexChanged += new System.EventHandler(this.PagesTabControl_SelectedIndexChanged);
+            // 
+            // pagesListTabPage
+            // 
+            this.pagesListTabPage.Controls.Add(this.pagesListView);
+            this.pagesListTabPage.Location = new System.Drawing.Point(4, 22);
+            this.pagesListTabPage.Name = "pagesListTabPage";
+            this.pagesListTabPage.Padding = new System.Windows.Forms.Padding(0);
+            this.pagesListTabPage.Size = new System.Drawing.Size(200, 827);
+            this.pagesListTabPage.TabIndex = 0;
+            this.pagesListTabPage.Text = Res("UI_Tab_PagesList");
+            this.pagesListTabPage.UseVisualStyleBackColor = true;
+            // 
+            // thumbnailsTabPage
+            // 
+            this.thumbnailsTabPage.Controls.Add(this.thumbnailsListView);
+            this.thumbnailsTabPage.Location = new System.Drawing.Point(4, 22);
+            this.thumbnailsTabPage.Name = "thumbnailsTabPage";
+            this.thumbnailsTabPage.Padding = new System.Windows.Forms.Padding(0);
+            this.thumbnailsTabPage.Size = new System.Drawing.Size(200, 827);
+            this.thumbnailsTabPage.TabIndex = 1;
+            this.thumbnailsTabPage.Text = Res("UI_Tab_Thumbnails");
+            this.thumbnailsTabPage.UseVisualStyleBackColor = true;
+            // 
+            // thumbnailsListView
+            // 
+            this.thumbnailsListView.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.thumbnailsListView.HideSelection = false;
+            this.thumbnailsListView.LargeImageList = this.thumbnailsImageList;
+            this.thumbnailsListView.Location = new System.Drawing.Point(0, 0);
+            this.thumbnailsListView.MultiSelect = false;
+            this.thumbnailsListView.Name = "thumbnailsListView";
+            this.thumbnailsListView.OwnerDraw = true;
+            this.thumbnailsListView.Size = new System.Drawing.Size(200, 827);
+            this.thumbnailsListView.TabIndex = 0;
+            this.toolTip1.SetToolTip(this.thumbnailsListView, Res("Tooltip_PageThumbnails"));
+            this.thumbnailsListView.UseCompatibleStateImageBehavior = false;
+            this.thumbnailsListView.View = System.Windows.Forms.View.LargeIcon;
+            this.thumbnailsListView.DrawItem += new System.Windows.Forms.DrawListViewItemEventHandler(this.ThumbnailsListView_DrawItem);
+            this.thumbnailsListView.SelectedIndexChanged += new System.EventHandler(this.ThumbnailsListView_SelectedIndexChanged);
+            // 
+            // thumbnailsImageList
+            // 
+            this.thumbnailsImageList.ColorDepth = System.Windows.Forms.ColorDepth.Depth32Bit;
+            this.thumbnailsImageList.ImageSize = new System.Drawing.Size(150, 150);
+            this.thumbnailsImageList.TransparentColor = System.Drawing.Color.Transparent;
             // 
             // formSplitContainer
             // 
@@ -1311,7 +1385,7 @@
             // 
             this.tableLayoutPanel1.ColumnCount = 1;
             this.tableLayoutPanel1.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
-            this.tableLayoutPanel1.Controls.Add(this.pagesListView, 0, 1);
+            this.tableLayoutPanel1.Controls.Add(this.pagesTabControl, 0, 1);
             this.tableLayoutPanel1.Controls.Add(this.groupBoxFilter, 0, 0);
             this.tableLayoutPanel1.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tableLayoutPanel1.Location = new System.Drawing.Point(0, 0);
@@ -1392,6 +1466,9 @@
             this.formSplitContainer.ResumeLayout(false);
             this.tableLayoutPanel1.ResumeLayout(false);
             this.groupBoxFilter.ResumeLayout(false);
+            this.pagesTabControl.ResumeLayout(false);
+            this.pagesListTabPage.ResumeLayout(false);
+            this.thumbnailsTabPage.ResumeLayout(false);
             this.ResumeLayout(false);
 
         }
@@ -1440,6 +1517,7 @@
         private System.Windows.Forms.ToolStripMenuItem savePdfMenuItem;
         private System.Windows.Forms.ToolStripSeparator toolStripMenuItem1;
         private System.Windows.Forms.ToolStripMenuItem recentFilesMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem importProjectMenuItem;
         private System.Windows.Forms.ToolStripSeparator toolStripMenuItemCloseDocumentSeparator;
         private System.Windows.Forms.ToolStripMenuItem closeDocumentMenuItem;
         private System.Windows.Forms.ToolStripMenuItem exitMenuItem;
@@ -1500,6 +1578,11 @@
         private System.Windows.Forms.TableLayoutPanel tableLayoutPanel1;
         private ThemedGroupBox groupBoxFilter;
         private System.Windows.Forms.ComboBox filterComboBox;
+        private System.Windows.Forms.TabControl pagesTabControl;
+        private System.Windows.Forms.TabPage pagesListTabPage;
+        private System.Windows.Forms.TabPage thumbnailsTabPage;
+        private System.Windows.Forms.ListView thumbnailsListView;
+        private System.Windows.Forms.ImageList thumbnailsImageList;
         private System.Windows.Forms.ToolStripMenuItem copyToClipboardMenuItem;
         private System.Windows.Forms.ToolStripMenuItem exportGraphicsMenuItem;
         private System.Windows.Forms.ToolStripMenuItem selectSignaturesToRemoveMenuItem;

@@ -177,6 +177,18 @@
   <data name="Menu_RecentFiles" xml:space="preserve">
     <value>Ostatnio otwierane pliki</value>
   </data>
+  <data name="Menu_ImportProject" xml:space="preserve">
+    <value>Importuj projekt</value>
+  </data>
+  <data name="Dialog_Title_ImportProjects" xml:space="preserve">
+    <value>Importuj projekty</value>
+  </data>
+  <data name="Err_ImportProjects_NoPdfPath" xml:space="preserve">
+    <value>Nie można zaimportować projektu bez wskazanego pliku PDF.</value>
+  </data>
+  <data name="Err_ImportProjects_DifferentPdf" xml:space="preserve">
+    <value>Wybrane projekty dotyczą różnych plików PDF. Import jest możliwy tylko dla jednego dokumentu źródłowego.</value>
+  </data>
   <data name="Menu_RecentFiles_Empty" xml:space="preserve">
     <value>Brak</value>
   </data>
@@ -270,6 +282,9 @@
   <data name="Menu_ExportGraphics" xml:space="preserve">
     <value>Eksport obiektów graficznych</value>
   </data>
+  <data name="Menu_CombineObjectsWithScanPages" xml:space="preserve">
+    <value>Scal obiekty z obrazem strony</value>
+  </data>
   <data name="Menu_IgnorePdfRestrictions" xml:space="preserve">
     <value>Pomijaj ograniczenia PDF</value>
   </data>
@@ -359,6 +374,12 @@
   </data>
   <data name="UI_Group_Filter" xml:space="preserve">
     <value>Filtr</value>
+  </data>
+  <data name="UI_Tab_PagesList" xml:space="preserve">
+    <value>Lista stron</value>
+  </data>
+  <data name="UI_Tab_Thumbnails" xml:space="preserve">
+    <value>Miniatury</value>
   </data>
   <data name="UI_Button_SavePdf" xml:space="preserve">
     <value>Zapisz PDF</value>
@@ -601,6 +622,9 @@ Ponowne kliknięcie usunie zaznaczenia.</value>
   </data>
   <data name="Tooltip_PagesList" xml:space="preserve">
     <value>Kliknij pozycję, aby wyświetlić stronę.</value>
+  </data>
+  <data name="Tooltip_PageThumbnails" xml:space="preserve">
+    <value>Kliknij miniaturę, aby wyświetlić stronę.</value>
   </data>
   <data name="Split_Success" xml:space="preserve">
     <value>Dokument PDF został podzielony.</value>

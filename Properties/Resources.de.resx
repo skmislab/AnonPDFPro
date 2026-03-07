@@ -374,6 +374,18 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="Menu_RecentFiles" xml:space="preserve">
     <value>Zuletzt verwendete Dateien</value>
   </data>
+  <data name="Menu_ImportProject" xml:space="preserve">
+    <value>Projekt importieren</value>
+  </data>
+  <data name="Dialog_Title_ImportProjects" xml:space="preserve">
+    <value>Projekte importieren</value>
+  </data>
+  <data name="Err_ImportProjects_NoPdfPath" xml:space="preserve">
+    <value>Ein Projekt ohne Quell-PDF-Pfad kann nicht importiert werden.</value>
+  </data>
+  <data name="Err_ImportProjects_DifferentPdf" xml:space="preserve">
+    <value>Die gewählten Projekte verwenden unterschiedliche Quell-PDFs. Import ist nur für ein gemeinsames Quelldokument möglich.</value>
+  </data>
   <data name="Menu_CloseDocument" xml:space="preserve">
     <value>Dokument schließen</value>
   </data>
@@ -464,6 +476,9 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="Menu_ExportGraphics" xml:space="preserve">
     <value>Grafiken exportieren</value>
   </data>
+  <data name="Menu_CombineObjectsWithScanPages" xml:space="preserve">
+    <value>Objekte mit Seitenbild zusammenführen</value>
+  </data>
   <data name="Menu_IgnorePdfRestrictions" xml:space="preserve">
     <value>PDF-Einschränkungen ignorieren</value>
   </data>
@@ -535,6 +550,12 @@ Anwendung schließen und Installer jetzt starten?</value>
   </data>
   <data name="UI_Group_Filter" xml:space="preserve">
     <value>Filter</value>
+  </data>
+  <data name="UI_Tab_PagesList" xml:space="preserve">
+    <value>Seitenliste</value>
+  </data>
+  <data name="UI_Tab_Thumbnails" xml:space="preserve">
+    <value>Miniaturen</value>
   </data>
   <data name="UI_Button_SavePdf" xml:space="preserve">
     <value>PDF speichern</value>
@@ -704,6 +725,9 @@ Nochmal klicken, um Markierungen zu entfernen.</value>
   </data>
   <data name="Tooltip_PagesList" xml:space="preserve">
     <value>Ein Element anklicken, um die Seite anzuzeigen.</value>
+  </data>
+  <data name="Tooltip_PageThumbnails" xml:space="preserve">
+    <value>Eine Miniatur anklicken, um die Seite anzuzeigen.</value>
   </data>
   <data name="About_Message" xml:space="preserve">
     <value>Anwendung: {0}
