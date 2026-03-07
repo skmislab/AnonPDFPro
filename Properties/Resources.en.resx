@@ -1375,7 +1375,7 @@ Close the application and run the installer now?</value>
     <value>index page: {0}</value>
   </data>
   <data name="CacheStatus_SearchPage" xml:space="preserve">
-    <value>search page: {0}</value>
+    <value>search: {0}</value>
   </data>
   <data name="TextAnnotation_ToStringFormat" xml:space="preserve">
     <value>{0} - {1}, {2} pt, {3}, {4}, {5}, {6}</value>

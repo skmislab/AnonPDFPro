@@ -15,6 +15,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Principal;
+using System.Security.Cryptography;
 using iText.Kernel.Pdf;
 using iText.PdfCleanup;
 using iText.Forms.Fields;
@@ -210,9 +211,15 @@ namespace AnonPDF
         private bool pagesListTooltipShownThisSession;
         private bool syncPageSelectionFromThumbnail;
         private bool syncThumbnailSelectionFromPage;
-        private bool thumbnailGenerationStarted;
+        private readonly Timer thumbnailViewportTimer;
         private System.Threading.CancellationTokenSource thumbnailGenerationCts;
+        private readonly object thumbnailGenerationSync = new object();
+        private readonly Queue<int> thumbnailGenerationQueue = new Queue<int>();
+        private readonly HashSet<int> thumbnailQueuedPages = new HashSet<int>();
+        private readonly HashSet<int> thumbnailRenderedPages = new HashSet<int>();
+        private bool thumbnailGenerationWorkerRunning;
         private string thumbnailGenerationSourcePdfPath = string.Empty;
+        private string thumbnailCacheDocumentDirectory = string.Empty;
         private readonly Dictionary<int, Size> thumbnailContentSizeByPage = new Dictionary<int, Size>();
         private string lastFootnoteBadgeLayoutLogKey = string.Empty;
         private int busyCursorDepth;
@@ -891,6 +898,12 @@ namespace AnonPDF
                 Interval = 2000
             };
             renderTimer.Tick += RenderTimer_Tick;
+
+            thumbnailViewportTimer = new Timer
+            {
+                Interval = 220
+            };
+            thumbnailViewportTimer.Tick += ThumbnailViewportTimer_Tick;
 
             // Version/licence check runs once at startup (see PDFForm_Shown).
 
@@ -6665,37 +6678,37 @@ namespace AnonPDF
         private void FilterComboBox_SelectedIndexChanged(object sender, EventArgs e)
         {
             var selected = (string)filterComboBox.SelectedItem;
-            if (selected == allComboItem)
-            {
-                // restore the full list of pages, without filtering
-                pagesListView.BeginUpdate();
-                pagesListView.Items.Clear();
-                foreach (var status in allPageStatuses)
-                {
-            var item = new ListViewItem(string.Format(Resources.UI_PageLabelFormat, status.PageNumber)) { Tag = status };
-                    pagesListView.Items.Add(item);
-                }
-                // mark the current page
-                var currentItem = pagesListView.Items
-                    .Cast<ListViewItem>()
-                    .FirstOrDefault(it => ((PageItemStatus)it.Tag).PageNumber == currentPage);
-                if (currentItem != null)
-                    currentItem.Selected = true;
-                pagesListView.EndUpdate();
-            }
-            else
-            {
-                // filter and rebuild the list
-                ApplyFilter(selected);
-            }
+            ApplyFilter(selected);
         }
 
         private void ApplyFilter(string filter)
         {
+            var filteredStatuses = GetStatusesForFilter(filter).ToList();
+
             pagesListView.BeginUpdate();
             pagesListView.Items.Clear();
+            foreach (var status in filteredStatuses)
+            {
+                pagesListView.Items.Add(new ListViewItem(string.Format(Resources.UI_PageLabelFormat, status.PageNumber)) { Tag = status });
+            }
 
-            // Predicate selecting statuses by filter
+            var currentItem = pagesListView.Items
+                .Cast<ListViewItem>()
+                .FirstOrDefault(it => ((PageItemStatus)it.Tag).PageNumber == currentPage);
+            if (currentItem != null)
+                currentItem.Selected = true;
+
+            pagesListView.EndUpdate();
+            RebuildThumbnailsForFilter(filteredStatuses.Select(s => s.PageNumber).ToList());
+        }
+
+        private IEnumerable<PageItemStatus> GetStatusesForFilter(string filter)
+        {
+            if (string.IsNullOrWhiteSpace(filter) || filter == allComboItem)
+            {
+                return allPageStatuses;
+            }
+
             var filterSelections = Resources.UI_Filter_Selections;
             var filterObjects = Resources.UI_Filter_Annotations;
             var filterSearches = Resources.UI_Filter_Searches;
@@ -6712,20 +6725,63 @@ namespace AnonPDF
                 _ => s => s.HasSelections || s.HasObjects || s.HasSearchResults || s.MarkedForDeletion || s.HasRotation
             };
 
-            // Add only those statuses that pass the predicate
-            foreach (var status in allPageStatuses.Where(predicate))
+            return allPageStatuses.Where(predicate);
+        }
+
+        private void RebuildThumbnailsForFilter(IReadOnlyList<int> pageNumbers)
+        {
+            if (thumbnailsListView == null || thumbnailsImageList == null)
             {
-                pagesListView.Items.Add(new ListViewItem(string.Format(Resources.UI_PageLabelFormat, status.PageNumber)) { Tag = status });
+                return;
             }
 
-            // Mark the current page if it is visible
-            var currentItem = pagesListView.Items
-                .Cast<ListViewItem>()
-                .FirstOrDefault(it => ((PageItemStatus)it.Tag).PageNumber == currentPage);
-            if (currentItem != null)
-                currentItem.Selected = true;
+            if (!thumbnailsImageList.Images.ContainsKey("placeholder"))
+            {
+                Bitmap placeholder = CreateThumbnailPlaceholderImage(thumbnailsImageList.ImageSize);
+                thumbnailsImageList.Images.Add("placeholder", placeholder);
+            }
 
-            pagesListView.EndUpdate();
+            lock (thumbnailGenerationSync)
+            {
+                thumbnailGenerationQueue.Clear();
+                thumbnailQueuedPages.Clear();
+            }
+
+            thumbnailsListView.BeginUpdate();
+            try
+            {
+                thumbnailsListView.Items.Clear();
+                foreach (int page in pageNumbers)
+                {
+                    string key = $"thumb_{page}";
+                    string imageKey = thumbnailsImageList.Images.ContainsKey(key) ? key : "placeholder";
+                    var item = new ListViewItem(string.Format(Resources.UI_PageLabelFormat, page))
+                    {
+                        Tag = page,
+                        ImageKey = imageKey
+                    };
+                    thumbnailsListView.Items.Add(item);
+                    if (imageKey == key)
+                    {
+                        lock (thumbnailGenerationSync)
+                        {
+                            thumbnailRenderedPages.Add(page);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                thumbnailsListView.EndUpdate();
+            }
+
+            ApplyThumbnailIconSpacing();
+            SelectThumbnailItemForCurrentPage(ensureVisible: IsThumbnailsTabSelected());
+            if (IsThumbnailsTabSelected())
+            {
+                QueueVisibleThumbnailsForGeneration();
+                StartThumbnailGenerationWorkerIfNeeded();
+            }
         }
 
 
@@ -11149,6 +11205,7 @@ namespace AnonPDF
             pdfCleanUpToolError = false;
             groupBoxFilter.Visible = false;
             pagesTabControl.Visible = false;
+            thumbnailViewportTimer?.Stop();
             currentPage = 1;
             scaleFactor = 0;
 
@@ -19784,6 +19841,14 @@ namespace AnonPDF
 
                 bool useThumbnails = Properties.Settings.Default.UseThumbnailsTabInRightPanel;
                 pagesTabControl.SelectedTab = useThumbnails ? thumbnailsTabPage : pagesListTabPage;
+                if (useThumbnails)
+                {
+                    thumbnailViewportTimer?.Start();
+                }
+                else
+                {
+                    thumbnailViewportTimer?.Stop();
+                }
             }
             catch (Exception ex)
             {
@@ -19820,8 +19885,15 @@ namespace AnonPDF
 
             if (IsThumbnailsTabSelected())
             {
+                thumbnailViewportTimer?.Start();
                 EnsureThumbnailGeneration();
                 SelectThumbnailItemForCurrentPage(ensureVisible: true);
+            }
+            else
+            {
+                thumbnailViewportTimer?.Stop();
+                CancelThumbnailGeneration();
+                SyncPagesListSelectionToCurrentPage(ensureVisible: true);
             }
         }
 
@@ -19833,9 +19905,15 @@ namespace AnonPDF
             }
 
             CancelThumbnailGeneration();
-            thumbnailGenerationStarted = false;
             thumbnailGenerationSourcePdfPath = inputPdfPath ?? string.Empty;
             thumbnailContentSizeByPage.Clear();
+            PrepareThumbnailCacheForCurrentDocument();
+            lock (thumbnailGenerationSync)
+            {
+                thumbnailGenerationQueue.Clear();
+                thumbnailQueuedPages.Clear();
+                thumbnailRenderedPages.Clear();
+            }
 
             thumbnailsListView.BeginUpdate();
             try
@@ -19844,15 +19922,8 @@ namespace AnonPDF
                 thumbnailsImageList.Images.Clear();
                 Bitmap placeholder = CreateThumbnailPlaceholderImage(thumbnailsImageList.ImageSize);
                 thumbnailsImageList.Images.Add("placeholder", placeholder);
-
                 for (int i = 1; i <= numPages; i++)
                 {
-                    var item = new ListViewItem(string.Format(Resources.UI_PageLabelFormat, i))
-                    {
-                        Tag = i,
-                        ImageKey = "placeholder"
-                    };
-                    thumbnailsListView.Items.Add(item);
                     thumbnailContentSizeByPage[i] = thumbnailsImageList.ImageSize;
                 }
             }
@@ -19861,15 +19932,18 @@ namespace AnonPDF
                 thumbnailsListView.EndUpdate();
             }
 
-            ApplyThumbnailIconSpacing();
-            SelectThumbnailItemForCurrentPage(ensureVisible: false);
+            var filteredPages = GetStatusesForFilter((string)filterComboBox.SelectedItem)
+                .Select(s => s.PageNumber)
+                .ToList();
+            RebuildThumbnailsForFilter(filteredPages);
         }
 
         private void ResetThumbnailPanel()
         {
+            thumbnailViewportTimer?.Stop();
             CancelThumbnailGeneration();
-            thumbnailGenerationStarted = false;
             thumbnailGenerationSourcePdfPath = string.Empty;
+            thumbnailCacheDocumentDirectory = string.Empty;
 
             if (thumbnailsListView != null)
             {
@@ -19882,6 +19956,136 @@ namespace AnonPDF
             }
 
             thumbnailContentSizeByPage.Clear();
+            lock (thumbnailGenerationSync)
+            {
+                thumbnailGenerationQueue.Clear();
+                thumbnailQueuedPages.Clear();
+                thumbnailRenderedPages.Clear();
+            }
+        }
+
+        private void PrepareThumbnailCacheForCurrentDocument()
+        {
+            try
+            {
+                thumbnailCacheDocumentDirectory = string.Empty;
+                if (string.IsNullOrWhiteSpace(inputPdfPath) || !File.Exists(inputPdfPath))
+                {
+                    return;
+                }
+
+                string fullPath = Path.GetFullPath(inputPdfPath);
+                var fileInfo = new FileInfo(fullPath);
+                string keySource = string.Join("|",
+                    "thumbcache-v1",
+                    fullPath.ToLowerInvariant(),
+                    fileInfo.Length.ToString(CultureInfo.InvariantCulture),
+                    fileInfo.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture),
+                    thumbnailsImageList.ImageSize.Width.ToString(CultureInfo.InvariantCulture),
+                    thumbnailsImageList.ImageSize.Height.ToString(CultureInfo.InvariantCulture));
+                string key = ComputeSha256Hex(keySource);
+                string root = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MISART",
+                    "AnonPDFPro",
+                    "thumbcache");
+                string documentDir = Path.Combine(root, key);
+                Directory.CreateDirectory(documentDir);
+                thumbnailCacheDocumentDirectory = documentDir;
+            }
+            catch (Exception ex)
+            {
+                thumbnailCacheDocumentDirectory = string.Empty;
+                LogDebug("Prepare thumbnail cache failed: " + ex.Message);
+            }
+        }
+
+        private static string ComputeSha256Hex(string input)
+        {
+            using (var sha = SHA256.Create())
+            {
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(input ?? string.Empty);
+                byte[] hash = sha.ComputeHash(bytes);
+                var sb = new System.Text.StringBuilder(hash.Length * 2);
+                for (int i = 0; i < hash.Length; i++)
+                {
+                    sb.Append(hash[i].ToString("x2", CultureInfo.InvariantCulture));
+                }
+
+                return sb.ToString();
+            }
+        }
+
+        private string GetThumbnailCacheFilePath(int pageNumber, int renderedWidth, int renderedHeight)
+        {
+            if (string.IsNullOrWhiteSpace(thumbnailCacheDocumentDirectory))
+            {
+                return string.Empty;
+            }
+
+            string fileName = string.Format(
+                CultureInfo.InvariantCulture,
+                "p{0:D5}_{1}x{2}.png",
+                pageNumber,
+                renderedWidth,
+                renderedHeight);
+            return Path.Combine(thumbnailCacheDocumentDirectory, fileName);
+        }
+
+        private static bool TryLoadThumbnailBitmapFromCache(string cachePath, out Bitmap bitmap)
+        {
+            bitmap = null;
+            if (string.IsNullOrWhiteSpace(cachePath) || !File.Exists(cachePath))
+            {
+                return false;
+            }
+
+            try
+            {
+                using (var stream = new FileStream(cachePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                using (var image = DrawingImage.FromStream(stream))
+                {
+                    bitmap = new Bitmap(image);
+                }
+
+                return true;
+            }
+            catch
+            {
+                try
+                {
+                    File.Delete(cachePath);
+                }
+                catch
+                {
+                    // ignore
+                }
+
+                return false;
+            }
+        }
+
+        private static void TrySaveThumbnailBitmapToCache(string cachePath, Bitmap bitmap)
+        {
+            if (string.IsNullOrWhiteSpace(cachePath) || bitmap == null)
+            {
+                return;
+            }
+
+            try
+            {
+                string directory = Path.GetDirectoryName(cachePath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                bitmap.Save(cachePath, ImageFormat.Png);
+            }
+            catch
+            {
+                // ignore cache write errors
+            }
         }
 
         private void ApplyThumbnailIconSpacing()
@@ -19917,21 +20121,122 @@ namespace AnonPDF
                 return;
             }
 
-            if (thumbnailsListView.Items.Count != numPages)
+            if (thumbnailsListView.Items.Count == 0)
             {
-                InitializeThumbnailPanelItems();
+                RebuildThumbnailsForFilter(
+                    GetStatusesForFilter((string)filterComboBox.SelectedItem)
+                        .Select(s => s.PageNumber)
+                        .ToList());
             }
 
-            if (thumbnailGenerationStarted && ArePathsEqual(thumbnailGenerationSourcePdfPath, inputPdfPath))
+            QueueVisibleThumbnailsForGeneration();
+            StartThumbnailGenerationWorkerIfNeeded();
+        }
+
+        private void QueueVisibleThumbnailsForGeneration()
+        {
+            var candidatePages = GetThumbnailPagesAroundViewport();
+            if (candidatePages.Count == 0)
             {
                 return;
             }
 
-            StartThumbnailGenerationAsync(inputPdfPath, numPages, userPassword);
+            foreach (int page in candidatePages
+                .OrderBy(p => Math.Abs(p - currentPage))
+                .ThenBy(p => p))
+            {
+                QueueThumbnailPageForGeneration(page);
+            }
+        }
+
+        private List<int> GetThumbnailPagesAroundViewport()
+        {
+            var result = new List<int>();
+            if (thumbnailsListView == null || thumbnailsListView.Items.Count == 0)
+            {
+                return result;
+            }
+
+            DrawingRectangle client = thumbnailsListView.ClientRectangle;
+            int firstVisible = int.MaxValue;
+            int lastVisible = int.MinValue;
+
+            for (int i = 0; i < thumbnailsListView.Items.Count; i++)
+            {
+                DrawingRectangle itemBounds = thumbnailsListView.GetItemRect(i, ItemBoundsPortion.Entire);
+                if (itemBounds.IntersectsWith(client))
+                {
+                    firstVisible = Math.Min(firstVisible, i);
+                    lastVisible = Math.Max(lastVisible, i);
+                }
+            }
+
+            if (firstVisible == int.MaxValue || lastVisible == int.MinValue)
+            {
+                var fallbackItem = FindThumbnailListItemByPageNumber(currentPage);
+                int fallback = fallbackItem != null
+                    ? fallbackItem.Index
+                    : Math.Max(0, Math.Min(thumbnailsListView.Items.Count - 1, 0));
+                firstVisible = fallback;
+                lastVisible = fallback;
+            }
+
+            int estimatedColumns = Math.Max(
+                1,
+                thumbnailsListView.ClientSize.Width / Math.Max(1, thumbnailsImageList.ImageSize.Width + 8));
+            int buffer = Math.Max(4, estimatedColumns * 2);
+
+            int startIndex = Math.Max(0, firstVisible - buffer);
+            int endIndex = Math.Min(thumbnailsListView.Items.Count - 1, lastVisible + buffer);
+            for (int i = startIndex; i <= endIndex; i++)
+            {
+                if (thumbnailsListView.Items[i].Tag is int page && page >= 1 && page <= numPages)
+                {
+                    result.Add(page);
+                }
+            }
+
+            if (FindThumbnailListItemByPageNumber(currentPage) != null && !result.Contains(currentPage))
+            {
+                result.Add(currentPage);
+            }
+
+            return result;
+        }
+
+        private void QueueThumbnailPageForGeneration(int pageNumber)
+        {
+            if (pageNumber < 1 || pageNumber > numPages)
+            {
+                return;
+            }
+
+            lock (thumbnailGenerationSync)
+            {
+                string key = $"thumb_{pageNumber}";
+                if (thumbnailRenderedPages.Contains(pageNumber) && !thumbnailsImageList.Images.ContainsKey(key))
+                {
+                    thumbnailRenderedPages.Remove(pageNumber);
+                }
+
+                if (thumbnailRenderedPages.Contains(pageNumber) || thumbnailQueuedPages.Contains(pageNumber))
+                {
+                    return;
+                }
+
+                thumbnailGenerationQueue.Enqueue(pageNumber);
+                thumbnailQueuedPages.Add(pageNumber);
+            }
         }
 
         private void CancelThumbnailGeneration()
         {
+            lock (thumbnailGenerationSync)
+            {
+                thumbnailGenerationQueue.Clear();
+                thumbnailQueuedPages.Clear();
+            }
+
             var cts = thumbnailGenerationCts;
             thumbnailGenerationCts = null;
 
@@ -19945,44 +20250,86 @@ namespace AnonPDF
             }
         }
 
-        private async void StartThumbnailGenerationAsync(string sourcePdfPath, int pageCount, string password)
+        private void StartThumbnailGenerationWorkerIfNeeded()
         {
-            CancelThumbnailGeneration();
-            thumbnailGenerationSourcePdfPath = sourcePdfPath ?? string.Empty;
-            thumbnailGenerationStarted = true;
+            if (thumbnailGenerationWorkerRunning)
+            {
+                return;
+            }
+
+            bool hasWork;
+            lock (thumbnailGenerationSync)
+            {
+                hasWork = thumbnailGenerationQueue.Count > 0;
+                if (hasWork)
+                {
+                    thumbnailGenerationWorkerRunning = true;
+                }
+            }
+
+            if (!hasWork)
+            {
+                return;
+            }
 
             var cts = new System.Threading.CancellationTokenSource();
             thumbnailGenerationCts = cts;
+            string sourcePdfPath = inputPdfPath;
+            string password = userPassword;
+            thumbnailGenerationSourcePdfPath = sourcePdfPath ?? string.Empty;
+
+            _ = Task.Run(() => ThumbnailGenerationWorkerAsync(sourcePdfPath, password, cts));
+        }
+
+        private async Task ThumbnailGenerationWorkerAsync(string sourcePdfPath, string password, System.Threading.CancellationTokenSource cts)
+        {
             System.Threading.CancellationToken token = cts.Token;
             Size thumbnailSize = thumbnailsImageList.ImageSize;
 
             try
             {
-                await Task.Run(() =>
+                using (var thumbPdf = string.IsNullOrWhiteSpace(password)
+                    ? new PDFiumSharp.PdfDocument(sourcePdfPath)
+                    : new PDFiumSharp.PdfDocument(sourcePdfPath, password))
                 {
-                    using (var thumbPdf = string.IsNullOrWhiteSpace(password)
-                        ? new PDFiumSharp.PdfDocument(sourcePdfPath)
-                        : new PDFiumSharp.PdfDocument(sourcePdfPath, password))
+                    while (true)
                     {
-                        int maxPages = Math.Min(pageCount, thumbPdf.Pages.Count);
-                        for (int pageIndex = 0; pageIndex < maxPages; pageIndex++)
-                        {
-                            token.ThrowIfCancellationRequested();
-                            Bitmap thumbBitmap;
-                            int renderedWidth = 1;
-                            int renderedHeight = 1;
-                            using (var page = thumbPdf.Pages[pageIndex])
-                            {
-                                float pageWidth = Math.Max(1f, (float)page.Width);
-                                float pageHeight = Math.Max(1f, (float)page.Height);
-                                float scale = Math.Min(
-                                    thumbnailSize.Width / pageWidth,
-                                    thumbnailSize.Height / pageHeight);
-                                int renderWidth = Math.Max(1, (int)Math.Round(pageWidth * scale));
-                                int renderHeight = Math.Max(1, (int)Math.Round(pageHeight * scale));
-                                renderedWidth = renderWidth;
-                                renderedHeight = renderHeight;
+                        token.ThrowIfCancellationRequested();
 
+                        int pageNumber;
+                        lock (thumbnailGenerationSync)
+                        {
+                            if (thumbnailGenerationQueue.Count == 0)
+                            {
+                                break;
+                            }
+
+                            pageNumber = thumbnailGenerationQueue.Dequeue();
+                            thumbnailQueuedPages.Remove(pageNumber);
+                        }
+
+                        if (pageNumber < 1 || pageNumber > thumbPdf.Pages.Count)
+                        {
+                            continue;
+                        }
+
+                        Bitmap thumbBitmap;
+                        int renderedWidth = 1;
+                        int renderedHeight = 1;
+                        using (var page = thumbPdf.Pages[pageNumber - 1])
+                        {
+                            float pageWidth = Math.Max(1f, (float)page.Width);
+                            float pageHeight = Math.Max(1f, (float)page.Height);
+                            float scale = Math.Min(
+                                thumbnailSize.Width / pageWidth,
+                                thumbnailSize.Height / pageHeight);
+                            int renderWidth = Math.Max(1, (int)Math.Round(pageWidth * scale));
+                            int renderHeight = Math.Max(1, (int)Math.Round(pageHeight * scale));
+                            renderedWidth = renderWidth;
+                            renderedHeight = renderHeight;
+                            string cachePath = GetThumbnailCacheFilePath(pageNumber, renderWidth, renderHeight);
+                            if (!TryLoadThumbnailBitmapFromCache(cachePath, out thumbBitmap))
+                            {
                                 thumbBitmap = new Bitmap(thumbnailSize.Width, thumbnailSize.Height, PixelFormat.Format32bppArgb);
                                 using (Graphics g = Graphics.FromImage(thumbBitmap))
                                 {
@@ -19999,45 +20346,55 @@ namespace AnonPDF
                                             g.DrawImage(rendered, left, top, renderWidth, renderHeight);
                                         }
                                     }
-
                                 }
+
+                                TrySaveThumbnailBitmapToCache(cachePath, thumbBitmap);
+                            }
+                        }
+
+                        if (!IsHandleCreated || IsDisposed || token.IsCancellationRequested)
+                        {
+                            thumbBitmap.Dispose();
+                            break;
+                        }
+
+                        Invoke(new Action(() =>
+                        {
+                            if (thumbBitmap == null)
+                            {
+                                return;
                             }
 
-                            int pageNumber = pageIndex + 1;
-                            if (!IsHandleCreated || IsDisposed)
+                            if (!ArePathsEqual(sourcePdfPath, inputPdfPath) ||
+                                pageNumber < 1 ||
+                                pageNumber > numPages)
                             {
                                 thumbBitmap.Dispose();
                                 return;
                             }
 
-                            BeginInvoke(new Action(() =>
+                            var targetItem = FindThumbnailListItemByPageNumber(pageNumber);
+                            string key = $"thumb_{pageNumber}";
+                            if (thumbnailsImageList.Images.ContainsKey(key))
                             {
-                                if (thumbBitmap == null)
-                                {
-                                    return;
-                                }
+                                thumbnailsImageList.Images.RemoveByKey(key);
+                            }
 
-                                if (!ArePathsEqual(sourcePdfPath, inputPdfPath) ||
-                                    pageNumber < 1 ||
-                                    pageNumber > thumbnailsListView.Items.Count)
-                                {
-                                    thumbBitmap.Dispose();
-                                    return;
-                                }
+                            thumbnailsImageList.Images.Add(key, thumbBitmap);
+                            if (targetItem != null)
+                            {
+                                targetItem.ImageKey = key;
+                            }
+                            thumbnailContentSizeByPage[pageNumber] = new Size(renderedWidth, renderedHeight);
+                            lock (thumbnailGenerationSync)
+                            {
+                                thumbnailRenderedPages.Add(pageNumber);
+                            }
+                        }));
 
-                                string key = $"thumb_{pageNumber}";
-                                if (thumbnailsImageList.Images.ContainsKey(key))
-                                {
-                                    thumbnailsImageList.Images.RemoveByKey(key);
-                                }
-
-                                thumbnailsImageList.Images.Add(key, thumbBitmap);
-                                thumbnailsListView.Items[pageNumber - 1].ImageKey = key;
-                                thumbnailContentSizeByPage[pageNumber] = new Size(renderedWidth, renderedHeight);
-                            }));
-                        }
+                        await Task.Yield();
                     }
-                }, token);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -20053,7 +20410,23 @@ namespace AnonPDF
                 {
                     thumbnailGenerationCts = null;
                 }
+                lock (thumbnailGenerationSync)
+                {
+                    thumbnailGenerationWorkerRunning = false;
+                }
                 cts.Dispose();
+
+                if (IsHandleCreated && !IsDisposed)
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        if (IsThumbnailsTabSelected())
+                        {
+                            QueueVisibleThumbnailsForGeneration();
+                            StartThumbnailGenerationWorkerIfNeeded();
+                        }
+                    }));
+                }
             }
         }
 
@@ -20070,7 +20443,7 @@ namespace AnonPDF
 
         private void SelectThumbnailItemForCurrentPage(bool ensureVisible)
         {
-            if (thumbnailsListView == null || currentPage < 1 || currentPage > thumbnailsListView.Items.Count)
+            if (thumbnailsListView == null || currentPage < 1)
             {
                 return;
             }
@@ -20083,7 +20456,13 @@ namespace AnonPDF
             syncThumbnailSelectionFromPage = true;
             try
             {
-                var item = thumbnailsListView.Items[currentPage - 1];
+                var item = FindThumbnailListItemByPageNumber(currentPage);
+                if (item == null)
+                {
+                    thumbnailsListView.SelectedItems.Clear();
+                    return;
+                }
+
                 if (thumbnailsListView.SelectedItems.Count != 1 || thumbnailsListView.SelectedItems[0] != item)
                 {
                     thumbnailsListView.SelectedItems.Clear();
@@ -20099,6 +20478,18 @@ namespace AnonPDF
             {
                 syncThumbnailSelectionFromPage = false;
             }
+        }
+
+        private ListViewItem FindThumbnailListItemByPageNumber(int pageNumber)
+        {
+            if (thumbnailsListView == null)
+            {
+                return null;
+            }
+
+            return thumbnailsListView.Items
+                .Cast<ListViewItem>()
+                .FirstOrDefault(item => item.Tag is int page && page == pageNumber);
         }
 
         private void ThumbnailsListView_SelectedIndexChanged(object sender, EventArgs e)
@@ -20125,6 +20516,7 @@ namespace AnonPDF
                 try
                 {
                     ForcePageListSelection(target);
+                    target.EnsureVisible();
                 }
                 finally
                 {
@@ -20138,6 +20530,47 @@ namespace AnonPDF
             UpdateNavigationButtons(currentPage);
             UpdateSelectionNavigationButtons();
             UpdateSearchNavigationButtons();
+            SyncPagesListSelectionToCurrentPage(ensureVisible: false);
+        }
+
+        private void SyncPagesListSelectionToCurrentPage(bool ensureVisible)
+        {
+            if (pagesListView == null || pagesListView.Items.Count == 0 || currentPage < 1)
+            {
+                return;
+            }
+
+            ListViewItem target = null;
+            if ((string)filterComboBox.SelectedItem == allComboItem &&
+                currentPage <= pagesListView.Items.Count)
+            {
+                target = pagesListView.Items[currentPage - 1];
+            }
+            else
+            {
+                target = FindListViewItemByPageNumber(currentPage);
+            }
+
+            if (target == null)
+            {
+                return;
+            }
+
+            ForcePageListSelection(target);
+            if (ensureVisible)
+            {
+                target.EnsureVisible();
+            }
+        }
+
+        private void ThumbnailViewportTimer_Tick(object sender, EventArgs e)
+        {
+            if (!IsThumbnailsTabSelected())
+            {
+                return;
+            }
+
+            EnsureThumbnailGeneration();
         }
 
         private void ThumbnailsListView_DrawItem(object sender, DrawListViewItemEventArgs e)
