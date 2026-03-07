@@ -869,6 +869,8 @@ namespace AnonPDF
             }
 
             InitializeComponent();
+            formSplitContainer.SplitterMoved += FormSplitContainer_SplitterMoved;
+            ApplyRightPanelDividerFromSettings();
             autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
             combineObjectsWithScanPagesEnabled = Properties.Settings.Default.CombineObjectsWithScanPagesEnabled;
             addObjectsByPageRotationEnabled = true;
@@ -7696,6 +7698,7 @@ namespace AnonPDF
 
         private void PDFForm_Shown(object sender, EventArgs e)
         {
+            ApplyRightPanelDividerFromSettings();
             if (!Properties.Settings.Default.TutorialShown)
             {
                 if (ShowTutorial())
@@ -20192,6 +20195,82 @@ namespace AnonPDF
             {
                 LogDebug("Save right-panel tab selection failed: " + ex.Message);
             }
+        }
+
+        private void ApplyRightPanelDividerFromSettings()
+        {
+            try
+            {
+                if (formSplitContainer == null)
+                {
+                    return;
+                }
+
+                int desiredRightPanelWidth = Properties.Settings.Default.RightPanelWidth;
+                if (desiredRightPanelWidth <= 0)
+                {
+                    return;
+                }
+
+                int totalWidth = formSplitContainer.ClientSize.Width;
+                int splitterWidth = formSplitContainer.SplitterWidth;
+                if (totalWidth <= splitterWidth)
+                {
+                    return;
+                }
+
+                int minRightWidth = Math.Max(1, formSplitContainer.Panel2MinSize);
+                int maxRightWidth = Math.Max(minRightWidth, totalWidth - splitterWidth - formSplitContainer.Panel1MinSize);
+                int rightWidth = Math.Max(minRightWidth, Math.Min(desiredRightPanelWidth, maxRightWidth));
+
+                int desiredSplitterDistance = totalWidth - splitterWidth - rightWidth;
+                int minSplitterDistance = Math.Max(0, formSplitContainer.Panel1MinSize);
+                int maxSplitterDistance = Math.Max(minSplitterDistance, totalWidth - splitterWidth - minRightWidth);
+                desiredSplitterDistance = Math.Max(minSplitterDistance, Math.Min(desiredSplitterDistance, maxSplitterDistance));
+
+                if (formSplitContainer.SplitterDistance != desiredSplitterDistance)
+                {
+                    formSplitContainer.SplitterDistance = desiredSplitterDistance;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Apply right-panel divider failed: " + ex.Message);
+            }
+        }
+
+        private void SaveRightPanelDividerUserSetting()
+        {
+            try
+            {
+                if (formSplitContainer == null)
+                {
+                    return;
+                }
+
+                int currentRightPanelWidth = formSplitContainer.Panel2.Width;
+                if (currentRightPanelWidth <= 0)
+                {
+                    return;
+                }
+
+                if (Properties.Settings.Default.RightPanelWidth == currentRightPanelWidth)
+                {
+                    return;
+                }
+
+                Properties.Settings.Default.RightPanelWidth = currentRightPanelWidth;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Save right-panel divider failed: " + ex.Message);
+            }
+        }
+
+        private void FormSplitContainer_SplitterMoved(object sender, SplitterEventArgs e)
+        {
+            SaveRightPanelDividerUserSetting();
         }
 
         private bool IsThumbnailsTabSelected()

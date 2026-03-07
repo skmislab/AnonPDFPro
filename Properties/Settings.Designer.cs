@@ -274,5 +274,17 @@ namespace AnonPDF.Properties {
                 this["UseThumbnailsTabInRightPanel"] = value;
             }
         }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("218")]
+        public int RightPanelWidth {
+            get {
+                return ((int)(this["RightPanelWidth"]));
+            }
+            set {
+                this["RightPanelWidth"] = value;
+            }
+        }
     }
 }
