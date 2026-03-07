@@ -151,7 +151,7 @@
     <value>Dark Teal</value>
   </data>
   <data name="Menu_Help" xml:space="preserve">
-    <value>&amp;Help</value>
+    <value>?</value>
   </data>
   <data name="Menu_OpenPdf" xml:space="preserve">
     <value>Open PDF</value>
@@ -211,7 +211,161 @@
     <value>Rotate page</value>
   </data>
   <data name="Menu_Add" xml:space="preserve">
-    <value>Add</value>
+    <value>Tools</value>
+  </data>
+  <data name="Menu_Undo" xml:space="preserve">
+    <value>Undo</value>
+  </data>
+  <data name="Menu_Redo" xml:space="preserve">
+    <value>Redo</value>
+  </data>
+  <data name="Dialog_Button_Cancel" xml:space="preserve">
+    <value>Cancel</value>
+  </data>
+  <data name="Dialog_Button_Yes" xml:space="preserve">
+    <value>Yes</value>
+  </data>
+  <data name="Dialog_CloseProject_Prompt" xml:space="preserve">
+    <value>Save changes to the project?</value>
+  </data>
+  <data name="Dialog_CloseProject_Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Dialog_CloseProject_DontSave" xml:space="preserve">
+    <value>Don't save</value>
+  </data>
+  <data name="Vector_Shape_Region" xml:space="preserve">
+    <value>Region</value>
+  </data>
+  <data name="Vector_Shape_Polyline" xml:space="preserve">
+    <value>Polyline</value>
+  </data>
+  <data name="Vector_Shape_Rectangle" xml:space="preserve">
+    <value>Rectangle</value>
+  </data>
+  <data name="Vector_Shape_Ellipse" xml:space="preserve">
+    <value>Ellipse</value>
+  </data>
+  <data name="Vector_Shape_Triangle" xml:space="preserve">
+    <value>Triangle</value>
+  </data>
+  <data name="Vector_Shape_Arc" xml:space="preserve">
+    <value>Arc</value>
+  </data>
+  <data name="Vector_Shape_DefaultTooltip" xml:space="preserve">
+    <value>Click on the page
+to start drawing.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Polyline" xml:space="preserve">
+    <value>Polyline:
+Left mouse button adds nodes.
+Double-click or right mouse button finishes.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Region" xml:space="preserve">
+    <value>Region:
+Left mouse button adds points.
+Double-click or right mouse button closes.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Rectangle" xml:space="preserve">
+    <value>Rectangle:
+Set two corners.
+ALT enforces a square.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Ellipse" xml:space="preserve">
+    <value>Ellipse:
+Set start and end of bounds.
+ALT enforces a circle.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Triangle" xml:space="preserve">
+    <value>Triangle:
+Set start and end of bounds.
+ALT enforces an equilateral triangle.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Arc" xml:space="preserve">
+    <value>Arc:
+Set start, end,
+and a third arc point.</value>
+  </data>
+  <data name="Vector_Dialog_ShapeLabel" xml:space="preserve">
+    <value>Shape:</value>
+  </data>
+  <data name="Vector_Dialog_StrokeColor" xml:space="preserve">
+    <value>Line color:</value>
+  </data>
+  <data name="Vector_Dialog_NoStrokeColor" xml:space="preserve">
+    <value>No line color</value>
+  </data>
+  <data name="Vector_Dialog_StrokeWidth" xml:space="preserve">
+    <value>Width:</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle" xml:space="preserve">
+    <value>Style:</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_Solid" xml:space="preserve">
+    <value>Solid</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_Dash" xml:space="preserve">
+    <value>Dash</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_Dot" xml:space="preserve">
+    <value>Dot</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_DashDot" xml:space="preserve">
+    <value>Dash-dot</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_DashDotDot" xml:space="preserve">
+    <value>Dash-dot-dot</value>
+  </data>
+  <data name="Vector_Dialog_FillColor" xml:space="preserve">
+    <value>Fill color:</value>
+  </data>
+  <data name="Vector_Dialog_NoFillColor" xml:space="preserve">
+    <value>No fill color</value>
+  </data>
+  <data name="Vector_Dialog_FillOpacity" xml:space="preserve">
+    <value>Fill (%):</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern" xml:space="preserve">
+    <value>Pattern:</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern_Solid" xml:space="preserve">
+    <value>Solid</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern_Diagonal" xml:space="preserve">
+    <value>Diagonal</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern_Cross" xml:space="preserve">
+    <value>Cross</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern_Dots" xml:space="preserve">
+    <value>Dots</value>
+  </data>
+  <data name="Vector_Dialog_FillPatternColor" xml:space="preserve">
+    <value>Color:</value>
+  </data>
+  <data name="Comment_Dialog_Title" xml:space="preserve">
+    <value>Add comment</value>
+  </data>
+  <data name="Comment_Dialog_Label" xml:space="preserve">
+    <value>Comment text:</value>
+  </data>
+  <data name="Comment_DefaultText" xml:space="preserve">
+    <value>Comment</value>
+  </data>
+  <data name="Comment_Label_HighlightColor" xml:space="preserve">
+    <value>Highlight color:</value>
+  </data>
+  <data name="Comment_Label_TextColor" xml:space="preserve">
+    <value>Text color:</value>
+  </data>
+  <data name="Comment_Button_ChooseColor" xml:space="preserve">
+    <value>Choose...</value>
+  </data>
+  <data name="Comment_Context_Edit" xml:space="preserve">
+    <value>Edit comment</value>
+  </data>
+  <data name="Comment_Context_Delete" xml:space="preserve">
+    <value>Delete comment</value>
   </data>
   <data name="Menu_AddText" xml:space="preserve">
     <value>Add text</value>

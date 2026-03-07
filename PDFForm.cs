@@ -116,6 +116,7 @@ namespace AnonPDF
         private System.Drawing.Point startPoint;
         private bool isDrawing;
         private bool suppressNextLeftMouseUpAfterEscape;
+        private bool suppressUndoRedoCapture;
         private bool isMarkerCtrlBoxMode;
         private bool isMoving;
         private bool isRotatingTextAnnotation;
@@ -206,6 +207,8 @@ namespace AnonPDF
         private ToolStripMenuItem exclusionAuthorityToolStripMenuItem;
         private ToolStripMenuItem automaticFootnotesToolStripMenuItem;
         private ToolStripMenuItem combineObjectsWithScanPagesToolStripMenuItem;
+        private ToolStripMenuItem undoToolStripMenuItem;
+        private ToolStripMenuItem redoToolStripMenuItem;
         private bool snapToGridEnabled = true;
         private bool addObjectsByPageRotationEnabled = false;
         private bool combineObjectsWithScanPagesEnabled = false;
@@ -292,6 +295,11 @@ namespace AnonPDF
         private float groupMoveMinDy;
         private float groupMoveMaxDy;
         private readonly List<GroupMoveEntry> groupMoveEntries = new List<GroupMoveEntry>();
+        private UndoCaptureContext pendingUndoCapture;
+        private readonly Stack<UndoHistoryEntry> undoHistory = new Stack<UndoHistoryEntry>();
+        private readonly Stack<UndoHistoryEntry> redoHistory = new Stack<UndoHistoryEntry>();
+        private string savedProjectStateSignature = string.Empty;
+        private const int UndoHistoryLimit = 100;
         private bool isMovingRasterObject;
         private bool isRotatingRasterObject;
         private bool isResizingRasterObject;
@@ -387,6 +395,19 @@ namespace AnonPDF
             public PointF Start { get; set; }
             public PointF End { get; set; }
             public List<PointF> Points { get; set; }
+        }
+
+        private sealed class UndoCaptureContext
+        {
+            public string ActionName { get; set; }
+            public string BeforeStateJson { get; set; }
+        }
+
+        private sealed class UndoHistoryEntry
+        {
+            public string ActionName { get; set; }
+            public string BeforeStateJson { get; set; }
+            public string AfterStateJson { get; set; }
         }
 
         private enum LayerObjectType
@@ -939,6 +960,7 @@ namespace AnonPDF
             pdfViewer.MouseDown += OnMouseDown;
             pdfViewer.MouseMove += OnMouseMove;
             pdfViewer.MouseUp += OnMouseUp;
+            pdfViewer.MouseUp += OnMouseUpFinalizeUndoCapture;
             pdfViewer.MouseCaptureChanged += PdfViewer_MouseCaptureChanged;
             pdfViewer.Paint += OnPaint;
             this.Shown += PDFForm_Shown;
@@ -1134,6 +1156,20 @@ namespace AnonPDF
                 Name = "menuAddItem"
             };
 
+            undoToolStripMenuItem = new ToolStripMenuItem
+            {
+                Name = "undoToolStripMenuItem",
+                ShortcutKeys = Keys.Control | Keys.Z
+            };
+            undoToolStripMenuItem.Click += UndoToolStripMenuItem_Click;
+
+            redoToolStripMenuItem = new ToolStripMenuItem
+            {
+                Name = "redoToolStripMenuItem",
+                ShortcutKeys = Keys.Control | Keys.Y
+            };
+            redoToolStripMenuItem.Click += RedoToolStripMenuItem_Click;
+
             addRasterImageToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "addRasterImageToolStripMenuItem",
@@ -1285,6 +1321,9 @@ namespace AnonPDF
             }
 
             menuAddItem.DropDownItems.Clear();
+            menuAddItem.DropDownItems.Add(undoToolStripMenuItem);
+            menuAddItem.DropDownItems.Add(redoToolStripMenuItem);
+            menuAddItem.DropDownItems.Add(new ToolStripSeparator());
             menuAddItem.DropDownItems.Add(addArrowToolStripMenuItem);
             menuAddItem.DropDownItems.Add(addTextMenuItem);
             menuAddItem.DropDownItems.Add(addShapeToolStripMenuItem);
@@ -1311,22 +1350,16 @@ namespace AnonPDF
                 return;
             }
 
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
+            menuAddItem.Text = LocalizedText("Menu_Add");
+
+            if (undoToolStripMenuItem != null)
             {
-                menuAddItem.Text = "Narz\u0119dzia";
+                undoToolStripMenuItem.Text = LocalizedText("Menu_Undo");
             }
-            else if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+
+            if (redoToolStripMenuItem != null)
             {
-                menuAddItem.Text = "Tools";
-            }
-            else if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                menuAddItem.Text = "Werk";
-            }
-            else
-            {
-                menuAddItem.Text = LocalizedText("Menu_Add");
+                redoToolStripMenuItem.Text = LocalizedText("Menu_Redo");
             }
             addTextMenuItem.Text = Resources.Menu_AddText;
 
@@ -1847,18 +1880,7 @@ namespace AnonPDF
 
         private string GetCancelButtonText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Abbrechen";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Cancel";
-            }
-
-            return "Anuluj";
+            return LocalizedText("Dialog_Button_Cancel");
         }
 
         private void SaveExclusionAuthorityUserSetting(string authorityValue, bool? verified = null)
@@ -4526,6 +4548,7 @@ namespace AnonPDF
             }
 
             groupMoveStartMouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
+            BeginUndoCapture("Move object group");
             isMovingObjectGroup = true;
             groupMoveChanged = false;
             this.Cursor = Cursors.SizeAll;
@@ -4639,11 +4662,7 @@ namespace AnonPDF
             // Top-level menus (from resources)
             menuFileItem.Text = Resources.Menu_File;
             menuOptionsItem.Text = Resources.Menu_Options;
-            string topLang = currentCulture.TwoLetterISOLanguageName;
-            menuHelpItem.Text = (string.Equals(topLang, "pl", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(topLang, "en", StringComparison.OrdinalIgnoreCase))
-                ? "?"
-                : Resources.Menu_Help;
+            menuHelpItem.Text = Resources.Menu_Help;
             ApplyAddMenuLocalization();
 
             // Language submenu
@@ -11361,6 +11380,11 @@ namespace AnonPDF
 
             removePageButton.Enabled = true;
             removePageRangeButton.Enabled = true;
+
+            projectWasChangedAfterLastSave = false;
+            saveProjectButton.Enabled = false;
+            saveProjectMenuItem.Enabled = false;
+            ResetUndoRedoHistory(resetSavedStateSignature: true);
             
             UpdateSaveGroupState();
             UpdateOptionsGroupState();
@@ -11492,50 +11516,17 @@ namespace AnonPDF
 
         private string GetCloseProjectPromptText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Aenderungen im Projekt speichern?";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Save changes to the project?";
-            }
-
-            return "Czy zapisać zmiany w projekcie?";
+            return LocalizedText("Dialog_CloseProject_Prompt");
         }
 
         private string GetCloseProjectSaveButtonText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Speichern";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Save";
-            }
-
-            return "Zapisz";
+            return LocalizedText("Dialog_CloseProject_Save");
         }
 
         private string GetCloseProjectDontSaveButtonText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Nicht speichern";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Don't save";
-            }
-
-            return "Nie zapisuj";
+            return LocalizedText("Dialog_CloseProject_DontSave");
         }
 
         private string GetCloseProjectCancelButtonText()
@@ -11545,18 +11536,7 @@ namespace AnonPDF
 
         private string GetCloseAppConfirmButtonText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Ja";
-            }
-
-            if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Yes";
-            }
-
-            return "Tak";
+            return LocalizedText("Dialog_Button_Yes");
         }
 
         private enum CloseProjectDecision
@@ -11942,6 +11922,8 @@ namespace AnonPDF
 
             projectWasChangedAfterLastSave = false;
             lastSavedProjectName = string.Empty;
+            ResetUndoRedoHistory();
+            savedProjectStateSignature = string.Empty;
 
             UpdateNavigationButtons(currentPage);
             UpdateSaveGroupState();
@@ -13040,6 +13022,427 @@ namespace AnonPDF
             };
         }
 
+        private string BuildProjectStateSignature()
+        {
+            var snapshot = BuildCurrentProjectDataSnapshot(includeViewState: false);
+            snapshot.CurrentPage = 0;
+            snapshot.ZoomFactor = null;
+            snapshot.ScrollX = null;
+            snapshot.ScrollY = null;
+            snapshot.FilePath = string.Empty;
+            return JsonConvert.SerializeObject(snapshot, Formatting.None);
+        }
+
+        private void SyncProjectChangedFlagWithStateSignature()
+        {
+            if (suppressUndoRedoCapture)
+            {
+                return;
+            }
+
+            if (string.IsNullOrEmpty(savedProjectStateSignature))
+            {
+                projectWasChangedAfterLastSave = HasAnyProjectContent();
+            }
+            else
+            {
+                projectWasChangedAfterLastSave = !string.Equals(
+                    BuildProjectStateSignature(),
+                    savedProjectStateSignature,
+                    StringComparison.Ordinal);
+            }
+
+            saveProjectButton.Enabled = projectWasChangedAfterLastSave;
+            saveProjectMenuItem.Enabled = projectWasChangedAfterLastSave;
+        }
+
+        private void ResetUndoRedoHistory(bool resetSavedStateSignature = false)
+        {
+            pendingUndoCapture = null;
+            undoHistory.Clear();
+            redoHistory.Clear();
+            if (resetSavedStateSignature)
+            {
+                savedProjectStateSignature = BuildProjectStateSignature();
+            }
+        }
+
+        private void MarkCurrentStateAsSavedBaseline()
+        {
+            savedProjectStateSignature = BuildProjectStateSignature();
+            SyncProjectChangedFlagWithStateSignature();
+        }
+
+        private void BeginUndoCapture(string actionName)
+        {
+            if (suppressUndoRedoCapture || pdf == null || numPages <= 0)
+            {
+                return;
+            }
+
+            if (pendingUndoCapture != null)
+            {
+                return;
+            }
+
+            pendingUndoCapture = new UndoCaptureContext
+            {
+                ActionName = string.IsNullOrWhiteSpace(actionName) ? "Edit" : actionName.Trim(),
+                BeforeStateJson = BuildProjectStateSignature()
+            };
+        }
+
+        private void CancelUndoCapture()
+        {
+            pendingUndoCapture = null;
+        }
+
+        private void CommitUndoCapture()
+        {
+            if (suppressUndoRedoCapture || pendingUndoCapture == null)
+            {
+                return;
+            }
+
+            string afterState = BuildProjectStateSignature();
+            if (string.Equals(pendingUndoCapture.BeforeStateJson, afterState, StringComparison.Ordinal))
+            {
+                pendingUndoCapture = null;
+                return;
+            }
+
+            undoHistory.Push(new UndoHistoryEntry
+            {
+                ActionName = pendingUndoCapture.ActionName,
+                BeforeStateJson = pendingUndoCapture.BeforeStateJson,
+                AfterStateJson = afterState
+            });
+
+            if (undoHistory.Count > UndoHistoryLimit)
+            {
+                List<UndoHistoryEntry> newestEntries = undoHistory
+                    .Take(UndoHistoryLimit)
+                    .Reverse()
+                    .ToList();
+                undoHistory.Clear();
+                foreach (UndoHistoryEntry entry in newestEntries)
+                {
+                    undoHistory.Push(entry);
+                }
+            }
+
+            redoHistory.Clear();
+            pendingUndoCapture = null;
+            SyncProjectChangedFlagWithStateSignature();
+        }
+
+        private bool UndoLastAction()
+        {
+            if (undoHistory.Count == 0 || pdf == null || numPages <= 0)
+            {
+                return false;
+            }
+
+            CancelUndoCapture();
+            UndoHistoryEntry entry = undoHistory.Pop();
+            if (entry == null || string.IsNullOrWhiteSpace(entry.BeforeStateJson))
+            {
+                return false;
+            }
+
+            if (!TryApplyProjectStateFromSignature(entry.BeforeStateJson))
+            {
+                return false;
+            }
+
+            redoHistory.Push(entry);
+            SyncProjectChangedFlagWithStateSignature();
+            return true;
+        }
+
+        private bool RedoLastAction()
+        {
+            if (redoHistory.Count == 0 || pdf == null || numPages <= 0)
+            {
+                return false;
+            }
+
+            CancelUndoCapture();
+            UndoHistoryEntry entry = redoHistory.Pop();
+            if (entry == null || string.IsNullOrWhiteSpace(entry.AfterStateJson))
+            {
+                return false;
+            }
+
+            if (!TryApplyProjectStateFromSignature(entry.AfterStateJson))
+            {
+                return false;
+            }
+
+            undoHistory.Push(entry);
+            SyncProjectChangedFlagWithStateSignature();
+            return true;
+        }
+
+        private bool TryApplyProjectStateFromSignature(string stateJson)
+        {
+            if (string.IsNullOrWhiteSpace(stateJson) || pdf == null || numPages <= 0)
+            {
+                return false;
+            }
+
+            ProjectData snapshot;
+            try
+            {
+                snapshot = JsonConvert.DeserializeObject<ProjectData>(stateJson);
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Undo state deserialize failed: " + ex.Message);
+                return false;
+            }
+
+            if (snapshot == null)
+            {
+                return false;
+            }
+
+            suppressUndoRedoCapture = true;
+            try
+            {
+                ApplyProjectSnapshotToCurrentDocument(snapshot);
+            }
+            finally
+            {
+                suppressUndoRedoCapture = false;
+            }
+
+            return true;
+        }
+
+        private void ApplyProjectSnapshotToCurrentDocument(ProjectData projectData)
+        {
+            if (projectData == null || pdf == null || numPages <= 0)
+            {
+                return;
+            }
+
+            List<RedactionBlock> blocks = (projectData.RedactionBlocks ?? new List<RedactionBlock>())
+                .Where(block => block != null && block.PageNumber >= 1 && block.PageNumber <= numPages)
+                .ToList();
+            foreach (RedactionBlock block in blocks)
+            {
+                NormalizeRedactionBlockMetadata(block);
+                EnsureRedactionBlockTimestamps(block);
+            }
+
+            List<CommentAnnotation> comments = (projectData.CommentAnnotations ?? new List<CommentAnnotation>())
+                .Where(comment => comment != null && comment.PageNumber >= 1 && comment.PageNumber <= numPages)
+                .ToList();
+            foreach (CommentAnnotation comment in comments)
+            {
+                NormalizeCommentAnnotation(comment);
+            }
+
+            List<TextAnnotation> texts = (projectData.TextAnnotations ?? new List<TextAnnotation>())
+                .Where(annotation => annotation != null && annotation.PageNumber >= 1 && annotation.PageNumber <= numPages)
+                .ToList();
+            foreach (TextAnnotation annotation in texts)
+            {
+                EnsureTextAnnotationTimestamps(annotation);
+            }
+
+            List<RasterObject> rasters = (projectData.RasterObjects ?? new List<RasterObject>())
+                .Where(obj => obj != null && obj.PageNumber >= 1 && obj.PageNumber <= numPages)
+                .ToList();
+            foreach (RasterObject raster in rasters)
+            {
+                raster.Rotation = NormalizeRotation(raster.Rotation);
+                raster.Opacity = NormalizeOpacity(raster.Opacity);
+                GetResolvedRasterInitialBounds(raster);
+                ConstrainRasterObjectToPage(raster);
+            }
+
+            List<ArrowObject> arrows = (projectData.ArrowObjects ?? new List<ArrowObject>())
+                .Where(obj => obj != null && obj.PageNumber >= 1 && obj.PageNumber <= numPages)
+                .ToList();
+            foreach (ArrowObject arrow in arrows)
+            {
+                if (string.IsNullOrWhiteSpace(arrow.Id))
+                {
+                    arrow.Id = Guid.NewGuid().ToString("N");
+                }
+
+                if (!IsArrowColorValid(arrow))
+                {
+                    arrow.LineColorArgb = DefaultArrowColor.ToArgb();
+                }
+
+                arrow.Thickness = NormalizeArrowThickness(arrow.Thickness);
+                arrow.HeadLength = NormalizeArrowHeadLength(arrow.HeadLength);
+                arrow.HeadWidth = NormalizeArrowHeadWidth(arrow.HeadWidth);
+                ConstrainArrowToPage(arrow);
+            }
+
+            List<VectorShapeObject> vectors = (projectData.VectorShapes ?? new List<VectorShapeObject>())
+                .Where(obj => obj != null && obj.PageNumber >= 1 && obj.PageNumber <= numPages)
+                .ToList();
+            foreach (VectorShapeObject vector in vectors)
+            {
+                NormalizeVectorShape(vector);
+            }
+
+            redactionBlocks = blocks;
+            commentAnnotations = comments;
+            textAnnotations = texts;
+            rasterObjects = rasters;
+            arrowObjects = arrows;
+            vectorShapes = vectors;
+
+            pagesToRemove = new HashSet<int>(
+                (projectData.PagesToRemove ?? new HashSet<int>())
+                    .Where(page => page >= 1 && page <= numPages));
+
+            pageRotationOffsets = (projectData.PageRotationOffsets ?? new Dictionary<int, int>())
+                .Where(kvp => kvp.Key >= 1 && kvp.Key <= numPages)
+                .Select(kvp => new KeyValuePair<int, int>(kvp.Key, NormalizeRotation(kvp.Value)))
+                .Where(kvp => kvp.Value != 0)
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
+            hasCustomSignatureSelection = projectData.SignaturesToRemove != null;
+            signaturesToRemove = projectData.SignaturesToRemove ?? new List<string>();
+            SyncSignatureSelectionWithAvailableSignatures();
+            UpdateSignatureSelectionMenuState();
+            ApplySignatureModeFromProject(projectData.SignaturesMode);
+
+            autoFootnotesEnabled = projectData.AutoFootnotesEnabled ?? Properties.Settings.Default.AutoFootnotesEnabled;
+            if (!string.IsNullOrWhiteSpace(projectData.ExclusionAuthority))
+            {
+                exclusionAuthorityName = projectData.ExclusionAuthority.Trim();
+            }
+            ApplyAutomaticFootnotesMenuState();
+            ApplyAddObjectsByPageRotationMenuState();
+
+            ClearGroupSelection();
+            selectedTextAnnotation = null;
+            selectedRasterObject = null;
+            selectedArrowObject = null;
+            selectedVectorShape = null;
+            ResetGroupMoveState();
+            ResetTextRotationInteractionState();
+            ResetRasterInteractionState();
+            ResetArrowInteractionState();
+            ResetVectorInteractionState();
+            ResetCommentNoteMoveState();
+            commentNoteRectsDoc.Clear();
+            commentPreviewOverlayReady = false;
+            isDrawing = false;
+            isMarkerCtrlBoxMode = false;
+            currentSelection = RectangleF.Empty;
+
+            currentPage = Math.Max(1, Math.Min(projectData.CurrentPage > 0 ? projectData.CurrentPage : currentPage, numPages));
+
+            RebuildPageStatusesFromCurrentModel();
+            ReloadRefreshCurrentPage();
+            UpdateCurrentPageObjectsMarker();
+            UpdateSelectionNavigationButtons();
+            UpdateSearchNavigationButtons();
+            UpdateNavigationButtons(currentPage);
+            renderTimer.Stop();
+            renderTimer.Start();
+            pdfViewer.Invalidate();
+        }
+
+        private void RebuildPageStatusesFromCurrentModel()
+        {
+            if (numPages <= 0)
+            {
+                return;
+            }
+
+            if (allPageStatuses == null)
+            {
+                allPageStatuses = new List<PageItemStatus>();
+            }
+
+            while (allPageStatuses.Count < numPages)
+            {
+                allPageStatuses.Add(new PageItemStatus { PageNumber = allPageStatuses.Count + 1 });
+            }
+
+            if (allPageStatuses.Count > numPages)
+            {
+                allPageStatuses.RemoveRange(numPages, allPageStatuses.Count - numPages);
+            }
+
+            HashSet<int> pagesWithSelections = new HashSet<int>(
+                redactionBlocks
+                    .Where(block => block != null && block.PageNumber >= 1 && block.PageNumber <= numPages)
+                    .Select(block => block.PageNumber));
+            HashSet<int> pagesWithObjects = new HashSet<int>(
+                textAnnotations.Where(annotation => annotation != null).Select(annotation => annotation.PageNumber)
+                .Concat(commentAnnotations.Where(comment => comment != null).Select(comment => comment.PageNumber))
+                .Concat(rasterObjects.Where(obj => obj != null).Select(obj => obj.PageNumber))
+                .Concat(arrowObjects.Where(obj => obj != null).Select(obj => obj.PageNumber))
+                .Concat(vectorShapes.Where(obj => obj != null).Select(obj => obj.PageNumber))
+                .Where(page => page >= 1 && page <= numPages));
+            HashSet<int> pagesWithSearch = new HashSet<int>(
+                searchLocations
+                    .Where(location => location != null && location.PageNumber >= 1 && location.PageNumber <= numPages)
+                    .Select(location => location.PageNumber));
+            HashSet<int> pagesWithRotation = new HashSet<int>(pageRotationOffsets.Keys.Where(page => page >= 1 && page <= numPages));
+
+            for (int page = 1; page <= numPages; page++)
+            {
+                PageItemStatus status = allPageStatuses[page - 1];
+                status.PageNumber = page;
+                status.MarkedForDeletion = pagesToRemove.Contains(page);
+                status.HasSearchResults = pagesWithSearch.Contains(page);
+                status.HasSelections = pagesWithSelections.Contains(page);
+                status.HasObjects = pagesWithObjects.Contains(page);
+                status.HasRotation = pagesWithRotation.Contains(page);
+            }
+
+            string selectedFilter = (string)filterComboBox.SelectedItem ?? allComboItem;
+            if (string.Equals(selectedFilter, allComboItem, StringComparison.Ordinal))
+            {
+                int limit = Math.Min(pagesListView.Items.Count, numPages);
+                for (int index = 0; index < limit; index++)
+                {
+                    int page = index + 1;
+                    PageItemStatus status = allPageStatuses[index];
+                    ListViewItem pageItem = pagesListView.Items[index];
+                    UpdateItemTag(pageItem, page, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
+                }
+            }
+            else
+            {
+                ApplyFilter(selectedFilter);
+            }
+
+            if ((string)filterComboBox.SelectedItem == allComboItem)
+            {
+                if (currentPage >= 1 && currentPage <= pagesListView.Items.Count)
+                {
+                    pagesListView.SelectedItems.Clear();
+                    pagesListView.Items[currentPage - 1].Selected = true;
+                    pagesListView.Items[currentPage - 1].EnsureVisible();
+                }
+            }
+            else
+            {
+                ListViewItem currentItem = FindListViewItemByPageNumber(currentPage);
+                if (currentItem != null)
+                {
+                    pagesListView.SelectedItems.Clear();
+                    currentItem.Selected = true;
+                    currentItem.EnsureVisible();
+                }
+            }
+
+            SelectThumbnailItemForCurrentPage(ensureVisible: true);
+        }
+
         private bool TrySaveAutoResumeProjectSnapshot(out string savedPath)
         {
             savedPath = string.Empty;
@@ -13341,23 +13744,20 @@ namespace AnonPDF
 
         private string GetShapeTypeDisplayName(VectorShapeType shapeType)
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            bool isPl = string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase);
-            bool isDe = string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase);
             switch (shapeType)
             {
                 case VectorShapeType.Region:
-                    return isPl ? "Region" : isDe ? "Region" : "Region";
+                    return LocalizedText("Vector_Shape_Region");
                 case VectorShapeType.Polyline:
-                    return isPl ? "Linia łamana" : isDe ? "Polylinie" : "Polyline";
+                    return LocalizedText("Vector_Shape_Polyline");
                 case VectorShapeType.Rectangle:
-                    return isPl ? "Prostokąt" : isDe ? "Rechteck" : "Rectangle";
+                    return LocalizedText("Vector_Shape_Rectangle");
                 case VectorShapeType.Ellipse:
-                    return isPl ? "Elipsa" : isDe ? "Ellipse" : "Ellipse";
+                    return LocalizedText("Vector_Shape_Ellipse");
                 case VectorShapeType.Triangle:
-                    return isPl ? "Trójkąt" : isDe ? "Dreieck" : "Triangle";
+                    return LocalizedText("Vector_Shape_Triangle");
                 case VectorShapeType.Arc:
-                    return isPl ? "Łuk" : isDe ? "Bogen" : "Arc";
+                    return LocalizedText("Vector_Shape_Arc");
                 default:
                     return shapeType.ToString();
             }
@@ -13365,78 +13765,27 @@ namespace AnonPDF
 
         private string GetShapeToolDialogTitle()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Dodaj kształt";
-            }
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Form hinzufuegen";
-            }
-            return "Add shape";
+            return LocalizedText("Menu_AddShape");
         }
 
         private string GetShapeTypeInputTooltip(VectorShapeType shapeType)
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                switch (shapeType)
-                {
-                    case VectorShapeType.Polyline:
-                        return "Linia łamana:\nLewy przycisk myszy dodaje węzły.\nDwuklik lub prawy przycisk myszy kończy.";
-                    case VectorShapeType.Region:
-                        return "Region:\nLewy przycisk myszy dodaje punkty.\nDwuklik lub prawy przycisk myszy zamyka.";
-                    case VectorShapeType.Rectangle:
-                        return "Prostokąt:\nUstaw dwa narożniki.\nALT wymusza kwadrat.";
-                    case VectorShapeType.Ellipse:
-                        return "Elipsa:\nUstaw początek i koniec obwiedni.\nALT wymusza okrąg.";
-                    case VectorShapeType.Triangle:
-                        return "Trójkąt:\nUstaw początek i koniec obwiedni.\nALT wymusza trójkąt równoboczny.";
-                    case VectorShapeType.Arc:
-                        return "Łuk:\nUstaw punkt początkowy,\nkońcowy i trzeci punkt łuku.";
-                    default:
-                        return "Kliknij na stronie,\naby rozpocząć rysowanie.";
-                }
-            }
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                switch (shapeType)
-                {
-                    case VectorShapeType.Polyline:
-                        return "Polylinie:\nLinke Maustaste setzt Knoten.\nDoppelklick oder rechte Maustaste beendet.";
-                    case VectorShapeType.Region:
-                        return "Region:\nLinke Maustaste setzt Punkte.\nDoppelklick oder rechte Maustaste schließt.";
-                    case VectorShapeType.Rectangle:
-                        return "Rechteck:\nZwei Eckpunkte setzen.\nALT erzwingt ein Quadrat.";
-                    case VectorShapeType.Ellipse:
-                        return "Ellipse:\nStart- und Endpunkt setzen.\nALT erzwingt einen Kreis.";
-                    case VectorShapeType.Triangle:
-                        return "Dreieck:\nStart- und Endpunkt setzen.\nALT erzwingt ein gleichseitiges Dreieck.";
-                    case VectorShapeType.Arc:
-                        return "Bogen:\nStartpunkt, Endpunkt\nund dritten Punkt setzen.";
-                    default:
-                        return "Auf der Seite klicken,\num die Form zu zeichnen.";
-                }
-            }
-
             switch (shapeType)
             {
                 case VectorShapeType.Polyline:
-                    return "Polyline:\nLeft mouse button adds nodes.\nDouble-click or right mouse button finishes.";
+                    return LocalizedText("Vector_Shape_Tooltip_Polyline");
                 case VectorShapeType.Region:
-                    return "Region:\nLeft mouse button adds points.\nDouble-click or right mouse button closes.";
+                    return LocalizedText("Vector_Shape_Tooltip_Region");
                 case VectorShapeType.Rectangle:
-                    return "Rectangle:\nSet two corners.\nALT enforces a square.";
+                    return LocalizedText("Vector_Shape_Tooltip_Rectangle");
                 case VectorShapeType.Ellipse:
-                    return "Ellipse:\nSet start and end of bounds.\nALT enforces a circle.";
+                    return LocalizedText("Vector_Shape_Tooltip_Ellipse");
                 case VectorShapeType.Triangle:
-                    return "Triangle:\nSet start and end of bounds.\nALT enforces an equilateral triangle.";
+                    return LocalizedText("Vector_Shape_Tooltip_Triangle");
                 case VectorShapeType.Arc:
-                    return "Arc:\nSet start, end,\nand a third arc point.";
+                    return LocalizedText("Vector_Shape_Tooltip_Arc");
                 default:
-                    return "Click on the page\nto start drawing.";
+                    return LocalizedText("Vector_Shape_DefaultTooltip");
             }
         }
 
@@ -13664,9 +14013,6 @@ namespace AnonPDF
             VectorShapeDefaults sourceDefaults = initialDefaults ?? activeVectorShapeDefaults;
             VectorShapeDefaults working = sourceDefaults?.Clone() ?? VectorShapeDefaults.CreateDefault();
             VectorShapeType selectedShape = working.ShapeType;
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            bool isPl = string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase);
-            bool isDe = string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase);
 
             using (var prompt = new Form())
             {
@@ -13686,7 +14032,7 @@ namespace AnonPDF
                     Left = 12,
                     Top = 12,
                     Width = 560,
-                    Text = isPl ? "Kształt:" : isDe ? "Form:" : "Shape:"
+                    Text = LocalizedText("Vector_Dialog_ShapeLabel")
                 };
 
                 var shapesPanel = new FlowLayoutPanel
@@ -13759,7 +14105,7 @@ namespace AnonPDF
                     shapesPanel.Controls.Add(button);
                 }
 
-                var labelStrokeColor = new Label { Left = 12, Top = 120, Width = 120, Text = isPl ? "Kolor linii:" : isDe ? "Linienfarbe:" : "Line color:" };
+                var labelStrokeColor = new Label { Left = 12, Top = 120, Width = 120, Text = LocalizedText("Vector_Dialog_StrokeColor") };
                 System.Drawing.Color strokeBaseColor = System.Drawing.Color.FromArgb(working.StrokeColorArgb);
                 var buttonStrokeColor = new Button
                 {
@@ -13786,11 +14132,11 @@ namespace AnonPDF
                     Left = 140,
                     Top = 146,
                     Width = 180,
-                    Text = isPl ? "Brak koloru linii" : isDe ? "Keine Linienfarbe" : "No line color",
+                    Text = LocalizedText("Vector_Dialog_NoStrokeColor"),
                     Checked = !HasVisibleVectorColor(working.StrokeColorArgb)
                 };
 
-                var labelStrokeWidth = new Label { Left = 300, Top = 120, Width = 95, Text = isPl ? "Grubość:" : isDe ? "Staerke:" : "Width:" };
+                var labelStrokeWidth = new Label { Left = 300, Top = 120, Width = 95, Text = LocalizedText("Vector_Dialog_StrokeWidth") };
                 var numericStrokeWidth = new NumericUpDown
                 {
                     Left = 398,
@@ -13803,7 +14149,7 @@ namespace AnonPDF
                     Value = (decimal)NormalizeVectorStrokeWidth(working.StrokeWidth)
                 };
 
-                var labelStrokeStyle = new Label { Left = 482, Top = 120, Width = 60, Text = isPl ? "Linia:" : isDe ? "Stil:" : "Style:" };
+                var labelStrokeStyle = new Label { Left = 482, Top = 120, Width = 60, Text = LocalizedText("Vector_Dialog_StrokeStyle") };
                 var comboStrokeStyle = new ComboBox
                 {
                     Left = 540,
@@ -13812,11 +14158,11 @@ namespace AnonPDF
                     DropDownStyle = ComboBoxStyle.DropDownList
                 };
                 comboStrokeStyle.DropDownWidth = 170;
-                comboStrokeStyle.Items.Add(isPl ? "Ciągła" : isDe ? "Durchgezogen" : "Solid");
-                comboStrokeStyle.Items.Add(isPl ? "Przerywana" : isDe ? "Gestrichelt" : "Dash");
-                comboStrokeStyle.Items.Add(isPl ? "Kropkowana" : isDe ? "Gepunktet" : "Dot");
-                comboStrokeStyle.Items.Add(isPl ? "Kreska-kropka" : isDe ? "Strich-Punkt" : "Dash-dot");
-                comboStrokeStyle.Items.Add(isPl ? "Kreska-kropka-kropka" : isDe ? "Strich-Punkt-Punkt" : "Dash-dot-dot");
+                comboStrokeStyle.Items.Add(LocalizedText("Vector_Dialog_StrokeStyle_Solid"));
+                comboStrokeStyle.Items.Add(LocalizedText("Vector_Dialog_StrokeStyle_Dash"));
+                comboStrokeStyle.Items.Add(LocalizedText("Vector_Dialog_StrokeStyle_Dot"));
+                comboStrokeStyle.Items.Add(LocalizedText("Vector_Dialog_StrokeStyle_DashDot"));
+                comboStrokeStyle.Items.Add(LocalizedText("Vector_Dialog_StrokeStyle_DashDotDot"));
                 switch (working.StrokeKind)
                 {
                     case VectorShapeStrokeKind.Dash:
@@ -13836,7 +14182,7 @@ namespace AnonPDF
                         break;
                 }
 
-                var labelFillColor = new Label { Left = 12, Top = 184, Width = 120, Text = isPl ? "Kolor wypełnienia:" : isDe ? "Fuellfarbe:" : "Fill color:" };
+                var labelFillColor = new Label { Left = 12, Top = 184, Width = 120, Text = LocalizedText("Vector_Dialog_FillColor") };
                 System.Drawing.Color fillBaseColor = System.Drawing.Color.FromArgb(working.FillColorArgb);
                 var buttonFillColor = new Button
                 {
@@ -13863,11 +14209,11 @@ namespace AnonPDF
                     Left = 140,
                     Top = 210,
                     Width = 200,
-                    Text = isPl ? "Brak koloru wypełnienia" : isDe ? "Keine Fuellfarbe" : "No fill color",
+                    Text = LocalizedText("Vector_Dialog_NoFillColor"),
                     Checked = !HasVisibleVectorColor(working.FillColorArgb) || NormalizeVectorFillOpacity(working.FillOpacity) <= 0f
                 };
 
-                var labelFillOpacity = new Label { Left = 300, Top = 184, Width = 95, Text = isPl ? "Wypełnienie (%):" : isDe ? "Fuellung (%):" : "Fill (%):" };
+                var labelFillOpacity = new Label { Left = 300, Top = 184, Width = 95, Text = LocalizedText("Vector_Dialog_FillOpacity") };
                 var numericFillOpacity = new NumericUpDown
                 {
                     Left = 398,
@@ -13879,7 +14225,7 @@ namespace AnonPDF
                     Increment = 5,
                     Value = (decimal)Math.Round(NormalizeVectorFillOpacity(working.FillOpacity) * 100f)
                 };
-                var labelFillPattern = new Label { Left = 482, Top = 184, Width = 60, Text = isPl ? "Wzór:" : isDe ? "Muster:" : "Pattern:" };
+                var labelFillPattern = new Label { Left = 482, Top = 184, Width = 60, Text = LocalizedText("Vector_Dialog_FillPattern") };
                 var comboFillPattern = new ComboBox
                 {
                     Left = 540,
@@ -13888,10 +14234,10 @@ namespace AnonPDF
                     DropDownStyle = ComboBoxStyle.DropDownList
                 };
                 comboFillPattern.DropDownWidth = 170;
-                comboFillPattern.Items.Add(isPl ? "Pełny" : isDe ? "Voll" : "Solid");
-                comboFillPattern.Items.Add(isPl ? "Ukośny" : isDe ? "Diagonal" : "Diagonal");
-                comboFillPattern.Items.Add(isPl ? "Krzyżowy" : isDe ? "Kreuz" : "Cross");
-                comboFillPattern.Items.Add(isPl ? "Kropki" : isDe ? "Punkte" : "Dots");
+                comboFillPattern.Items.Add(LocalizedText("Vector_Dialog_FillPattern_Solid"));
+                comboFillPattern.Items.Add(LocalizedText("Vector_Dialog_FillPattern_Diagonal"));
+                comboFillPattern.Items.Add(LocalizedText("Vector_Dialog_FillPattern_Cross"));
+                comboFillPattern.Items.Add(LocalizedText("Vector_Dialog_FillPattern_Dots"));
                 switch (working.FillPattern)
                 {
                     case VectorFillPatternKind.Diagonal:
@@ -13912,7 +14258,7 @@ namespace AnonPDF
                 {
                     patternBaseColor = System.Drawing.Color.Black;
                 }
-                var labelFillPatternColor = new Label { Left = 482, Top = 214, Width = 60, Text = isPl ? "Kolor:" : isDe ? "Farbe:" : "Color:" };
+                var labelFillPatternColor = new Label { Left = 482, Top = 214, Width = 60, Text = LocalizedText("Vector_Dialog_FillPatternColor") };
                 var buttonFillPatternColor = new Button
                 {
                     Left = 540,
@@ -13961,7 +14307,7 @@ namespace AnonPDF
                 };
 
                 var buttonOk = new Button { Left = 364, Top = 252, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
-                var buttonCancel = new Button { Left = 486, Top = 252, Width = 110, Text = isPl ? "Anuluj" : isDe ? "Abbrechen" : "Cancel", DialogResult = DialogResult.Cancel };
+                var buttonCancel = new Button { Left = 486, Top = 252, Width = 110, Text = GetCancelButtonText(), DialogResult = DialogResult.Cancel };
 
                 prompt.Controls.Add(labelShapes);
                 prompt.Controls.Add(shapesPanel);
@@ -14126,6 +14472,8 @@ namespace AnonPDF
             {
                 return false;
             }
+
+            BeginUndoCapture("Add shape");
 
             var shape = new VectorShapeObject
             {
@@ -14345,6 +14693,7 @@ namespace AnonPDF
 
                     if (IsPointInCommentResizeHandle(e.Location, hitNoteRect))
                     {
+                        BeginUndoCapture("Resize comment");
                         isResizingCommentNote = true;
                         commentNoteResizeChanged = false;
                         commentNoteToResize = hitComment;
@@ -14356,6 +14705,7 @@ namespace AnonPDF
                     }
                     else
                     {
+                        BeginUndoCapture("Move comment");
                         isMovingCommentNote = true;
                         commentNoteMoveChanged = false;
                         commentNoteToMove = hitComment;
@@ -14369,6 +14719,7 @@ namespace AnonPDF
 
                 if (isCommentCreationMode)
                 {
+                    BeginUndoCapture("Add comment");
                     selectedTextAnnotation = null;
                     annotationToMove = null;
                     isMoving = false;
@@ -14489,6 +14840,7 @@ namespace AnonPDF
 
                     if (!hitAnnotation.AnnotationIsLocked)
                     {
+                        BeginUndoCapture("Move text");
                         annotationToMove = hitAnnotation;
                         isMoving = true;
                         textMoveStartBounds = hitAnnotation.AnnotationBounds;
@@ -14627,6 +14979,7 @@ namespace AnonPDF
                     isMoving = false;
                     textMoveMouseOffset = PointF.Empty;
                     isDrawing = true;
+                    BeginUndoCapture(markerRadioButton.Checked ? "Add marker selection" : "Add box selection");
                     currentSelection = new System.Drawing.RectangleF(startPoint, Size.Empty);
                 }
                 pdfViewer.Invalidate();
@@ -15397,6 +15750,7 @@ namespace AnonPDF
             if (e.Button == MouseButtons.Left && suppressNextLeftMouseUpAfterEscape)
             {
                 suppressNextLeftMouseUpAfterEscape = false;
+                CancelUndoCapture();
                 isDrawing = false;
                 isMarkerCtrlBoxMode = false;
                 currentSelection = RectangleF.Empty;
@@ -15550,6 +15904,7 @@ namespace AnonPDF
 
                 if (isClickOnRasterIcon && rasterObjectForIcon != null)
                 {
+                    BeginUndoCapture("Edit object");
                     switch (clickedRasterIconType)
                     {
                         case RasterIconType.Edit:
@@ -15595,6 +15950,7 @@ namespace AnonPDF
 
                 if (isClickOnArrowIcon && arrowObjectForIcon != null)
                 {
+                    BeginUndoCapture("Edit object");
                     switch (clickedArrowIconType)
                     {
                         case ArrowIconType.Edit:
@@ -15637,6 +15993,7 @@ namespace AnonPDF
 
                 if (isClickOnVectorIcon && vectorShapeForIcon != null)
                 {
+                    BeginUndoCapture("Edit object");
                     switch (clickedVectorIconType)
                     {
                         case VectorIconType.Edit:
@@ -15680,6 +16037,7 @@ namespace AnonPDF
                 // If user clicked in icon button area
                 if (isClickOnIcon && annotationForIcon != null)
                 {
+                    BeginUndoCapture("Edit object");
                     // Call appropriate action depending on clicked button
                     if (clickedIconType == IconType.Edit)
                     {
@@ -15897,6 +16255,23 @@ namespace AnonPDF
         {
             DeactivateObjectCreationModes();
             BeginCommentCreationMode();
+        }
+
+        private void OnMouseUpFinalizeUndoCapture(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            if (suppressNextLeftMouseUpAfterEscape)
+            {
+                CancelUndoCapture();
+                suppressNextLeftMouseUpAfterEscape = false;
+                return;
+            }
+
+            CommitUndoCapture();
         }
 
         private void BeginCommentCreationMode()
@@ -16202,130 +16577,42 @@ namespace AnonPDF
 
         private string GetCommentDialogTitleText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Dodaj komentarz";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Kommentar hinzuf\u00fcgen";
-            }
-
-            return "Add comment";
+            return LocalizedText("Comment_Dialog_Title");
         }
 
         private string GetCommentDialogLabelText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Tre\u015b\u0107 komentarza:";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Kommentartext:";
-            }
-
-            return "Comment text:";
+            return LocalizedText("Comment_Dialog_Label");
         }
 
         private string GetDefaultCommentText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Komentarz";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Kommentar";
-            }
-
-            return "Comment";
+            return LocalizedText("Comment_DefaultText");
         }
 
         private string GetCommentHighlightColorLabelText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Kolor zaznaczenia:";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Markierungsfarbe:";
-            }
-
-            return "Highlight color:";
+            return LocalizedText("Comment_Label_HighlightColor");
         }
 
         private string GetCommentTextColorLabelText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Kolor tekstu:";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Textfarbe:";
-            }
-
-            return "Text color:";
+            return LocalizedText("Comment_Label_TextColor");
         }
 
         private string GetChooseColorText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Wybierz...";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Wählen...";
-            }
-
-            return "Choose...";
+            return LocalizedText("Comment_Button_ChooseColor");
         }
 
         private string GetEditCommentContextMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Edytuj komentarz";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Kommentar bearbeiten";
-            }
-
-            return "Edit comment";
+            return LocalizedText("Comment_Context_Edit");
         }
 
         private string GetDeleteCommentContextMenuText()
         {
-            string lang = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName;
-            if (string.Equals(lang, "pl", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Usu\u0144 komentarz";
-            }
-
-            if (string.Equals(lang, "de", StringComparison.OrdinalIgnoreCase))
-            {
-                return "Kommentar entfernen";
-            }
-
-            return "Delete comment";
+            return LocalizedText("Comment_Context_Delete");
         }
 
         private bool PromptForCommentText(
@@ -21289,6 +21576,7 @@ namespace AnonPDF
                         //Properties.Settings.Default.LastPapPath = inputProjectPath;
                         //Properties.Settings.Default.Save();
                         projectWasChangedAfterLastSave = false;
+                        ResetUndoRedoHistory(resetSavedStateSignature: true);
                         AddRecentFile(inputProjectPathTemp);
                     }
                     else
@@ -21296,6 +21584,7 @@ namespace AnonPDF
                         inputProjectPath = "";
                         lastSavedProjectName = "";
                         projectWasChangedAfterLastSave = true;
+                        ResetUndoRedoHistory();
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
                         saveProjectAsButton.Enabled = true;
@@ -21390,6 +21679,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = false;
             saveProjectButton.Enabled = false;
             saveProjectMenuItem.Enabled = false;
+                        MarkCurrentStateAsSavedBaseline();
                         Properties.Settings.Default.LastPapPath = lastSavedProjectName;
                         Properties.Settings.Default.Save();
                         UpdateWindowTitle();
@@ -22465,6 +22755,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = false;
                         saveProjectButton.Enabled = false;
                         saveProjectMenuItem.Enabled = false;
+                        MarkCurrentStateAsSavedBaseline();
                     }
                 }
                 catch (Exception ex)
@@ -22922,6 +23213,32 @@ namespace AnonPDF
 
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (keyData == (Keys.Control | Keys.Z))
+            {
+                if (IsTextInputFocused())
+                {
+                    return base.ProcessCmdKey(ref msg, keyData);
+                }
+
+                if (UndoLastAction())
+                {
+                    return true;
+                }
+            }
+
+            if (keyData == (Keys.Control | Keys.Y))
+            {
+                if (IsTextInputFocused())
+                {
+                    return base.ProcessCmdKey(ref msg, keyData);
+                }
+
+                if (RedoLastAction())
+                {
+                    return true;
+                }
+            }
+
             if (keyData == Keys.Escape)
             {
                 if (TryCancelActiveManipulationWithEscape())
@@ -22976,7 +23293,9 @@ namespace AnonPDF
                     return base.ProcessCmdKey(ref msg, keyData);
                 }
 
+                BeginUndoCapture("Rotate page");
                 RotateCurrentPageClockwise();
+                CommitUndoCapture();
                 return true;
             }
 
@@ -23014,11 +23333,13 @@ namespace AnonPDF
                     return base.ProcessCmdKey(ref msg, keyData);
                 }
 
+                BeginUndoCapture("Paste object");
                 bool externalClipboardContentAvailable = IsExternalClipboardContentAvailable();
                 if (HasNewerExternalClipboardData(externalClipboardContentAvailable) &&
                     TryHandleGlobalPasteShortcut())
                 {
                     preferObjectClipboardPaste = false;
+                    CommitUndoCapture();
                     return true;
                 }
 
@@ -23026,25 +23347,30 @@ namespace AnonPDF
                 // unless system clipboard changed afterwards.
                 if (preferObjectClipboardPaste && TryPasteObjectsFromInternalClipboard())
                 {
+                    CommitUndoCapture();
                     return true;
                 }
 
                 if (externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
                 {
                     preferObjectClipboardPaste = false;
+                    CommitUndoCapture();
                     return true;
                 }
 
                 if (TryPasteObjectsFromInternalClipboard())
                 {
+                    CommitUndoCapture();
                     return true;
                 }
 
                 if (!externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
                 {
                     preferObjectClipboardPaste = false;
+                    CommitUndoCapture();
                     return true;
                 }
+                CancelUndoCapture();
             }
 
             // Check if it's just Delete without modifiers
@@ -23055,11 +23381,17 @@ namespace AnonPDF
                     return false;  // we don't handle - pass on to control
 
                 // 2) If any object is active, delete that object first.
+                BeginUndoCapture("Delete");
                 if (TryDeleteActiveObjectByKeyboard())
+                {
+                    CommitUndoCapture();
                     return true;
+                }
 
                 // 2) Otherwise treat Delete as "delete page":
+                BeginUndoCapture("Delete page");
                 RemovePage();
+                CommitUndoCapture();
                 return true;     // handled, don't pass on
             }
 
@@ -23205,6 +23537,8 @@ namespace AnonPDF
                 return;
             }
 
+            BeginUndoCapture("Add image");
+
             using (var openFileDialog = new OpenFileDialog())
             {
                 openFileDialog.Filter = LocalizedText("Dialog_Filter_RasterImages");
@@ -23214,6 +23548,7 @@ namespace AnonPDF
 
                 if (openFileDialog.ShowDialog(this) != DialogResult.OK)
                 {
+                    CancelUndoCapture();
                     return;
                 }
 
@@ -23230,10 +23565,12 @@ namespace AnonPDF
                             embeddedBytes: null,
                             mimeType: GetRasterMimeTypeFromPath(selectedPath),
                             preferOneToOne: false);
+                        CommitUndoCapture();
                     }
                 }
                 catch (Exception ex)
                 {
+                    CancelUndoCapture();
                     ShowInfoMessage(LocalizedFormat("Err_RasterImageLoad", ex.Message));
                     LogDebug("Add raster image from file failed: " + ex);
                 }
@@ -24457,6 +24794,8 @@ namespace AnonPDF
                 return false;
             }
 
+            BeginUndoCapture("Edit shape");
+
             var points = vectorShape.Points.ToList();
             insertIndex = Math.Max(0, Math.Min(points.Count, insertIndex));
 
@@ -24484,6 +24823,7 @@ namespace AnonPDF
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
             pdfViewer.Invalidate();
+            CommitUndoCapture();
             return true;
         }
 
@@ -24506,6 +24846,8 @@ namespace AnonPDF
                 return false;
             }
 
+            BeginUndoCapture("Edit shape");
+
             var points = vectorShape.Points.ToList();
             points.RemoveAt(nodeIndex);
             vectorShape.Points = points;
@@ -24517,6 +24859,7 @@ namespace AnonPDF
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
             pdfViewer.Invalidate();
+            CommitUndoCapture();
             return true;
         }
 
@@ -25604,6 +25947,7 @@ namespace AnonPDF
             {
                 if (TryGetVectorHandleAtPoint(selectedVectorShape, location, out int selectedHandleIndex))
                 {
+                    BeginUndoCapture("Edit shape");
                     vectorShapeToMove = null;
                     vectorShapeToAdjust = selectedVectorShape;
                     vectorShapeToRotate = null;
@@ -25620,6 +25964,7 @@ namespace AnonPDF
 
                 if (TryGetVectorRotationHandleRect(selectedVectorShape, out RectangleF handleRect, out _) && handleRect.Contains(location))
                 {
+                    BeginUndoCapture("Rotate shape");
                     vectorShapeToMove = null;
                     vectorShapeToAdjust = null;
                     vectorShapeToRotate = selectedVectorShape;
@@ -25638,6 +25983,7 @@ namespace AnonPDF
 
                 if (IsPointNearVectorShape(selectedVectorShape, location))
                 {
+                    BeginUndoCapture("Move shape");
                     vectorShapeToMove = selectedVectorShape;
                     vectorShapeToAdjust = null;
                     vectorShapeToRotate = null;
@@ -25670,6 +26016,7 @@ namespace AnonPDF
 
             if (TryGetVectorHandleAtPoint(hitVectorShape, location, out int handleIndex))
             {
+                BeginUndoCapture("Edit shape");
                 vectorShapeToMove = null;
                 vectorShapeToAdjust = hitVectorShape;
                 vectorShapeToRotate = null;
@@ -25686,6 +26033,7 @@ namespace AnonPDF
 
             if (TryGetVectorRotationHandleRect(hitVectorShape, out RectangleF hitRotationHandleRect, out _) && hitRotationHandleRect.Contains(location))
             {
+                BeginUndoCapture("Rotate shape");
                 vectorShapeToMove = null;
                 vectorShapeToAdjust = null;
                 vectorShapeToRotate = hitVectorShape;
@@ -25703,6 +26051,7 @@ namespace AnonPDF
             }
 
             vectorShapeToMove = hitVectorShape;
+            BeginUndoCapture("Move shape");
             vectorShapeToAdjust = null;
             vectorShapeToRotate = null;
             isMovingVectorShape = true;
@@ -25724,6 +26073,7 @@ namespace AnonPDF
                 if (TryGetArrowHandleAtPoint(selectedArrowObject, location, out ArrowHandleType selectedHandle) &&
                     selectedHandle != ArrowHandleType.None)
                 {
+                    BeginUndoCapture("Edit arrow");
                     arrowObjectToAdjust = selectedArrowObject;
                     isAdjustingArrowHandle = true;
                     arrowHandleType = selectedHandle;
@@ -25759,6 +26109,7 @@ namespace AnonPDF
 
             if (TryGetArrowHandleAtPoint(hitArrow, location, out ArrowHandleType handleType) && handleType != ArrowHandleType.None)
             {
+                BeginUndoCapture("Edit arrow");
                 arrowObjectToAdjust = hitArrow;
                 isAdjustingArrowHandle = true;
                 arrowHandleType = handleType;
@@ -25770,6 +26121,7 @@ namespace AnonPDF
             }
 
             arrowObjectToMove = hitArrow;
+            BeginUndoCapture("Move arrow");
             isMovingArrowObject = true;
             arrowInteractionChanged = false;
             startPoint = location;
@@ -26969,6 +27321,7 @@ namespace AnonPDF
             }
 
             annotationToRotate = selectedTextAnnotation;
+            BeginUndoCapture("Rotate text");
             isRotatingTextAnnotation = true;
             textRotationInteractionChanged = false;
             textRotationStartValue = NormalizeRotation(selectedTextAnnotation.AnnotationRotation);
@@ -27753,6 +28106,7 @@ namespace AnonPDF
             {
                 if (TryGetRasterResizeHandleAtPoint(selectedRasterObject, location, out RasterResizeHandleType handle))
                 {
+                    BeginUndoCapture("Resize image");
                     rasterObjectToResize = selectedRasterObject;
                     isResizingRasterObject = true;
                     rasterResizeHandle = handle;
@@ -27769,6 +28123,7 @@ namespace AnonPDF
 
                 if (TryGetRasterRotationHandleRect(selectedRasterObject, out RectangleF handleRect, out _) && handleRect.Contains(location))
                 {
+                    BeginUndoCapture("Rotate image");
                     rasterObjectToRotate = selectedRasterObject;
                     isRotatingRasterObject = true;
                     rasterRotationStartValue = NormalizeRotation(selectedRasterObject.Rotation);
@@ -27802,6 +28157,7 @@ namespace AnonPDF
             }
 
             rasterObjectToMove = hitObject;
+            BeginUndoCapture("Move image");
             isMovingRasterObject = true;
             rasterMoveStartBounds = hitObject.Bounds;
             startPoint = location;
@@ -29070,7 +29426,9 @@ namespace AnonPDF
 
         private void RemovePageButton_Click(object sender, EventArgs e)
         {
+            BeginUndoCapture("Delete page");
             RemovePage();
+            CommitUndoCapture();
         }
 
 
@@ -30478,46 +30836,71 @@ namespace AnonPDF
             BeginVectorShapeCreation(selectedDefaults);
         }
 
+        private void UndoToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            UndoLastAction();
+        }
+
+        private void RedoToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            RedoLastAction();
+        }
+
         private void PasteObjectFromClipboardToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            BeginUndoCapture("Paste object");
             bool externalClipboardContentAvailable = IsExternalClipboardContentAvailable();
             if (HasNewerExternalClipboardData(externalClipboardContentAvailable) &&
                 TryHandleGlobalPasteShortcut())
             {
                 preferObjectClipboardPaste = false;
+                CommitUndoCapture();
                 return;
             }
 
             if (preferObjectClipboardPaste && TryPasteObjectsFromInternalClipboard())
             {
+                CommitUndoCapture();
                 return;
             }
 
             if (externalClipboardContentAvailable && TryHandleGlobalPasteShortcut())
             {
                 preferObjectClipboardPaste = false;
+                CommitUndoCapture();
                 return;
             }
 
             if (TryPasteObjectsFromInternalClipboard())
             {
+                CommitUndoCapture();
                 return;
             }
 
             if (!externalClipboardContentAvailable)
             {
-                TryHandleGlobalPasteShortcut();
+                if (TryHandleGlobalPasteShortcut())
+                {
+                    CommitUndoCapture();
+                    return;
+                }
             }
+
+            CancelUndoCapture();
         }
 
         private void DeletePageToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            BeginUndoCapture("Delete page");
             RemovePage();
+            CommitUndoCapture();
         }
 
         private void RotatePageMenuItem_Click(object sender, EventArgs e)
         {
+            BeginUndoCapture("Rotate page");
             RotateCurrentPageClockwise();
+            CommitUndoCapture();
         }
 
         private void CopyToClipboardToolStripMenuItem_Click(object sender, EventArgs e)

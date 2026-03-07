@@ -151,7 +151,7 @@
     <value>Ciemny turkus</value>
   </data>
   <data name="Menu_Help" xml:space="preserve">
-    <value>P&amp;omoc</value>
+    <value>?</value>
   </data>
   <data name="Menu_OpenPdf" xml:space="preserve">
     <value>Otwórz PDF</value>
@@ -211,7 +211,161 @@
     <value>Obróć stronę</value>
   </data>
   <data name="Menu_Add" xml:space="preserve">
-    <value>Dodaj</value>
+    <value>Narzędzia</value>
+  </data>
+  <data name="Menu_Undo" xml:space="preserve">
+    <value>Cofnij</value>
+  </data>
+  <data name="Menu_Redo" xml:space="preserve">
+    <value>Ponów</value>
+  </data>
+  <data name="Dialog_Button_Cancel" xml:space="preserve">
+    <value>Anuluj</value>
+  </data>
+  <data name="Dialog_Button_Yes" xml:space="preserve">
+    <value>Tak</value>
+  </data>
+  <data name="Dialog_CloseProject_Prompt" xml:space="preserve">
+    <value>Czy zapisać zmiany w projekcie?</value>
+  </data>
+  <data name="Dialog_CloseProject_Save" xml:space="preserve">
+    <value>Zapisz</value>
+  </data>
+  <data name="Dialog_CloseProject_DontSave" xml:space="preserve">
+    <value>Nie zapisuj</value>
+  </data>
+  <data name="Vector_Shape_Region" xml:space="preserve">
+    <value>Region</value>
+  </data>
+  <data name="Vector_Shape_Polyline" xml:space="preserve">
+    <value>Linia łamana</value>
+  </data>
+  <data name="Vector_Shape_Rectangle" xml:space="preserve">
+    <value>Prostokąt</value>
+  </data>
+  <data name="Vector_Shape_Ellipse" xml:space="preserve">
+    <value>Elipsa</value>
+  </data>
+  <data name="Vector_Shape_Triangle" xml:space="preserve">
+    <value>Trójkąt</value>
+  </data>
+  <data name="Vector_Shape_Arc" xml:space="preserve">
+    <value>Łuk</value>
+  </data>
+  <data name="Vector_Shape_DefaultTooltip" xml:space="preserve">
+    <value>Kliknij na stronie,
+aby rozpocząć rysowanie.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Polyline" xml:space="preserve">
+    <value>Linia łamana:
+Lewy przycisk myszy dodaje węzły.
+Dwuklik lub prawy przycisk myszy kończy.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Region" xml:space="preserve">
+    <value>Region:
+Lewy przycisk myszy dodaje punkty.
+Dwuklik lub prawy przycisk myszy zamyka.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Rectangle" xml:space="preserve">
+    <value>Prostokąt:
+Ustaw dwa narożniki.
+ALT wymusza kwadrat.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Ellipse" xml:space="preserve">
+    <value>Elipsa:
+Ustaw początek i koniec obwiedni.
+ALT wymusza okrąg.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Triangle" xml:space="preserve">
+    <value>Trójkąt:
+Ustaw początek i koniec obwiedni.
+ALT wymusza trójkąt równoboczny.</value>
+  </data>
+  <data name="Vector_Shape_Tooltip_Arc" xml:space="preserve">
+    <value>Łuk:
+Ustaw punkt początkowy,
+końcowy i trzeci punkt łuku.</value>
+  </data>
+  <data name="Vector_Dialog_ShapeLabel" xml:space="preserve">
+    <value>Kształt:</value>
+  </data>
+  <data name="Vector_Dialog_StrokeColor" xml:space="preserve">
+    <value>Kolor linii:</value>
+  </data>
+  <data name="Vector_Dialog_NoStrokeColor" xml:space="preserve">
+    <value>Brak koloru linii</value>
+  </data>
+  <data name="Vector_Dialog_StrokeWidth" xml:space="preserve">
+    <value>Grubość:</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle" xml:space="preserve">
+    <value>Linia:</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_Solid" xml:space="preserve">
+    <value>Ciągła</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_Dash" xml:space="preserve">
+    <value>Przerywana</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_Dot" xml:space="preserve">
+    <value>Kropkowana</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_DashDot" xml:space="preserve">
+    <value>Kreska-kropka</value>
+  </data>
+  <data name="Vector_Dialog_StrokeStyle_DashDotDot" xml:space="preserve">
+    <value>Kreska-kropka-kropka</value>
+  </data>
+  <data name="Vector_Dialog_FillColor" xml:space="preserve">
+    <value>Kolor wypełnienia:</value>
+  </data>
+  <data name="Vector_Dialog_NoFillColor" xml:space="preserve">
+    <value>Brak koloru wypełnienia</value>
+  </data>
+  <data name="Vector_Dialog_FillOpacity" xml:space="preserve">
+    <value>Wypełnienie (%):</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern" xml:space="preserve">
+    <value>Wzór:</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern_Solid" xml:space="preserve">
+    <value>Pełny</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern_Diagonal" xml:space="preserve">
+    <value>Ukośny</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern_Cross" xml:space="preserve">
+    <value>Krzyżowy</value>
+  </data>
+  <data name="Vector_Dialog_FillPattern_Dots" xml:space="preserve">
+    <value>Kropki</value>
+  </data>
+  <data name="Vector_Dialog_FillPatternColor" xml:space="preserve">
+    <value>Kolor:</value>
+  </data>
+  <data name="Comment_Dialog_Title" xml:space="preserve">
+    <value>Dodaj komentarz</value>
+  </data>
+  <data name="Comment_Dialog_Label" xml:space="preserve">
+    <value>Treść komentarza:</value>
+  </data>
+  <data name="Comment_DefaultText" xml:space="preserve">
+    <value>Komentarz</value>
+  </data>
+  <data name="Comment_Label_HighlightColor" xml:space="preserve">
+    <value>Kolor zaznaczenia:</value>
+  </data>
+  <data name="Comment_Label_TextColor" xml:space="preserve">
+    <value>Kolor tekstu:</value>
+  </data>
+  <data name="Comment_Button_ChooseColor" xml:space="preserve">
+    <value>Wybierz...</value>
+  </data>
+  <data name="Comment_Context_Edit" xml:space="preserve">
+    <value>Edytuj komentarz</value>
+  </data>
+  <data name="Comment_Context_Delete" xml:space="preserve">
+    <value>Usuń komentarz</value>
   </data>
   <data name="Menu_AddText" xml:space="preserve">
     <value>Dodaj napis</value>
