@@ -115,6 +115,7 @@ namespace AnonPDF
         private int duplicationGroupSequence;
         private System.Drawing.Point startPoint;
         private bool isDrawing;
+        private bool suppressNextLeftMouseUpAfterEscape;
         private bool isMarkerCtrlBoxMode;
         private bool isMoving;
         private bool isRotatingTextAnnotation;
@@ -243,7 +244,11 @@ namespace AnonPDF
         private VectorShapeObject vectorShapeToAdjust;
         private VectorShapeObject vectorShapeToRotate;
         private PointF textMoveMouseOffset;
+        private RectangleF textMoveStartBounds = RectangleF.Empty;
+        private RectangleF textRotationStartBounds = RectangleF.Empty;
         private PointF rasterMoveMouseOffset;
+        private RectangleF rasterMoveStartBounds = RectangleF.Empty;
+        private RectangleF rasterRotateStartBounds = RectangleF.Empty;
         private PointF arrowMoveStartMouseDoc;
         private PointF arrowMoveInitialStart;
         private PointF arrowMoveInitialEnd;
@@ -269,6 +274,7 @@ namespace AnonPDF
         private bool commentNoteResizeChanged;
         private CommentAnnotation commentNoteToResize;
         private PointF commentNoteResizeAnchorDoc = PointF.Empty;
+        private RectangleF commentNoteStartRectDoc = RectangleF.Empty;
         private readonly Dictionary<string, RectangleF> commentNoteRectsDoc = new Dictionary<string, RectangleF>(StringComparer.Ordinal);
         private const float CommentNoteResizeHandleSizePx = 10f;
         private VectorShapeType activeVectorShapeType = VectorShapeType.Polyline;
@@ -14293,6 +14299,7 @@ namespace AnonPDF
             }
             else if (e.Button == MouseButtons.Left)
             {
+                suppressNextLeftMouseUpAfterEscape = false;
                 startPoint = e.Location;
                 isMarkerCtrlBoxMode = false;
 
@@ -14341,6 +14348,7 @@ namespace AnonPDF
                         isResizingCommentNote = true;
                         commentNoteResizeChanged = false;
                         commentNoteToResize = hitComment;
+                        commentNoteStartRectDoc = hitNoteRect;
                         hitComment.NoteX = hitNoteRect.X;
                         hitComment.NoteY = hitNoteRect.Y;
                         commentNoteResizeAnchorDoc = new PointF(hitNoteRect.X, hitNoteRect.Y);
@@ -14351,6 +14359,7 @@ namespace AnonPDF
                         isMovingCommentNote = true;
                         commentNoteMoveChanged = false;
                         commentNoteToMove = hitComment;
+                        commentNoteStartRectDoc = hitNoteRect;
                         commentNoteMoveOffsetDoc = new PointF(docX - hitNoteRect.X, docY - hitNoteRect.Y);
                         this.Cursor = Cursors.SizeAll;
                     }
@@ -14482,6 +14491,7 @@ namespace AnonPDF
                     {
                         annotationToMove = hitAnnotation;
                         isMoving = true;
+                        textMoveStartBounds = hitAnnotation.AnnotationBounds;
                         PointF mouseDoc = new PointF(e.X / scaleFactor, e.Y / scaleFactor);
                         textMoveMouseOffset = new PointF(
                             mouseDoc.X - hitAnnotation.AnnotationBounds.X,
@@ -14492,6 +14502,7 @@ namespace AnonPDF
                     {
                         annotationToMove = null;
                         isMoving = false;
+                        textMoveStartBounds = RectangleF.Empty;
                         textMoveMouseOffset = PointF.Empty;
                         this.Cursor = Cursors.Default;
                     }
@@ -15383,6 +15394,20 @@ namespace AnonPDF
                 return;
             }
 
+            if (e.Button == MouseButtons.Left && suppressNextLeftMouseUpAfterEscape)
+            {
+                suppressNextLeftMouseUpAfterEscape = false;
+                isDrawing = false;
+                isMarkerCtrlBoxMode = false;
+                currentSelection = RectangleF.Empty;
+                if (!isMiddleMousePanning && !isVectorShapeCreationMode && !isCommentCreationMode)
+                {
+                    this.Cursor = Cursors.Default;
+                }
+                pdfViewer.Invalidate();
+                return;
+            }
+
              
             //if ((string)filterComboBox.SelectedItem == allComboItem)
             //{
@@ -15700,6 +15725,7 @@ namespace AnonPDF
                     if (isMoving)
                     {
                         isMoving = false;
+                        textMoveStartBounds = RectangleF.Empty;
                         textMoveMouseOffset = PointF.Empty;
                         this.Cursor = Cursors.Default;
                         projectWasChangedAfterLastSave = true;
@@ -15916,6 +15942,7 @@ namespace AnonPDF
             commentNoteResizeChanged = false;
             commentNoteToResize = null;
             commentNoteResizeAnchorDoc = PointF.Empty;
+            commentNoteStartRectDoc = RectangleF.Empty;
         }
 
         private bool IsPointInCommentResizeHandle(Point location, RectangleF noteRectDoc)
@@ -22669,8 +22696,245 @@ namespace AnonPDF
             );
         }
 
+        private bool TryCancelActiveDrawActionWithEscape()
+        {
+            bool cancelled = false;
+            bool drawingWasCancelled = false;
+
+            if (isDrawing)
+            {
+                isDrawing = false;
+                isMarkerCtrlBoxMode = false;
+                currentSelection = RectangleF.Empty;
+                suppressNextLeftMouseUpAfterEscape = true;
+                cancelled = true;
+                drawingWasCancelled = true;
+            }
+
+            if (isVectorShapeCreationMode)
+            {
+                if (vectorShapeDraftPoints.Count > 0)
+                {
+                    vectorShapeDraftPoints.Clear();
+                    vectorShapeDraftHoverActive = false;
+                    cancelled = true;
+                }
+                else
+                {
+                    EndVectorShapeCreationMode();
+                    cancelled = true;
+                }
+            }
+
+            if (isCommentCreationMode && !drawingWasCancelled)
+            {
+                EndCommentCreationMode();
+                cancelled = true;
+            }
+
+            if (cancelled)
+            {
+                pdfViewer.Invalidate();
+            }
+
+            return cancelled;
+        }
+
+        private bool TryCancelActiveManipulationWithEscape()
+        {
+            bool cancelled = false;
+
+            if (isMovingObjectGroup)
+            {
+                foreach (GroupMoveEntry entry in groupMoveEntries)
+                {
+                    if (entry == null)
+                    {
+                        continue;
+                    }
+
+                    switch (entry.Type)
+                    {
+                        case GroupMoveObjectType.Text:
+                            if (entry.Text != null)
+                            {
+                                entry.Text.AnnotationBounds = entry.Bounds;
+                            }
+                            break;
+                        case GroupMoveObjectType.Raster:
+                            if (entry.Raster != null)
+                            {
+                                entry.Raster.Bounds = entry.Bounds;
+                            }
+                            break;
+                        case GroupMoveObjectType.Arrow:
+                            if (entry.Arrow != null)
+                            {
+                                entry.Arrow.Start = entry.Start;
+                                entry.Arrow.End = entry.End;
+                            }
+                            break;
+                        case GroupMoveObjectType.VectorShape:
+                            if (entry.VectorShape != null && entry.Points != null)
+                            {
+                                entry.VectorShape.Points = entry.Points.Select(point => new PointF(point.X, point.Y)).ToList();
+                            }
+                            break;
+                    }
+                }
+
+                groupMoveChanged = false;
+                ResetGroupMoveState();
+                this.Cursor = Cursors.Default;
+                cancelled = true;
+            }
+
+            if (isResizingCommentNote && commentNoteToResize != null)
+            {
+                if (!commentNoteStartRectDoc.IsEmpty)
+                {
+                    commentNoteToResize.NoteX = commentNoteStartRectDoc.X;
+                    commentNoteToResize.NoteY = commentNoteStartRectDoc.Y;
+                    commentNoteToResize.NoteWidth = commentNoteStartRectDoc.Width;
+                    commentNoteToResize.NoteHeight = commentNoteStartRectDoc.Height;
+                }
+
+                ResetCommentNoteMoveState();
+                commentNoteRectsDoc.Clear();
+                this.Cursor = Cursors.Default;
+                cancelled = true;
+            }
+            else if (isMovingCommentNote && commentNoteToMove != null)
+            {
+                if (!commentNoteStartRectDoc.IsEmpty)
+                {
+                    commentNoteToMove.NoteX = commentNoteStartRectDoc.X;
+                    commentNoteToMove.NoteY = commentNoteStartRectDoc.Y;
+                }
+
+                ResetCommentNoteMoveState();
+                commentNoteRectsDoc.Clear();
+                this.Cursor = Cursors.Default;
+                cancelled = true;
+            }
+
+            if (isRotatingTextAnnotation && annotationToRotate != null)
+            {
+                annotationToRotate.AnnotationRotation = NormalizeRotation(textRotationStartValue);
+                if (!textRotationStartBounds.IsEmpty)
+                {
+                    annotationToRotate.AnnotationBounds = textRotationStartBounds;
+                }
+
+                textRotationInteractionChanged = false;
+                ResetTextRotationInteractionState();
+                this.Cursor = Cursors.Default;
+                cancelled = true;
+            }
+
+            if (isMoving && annotationToMove != null)
+            {
+                if (!textMoveStartBounds.IsEmpty)
+                {
+                    annotationToMove.AnnotationBounds = textMoveStartBounds;
+                }
+
+                isMoving = false;
+                annotationToMove = null;
+                textMoveMouseOffset = PointF.Empty;
+                textMoveStartBounds = RectangleF.Empty;
+                this.Cursor = Cursors.Default;
+                cancelled = true;
+            }
+
+            if (arrowMouseActionInProgress || isMovingArrowObject || isAdjustingArrowHandle)
+            {
+                ArrowObject arrowToRestore = arrowObjectToMove ?? arrowObjectToAdjust;
+                if (arrowToRestore != null)
+                {
+                    arrowToRestore.Start = arrowMoveInitialStart;
+                    arrowToRestore.End = arrowMoveInitialEnd;
+                }
+
+                arrowInteractionChanged = false;
+                ResetArrowInteractionState();
+                this.Cursor = Cursors.Default;
+                cancelled = true;
+            }
+
+            if (rasterMouseActionInProgress || isMovingRasterObject || isRotatingRasterObject || isResizingRasterObject)
+            {
+                if (isMovingRasterObject && rasterObjectToMove != null && HasPositiveSize(rasterMoveStartBounds))
+                {
+                    rasterObjectToMove.Bounds = rasterMoveStartBounds;
+                }
+
+                if (isRotatingRasterObject && rasterObjectToRotate != null)
+                {
+                    rasterObjectToRotate.Rotation = NormalizeRotation(rasterRotationStartValue);
+                    if (HasPositiveSize(rasterRotateStartBounds))
+                    {
+                        rasterObjectToRotate.Bounds = rasterRotateStartBounds;
+                    }
+                }
+
+                if (isResizingRasterObject && rasterObjectToResize != null && HasPositiveSize(rasterResizeStartBounds))
+                {
+                    rasterObjectToResize.Bounds = rasterResizeStartBounds;
+                }
+
+                ResetRasterInteractionState();
+                this.Cursor = Cursors.Default;
+                cancelled = true;
+            }
+
+            if (vectorMouseActionInProgress || isMovingVectorShape || isAdjustingVectorHandle || isRotatingVectorShape)
+            {
+                if (isMovingVectorShape && vectorShapeToMove != null && vectorMoveInitialPoints != null && vectorMoveInitialPoints.Count > 0)
+                {
+                    vectorShapeToMove.Points = vectorMoveInitialPoints.Select(point => new PointF(point.X, point.Y)).ToList();
+                }
+
+                if (isAdjustingVectorHandle && vectorShapeToAdjust != null && vectorMoveInitialPoints != null && vectorMoveInitialPoints.Count > 0)
+                {
+                    vectorShapeToAdjust.Points = vectorMoveInitialPoints.Select(point => new PointF(point.X, point.Y)).ToList();
+                }
+
+                if (isRotatingVectorShape && vectorShapeToRotate != null && vectorRotateInitialPoints != null && vectorRotateInitialPoints.Count > 0)
+                {
+                    vectorShapeToRotate.Points = vectorRotateInitialPoints.Select(point => new PointF(point.X, point.Y)).ToList();
+                }
+
+                vectorInteractionChanged = false;
+                ResetVectorInteractionState();
+                this.Cursor = Cursors.Default;
+                cancelled = true;
+            }
+
+            if (cancelled)
+            {
+                suppressNextLeftMouseUpAfterEscape = true;
+                pdfViewer.Invalidate();
+            }
+
+            return cancelled;
+        }
+
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
         {
+            if (keyData == Keys.Escape)
+            {
+                if (TryCancelActiveManipulationWithEscape())
+                {
+                    return true;
+                }
+
+                if (TryCancelActiveDrawActionWithEscape())
+                {
+                    return true;
+                }
+            }
+
             if (keyData == Keys.F11)
             {
                 SetFullScreen(!isFullScreen);
@@ -23451,6 +23715,8 @@ namespace AnonPDF
             rasterResizeHandle = RasterResizeHandleType.None;
             rasterMouseActionInProgress = false;
             rasterMoveMouseOffset = PointF.Empty;
+            rasterMoveStartBounds = RectangleF.Empty;
+            rasterRotateStartBounds = RectangleF.Empty;
             rasterResizeStartBounds = RectangleF.Empty;
             rasterResizeAnchorWorld = PointF.Empty;
             rasterResizeStartRotation = 0;
@@ -23469,6 +23735,7 @@ namespace AnonPDF
             textRotationStartValue = 0;
             textRotationStartAngle = 0f;
             textRotationStartCenterDoc = PointF.Empty;
+            textRotationStartBounds = RectangleF.Empty;
         }
 
         private void ResetArrowInteractionState()
@@ -25460,6 +25727,8 @@ namespace AnonPDF
                     arrowObjectToAdjust = selectedArrowObject;
                     isAdjustingArrowHandle = true;
                     arrowHandleType = selectedHandle;
+                    arrowMoveInitialStart = selectedArrowObject.Start;
+                    arrowMoveInitialEnd = selectedArrowObject.End;
                     arrowInteractionChanged = false;
                     this.Cursor = GetArrowHandleCursor(selectedArrowObject, selectedHandle);
                     return true;
@@ -25493,6 +25762,8 @@ namespace AnonPDF
                 arrowObjectToAdjust = hitArrow;
                 isAdjustingArrowHandle = true;
                 arrowHandleType = handleType;
+                arrowMoveInitialStart = hitArrow.Start;
+                arrowMoveInitialEnd = hitArrow.End;
                 arrowInteractionChanged = false;
                 this.Cursor = GetArrowHandleCursor(hitArrow, handleType);
                 return true;
@@ -26701,6 +26972,7 @@ namespace AnonPDF
             isRotatingTextAnnotation = true;
             textRotationInteractionChanged = false;
             textRotationStartValue = NormalizeRotation(selectedTextAnnotation.AnnotationRotation);
+            textRotationStartBounds = selectedTextAnnotation.AnnotationBounds;
             textRotationStartCenterDoc = new PointF(
                 selectedTextAnnotation.AnnotationBounds.X + (selectedTextAnnotation.AnnotationBounds.Width / 2f),
                 selectedTextAnnotation.AnnotationBounds.Y + (selectedTextAnnotation.AnnotationBounds.Height / 2f));
@@ -27500,6 +27772,7 @@ namespace AnonPDF
                     rasterObjectToRotate = selectedRasterObject;
                     isRotatingRasterObject = true;
                     rasterRotationStartValue = NormalizeRotation(selectedRasterObject.Rotation);
+                    rasterRotateStartBounds = selectedRasterObject.Bounds;
                     rasterRotationStartAngle = GetAngleDegrees(GetRasterObjectScreenCenter(selectedRasterObject), location);
                     this.Cursor = Cursors.Hand;
                     return true;
@@ -27530,6 +27803,7 @@ namespace AnonPDF
 
             rasterObjectToMove = hitObject;
             isMovingRasterObject = true;
+            rasterMoveStartBounds = hitObject.Bounds;
             startPoint = location;
             PointF mouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
             rasterMoveMouseOffset = new PointF(mouseDoc.X - hitObject.Bounds.X, mouseDoc.Y - hitObject.Bounds.Y);
