@@ -469,6 +469,9 @@ and a third arc point.</value>
   <data name="Menu_Help_Help" xml:space="preserve">
     <value>Help</value>
   </data>
+  <data name="Menu_Help_WhatsNew" xml:space="preserve">
+    <value>What's new?</value>
+  </data>
   <data name="Menu_Help_Tutorial" xml:space="preserve">
     <value>Tutorial</value>
   </data>
@@ -477,6 +480,9 @@ and a third arc point.</value>
   </data>
   <data name="Menu_Help_About" xml:space="preserve">
     <value>About</value>
+  </data>
+  <data name="Menu_Help_Licenses" xml:space="preserve">
+    <value>Licenses</value>
   </data>
   <data name="Menu_Help_ShowLicense" xml:space="preserve">
     <value>Show License</value>
@@ -880,6 +886,27 @@ The application will close.</value>
   </data>
   <data name="Msg_NoticesNotFound" xml:space="preserve">
     <value>Third-party notices file "THIRD-PARTY-NOTICES.md" was not found in the application folder.</value>
+  </data>
+  <data name="Dialog_Licenses_Title" xml:space="preserve">
+    <value>Licenses</value>
+  </data>
+  <data name="Dialog_Licenses_Source" xml:space="preserve">
+    <value>Type:</value>
+  </data>
+  <data name="Dialog_Licenses_Option_License" xml:space="preserve">
+    <value>Application license</value>
+  </data>
+  <data name="Dialog_Licenses_Option_ThirdParty" xml:space="preserve">
+    <value>Third-party components</value>
+  </data>
+  <data name="Dialog_Licenses_Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="Dialog_Licenses_FileNotFound" xml:space="preserve">
+    <value>File not found: {0}</value>
+  </data>
+  <data name="Dialog_Licenses_ReadError" xml:space="preserve">
+    <value>Failed to read file: {0}</value>
   </data>
   <data name="EditText_Title" xml:space="preserve">
     <value>Add text</value>

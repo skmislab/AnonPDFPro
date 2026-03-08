@@ -4746,6 +4746,10 @@ namespace AnonPDF
 
             // Help menu
             helpMenuItem.Text = Resources.Menu_Help_Help;
+            if (whatsNewMenuItem != null)
+            {
+                whatsNewMenuItem.Text = LocalizedText("Menu_Help_WhatsNew");
+            }
             if (checkForUpdatesToolStripMenuItem != null)
             {
                 checkForUpdatesToolStripMenuItem.Text = LocalizedText("Menu_Help_CheckForUpdates");
@@ -4757,8 +4761,7 @@ namespace AnonPDF
             tutorialMenuItem.Text = Resources.Menu_Help_Tutorial;
             diagnosticModeMenuItem.Text = Resources.Menu_Help_DiagnosticMode;
             aboutMenuItem.Text = Resources.Menu_Help_About;
-            showLicenseToolStripMenuItem.Text = Resources.Menu_Help_ShowLicense;
-            thirdPartyNoticesToolStripMenuItem.Text = Resources.Menu_Help_ThirdParty;
+            showLicenseToolStripMenuItem.Text = LocalizedText("Menu_Help_Licenses");
 
             // Common buttons (partial coverage)
             try { buttonRedactText.Text = Resources.UI_Button_SavePdf; } catch { }
@@ -23404,21 +23407,26 @@ namespace AnonPDF
             }
         }
 
-        private void ShowLicenseToolStripMenuItem_Click(object sender, EventArgs e)
+        private static string GetWhatsNewPageUrl()
+        {
+            string serverBaseUrl = LicenseManager.Config?.ServerBaseUrl;
+            if (string.IsNullOrWhiteSpace(serverBaseUrl))
+            {
+                return "https://misart.pl/anonpdfpro/whats-new.html";
+            }
+
+            return serverBaseUrl.TrimEnd('/') + "/whats-new.html";
+        }
+
+        private void WhatsNewMenuItem_Click(object sender, EventArgs e)
         {
             try
             {
-                string licensePath = Path.Combine(Application.StartupPath, "LICENSE");
-                if (!File.Exists(licensePath))
+                var psi = new ProcessStartInfo
                 {
-                    MessageBox.Show(this,
-                        Resources.Msg_LicenseNotFound,
-                        Resources.Title_Error,
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
-                    return;
-                }
-                var psi = new ProcessStartInfo { FileName = licensePath, UseShellExecute = true };
+                    FileName = GetWhatsNewPageUrl(),
+                    UseShellExecute = true
+                };
                 Process.Start(psi);
             }
             catch (Exception ex)
@@ -23428,6 +23436,92 @@ namespace AnonPDF
                     Resources.Title_Error,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+            }
+        }
+
+        private void ShowLicenseToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            using (var dialog = new Form())
+            using (var sourceLabel = new Label())
+            using (var sourceComboBox = new ComboBox())
+            using (var contentTextBox = new TextBox())
+            using (var closeButton = new Button())
+            {
+                dialog.Text = LocalizedText("Dialog_Licenses_Title");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.Sizable;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = true;
+                dialog.ShowInTaskbar = false;
+                dialog.Size = new Size(900, 640);
+                dialog.MinimumSize = new Size(700, 500);
+
+                sourceLabel.AutoSize = true;
+                sourceLabel.Text = LocalizedText("Dialog_Licenses_Source");
+                sourceLabel.Location = new Point(12, 15);
+
+                sourceComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+                sourceComboBox.Location = new Point(130, 11);
+                sourceComboBox.Size = new Size(740, 24);
+                sourceComboBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                sourceComboBox.Items.Add(LocalizedText("Dialog_Licenses_Option_License"));
+                sourceComboBox.Items.Add(LocalizedText("Dialog_Licenses_Option_ThirdParty"));
+
+                contentTextBox.Multiline = true;
+                contentTextBox.ReadOnly = true;
+                contentTextBox.ScrollBars = ScrollBars.Both;
+                contentTextBox.WordWrap = false;
+                contentTextBox.Font = new Font("Consolas", 10F, FontStyle.Regular, GraphicsUnit.Point);
+                contentTextBox.Location = new Point(12, 44);
+                contentTextBox.Size = new Size(858, 510);
+                contentTextBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+
+                closeButton.Text = LocalizedText("Dialog_Licenses_Close");
+                closeButton.Size = new Size(120, 32);
+                closeButton.Location = new Point(750, 562);
+                closeButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+                closeButton.DialogResult = DialogResult.OK;
+
+                dialog.AcceptButton = closeButton;
+                dialog.CancelButton = closeButton;
+
+                void LoadSelectedContent()
+                {
+                    string selectedFileName = sourceComboBox.SelectedIndex == 1
+                        ? "THIRD-PARTY-NOTICES.md"
+                        : "LICENSE";
+
+                    string path = Path.Combine(Application.StartupPath, selectedFileName);
+                    if (!File.Exists(path))
+                    {
+                        contentTextBox.Text = string.Format(LocalizedText("Dialog_Licenses_FileNotFound"), selectedFileName);
+                        return;
+                    }
+
+                    try
+                    {
+                        string text = File.ReadAllText(path);
+                        // Normalize line endings so multi-line display is consistent for LF/CRLF files.
+                        text = text.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", Environment.NewLine);
+                        contentTextBox.Text = text;
+                        contentTextBox.SelectionStart = 0;
+                        contentTextBox.SelectionLength = 0;
+                    }
+                    catch (Exception ex)
+                    {
+                        contentTextBox.Text = string.Format(LocalizedText("Dialog_Licenses_ReadError"), ex.Message);
+                    }
+                }
+
+                sourceComboBox.SelectedIndexChanged += (s, args) => LoadSelectedContent();
+
+                dialog.Controls.Add(sourceLabel);
+                dialog.Controls.Add(sourceComboBox);
+                dialog.Controls.Add(contentTextBox);
+                dialog.Controls.Add(closeButton);
+
+                sourceComboBox.SelectedIndex = 0;
+                dialog.ShowDialog(this);
             }
         }
 

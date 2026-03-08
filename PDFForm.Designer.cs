@@ -130,6 +130,7 @@
             this.ignorePdfRestrictionsToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.menuHelpItem = new System.Windows.Forms.ToolStripMenuItem();
             this.helpMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.whatsNewMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.showLicenseToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.thirdPartyNoticesToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.tutorialMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -1257,8 +1258,8 @@
             // 
             this.menuHelpItem.DropDownItems.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.helpMenuItem,
+            this.whatsNewMenuItem,
             this.showLicenseToolStripMenuItem,
-            this.thirdPartyNoticesToolStripMenuItem,
             this.tutorialMenuItem,
             this.diagnosticModeMenuItem,
             this.aboutMenuItem});
@@ -1274,11 +1275,18 @@
             this.helpMenuItem.Text = Res("Menu_Help_Help");
             this.helpMenuItem.Click += new System.EventHandler(this.HelpToolStripMenuItem_Click);
             // 
+            // whatsNewMenuItem
+            // 
+            this.whatsNewMenuItem.Name = "whatsNewMenuItem";
+            this.whatsNewMenuItem.Size = new System.Drawing.Size(216, 22);
+            this.whatsNewMenuItem.Text = Res("Menu_Help_WhatsNew");
+            this.whatsNewMenuItem.Click += new System.EventHandler(this.WhatsNewMenuItem_Click);
+            // 
             // showLicenseToolStripMenuItem
             // 
             this.showLicenseToolStripMenuItem.Name = "showLicenseToolStripMenuItem";
             this.showLicenseToolStripMenuItem.Size = new System.Drawing.Size(216, 22);
-            this.showLicenseToolStripMenuItem.Text = Res("Menu_Help_ShowLicense");
+            this.showLicenseToolStripMenuItem.Text = Res("Menu_Help_Licenses");
             this.showLicenseToolStripMenuItem.Click += new System.EventHandler(this.ShowLicenseToolStripMenuItem_Click);
             // 
             // thirdPartyNoticesToolStripMenuItem
@@ -1557,6 +1565,7 @@
         private System.Windows.Forms.Button zoomMaxButton;
         private System.Windows.Forms.ToolStripMenuItem menuHelpItem;
         private System.Windows.Forms.ToolStripMenuItem helpMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem whatsNewMenuItem;
         private System.Windows.Forms.ToolStripMenuItem aboutMenuItem;
         private ThemedCheckBox openSavedPDFCheckBox;
         private System.Windows.Forms.ToolStripMenuItem openLastPdfProjectToolStripMenuItem;

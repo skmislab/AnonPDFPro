@@ -469,6 +469,9 @@ końcowy i trzeci punkt łuku.</value>
   <data name="Menu_Help_Help" xml:space="preserve">
     <value>Instrukcja</value>
   </data>
+  <data name="Menu_Help_WhatsNew" xml:space="preserve">
+    <value>Co nowego?</value>
+  </data>
   <data name="Menu_Help_Tutorial" xml:space="preserve">
     <value>Samouczek</value>
   </data>
@@ -477,6 +480,9 @@ końcowy i trzeci punkt łuku.</value>
   </data>
   <data name="Menu_Help_About" xml:space="preserve">
     <value>O aplikacji</value>
+  </data>
+  <data name="Menu_Help_Licenses" xml:space="preserve">
+    <value>Licencje</value>
   </data>
   <data name="Menu_Help_ShowLicense" xml:space="preserve">
     <value>Pokaż licencję</value>
@@ -880,6 +886,27 @@ Aplikacja zostanie zamknięta.</value>
   </data>
   <data name="Msg_NoticesNotFound" xml:space="preserve">
     <value>Plik z informacjami o komponentach "THIRD-PARTY-NOTICES.md" nie został znaleziony w folderze aplikacji.</value>
+  </data>
+  <data name="Dialog_Licenses_Title" xml:space="preserve">
+    <value>Licencje</value>
+  </data>
+  <data name="Dialog_Licenses_Source" xml:space="preserve">
+    <value>Rodzaj:</value>
+  </data>
+  <data name="Dialog_Licenses_Option_License" xml:space="preserve">
+    <value>Licencja aplikacji</value>
+  </data>
+  <data name="Dialog_Licenses_Option_ThirdParty" xml:space="preserve">
+    <value>Komponenty osób trzecich</value>
+  </data>
+  <data name="Dialog_Licenses_Close" xml:space="preserve">
+    <value>Zamknij</value>
+  </data>
+  <data name="Dialog_Licenses_FileNotFound" xml:space="preserve">
+    <value>Nie znaleziono pliku: {0}</value>
+  </data>
+  <data name="Dialog_Licenses_ReadError" xml:space="preserve">
+    <value>Nie udało się odczytać pliku: {0}</value>
   </data>
   <data name="EditText_Title" xml:space="preserve">
     <value>Edytuj napis</value>
