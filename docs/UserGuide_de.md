@@ -212,3 +212,17 @@ Sehr große Dokumente oder viele Objekte können die Verarbeitung verlangsamen. 
 # 8. Zusammenfassung
 
 AnonPDF Pro ermöglicht eine schnelle und nachvollziehbare Bearbeitung von PDF-Dokumenten für Veröffentlichung und Weitergabe. Durch Projekte, Objektwerkzeuge, Fußnoten und flexible Exportoptionen ist die Anwendung für den professionellen Einsatz in Verwaltung und Organisationen ausgelegt.
+
+# 9. Neue Funktionen
+
+In den letzten Versionen wurden u. a. ergänzt:
+
+- Drucken über das Menü `Datei` (`CTRL+P`) mit Auswahl: aktuelle Seite, Seitenbereich oder gesamtes Dokument.
+- Option `Seitenbereich als PDF speichern` im Menü `Datei`, standardmäßig mit der aktuellen Seite vorbelegt.
+- Zwei Seitenansicht-Tabs rechts: `Seitenliste` und `Miniaturen`.
+- Dynamische Erzeugung von Miniaturen sowie Miniatur-Cache für bessere Leistung bei großen Dokumenten.
+- Speicherung des zuletzt gewählten rechten Tabs (`Seitenliste` / `Miniaturen`).
+- Speicherung der Breite des rechten Panels zwischen Programmstarts.
+- Speicherung und Wiederherstellung der Scroll-Positionen in den rechten Panels (`Seitenliste` und `Miniaturen`) beim Fortsetzen eines Projekts.
+- Erweiterte Kontextmenüs für Markierungen und Objekte (Kopieren, Ausschneiden, Duplizieren, duplizierte Kopien löschen).
+- `Rückgängig` (`CTRL+Z`) und `Wiederholen` (`CTRL+Y`).

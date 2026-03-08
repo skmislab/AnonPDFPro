@@ -238,3 +238,17 @@ Project files (.pap) store redaction areas as JSON internally. Make sure you ope
 # 8. Summary
 
 AnonPDF Pro provides a quick and intuitive way to remove selected areas in PDF documents. Saving and reloading projects enables staged processing and makes it easier to prepare multiple documents consistently. This helps protect sensitive information when sharing PDF materials.
+
+# 9. New Features
+
+Recent versions include:
+
+- Printing from the `File` menu (`CTRL+P`) with range options: current page, selected page range, or whole document.
+- `Save page range to PDF` in the `File` menu, with the current page prefilled by default.
+- Two page preview tabs on the right: `Page List` and `Thumbnails`.
+- Dynamic thumbnail generation plus thumbnail cache for better performance on large documents.
+- Remembering the last selected right-side tab (`Page List` / `Thumbnails`).
+- Remembering right panel width between application launches.
+- Remembering and restoring scroll positions in right panels (`Page List` and `Thumbnails`) when resuming a project.
+- Extended context menus for selections and objects (copy, cut, duplicate, remove duplicated copies).
+- `Undo` (`CTRL+Z`) and `Redo` (`CTRL+Y`).

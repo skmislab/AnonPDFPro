@@ -264,3 +264,17 @@ Pliki .app zawierają wewnętrzny zapis zaznaczeń w postaci JSON. Upewnij się,
 # 8. Podsumowanie
 
 Aplikacja AnonPDF Pro pozwala w szybki i intuicyjny sposób usuwać wybrane obszary w dokumentach PDF. Zapisywanie i ponowne wczytywanie projektów umożliwia etapowe przygotowanie wielu dokumentów. Dzięki temu narzędziu łatwiej zadbasz o ochronę danych wrażliwych w dystrybuowanych materiałach.
+
+# 9. Nowe funkcjonalności
+
+W ostatnich wersjach dodano m.in.:
+
+- Drukowanie z menu `Plik` (`CTRL+P`) z wyborem: bieżąca strona, zakres stron lub cały dokument.
+- Opcję `Zapisz zakres stron do PDF` (menu `Plik`) z domyślnym zakresem ustawionym na bieżącą stronę.
+- Dwie zakładki podglądu stron po prawej stronie: `Lista stron` i `Miniatury`.
+- Dynamiczne generowanie miniaturek stron oraz pamięć podręczną miniaturek dla szybszej pracy na dużych dokumentach.
+- Zapamiętywanie ostatnio wybranej zakładki po prawej stronie (`Lista stron` / `Miniatury`).
+- Zapamiętywanie szerokości prawego panelu między uruchomieniami aplikacji.
+- Zapamiętywanie i odtwarzanie pozycji przewijania w prawych panelach (`Lista stron` i `Miniatury`) po wznowieniu pracy z projektem.
+- Rozszerzone menu kontekstowe dla zaznaczeń i obiektów (m.in. kopiowanie, wycinanie, powielanie, usuwanie kopii).
+- Funkcje `Cofnij` (`CTRL+Z`) i `Ponów` (`CTRL+Y`).
