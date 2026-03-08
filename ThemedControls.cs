@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Windows.Forms;
 
 namespace AnonPDF
@@ -7,45 +8,117 @@ namespace AnonPDF
     internal sealed class ThemedCheckBox : CheckBox
     {
         public Color DisabledForeColor { get; set; } = SystemColors.GrayText;
+        public Color AccentColor { get; set; } = SystemColors.Highlight;
+        public Color BorderColor { get; set; } = SystemColors.ControlDark;
+
+        public ThemedCheckBox()
+        {
+            SetStyle(
+                ControlStyles.UserPaint |
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.SupportsTransparentBackColor,
+                true);
+            UseVisualStyleBackColor = false;
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnPaint(e);
+            e.Graphics.Clear(BackColor);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-            if (Enabled)
-            {
-                return;
-            }
-
-            DrawDisabledText(e.Graphics);
-        }
-
-        private void DrawDisabledText(Graphics graphics)
-        {
-            if (string.IsNullOrEmpty(Text))
-            {
-                return;
-            }
-
-            var state = GetDisabledState();
-            var glyphSize = CheckBoxRenderer.GetGlyphSize(graphics, state);
-            var glyphRect = GetGlyphRectangle(ClientRectangle, glyphSize, CheckAlign);
+            var glyphRect = GetGlyphRectangle(ClientRectangle, GetGlyphSize(), CheckAlign);
             var textRect = GetTextRectangle(ClientRectangle, glyphRect, CheckAlign);
             var flags = GetTextFormatFlags(RightToLeft, UseMnemonic);
 
-            TextRenderer.DrawText(graphics, Text, Font, textRect, DisabledForeColor, BackColor, flags);
+            DrawCheckGlyph(e.Graphics, glyphRect);
+
+            Color textColor = Enabled ? ForeColor : DisabledForeColor;
+            TextRenderer.DrawText(e.Graphics, Text ?? string.Empty, Font, textRect, textColor, BackColor, flags);
+
+            if (Focused && ShowFocusCues)
+            {
+                ControlPaint.DrawFocusRectangle(e.Graphics, textRect, textColor, BackColor);
+            }
         }
 
-        private System.Windows.Forms.VisualStyles.CheckBoxState GetDisabledState()
+        private Size GetGlyphSize()
         {
-            if (CheckState == CheckState.Indeterminate)
+            int side = Math.Max(13, Math.Min(18, Font.Height - 1));
+            return new Size(side, side);
+        }
+
+        private void DrawCheckGlyph(Graphics graphics, Rectangle glyphRect)
+        {
+            Color normalBorderColor = DarkenColor(BorderColor, 0.18f);
+            Color borderColor = Enabled ? normalBorderColor : ControlPaint.Light(normalBorderColor);
+            Color accentColor = Enabled ? AccentColor : ControlPaint.Light(AccentColor);
+            Color boxBackColor = Enabled ? BackColor : ControlPaint.Light(BackColor);
+
+            using (var backBrush = new SolidBrush(boxBackColor))
+            using (var borderPen = new Pen(borderColor, 1f))
             {
-                return System.Windows.Forms.VisualStyles.CheckBoxState.MixedDisabled;
+                graphics.FillRectangle(backBrush, glyphRect);
+                graphics.DrawRectangle(borderPen, glyphRect.X, glyphRect.Y, glyphRect.Width - 1, glyphRect.Height - 1);
             }
 
-            return CheckState == CheckState.Checked
-                ? System.Windows.Forms.VisualStyles.CheckBoxState.CheckedDisabled
-                : System.Windows.Forms.VisualStyles.CheckBoxState.UncheckedDisabled;
+            if (CheckState == CheckState.Indeterminate)
+            {
+                Rectangle indeterminateRect = Rectangle.Inflate(glyphRect, -3, -3);
+                using (var accentBrush = new SolidBrush(accentColor))
+                {
+                    graphics.FillRectangle(accentBrush, indeterminateRect);
+                }
+                return;
+            }
+
+            if (CheckState != CheckState.Checked)
+            {
+                return;
+            }
+
+            Rectangle fillRect = Rectangle.Inflate(glyphRect, -2, -2);
+            using (var accentBrush = new SolidBrush(accentColor))
+            {
+                graphics.FillRectangle(accentBrush, fillRect);
+            }
+
+            Color checkColor = GetContrastColor(accentColor);
+            using (var checkPen = new Pen(checkColor, 2f))
+            {
+                checkPen.StartCap = LineCap.Round;
+                checkPen.EndCap = LineCap.Round;
+
+                int x1 = glyphRect.Left + (int)(glyphRect.Width * 0.24f);
+                int y1 = glyphRect.Top + (int)(glyphRect.Height * 0.55f);
+                int x2 = glyphRect.Left + (int)(glyphRect.Width * 0.44f);
+                int y2 = glyphRect.Top + (int)(glyphRect.Height * 0.74f);
+                int x3 = glyphRect.Left + (int)(glyphRect.Width * 0.76f);
+                int y3 = glyphRect.Top + (int)(glyphRect.Height * 0.30f);
+
+                graphics.DrawLines(checkPen, new[]
+                {
+                    new Point(x1, y1),
+                    new Point(x2, y2),
+                    new Point(x3, y3)
+                });
+            }
+        }
+
+        private static Color GetContrastColor(Color color)
+        {
+            double luminance = ((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B)) / 255d;
+            return luminance > 0.55 ? Color.Black : Color.White;
+        }
+
+        private static Color DarkenColor(Color color, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            int r = (int)Math.Round(color.R * (1f - amount));
+            int g = (int)Math.Round(color.G * (1f - amount));
+            int b = (int)Math.Round(color.B * (1f - amount));
+            return Color.FromArgb(color.A, Math.Max(0, r), Math.Max(0, g), Math.Max(0, b));
         }
 
         private static Rectangle GetGlyphRectangle(Rectangle bounds, Size glyphSize, ContentAlignment align)
@@ -101,40 +174,107 @@ namespace AnonPDF
     internal sealed class ThemedRadioButton : RadioButton
     {
         public Color DisabledForeColor { get; set; } = SystemColors.GrayText;
+        public Color AccentColor { get; set; } = SystemColors.Highlight;
+        public Color BorderColor { get; set; } = SystemColors.ControlDark;
+
+        public ThemedRadioButton()
+        {
+            SetStyle(
+                ControlStyles.UserPaint |
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.SupportsTransparentBackColor,
+                true);
+            UseVisualStyleBackColor = false;
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            base.OnPaint(e);
+            e.Graphics.Clear(BackColor);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-            if (Enabled)
-            {
-                return;
-            }
-
-            DrawDisabledText(e.Graphics);
-        }
-
-        private void DrawDisabledText(Graphics graphics)
-        {
-            if (string.IsNullOrEmpty(Text))
-            {
-                return;
-            }
-
-            var state = GetDisabledState();
-            var glyphSize = RadioButtonRenderer.GetGlyphSize(graphics, state);
-            var glyphRect = GetGlyphRectangle(ClientRectangle, glyphSize, CheckAlign);
+            var glyphRect = GetGlyphRectangle(ClientRectangle, GetGlyphSize(), CheckAlign);
             var textRect = GetTextRectangle(ClientRectangle, glyphRect, CheckAlign);
             var flags = GetTextFormatFlags(RightToLeft, UseMnemonic);
 
-            TextRenderer.DrawText(graphics, Text, Font, textRect, DisabledForeColor, BackColor, flags);
+            DrawRadioGlyph(e.Graphics, glyphRect);
+
+            Color textColor = Enabled ? ForeColor : DisabledForeColor;
+            TextRenderer.DrawText(e.Graphics, Text ?? string.Empty, Font, textRect, textColor, BackColor, flags);
+
+            if (Focused && ShowFocusCues)
+            {
+                ControlPaint.DrawFocusRectangle(e.Graphics, textRect, textColor, BackColor);
+            }
         }
 
-        private System.Windows.Forms.VisualStyles.RadioButtonState GetDisabledState()
+        private Size GetGlyphSize()
         {
-            return Checked
-                ? System.Windows.Forms.VisualStyles.RadioButtonState.CheckedDisabled
-                : System.Windows.Forms.VisualStyles.RadioButtonState.UncheckedDisabled;
+            int side = Math.Max(13, Math.Min(18, Font.Height - 1));
+            return new Size(side, side);
+        }
+
+        private void DrawRadioGlyph(Graphics graphics, Rectangle glyphRect)
+        {
+            Color accentBorderColor = DarkenColor(AccentColor, 0.14f);
+            Color neutralBorderColor = DarkenColor(BorderColor, 0.18f);
+            Color borderColor = Checked
+                ? (Enabled ? accentBorderColor : ControlPaint.Light(accentBorderColor))
+                : (Enabled ? neutralBorderColor : ControlPaint.Light(neutralBorderColor));
+            Color backColor = Enabled ? BackColor : ControlPaint.Light(BackColor);
+            Color dotColor = Enabled
+                ? GetContrastColor(AccentColor)
+                : ControlPaint.Dark(GetContrastColor(AccentColor));
+
+            using (var backBrush = new SolidBrush(backColor))
+            using (var borderPen = new Pen(borderColor, 1f))
+            {
+                graphics.FillEllipse(backBrush, glyphRect);
+                graphics.DrawEllipse(borderPen, glyphRect.X, glyphRect.Y, glyphRect.Width - 1, glyphRect.Height - 1);
+            }
+
+            if (!Checked)
+            {
+                return;
+            }
+
+            int accentDotSize = Math.Max(7, (int)Math.Round(glyphRect.Width * 0.74f));
+            Rectangle accentDotRect = new Rectangle(
+                glyphRect.Left + (glyphRect.Width - accentDotSize) / 2,
+                glyphRect.Top + (glyphRect.Height - accentDotSize) / 2,
+                accentDotSize,
+                accentDotSize);
+            using (var accentBrush = new SolidBrush(Enabled ? AccentColor : ControlPaint.Light(AccentColor)))
+            {
+                graphics.FillEllipse(accentBrush, accentDotRect);
+            }
+
+            int coreDotSize = Math.Max(5, (int)Math.Round(accentDotSize * 0.62f));
+            Rectangle coreDotRect = new Rectangle(
+                glyphRect.Left + (glyphRect.Width - coreDotSize) / 2,
+                glyphRect.Top + (glyphRect.Height - coreDotSize) / 2,
+                coreDotSize,
+                coreDotSize);
+            using (var dotBrush = new SolidBrush(dotColor))
+            {
+                graphics.FillEllipse(dotBrush, coreDotRect);
+            }
+        }
+
+        private static Color GetContrastColor(Color color)
+        {
+            double luminance = ((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B)) / 255d;
+            return luminance > 0.55 ? Color.Black : Color.White;
+        }
+
+        private static Color DarkenColor(Color color, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            int r = (int)Math.Round(color.R * (1f - amount));
+            int g = (int)Math.Round(color.G * (1f - amount));
+            int b = (int)Math.Round(color.B * (1f - amount));
+            return Color.FromArgb(color.A, Math.Max(0, r), Math.Max(0, g), Math.Max(0, b));
         }
 
         private static Rectangle GetGlyphRectangle(Rectangle bounds, Size glyphSize, ContentAlignment align)

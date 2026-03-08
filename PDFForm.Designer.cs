@@ -94,6 +94,7 @@
             this.saveProjectMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.savePdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.savePdfPageRangeMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.toolStripMenuItemPrintSeparator = new System.Windows.Forms.ToolStripSeparator();
             this.printPdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuItem1 = new System.Windows.Forms.ToolStripSeparator();
             this.recentFilesMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -903,6 +904,7 @@
             this.saveProjectMenuItem,
             this.savePdfMenuItem,
             this.savePdfPageRangeMenuItem,
+            this.toolStripMenuItemPrintSeparator,
             this.printPdfMenuItem,
             this.toolStripMenuItem1,
             this.recentFilesMenuItem,
@@ -977,6 +979,12 @@
             this.savePdfPageRangeMenuItem.Size = new System.Drawing.Size(261, 22);
             this.savePdfPageRangeMenuItem.Text = Res("Menu_SavePdfPageRange");
             this.savePdfPageRangeMenuItem.Click += new System.EventHandler(this.SavePdfPageRangeMenuItem_Click);
+            // 
+            // 
+            // toolStripMenuItemPrintSeparator
+            // 
+            this.toolStripMenuItemPrintSeparator.Name = "toolStripMenuItemPrintSeparator";
+            this.toolStripMenuItemPrintSeparator.Size = new System.Drawing.Size(258, 6);
             // 
             // printPdfMenuItem
             // 
@@ -1537,6 +1545,7 @@
         private System.Windows.Forms.ToolStripMenuItem saveProjectMenuItem;
         private System.Windows.Forms.ToolStripMenuItem savePdfMenuItem;
         private System.Windows.Forms.ToolStripMenuItem savePdfPageRangeMenuItem;
+        private System.Windows.Forms.ToolStripSeparator toolStripMenuItemPrintSeparator;
         private System.Windows.Forms.ToolStripMenuItem printPdfMenuItem;
         private System.Windows.Forms.ToolStripSeparator toolStripMenuItem1;
         private System.Windows.Forms.ToolStripMenuItem recentFilesMenuItem;

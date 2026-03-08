@@ -836,6 +836,7 @@ namespace AnonPDF
         private const int SW_RESTORE = 9;
         private const int DWMWA_CAPTION_COLOR = 35;
         private const int LVM_FIRST = 0x1000;
+        private const int LVM_SCROLL = LVM_FIRST + 20;
         private const int LVM_SETICONSPACING = LVM_FIRST + 53;
 
         public PDFForm(SplashForm splash = null)
@@ -5484,9 +5485,12 @@ namespace AnonPDF
                 int pageToSave = Math.Max(1, Math.Min(currentPage, numPages));
                 root["CurrentPage"] = pageToSave;
                 CaptureCurrentViewState(out float zoomFactor, out int scrollX, out int scrollY);
+                CaptureRightPanelsViewState(out int? pagesListTopPage, out int? thumbnailsTopPage);
                 root["ZoomFactor"] = zoomFactor;
                 root["ScrollX"] = scrollX;
                 root["ScrollY"] = scrollY;
+                root["PagesListTopPage"] = pagesListTopPage.HasValue ? JToken.FromObject(pagesListTopPage.Value) : JValue.CreateNull();
+                root["ThumbnailsTopPage"] = thumbnailsTopPage.HasValue ? JToken.FromObject(thumbnailsTopPage.Value) : JValue.CreateNull();
                 File.WriteAllText(projectPath, root.ToString(Formatting.Indented));
             }
             catch
@@ -7003,26 +7007,7 @@ namespace AnonPDF
                     Formatting = Formatting.Indented // prettier, indented format
                 };
 
-                var projectData = new ProjectData
-                {
-                    RedactionBlocks = redactionBlocks ?? new List<RedactionBlock>(),
-                    CommentAnnotations = commentAnnotations ?? new List<CommentAnnotation>(),
-                    PagesToRemove = pagesToRemove ?? new HashSet<int>(),
-                    TextAnnotations = textAnnotations ?? new List<TextAnnotation>(),
-                    RasterObjects = rasterObjects ?? new List<RasterObject>(),
-                    ArrowObjects = arrowObjects ?? new List<ArrowObject>(),
-                    VectorShapes = vectorShapes ?? new List<VectorShapeObject>(),
-                    ObjectLayers = BuildProjectObjectLayersSnapshot(),
-                    PageRotationOffsets = pageRotationOffsets == null
-                        ? new Dictionary<int, int>()
-                        : new Dictionary<int, int>(pageRotationOffsets),
-                    FilePath = inputPdfPath,
-                    CurrentPage = currentPage,
-                    SignaturesMode = GetSignatureModeForProject(),
-                    SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
-                    AutoFootnotesEnabled = autoFootnotesEnabled,
-                    ExclusionAuthority = exclusionAuthorityName
-                };
+                var projectData = BuildCurrentProjectDataSnapshot(includeViewState: true);
 
                 string json = JsonConvert.SerializeObject(projectData, jsonSettings);
                 File.WriteAllText(MaintenanceRecoveryProjectPath, json);
@@ -7892,6 +7877,8 @@ namespace AnonPDF
                     themedCheckBox.UseVisualStyleBackColor = false;
                     themedCheckBox.ForeColor = theme.TextPrimaryColor;
                     themedCheckBox.DisabledForeColor = theme.TextSecondaryColor;
+                    themedCheckBox.AccentColor = theme.SelectionBackColor;
+                    themedCheckBox.BorderColor = theme.BorderColor;
                 }
                 else if (control is ThemedRadioButton themedRadioButton)
                 {
@@ -7900,6 +7887,8 @@ namespace AnonPDF
                     themedRadioButton.UseVisualStyleBackColor = false;
                     themedRadioButton.ForeColor = theme.TextPrimaryColor;
                     themedRadioButton.DisabledForeColor = theme.TextSecondaryColor;
+                    themedRadioButton.AccentColor = theme.SelectionBackColor;
+                    themedRadioButton.BorderColor = theme.BorderColor;
                 }
                 else if (control is Button button)
                 {
@@ -8327,7 +8316,14 @@ namespace AnonPDF
         {
             if (e.Item.Tag is PageItemStatus status)
             {
-                e.DrawBackground();
+                var theme = CurrentTheme;
+                System.Drawing.Color selectedBackColor = theme.SelectionBackColor;
+                System.Drawing.Color selectedTextColor = theme.TextPrimaryColor;
+                System.Drawing.Color rowBackColor = pagesListView.BackColor;
+                using (var rowBrush = new SolidBrush(rowBackColor))
+                {
+                    e.Graphics.FillRectangle(rowBrush, e.Bounds);
+                }
 
                 // Set the dimensions of the rectangles
                 int rectangleWidth = 10;                       // rectangle width
@@ -8380,11 +8376,20 @@ namespace AnonPDF
                 {
                     if (e.Item.Selected)
                     {
-                        using (SolidBrush highlightBrush = new SolidBrush(SystemColors.Highlight))
+                        using (SolidBrush highlightBrush = new SolidBrush(selectedBackColor))
                         {
                             e.Graphics.FillRectangle(highlightBrush, selectionRect);
                         }
-                        TextRenderer.DrawText(e.Graphics, e.Item.Text, e.Item.Font, textRect, SystemColors.HighlightText, textFlags);
+                        using (var selectionBorderPen = new Pen(System.Drawing.Color.Black, 1f))
+                        {
+                            e.Graphics.DrawRectangle(
+                                selectionBorderPen,
+                                selectionRect.X,
+                                selectionRect.Y,
+                                Math.Max(1, selectionRect.Width - 1),
+                                Math.Max(1, selectionRect.Height - 1));
+                        }
+                        TextRenderer.DrawText(e.Graphics, e.Item.Text, e.Item.Font, textRect, selectedTextColor, textFlags);
                     }
                     else
                     {
@@ -8402,11 +8407,20 @@ namespace AnonPDF
                 // (e.g. holding PageUp and clicking a row), producing a second "ghost" highlight.
                 if (e.Item.Selected)
                 {
-                    using (SolidBrush highlightBrush = new SolidBrush(SystemColors.Highlight))
+                    using (SolidBrush highlightBrush = new SolidBrush(selectedBackColor))
                     {
                         e.Graphics.FillRectangle(highlightBrush, selectionRect);
                     }
-                    TextRenderer.DrawText(e.Graphics, e.Item.Text, e.Item.Font, textRect, SystemColors.HighlightText, textFlags);
+                    using (var selectionBorderPen = new Pen(System.Drawing.Color.Black, 1f))
+                    {
+                        e.Graphics.DrawRectangle(
+                            selectionBorderPen,
+                            selectionRect.X,
+                            selectionRect.Y,
+                            Math.Max(1, selectionRect.Width - 1),
+                            Math.Max(1, selectionRect.Height - 1));
+                    }
+                    TextRenderer.DrawText(e.Graphics, e.Item.Text, e.Item.Font, textRect, selectedTextColor, textFlags);
                 }
                 else
                 {
@@ -13249,10 +13263,13 @@ namespace AnonPDF
             float? zoomFactor = null;
             int? scrollX = null;
             int? scrollY = null;
+            int? pagesListTopPage = null;
+            int? thumbnailsTopPage = null;
 
             if (includeViewState)
             {
                 CaptureCurrentViewState(out float zf, out int sx, out int sy);
+                CaptureRightPanelsViewState(out pagesListTopPage, out thumbnailsTopPage);
                 zoomFactor = zf > 0 ? zf : (float?)null;
                 scrollX = sx;
                 scrollY = sy;
@@ -13286,6 +13303,8 @@ namespace AnonPDF
                 ZoomFactor = zoomFactor,
                 ScrollX = scrollX,
                 ScrollY = scrollY,
+                PagesListTopPage = pagesListTopPage,
+                ThumbnailsTopPage = thumbnailsTopPage,
                 SignaturesMode = GetSignatureModeForProject(),
                 SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
                 AutoFootnotesEnabled = autoFootnotesEnabled,
@@ -13300,6 +13319,8 @@ namespace AnonPDF
             snapshot.ZoomFactor = null;
             snapshot.ScrollX = null;
             snapshot.ScrollY = null;
+            snapshot.PagesListTopPage = null;
+            snapshot.ThumbnailsTopPage = null;
             snapshot.FilePath = string.Empty;
             return JsonConvert.SerializeObject(snapshot, Formatting.None);
         }
@@ -13619,6 +13640,10 @@ namespace AnonPDF
             UpdateSelectionNavigationButtons();
             UpdateSearchNavigationButtons();
             UpdateNavigationButtons(currentPage);
+            BeginInvoke(new MethodInvoker(() =>
+            {
+                RestoreRightPanelsViewState(projectData.PagesListTopPage, projectData.ThumbnailsTopPage);
+            }));
             renderTimer.Stop();
             renderTimer.Start();
             pdfViewer.Invalidate();
@@ -13765,6 +13790,172 @@ namespace AnonPDF
             {
                 scrollX = panel.HorizontalScroll.Value;
                 scrollY = panel.VerticalScroll.Value;
+            }
+        }
+
+        private void CaptureRightPanelsViewState(out int? pagesListTopPage, out int? thumbnailsTopPage)
+        {
+            pagesListTopPage = GetTopVisiblePageNumber(pagesListView);
+            thumbnailsTopPage = GetTopVisiblePageNumber(thumbnailsListView);
+        }
+
+        private int? GetTopVisiblePageNumber(ListView listView)
+        {
+            if (listView == null || listView.IsDisposed || listView.Items.Count == 0 || !listView.IsHandleCreated)
+            {
+                return null;
+            }
+
+            try
+            {
+                ListViewItem topItem = listView.TopItem;
+                int? topPage = GetPageNumberFromListViewItem(topItem);
+                if (topPage.HasValue)
+                {
+                    return topPage.Value;
+                }
+            }
+            catch
+            {
+                // Fallback to bounds-based detection.
+            }
+
+            try
+            {
+                DrawingRectangle client = listView.ClientRectangle;
+                int bestTop = int.MaxValue;
+                int bestLeft = int.MaxValue;
+                int? bestPage = null;
+
+                for (int i = 0; i < listView.Items.Count; i++)
+                {
+                    DrawingRectangle itemRect = listView.GetItemRect(i, ItemBoundsPortion.Entire);
+                    if (itemRect.Bottom <= client.Top || itemRect.Top >= client.Bottom)
+                    {
+                        continue;
+                    }
+
+                    int? page = GetPageNumberFromListViewItem(listView.Items[i]);
+                    if (!page.HasValue)
+                    {
+                        continue;
+                    }
+
+                    if (itemRect.Top < bestTop || (itemRect.Top == bestTop && itemRect.Left < bestLeft))
+                    {
+                        bestTop = itemRect.Top;
+                        bestLeft = itemRect.Left;
+                        bestPage = page.Value;
+                    }
+                }
+
+                return bestPage;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int? GetPageNumberFromListViewItem(ListViewItem item)
+        {
+            if (item == null)
+            {
+                return null;
+            }
+
+            if (item.Tag is PageItemStatus status)
+            {
+                return status.PageNumber;
+            }
+
+            if (item.Tag is int page && page > 0)
+            {
+                return page;
+            }
+
+            return null;
+        }
+
+        private void RestoreRightPanelsViewState(int? pagesListTopPage, int? thumbnailsTopPage)
+        {
+            if (pagesListTopPage.HasValue)
+            {
+                ListViewItem pageItem = FindListViewItemByPageNumber(pagesListTopPage.Value);
+                RestoreListViewTopItem(pagesListView, pageItem);
+            }
+
+            if (thumbnailsTopPage.HasValue)
+            {
+                ListViewItem thumbnailItem = FindThumbnailListItemByPageNumber(thumbnailsTopPage.Value);
+                RestoreListViewTopItem(thumbnailsListView, thumbnailItem);
+            }
+        }
+
+        private static void RestoreListViewTopItem(ListView listView, ListViewItem item)
+        {
+            if (listView == null || listView.IsDisposed || item == null || item.ListView != listView || !listView.IsHandleCreated)
+            {
+                return;
+            }
+
+            try
+            {
+                item.EnsureVisible();
+
+                bool topItemApplied = false;
+                try
+                {
+                    listView.TopItem = item;
+                    topItemApplied = true;
+                }
+                catch
+                {
+                    // Some view modes do not support setting TopItem directly.
+                }
+
+                if (!topItemApplied)
+                {
+                    TryAlignListViewItemToTop(listView, item);
+                }
+            }
+            catch
+            {
+                // Ignore scroll restoration errors.
+            }
+        }
+
+        private static void TryAlignListViewItemToTop(ListView listView, ListViewItem item)
+        {
+            if (listView == null || item == null || listView.Items.Count == 0 || !listView.IsHandleCreated)
+            {
+                return;
+            }
+
+            int itemIndex = item.Index;
+            if (itemIndex < 0 || itemIndex >= listView.Items.Count)
+            {
+                return;
+            }
+
+            DrawingRectangle client = listView.ClientRectangle;
+            DrawingRectangle beforeRect = listView.GetItemRect(itemIndex, ItemBoundsPortion.Entire);
+            int beforeDelta = beforeRect.Top - client.Top;
+            if (beforeDelta == 0)
+            {
+                return;
+            }
+
+            SendMessage(listView.Handle, LVM_SCROLL, IntPtr.Zero, (IntPtr)beforeDelta);
+
+            DrawingRectangle afterRect = listView.GetItemRect(itemIndex, ItemBoundsPortion.Entire);
+            int afterDelta = afterRect.Top - client.Top;
+
+            if (Math.Abs(afterDelta) > Math.Abs(beforeDelta))
+            {
+                // Direction was opposite on this control/view mode - retry with the inverted value.
+                SendMessage(listView.Handle, LVM_SCROLL, IntPtr.Zero, (IntPtr)(-beforeDelta));
+                SendMessage(listView.Handle, LVM_SCROLL, IntPtr.Zero, (IntPtr)(-beforeDelta));
             }
         }
 
@@ -21255,8 +21446,8 @@ namespace AnonPDF
 
             bool isSelected = e.Item.Selected;
             var theme = CurrentTheme;
-            System.Drawing.Color itemBackColor = isSelected ? SystemColors.Highlight : thumbnailsListView.BackColor;
-            System.Drawing.Color itemTextColor = isSelected ? SystemColors.HighlightText : thumbnailsListView.ForeColor;
+            System.Drawing.Color itemBackColor = isSelected ? theme.SelectionBackColor : thumbnailsListView.BackColor;
+            System.Drawing.Color itemTextColor = isSelected ? theme.TextPrimaryColor : thumbnailsListView.ForeColor;
             using (var backBrush = new SolidBrush(itemBackColor))
             {
                 e.Graphics.FillRectangle(backBrush, e.Bounds);
@@ -21277,7 +21468,7 @@ namespace AnonPDF
             int thumbWidth = Math.Min(image?.Width ?? thumbnailsImageList.ImageSize.Width, maxThumbWidth);
             int thumbHeight = Math.Min(image?.Height ?? thumbnailsImageList.ImageSize.Height, maxThumbHeight);
             int thumbX = e.Bounds.Left + Math.Max(0, (e.Bounds.Width - thumbWidth) / 2);
-            int thumbY = e.Bounds.Top + 4;
+            int thumbY = e.Bounds.Top + 10;
             var thumbRect = new DrawingRectangle(thumbX, thumbY, thumbWidth, thumbHeight);
 
             if (image != null)
@@ -21316,6 +21507,19 @@ namespace AnonPDF
                 textRect,
                 itemTextColor,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+
+            if (isSelected)
+            {
+                using (var selectionBorderPen = new Pen(System.Drawing.Color.Black, 1f))
+                {
+                    e.Graphics.DrawRectangle(
+                        selectionBorderPen,
+                        e.Bounds.X,
+                        e.Bounds.Y,
+                        Math.Max(1, e.Bounds.Width - 1),
+                        Math.Max(1, e.Bounds.Height - 1));
+                }
+            }
 
             if ((e.State & ListViewItemStates.Focused) == ListViewItemStates.Focused)
             {
@@ -21918,6 +22122,11 @@ namespace AnonPDF
                         }
                     }
 
+                    BeginInvoke(new MethodInvoker(() =>
+                    {
+                        RestoreRightPanelsViewState(projectData.PagesListTopPage, projectData.ThumbnailsTopPage);
+                    }));
+
                     if (registerAsProject)
                     {
                         inputProjectPath = inputProjectPathTemp;
@@ -21987,29 +22196,7 @@ namespace AnonPDF
                             Formatting = Formatting.Indented // prettier, indented format
                         };
 
-
-                        CaptureCurrentViewState(out float zoomFactor, out int scrollX, out int scrollY);
-                        ProjectData projectData = new ProjectData
-                        {
-                            RedactionBlocks = redactionBlocks,
-                            CommentAnnotations = commentAnnotations,
-                            PagesToRemove = pagesToRemove,
-                            TextAnnotations = textAnnotations,
-                            RasterObjects = rasterObjects,
-                            ArrowObjects = arrowObjects,
-                            VectorShapes = vectorShapes,
-                            ObjectLayers = BuildProjectObjectLayersSnapshot(),
-                            PageRotationOffsets = new Dictionary<int, int>(pageRotationOffsets),
-                            FilePath = inputPdfPath,
-                            CurrentPage = currentPage,
-                            ZoomFactor = zoomFactor,
-                            ScrollX = scrollX,
-                            ScrollY = scrollY,
-                            SignaturesMode = GetSignatureModeForProject(),
-                            SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
-                            AutoFootnotesEnabled = autoFootnotesEnabled,
-                            ExclusionAuthority = exclusionAuthorityName
-                        };
+                        ProjectData projectData = BuildCurrentProjectDataSnapshot(includeViewState: true);
 
                         // Serialize list to JSON string
                         string json = JsonConvert.SerializeObject(projectData, jsonSettings);
@@ -22273,6 +22460,16 @@ namespace AnonPDF
                 if (!mergedProject.ScrollY.HasValue && project.ScrollY.HasValue)
                 {
                     mergedProject.ScrollY = project.ScrollY;
+                }
+
+                if (!mergedProject.PagesListTopPage.HasValue && project.PagesListTopPage.HasValue)
+                {
+                    mergedProject.PagesListTopPage = project.PagesListTopPage;
+                }
+
+                if (!mergedProject.ThumbnailsTopPage.HasValue && project.ThumbnailsTopPage.HasValue)
+                {
+                    mergedProject.ThumbnailsTopPage = project.ThumbnailsTopPage;
                 }
 
                 if (string.IsNullOrWhiteSpace(mergedProject.SignaturesMode) && !string.IsNullOrWhiteSpace(project.SignaturesMode))
@@ -23073,28 +23270,7 @@ namespace AnonPDF
                             lastSavedProjectName = inputProjectPath;
                         }
 
-                        CaptureCurrentViewState(out float zoomFactor, out int scrollX, out int scrollY);
-                        ProjectData projectData = new ProjectData
-                        {
-                            RedactionBlocks = redactionBlocks,
-                            CommentAnnotations = commentAnnotations,
-                            PagesToRemove = pagesToRemove,
-                            TextAnnotations = textAnnotations,
-                            RasterObjects = rasterObjects,
-                            ArrowObjects = arrowObjects,
-                            VectorShapes = vectorShapes,
-                            ObjectLayers = BuildProjectObjectLayersSnapshot(),
-                            PageRotationOffsets = new Dictionary<int, int>(pageRotationOffsets),
-                            FilePath = inputPdfPath,
-                            CurrentPage = currentPage,
-                            ZoomFactor = zoomFactor,
-                            ScrollX = scrollX,
-                            ScrollY = scrollY,
-                            SignaturesMode = GetSignatureModeForProject(),
-                            SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
-                            AutoFootnotesEnabled = autoFootnotesEnabled,
-                            ExclusionAuthority = exclusionAuthorityName
-                        };
+                        ProjectData projectData = BuildCurrentProjectDataSnapshot(includeViewState: true);
 
                         // Serialize list to JSON string
                         string json = JsonConvert.SerializeObject(projectData, jsonSettings);
@@ -33901,6 +34077,8 @@ namespace AnonPDF
         public float? ZoomFactor { get; set; }
         public int? ScrollX { get; set; }
         public int? ScrollY { get; set; }
+        public int? PagesListTopPage { get; set; }
+        public int? ThumbnailsTopPage { get; set; }
         public List<string> SignaturesToRemove { get; set; }
         public string SignaturesMode { get; set; }
         public bool? AutoFootnotesEnabled { get; set; }
