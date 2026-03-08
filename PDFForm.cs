@@ -11369,6 +11369,8 @@ namespace AnonPDF
             pagesListView.Items[currentPage - 1].Selected = true;
             pagesListView.Items[currentPage - 1].EnsureVisible();
             SelectThumbnailItemForCurrentPage(ensureVisible: true);
+            // Do not rely only on ListView selection events when loading a new file.
+            ReloadRefreshCurrentPage();
 
             groupBoxSelections.Enabled = true;
             groupBoxPagesToRemove.Enabled = true;
@@ -21468,7 +21470,6 @@ namespace AnonPDF
                 {
                     syncPageSelectionFromThumbnail = false;
                 }
-                return;
             }
 
             currentPage = selectedPage;
