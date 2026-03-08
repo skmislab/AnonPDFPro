@@ -12507,45 +12507,37 @@ namespace AnonPDF
                 printDocument.PrinterSettings.FromPage = currentPage;
                 printDocument.PrinterSettings.ToPage = currentPage;
 
-                using (var printDialog = new PrintDialog())
-                {
-                    printDialog.UseEXDialog = true;
-                    printDialog.AllowCurrentPage = true;
-                    printDialog.AllowSomePages = true;
-                    printDialog.AllowSelection = false;
-                    printDialog.Document = printDocument;
+                int fromPage = currentPage;
+                int toPage = currentPage;
+                int pageToPrint = currentPage;
 
-                    if (printDialog.ShowDialog(this) != DialogResult.OK)
+                printDocument.BeginPrint += (_, __) =>
+                {
+                    switch (printDocument.PrinterSettings.PrintRange)
                     {
-                        return;
+                        case PrintRange.CurrentPage:
+                            fromPage = currentPage;
+                            toPage = currentPage;
+                            break;
+                        case PrintRange.SomePages:
+                            fromPage = Math.Max(1, Math.Min(numPages, printDocument.PrinterSettings.FromPage));
+                            toPage = Math.Max(1, Math.Min(numPages, printDocument.PrinterSettings.ToPage));
+                            if (fromPage > toPage)
+                            {
+                                int swap = fromPage;
+                                fromPage = toPage;
+                                toPage = swap;
+                            }
+                            break;
+                        default:
+                            fromPage = 1;
+                            toPage = numPages;
+                            break;
                     }
-                }
 
-                int fromPage;
-                int toPage;
-                switch (printDocument.PrinterSettings.PrintRange)
-                {
-                    case PrintRange.CurrentPage:
-                        fromPage = currentPage;
-                        toPage = currentPage;
-                        break;
-                    case PrintRange.SomePages:
-                        fromPage = Math.Max(1, Math.Min(numPages, printDocument.PrinterSettings.FromPage));
-                        toPage = Math.Max(1, Math.Min(numPages, printDocument.PrinterSettings.ToPage));
-                        if (fromPage > toPage)
-                        {
-                            int swap = fromPage;
-                            fromPage = toPage;
-                            toPage = swap;
-                        }
-                        break;
-                    default:
-                        fromPage = 1;
-                        toPage = numPages;
-                        break;
-                }
+                    pageToPrint = fromPage;
+                };
 
-                int pageToPrint = fromPage;
                 printDocument.PrintPage += (_, args) =>
                 {
                     using (Bitmap pageBitmap = RenderPageBitmapForPrint(pageToPrint, args.MarginBounds.Size))
@@ -12562,6 +12554,21 @@ namespace AnonPDF
                     pageToPrint++;
                     args.HasMorePages = pageToPrint <= toPage;
                 };
+
+                using (var printDialog = new PrintDialog())
+                {
+                    // Use legacy dialog to avoid unsupported system preview callback in WinForms/.NET Framework.
+                    printDialog.UseEXDialog = false;
+                    printDialog.AllowCurrentPage = true;
+                    printDialog.AllowSomePages = true;
+                    printDialog.AllowSelection = false;
+                    printDialog.Document = printDocument;
+
+                    if (printDialog.ShowDialog(this) != DialogResult.OK)
+                    {
+                        return;
+                    }
+                }
 
                 try
                 {
