@@ -1630,4 +1630,10 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="Footnotes_Scopes_DuplicateId" xml:space="preserve">
     <value>Doppelte ID des Ausschlussbereichs gefunden: {0}.</value>
   </data>
+  <data name="Window_Title_PrintingSuffix" xml:space="preserve">
+    <value> - druckt...</value>
+  </data>
+  <data name="Msg_Print_JobSubmitted" xml:space="preserve">
+    <value>Dokument wurde an den Drucker gesendet.</value>
+  </data>
 </root>

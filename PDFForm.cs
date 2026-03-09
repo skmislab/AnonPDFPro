@@ -85,6 +85,7 @@ namespace AnonPDF
 
         private string userPassword = "";
         private string userNewPassword = null;
+        private bool isPrintInProgress = false;
 
         private const string SignatureModeOriginal = "original";
         private const string SignatureModeRemove = "remove";
@@ -10055,7 +10056,8 @@ namespace AnonPDF
             string outputFile,
             ISet<int> pagesWithBakedRotation = null,
             ISet<int> additionalPagesToRemove = null,
-            bool includeSupplementaryPages = true)
+            bool includeSupplementaryPages = true,
+            bool showSuccessMessage = true)
         {
             iText.Kernel.Colors.Color cleanUpColorBlack = new DeviceRgb(0, 0, 0);
             iText.Kernel.Colors.Color cleanUpColorWhite = new DeviceRgb(255, 255, 255);
@@ -10892,7 +10894,10 @@ namespace AnonPDF
                 TryFlattenMergedScanPages(outputFile, flattenPages);
             }
 
-            MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (showSuccessMessage)
+            {
+                MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
         }
 
         internal void SuspendTopMostForExternalLaunch()
@@ -12467,23 +12472,7 @@ namespace AnonPDF
             try
             {
                 this.Cursor = Cursors.WaitCursor;
-
-                string tempFile = Path.Combine(Path.GetTempPath(), $"pdfreencoded_{DateTime.Now.Ticks}.pdf");
-                bool retReencoding = ReencodePdfKeepOriginalCompression(inputPdfPath, tempFile);
-
-                if (retReencoding)
-                {
-                    RedactText(tempFile, outputFilePath, reencodedPages, additionalPagesToRemove, includeSupplementaryPages);
-                }
-                else
-                {
-                    RedactText(inputPdfPath, outputFilePath, additionalPagesToRemove: additionalPagesToRemove, includeSupplementaryPages: includeSupplementaryPages);
-                }
-
-                if (File.Exists(tempFile))
-                {
-                    File.Delete(tempFile);
-                }
+                BuildRedactedPdfForOutput(outputFilePath, additionalPagesToRemove, includeSupplementaryPages, showSuccessMessage: true);
 
                 this.Cursor = Cursors.Default;
                 if (openSavedPDFCheckBox.Checked)
@@ -12515,6 +12504,52 @@ namespace AnonPDF
             }
         }
 
+        private void BuildRedactedPdfForOutput(
+            string outputFilePath,
+            ISet<int> additionalPagesToRemove,
+            bool includeSupplementaryPages = true,
+            bool showSuccessMessage = true)
+        {
+            string tempFile = Path.Combine(Path.GetTempPath(), $"pdfreencoded_{DateTime.Now.Ticks}.pdf");
+            try
+            {
+                bool retReencoding = ReencodePdfKeepOriginalCompression(inputPdfPath, tempFile);
+                if (retReencoding)
+                {
+                    RedactText(
+                        tempFile,
+                        outputFilePath,
+                        reencodedPages,
+                        additionalPagesToRemove,
+                        includeSupplementaryPages,
+                        showSuccessMessage);
+                }
+                else
+                {
+                    RedactText(
+                        inputPdfPath,
+                        outputFilePath,
+                        additionalPagesToRemove: additionalPagesToRemove,
+                        includeSupplementaryPages: includeSupplementaryPages,
+                        showSuccessMessage: showSuccessMessage);
+                }
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                {
+                    try
+                    {
+                        File.Delete(tempFile);
+                    }
+                    catch
+                    {
+                        // best effort cleanup
+                    }
+                }
+            }
+        }
+
         private void PrintPdfMenuItem_Click(object sender, EventArgs e)
         {
             if (pdf == null || numPages <= 0 || string.IsNullOrWhiteSpace(inputPdfPath))
@@ -12525,6 +12560,8 @@ namespace AnonPDF
             using (var printDocument = new PrintDocument())
             {
                 printDocument.DocumentName = Path.GetFileName(inputPdfPath);
+                printDocument.OriginAtMargins = false;
+                printDocument.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
                 printDocument.PrinterSettings.MinimumPage = 1;
                 printDocument.PrinterSettings.MaximumPage = numPages;
                 printDocument.PrinterSettings.FromPage = currentPage;
@@ -12533,33 +12570,82 @@ namespace AnonPDF
                 int fromPage = currentPage;
                 int toPage = currentPage;
                 int pageToPrint = currentPage;
+                PDFiumSharp.PdfDocument printSourcePdf = null;
+                string printSourceTempPath = null;
 
                 printDocument.BeginPrint += (_, __) =>
                 {
-                    ResolvePrintPageRange(printDocument.PrinterSettings, numPages, currentPage, out fromPage, out toPage);
-                    pageToPrint = fromPage;
+                    string printPassword = (!string.IsNullOrWhiteSpace(userNewPassword) && setSavePassword.Checked)
+                        ? userNewPassword
+                        : userPassword;
+                    printSourcePdf = string.IsNullOrWhiteSpace(printPassword)
+                        ? new PDFiumSharp.PdfDocument(printSourceTempPath)
+                        : new PDFiumSharp.PdfDocument(printSourceTempPath, printPassword);
+                    pageToPrint = 1;
                 };
 
                 printDocument.PrintPage += (_, args) =>
                 {
-                    int targetPixelWidth = Math.Max(1, (int)Math.Round(args.MarginBounds.Width * args.Graphics.DpiX / 100f));
-                    int targetPixelHeight = Math.Max(1, (int)Math.Round(args.MarginBounds.Height * args.Graphics.DpiY / 100f));
+                    var sourceDoc = printSourcePdf ?? pdf;
+                    var sourcePage = sourceDoc?.Pages[pageToPrint - 1];
+                    if (sourcePage == null)
+                    {
+                        args.HasMorePages = false;
+                        return;
+                    }
 
-                    using (Bitmap pageBitmap = RenderPageBitmapForPrint(pageToPrint, new Size(targetPixelWidth, targetPixelHeight)))
+                    int offset = printSourcePdf == null ? GetRotationOffset(pageToPrint) : 0;
+                    float sourceWidthPoints = (float)sourcePage.Width;
+                    float sourceHeightPoints = (float)sourcePage.Height;
+                    bool swapForOffset = offset == 90 || offset == 270;
+                    float printWidthPoints = swapForOffset ? sourceHeightPoints : sourceWidthPoints;
+                    float printHeightPoints = swapForOffset ? sourceWidthPoints : sourceHeightPoints;
+
+                    float targetWidthHundredths = Math.Max(1f, printWidthPoints * 100f / 72f);
+                    float targetHeightHundredths = Math.Max(1f, printHeightPoints * 100f / 72f);
+                    int targetPixelWidth = Math.Max(1, (int)Math.Round(targetWidthHundredths * args.Graphics.DpiX / 100f));
+                    int targetPixelHeight = Math.Max(1, (int)Math.Round(targetHeightHundredths * args.Graphics.DpiY / 100f));
+                    // Draw in physical page coordinates (0,0 = paper corner).
+                    // Compensate printer hard margins so app does not add its own offset.
+                    float x = -args.PageSettings.HardMarginX;
+                    float y = -args.PageSettings.HardMarginY;
+
+                    using (Bitmap pageBitmap = RenderPageBitmapForPrint(sourceDoc, pageToPrint, new Size(targetPixelWidth, targetPixelHeight), offset))
                     {
                         if (pageBitmap != null)
                         {
-                            float pageWidthInHundredths = pageBitmap.Width * 100f / args.Graphics.DpiX;
-                            float pageHeightInHundredths = pageBitmap.Height * 100f / args.Graphics.DpiY;
-                            float x = args.MarginBounds.Left + Math.Max(0f, (args.MarginBounds.Width - pageWidthInHundredths) / 2f);
-                            float y = args.MarginBounds.Top + Math.Max(0f, (args.MarginBounds.Height - pageHeightInHundredths) / 2f);
                             args.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                            args.Graphics.DrawImage(pageBitmap, x, y, pageWidthInHundredths, pageHeightInHundredths);
+                            args.Graphics.DrawImage(pageBitmap, x, y, targetWidthHundredths, targetHeightHundredths);
                         }
                     }
 
                     pageToPrint++;
-                    args.HasMorePages = pageToPrint <= toPage;
+                    int totalSourcePages = sourceDoc?.Pages.Count ?? 0;
+                    args.HasMorePages = pageToPrint <= totalSourcePages;
+                };
+
+                printDocument.EndPrint += (_, __) =>
+                {
+                    try
+                    {
+                        printSourcePdf?.Close();
+                    }
+                    catch
+                    {
+                        // ignore disposal errors
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(printSourceTempPath) && File.Exists(printSourceTempPath))
+                    {
+                        try
+                        {
+                            File.Delete(printSourceTempPath);
+                        }
+                        catch
+                        {
+                            // best effort cleanup
+                        }
+                    }
                 };
 
                 using (var printDialog = new PrintDialog())
@@ -12583,28 +12669,62 @@ namespace AnonPDF
                 }
 
                 ResolvePrintPageRange(printDocument.PrinterSettings, numPages, currentPage, out fromPage, out toPage);
-                if (TryExportPrintRangeToPdf(printDocument.PrinterSettings, fromPage, toPage))
+                if (!EnsureInterestSubjectForRequiredBases())
                 {
                     return;
                 }
 
+                isPrintInProgress = true;
+                this.Cursor = Cursors.WaitCursor;
+                UpdateWindowTitle();
                 try
                 {
-                    this.Cursor = Cursors.WaitCursor;
-                    printDocument.Print();
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(
-                        this,
-                        string.Format(LocalizedText("Err_Print"), ex.Message),
-                        Resources.Title_Error,
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
+                    bool includeSupplementaryPages = fromPage == 1 && toPage == numPages;
+                    var additionalPagesToRemove = BuildPagesOutsideRange(numPages, fromPage, toPage);
+                    printSourceTempPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_print_{Guid.NewGuid():N}.pdf");
+                    BuildRedactedPdfForOutput(
+                        printSourceTempPath,
+                        additionalPagesToRemove,
+                        includeSupplementaryPages,
+                        showSuccessMessage: false);
+
+                    if (TryExportPrintRangeToPdf(printDocument.PrinterSettings, fromPage, toPage, printSourceTempPath))
+                    {
+                        return;
+                    }
+
+                    try
+                    {
+                        printDocument.Print();
+                        ShowInfoMessage(LocalizedText("Msg_Print_JobSubmitted"));
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(
+                            this,
+                            string.Format(LocalizedText("Err_Print"), ex.Message),
+                            Resources.Title_Error,
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
                 }
                 finally
                 {
+                    if (!string.IsNullOrWhiteSpace(printSourceTempPath) && File.Exists(printSourceTempPath))
+                    {
+                        try
+                        {
+                            File.Delete(printSourceTempPath);
+                        }
+                        catch
+                        {
+                            // best effort cleanup
+                        }
+                    }
+
                     this.Cursor = Cursors.Default;
+                    isPrintInProgress = false;
+                    UpdateWindowTitle();
                 }
             }
         }
@@ -12637,7 +12757,7 @@ namespace AnonPDF
             }
         }
 
-        private bool TryExportPrintRangeToPdf(PrinterSettings printerSettings, int fromPage, int toPage)
+        private bool TryExportPrintRangeToPdf(PrinterSettings printerSettings, int fromPage, int toPage, string preparedPrintPdfPath)
         {
             if (printerSettings == null)
             {
@@ -12660,14 +12780,18 @@ namespace AnonPDF
                     return true;
                 }
 
-                if (!EnsureInterestSubjectForRequiredBases())
+                if (string.IsNullOrWhiteSpace(preparedPrintPdfPath) || !File.Exists(preparedPrintPdfPath))
                 {
+                    MessageBox.Show(
+                        this,
+                        string.Format(LocalizedText("Err_Print"), "Missing prepared print file."),
+                        Resources.Title_Error,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
                     return true;
                 }
 
-                var additionalPagesToRemove = BuildPagesOutsideRange(numPages, fromPage, toPage);
-                bool includeSupplementaryPages = fromPage == 1 && toPage == numPages;
-                SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove, includeSupplementaryPages);
+                File.Copy(preparedPrintPdfPath, saveFileDialog.FileName, overwrite: true);
             }
 
             return true;
@@ -12689,9 +12813,9 @@ namespace AnonPDF
             return printerName.IndexOf("pdf", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-        private Bitmap RenderPageBitmapForPrint(int pageNumber, Size targetBounds)
+        private Bitmap RenderPageBitmapForPrint(PDFiumSharp.PdfDocument sourceDocument, int pageNumber, Size targetBounds, int rotationOffset = 0)
         {
-            if (pdf == null || pageNumber < 1 || pageNumber > pdf.Pages.Count)
+            if (sourceDocument == null || pageNumber < 1 || pageNumber > sourceDocument.Pages.Count)
             {
                 return null;
             }
@@ -12701,14 +12825,13 @@ namespace AnonPDF
 
             lock (pdfRenderSync)
             {
-                if (pdf == null || pageNumber < 1 || pageNumber > pdf.Pages.Count)
+                if (sourceDocument == null || pageNumber < 1 || pageNumber > sourceDocument.Pages.Count)
                 {
                     return null;
                 }
 
-                var page = pdf.Pages[pageNumber - 1];
-                int offset = GetRotationOffset(pageNumber);
-                bool swapForOffset = offset == 90 || offset == 270;
+                var page = sourceDocument.Pages[pageNumber - 1];
+                bool swapForOffset = rotationOffset == 90 || rotationOffset == 270;
 
                 float pageWidth = Math.Max(1f, (float)page.Width);
                 float pageHeight = Math.Max(1f, (float)page.Height);
@@ -12738,7 +12861,7 @@ namespace AnonPDF
                         using (var sourceBitmap = new Bitmap(ms))
                         {
                             Bitmap printBitmap = new Bitmap(sourceBitmap);
-                            ApplyRotationOffset(printBitmap, offset);
+                            ApplyRotationOffset(printBitmap, rotationOffset);
                             return printBitmap;
                         }
                     }
@@ -29867,6 +29990,11 @@ namespace AnonPDF
             if (papText != "")
             {
                 titleText += papText;
+            }
+
+            if (isPrintInProgress)
+            {
+                titleText += LocalizedText("Window_Title_PrintingSuffix");
             }
 
             this.Text = titleText;

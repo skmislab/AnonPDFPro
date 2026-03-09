@@ -1735,4 +1735,10 @@ Close the application and run the installer now?</value>
   <data name="Footnotes_Scopes_DuplicateId" xml:space="preserve">
     <value>Duplicate exclusion scope ID detected: {0}.</value>
   </data>
+  <data name="Window_Title_PrintingSuffix" xml:space="preserve">
+    <value> - printing...</value>
+  </data>
+  <data name="Msg_Print_JobSubmitted" xml:space="preserve">
+    <value>Document was sent to the printer.</value>
+  </data>
 </root>

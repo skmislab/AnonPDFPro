@@ -1735,4 +1735,10 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="Footnotes_Scopes_DuplicateId" xml:space="preserve">
     <value>Wykryto zduplikowane ID zakresu wyłączenia: {0}.</value>
   </data>
+  <data name="Window_Title_PrintingSuffix" xml:space="preserve">
+    <value> - drukowanie...</value>
+  </data>
+  <data name="Msg_Print_JobSubmitted" xml:space="preserve">
+    <value>Dokument został wysłany do drukarki.</value>
+  </data>
 </root>
