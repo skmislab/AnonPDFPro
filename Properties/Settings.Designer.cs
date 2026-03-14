@@ -266,6 +266,18 @@ namespace AnonPDF.Properties {
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool ReducePdfFileSizeEnabled {
+            get {
+                return ((bool)(this["ReducePdfFileSizeEnabled"]));
+            }
+            set {
+                this["ReducePdfFileSizeEnabled"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool UseThumbnailsTabInRightPanel {
             get {
                 return ((bool)(this["UseThumbnailsTabInRightPanel"]));

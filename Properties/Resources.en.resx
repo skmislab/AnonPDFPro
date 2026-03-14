@@ -445,6 +445,9 @@ and a third arc point.</value>
   <data name="Menu_CombineObjectsWithScanPages" xml:space="preserve">
     <value>Merge objects with page image</value>
   </data>
+  <data name="Menu_ReducePdfFileSize" xml:space="preserve">
+    <value>Reduce PDF file size</value>
+  </data>
   <data name="Menu_IgnorePdfRestrictions" xml:space="preserve">
     <value>Ignore PDF restrictions</value>
   </data>
@@ -1556,10 +1559,10 @@ Close the application and run the installer now?</value>
     <value>HTTP {0}</value>
   </data>
   <data name="Pdf_Metadata_iTextCopyright" xml:space="preserve">
-    <value>This document was processed using iText Core / Community under the AGPLv3 license. Copyright (c) iText Group NV.</value>
+    <value>This document was created or modified using iText Core / Community. Copyright (c) iText Group NV.</value>
   </data>
   <data name="Pdf_Metadata_iTextLicense" xml:space="preserve">
-    <value>For more information see https://www.gnu.org/licenses/agpl-3.0.html and https://itextpdf.com/.</value>
+    <value>AGPLv3 license: https://www.gnu.org/licenses/agpl-3.0.html | iText information: https://itextpdf.com/</value>
   </data>
   <data name="CacheStatus_IndexPage" xml:space="preserve">
     <value>index page: {0}</value>

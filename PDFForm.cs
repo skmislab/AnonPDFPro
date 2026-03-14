@@ -94,6 +94,10 @@ namespace AnonPDF
         private const string ClassificationSourceAuto = "auto";
         private const string ClassificationSourceManual = "manual";
         private const float FootnoteMarkerGapPx = 2f;
+        private const int RasterDownsampleTextThresholdDpi = 300;
+        private const int RasterDownsamplePhotoThresholdDpi = 220;
+        private const int RasterDownsampleTextTargetDpi = 200;
+        private const int RasterDownsamplePhotoTargetDpi = 150;
         private const string ShapeIconFontFileName = "materialdesignicons-subset.ttf";
         private const string ShapeIconFontLegacyFileName = "materialdesignicons-webfont.ttf";
         private const string RasterSourceClipboard = "Clipboard";
@@ -208,12 +212,14 @@ namespace AnonPDF
         private ToolStripMenuItem legalBasesDictionaryToolStripMenuItem;
         private ToolStripMenuItem exclusionAuthorityToolStripMenuItem;
         private ToolStripMenuItem automaticFootnotesToolStripMenuItem;
+        private ToolStripMenuItem reducePdfFileSizeToolStripMenuItem;
         private ToolStripMenuItem combineObjectsWithScanPagesToolStripMenuItem;
         private ToolStripMenuItem undoToolStripMenuItem;
         private ToolStripMenuItem redoToolStripMenuItem;
         private bool snapToGridEnabled = true;
         private bool addObjectsByPageRotationEnabled = false;
         private bool combineObjectsWithScanPagesEnabled = false;
+        private bool reducePdfFileSizeEnabled = false;
         private bool suppressAutomaticFootnotesMenuSync;
         private const float SnapGridStep = 5f;
         private static readonly System.Drawing.Color GroupSelectionColor = System.Drawing.Color.DeepSkyBlue;
@@ -806,6 +812,125 @@ namespace AnonPDF
             public override System.Drawing.Color ToolStripBorder => theme.BorderColor;
             public override System.Drawing.Color MenuBorder => theme.BorderColor;
         }
+
+        private sealed class RasterOptimizationProfile
+        {
+            public int PageNumber { get; set; }
+            public string OriginalFilter { get; set; }
+            public int WidthPx { get; set; }
+            public int HeightPx { get; set; }
+            public int SourceDpiX { get; set; }
+            public int SourceDpiY { get; set; }
+            public double WorkingDpiX { get; set; }
+            public double WorkingDpiY { get; set; }
+            public double EffectiveDpiX { get; set; }
+            public double EffectiveDpiY { get; set; }
+            public double RenderedWidthPoints { get; set; }
+            public double RenderedHeightPoints { get; set; }
+            public double GrayscaleRatio { get; set; }
+            public double NearGrayscaleRatio { get; set; }
+            public double BilevelRatio { get; set; }
+            public int LuminanceBucketCount { get; set; }
+            public double TextLikeScore { get; set; }
+            public double PhotoLikeScore { get; set; }
+            public bool LooksTextLike { get; set; }
+            public bool LooksPhotoLike { get; set; }
+            public bool IsFullPageImage { get; set; }
+        }
+
+        private enum RasterEncodingStrategy
+        {
+            TiffG4,
+            PngGray2,
+            PngGray4,
+            PngGray8,
+            JpegGray72,
+            JpegGray78,
+            JpegColor76,
+            JpegColor82,
+            PngLossless,
+            JpegColor90Fallback
+        }
+
+        private sealed class RasterEncodingCandidate
+        {
+            public RasterEncodingStrategy Strategy { get; set; }
+            public string Label { get; set; }
+            public int? TargetDpi { get; set; }
+        }
+
+        private sealed class RasterPageImageInfo
+        {
+            public string Filter { get; set; }
+            public int PixelWidth { get; set; }
+            public int PixelHeight { get; set; }
+            public double DisplayedWidthPoints { get; set; }
+            public double DisplayedHeightPoints { get; set; }
+            public double CoverageRatio { get; set; }
+        }
+
+        private sealed class RasterImageInfoExtractionListener : IEventListener
+        {
+            private readonly List<RasterPageImageInfo> images = new List<RasterPageImageInfo>();
+            private readonly double pageArea;
+
+            public RasterImageInfoExtractionListener(double pageWidthPoints, double pageHeightPoints)
+            {
+                pageArea = Math.Max(1d, pageWidthPoints * pageHeightPoints);
+            }
+
+            public IReadOnlyList<RasterPageImageInfo> Images => images;
+
+            public void EventOccurred(IEventData data, EventType type)
+            {
+                if (type != EventType.RENDER_IMAGE || !(data is ImageRenderInfo imageInfo))
+                {
+                    return;
+                }
+
+                try
+                {
+                    PdfImageXObject pdfImage = imageInfo.GetImage();
+                    if (pdfImage == null)
+                    {
+                        return;
+                    }
+
+                    iText.Kernel.Geom.Matrix ctm = imageInfo.GetImageCtm();
+                    iText.Kernel.Geom.Vector p0 = new iText.Kernel.Geom.Vector(0, 0, 1).Cross(ctm);
+                    iText.Kernel.Geom.Vector p1 = new iText.Kernel.Geom.Vector(1, 0, 1).Cross(ctm);
+                    iText.Kernel.Geom.Vector p2 = new iText.Kernel.Geom.Vector(0, 1, 1).Cross(ctm);
+
+                    double widthPoints = Math.Sqrt(
+                        Math.Pow(p1.Get(iText.Kernel.Geom.Vector.I1) - p0.Get(iText.Kernel.Geom.Vector.I1), 2) +
+                        Math.Pow(p1.Get(iText.Kernel.Geom.Vector.I2) - p0.Get(iText.Kernel.Geom.Vector.I2), 2));
+                    double heightPoints = Math.Sqrt(
+                        Math.Pow(p2.Get(iText.Kernel.Geom.Vector.I1) - p0.Get(iText.Kernel.Geom.Vector.I1), 2) +
+                        Math.Pow(p2.Get(iText.Kernel.Geom.Vector.I2) - p0.Get(iText.Kernel.Geom.Vector.I2), 2));
+
+                    PdfObject filterObject = pdfImage.GetPdfObject()?.Get(PdfName.Filter);
+                    images.Add(new RasterPageImageInfo
+                    {
+                        Filter = ExtractFilterName(filterObject),
+                        PixelWidth = (int)Math.Round(pdfImage.GetWidth()),
+                        PixelHeight = (int)Math.Round(pdfImage.GetHeight()),
+                        DisplayedWidthPoints = widthPoints,
+                        DisplayedHeightPoints = heightPoints,
+                        CoverageRatio = (widthPoints * heightPoints) / pageArea
+                    });
+                }
+                catch
+                {
+                    // Ignore malformed image events and keep extracting the rest.
+                }
+            }
+
+            public ICollection<EventType> GetSupportedEvents()
+            {
+                return new List<EventType> { EventType.RENDER_IMAGE };
+            }
+        }
+
         private bool isFullScreen = false;
         private FormBorderStyle previousFormBorderStyle;
         private FormWindowState previousWindowState;
@@ -876,6 +1001,7 @@ namespace AnonPDF
             ApplyRightPanelDividerFromSettings();
             autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
             combineObjectsWithScanPagesEnabled = Properties.Settings.Default.CombineObjectsWithScanPagesEnabled;
+            reducePdfFileSizeEnabled = Properties.Settings.Default.ReducePdfFileSizeEnabled;
             addObjectsByPageRotationEnabled = true;
             if (!Properties.Settings.Default.AddObjectsByPageRotationEnabled)
             {
@@ -1266,6 +1392,15 @@ namespace AnonPDF
             };
             combineObjectsWithScanPagesToolStripMenuItem.CheckedChanged += CombineObjectsWithScanPagesToolStripMenuItem_CheckedChanged;
 
+            reducePdfFileSizeToolStripMenuItem = new ToolStripMenuItem
+            {
+                Name = "reducePdfFileSizeToolStripMenuItem",
+                CheckOnClick = true,
+                Checked = reducePdfFileSizeEnabled,
+                Enabled = false
+            };
+            reducePdfFileSizeToolStripMenuItem.CheckedChanged += ReducePdfFileSizeToolStripMenuItem_CheckedChanged;
+
             if (rotatePageMenuItem != null)
             {
                 rotatePageMenuItem.ShortcutKeys = Keys.Control | Keys.R;
@@ -1322,6 +1457,33 @@ namespace AnonPDF
                 else
                 {
                     menuOptionsItem.DropDownItems.Add(combineObjectsWithScanPagesToolStripMenuItem);
+                }
+            }
+
+            if (menuOptionsItem != null && reducePdfFileSizeToolStripMenuItem != null)
+            {
+                if (reducePdfFileSizeToolStripMenuItem.OwnerItem is ToolStripDropDownItem reduceOwner &&
+                    reduceOwner.DropDownItems.Contains(reducePdfFileSizeToolStripMenuItem))
+                {
+                    reduceOwner.DropDownItems.Remove(reducePdfFileSizeToolStripMenuItem);
+                }
+
+                int combineIndex = menuOptionsItem.DropDownItems.IndexOf(combineObjectsWithScanPagesToolStripMenuItem);
+                if (combineIndex >= 0)
+                {
+                    menuOptionsItem.DropDownItems.Insert(combineIndex, reducePdfFileSizeToolStripMenuItem);
+                }
+                else
+                {
+                    int ignoreRestrictionsIndex = menuOptionsItem.DropDownItems.IndexOf(ignorePdfRestrictionsToolStripMenuItem);
+                    if (ignoreRestrictionsIndex >= 0)
+                    {
+                        menuOptionsItem.DropDownItems.Insert(ignoreRestrictionsIndex, reducePdfFileSizeToolStripMenuItem);
+                    }
+                    else
+                    {
+                        menuOptionsItem.DropDownItems.Add(reducePdfFileSizeToolStripMenuItem);
+                    }
                 }
             }
 
@@ -2247,6 +2409,17 @@ namespace AnonPDF
             SaveCombineObjectsWithScanPagesUserSetting(combineObjectsWithScanPagesEnabled);
         }
 
+        private void ReducePdfFileSizeToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
+        {
+            if (reducePdfFileSizeToolStripMenuItem == null)
+            {
+                return;
+            }
+
+            reducePdfFileSizeEnabled = reducePdfFileSizeToolStripMenuItem.Checked;
+            SaveReducePdfFileSizeUserSetting(reducePdfFileSizeEnabled);
+        }
+
         private void SaveAutoFootnotesUserSetting(bool enabled)
         {
             try
@@ -2283,6 +2456,19 @@ namespace AnonPDF
             catch (Exception ex)
             {
                 LogDebug("Save combine-objects-with-scan-pages user setting failed: " + ex.Message);
+            }
+        }
+
+        private void SaveReducePdfFileSizeUserSetting(bool enabled)
+        {
+            try
+            {
+                Properties.Settings.Default.ReducePdfFileSizeEnabled = enabled;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Save reduce-pdf-file-size user setting failed: " + ex.Message);
             }
         }
 
@@ -4713,6 +4899,10 @@ namespace AnonPDF
               if (combineObjectsWithScanPagesToolStripMenuItem != null)
               {
                   combineObjectsWithScanPagesToolStripMenuItem.Text = LocalizedText("Menu_CombineObjectsWithScanPages");
+              }
+              if (reducePdfFileSizeToolStripMenuItem != null)
+              {
+                  reducePdfFileSizeToolStripMenuItem.Text = LocalizedText("Menu_ReducePdfFileSize");
               }
               selectSignaturesToRemoveMenuItem.Text = Resources.Menu_SelectSignaturesToRemove;
               ignorePdfRestrictionsToolStripMenuItem.Text = Resources.Menu_IgnorePdfRestrictions;
@@ -10057,7 +10247,9 @@ namespace AnonPDF
             ISet<int> pagesWithBakedRotation = null,
             ISet<int> additionalPagesToRemove = null,
             bool includeSupplementaryPages = true,
-            bool showSuccessMessage = true)
+            bool showSuccessMessage = true,
+            bool skipPasswordPrompt = false,
+            bool forcePdfStructureCompression = false)
         {
             iText.Kernel.Colors.Color cleanUpColorBlack = new DeviceRgb(0, 0, 0);
             iText.Kernel.Colors.Color cleanUpColorWhite = new DeviceRgb(255, 255, 255);
@@ -10089,13 +10281,21 @@ namespace AnonPDF
 
 
             var writerProps = new WriterProperties();
+            if (forcePdfStructureCompression)
+            {
+                writerProps.SetCompressionLevel(9);
+                writerProps.SetFullCompressionMode(true);
+            }
             if (setSavePassword.Checked)
             {
-                if (userNewPassword == null)
+                if (!skipPasswordPrompt)
                 {
-                    userNewPassword = userPassword;
+                    if (userNewPassword == null)
+                    {
+                        userNewPassword = userPassword;
+                    }
+                    userNewPassword = PromptForPassword(userNewPassword, false);
                 }
-                userNewPassword = PromptForPassword(userNewPassword, false);
                 if (!string.IsNullOrEmpty(userNewPassword))
                 {
                     byte[] pwdSaveBytes = System.Text.Encoding.UTF8.GetBytes(userNewPassword);
@@ -10880,11 +11080,7 @@ namespace AnonPDF
                     AppendFootnotesSummaryPageIfNeeded(pdfDoc, footnoteRenderableBlocks, footnoteBasisNumberMap);
                 }
 
-                var info = pdfDoc.GetDocumentInfo();
-
-                // Custom fields
-                info.SetMoreInfo("iTextCopyright", LocalizedText("Pdf_Metadata_iTextCopyright"));
-                info.SetMoreInfo("iTextLicense", LocalizedText("Pdf_Metadata_iTextLicense"));
+                EnsureITextMetadataCompliance(pdfDoc, "full-export");
 
                 ApplyDemoWatermarkIfNeeded(pdfDoc);
             }
@@ -11439,6 +11635,10 @@ namespace AnonPDF
             {
                 combineObjectsWithScanPagesToolStripMenuItem.Enabled = true;
             }
+            if (reducePdfFileSizeToolStripMenuItem != null)
+            {
+                reducePdfFileSizeToolStripMenuItem.Enabled = true;
+            }
             closeDocumentMenuItem.Enabled = true;
 
             removePageButton.Enabled = true;
@@ -11983,6 +12183,10 @@ namespace AnonPDF
             {
                 combineObjectsWithScanPagesToolStripMenuItem.Enabled = false;
             }
+            if (reducePdfFileSizeToolStripMenuItem != null)
+            {
+                reducePdfFileSizeToolStripMenuItem.Enabled = false;
+            }
             closeDocumentMenuItem.Enabled = false;
 
             removePageButton.Enabled = false;
@@ -12504,16 +12708,19 @@ namespace AnonPDF
             }
         }
 
-        private void BuildRedactedPdfForOutput(
+        private void BuildRedactedPdfForOutputCore(
             string outputFilePath,
             ISet<int> additionalPagesToRemove,
             bool includeSupplementaryPages = true,
-            bool showSuccessMessage = true)
+            bool showSuccessMessage = true,
+            bool reduceFileSizeMode = false,
+            bool skipPasswordPrompt = false,
+            bool forcePdfStructureCompression = false)
         {
             string tempFile = Path.Combine(Path.GetTempPath(), $"pdfreencoded_{DateTime.Now.Ticks}.pdf");
             try
             {
-                bool retReencoding = ReencodePdfKeepOriginalCompression(inputPdfPath, tempFile);
+                bool retReencoding = ReencodePdfKeepOriginalCompression(inputPdfPath, tempFile, reduceFileSizeMode);
                 if (retReencoding)
                 {
                     RedactText(
@@ -12522,7 +12729,9 @@ namespace AnonPDF
                         reencodedPages,
                         additionalPagesToRemove,
                         includeSupplementaryPages,
-                        showSuccessMessage);
+                        showSuccessMessage,
+                        skipPasswordPrompt,
+                        forcePdfStructureCompression);
                 }
                 else
                 {
@@ -12531,7 +12740,9 @@ namespace AnonPDF
                         outputFilePath,
                         additionalPagesToRemove: additionalPagesToRemove,
                         includeSupplementaryPages: includeSupplementaryPages,
-                        showSuccessMessage: showSuccessMessage);
+                        showSuccessMessage: showSuccessMessage,
+                        skipPasswordPrompt: skipPasswordPrompt,
+                        forcePdfStructureCompression: forcePdfStructureCompression);
                 }
             }
             finally
@@ -12548,6 +12759,590 @@ namespace AnonPDF
                     }
                 }
             }
+        }
+
+        private void BuildRedactedPdfForOutput(
+            string outputFilePath,
+            ISet<int> additionalPagesToRemove,
+            bool includeSupplementaryPages = true,
+            bool showSuccessMessage = true)
+        {
+            bool noContentChanges = IsNoContentChangeExport(additionalPagesToRemove, includeSupplementaryPages);
+            bool structuralOnlyChanges = IsStructuralOnlyExport(additionalPagesToRemove, includeSupplementaryPages);
+
+            if (noContentChanges && !reducePdfFileSizeEnabled)
+            {
+                ApplyLicenseMetadataOnly(outputFilePath);
+
+                if (DebugLogEnabled)
+                {
+                    long inputSize = File.Exists(inputPdfPath) ? new FileInfo(inputPdfPath).Length : -1;
+                    long outputSize = File.Exists(outputFilePath) ? new FileInfo(outputFilePath).Length : -1;
+                    LogDebug($"ReducePdfSize metadata-only input={inputSize} output={outputSize} includeSupplementary={includeSupplementaryPages}");
+                }
+                return;
+            }
+
+            if (noContentChanges && reducePdfFileSizeEnabled)
+            {
+                string noChangeOptimizedOutputPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_opt_{Guid.NewGuid():N}.pdf");
+                string noChangeMetadataOnlyOutputPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_meta_{Guid.NewGuid():N}.pdf");
+                string noChangeCompactOutputPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_compact_{Guid.NewGuid():N}.pdf");
+                try
+                {
+                    BuildRedactedPdfForOutputCore(
+                        noChangeOptimizedOutputPath,
+                        additionalPagesToRemove,
+                        includeSupplementaryPages,
+                        showSuccessMessage: false,
+                        reduceFileSizeMode: true,
+                        skipPasswordPrompt: false,
+                        forcePdfStructureCompression: true);
+
+                    ApplyLicenseMetadataOnly(noChangeMetadataOnlyOutputPath);
+                    WriteCompactPdfWithLicenseMetadata(noChangeCompactOutputPath, additionalPagesToRemove);
+
+                    bool optimizedExists = File.Exists(noChangeOptimizedOutputPath);
+                    bool metadataExists = File.Exists(noChangeMetadataOnlyOutputPath);
+                    bool compactExists = File.Exists(noChangeCompactOutputPath);
+                    if (!optimizedExists && !metadataExists && !compactExists)
+                    {
+                        throw new IOException("Cannot build output PDF.");
+                    }
+
+                    string selectedPath = compactExists ? noChangeCompactOutputPath : (metadataExists ? noChangeMetadataOnlyOutputPath : noChangeOptimizedOutputPath);
+                    if (optimizedExists || metadataExists || compactExists)
+                    {
+                        var candidates = new List<(string Label, string Path, long Size)>();
+                        if (optimizedExists)
+                        {
+                            candidates.Add(("optimized", noChangeOptimizedOutputPath, new FileInfo(noChangeOptimizedOutputPath).Length));
+                        }
+                        if (metadataExists)
+                        {
+                            candidates.Add(("metadata-only", noChangeMetadataOnlyOutputPath, new FileInfo(noChangeMetadataOnlyOutputPath).Length));
+                        }
+                        if (compactExists)
+                        {
+                            candidates.Add(("compact", noChangeCompactOutputPath, new FileInfo(noChangeCompactOutputPath).Length));
+                        }
+
+                        var best = candidates.OrderBy(c => c.Size).First();
+                        selectedPath = best.Path;
+                        if (DebugLogEnabled)
+                        {
+                            long optimizedSize = optimizedExists ? new FileInfo(noChangeOptimizedOutputPath).Length : -1;
+                            long metadataSize = metadataExists ? new FileInfo(noChangeMetadataOnlyOutputPath).Length : -1;
+                            long compactSize = compactExists ? new FileInfo(noChangeCompactOutputPath).Length : -1;
+                            LogDebug($"ReducePdfSize nochange compare optimized={optimizedSize} metadata={metadataSize} compact={compactSize} selected={best.Label}");
+                        }
+                    }
+
+                    File.Copy(selectedPath, outputFilePath, overwrite: true);
+
+                    if (DebugLogEnabled && File.Exists(outputFilePath))
+                    {
+                        long inputSize = File.Exists(inputPdfPath) ? new FileInfo(inputPdfPath).Length : -1;
+                        long outputSize = new FileInfo(outputFilePath).Length;
+                        LogDebug($"ReducePdfSize final input={inputSize} output={outputSize} includeSupplementary={includeSupplementaryPages}");
+                    }
+
+                    if (showSuccessMessage)
+                    {
+                        MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(noChangeOptimizedOutputPath))
+                    {
+                        try
+                        {
+                            File.Delete(noChangeOptimizedOutputPath);
+                        }
+                        catch
+                        {
+                            // best effort cleanup
+                        }
+                    }
+
+                    if (File.Exists(noChangeMetadataOnlyOutputPath))
+                    {
+                        try
+                        {
+                            File.Delete(noChangeMetadataOnlyOutputPath);
+                        }
+                        catch
+                        {
+                            // best effort cleanup
+                        }
+                    }
+
+                    if (File.Exists(noChangeCompactOutputPath))
+                    {
+                        try
+                        {
+                            File.Delete(noChangeCompactOutputPath);
+                        }
+                        catch
+                        {
+                            // best effort cleanup
+                        }
+                    }
+                }
+
+                return;
+            }
+
+            if (structuralOnlyChanges && !reducePdfFileSizeEnabled)
+            {
+                WriteCompactPdfWithLicenseMetadata(outputFilePath, additionalPagesToRemove);
+                if (DebugLogEnabled && File.Exists(outputFilePath))
+                {
+                    long inputSize = File.Exists(inputPdfPath) ? new FileInfo(inputPdfPath).Length : -1;
+                    long outputSize = new FileInfo(outputFilePath).Length;
+                    LogDebug($"ReducePdfSize compact-only input={inputSize} output={outputSize} includeSupplementary={includeSupplementaryPages}");
+                }
+
+                if (showSuccessMessage)
+                {
+                    MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                return;
+            }
+
+            if (structuralOnlyChanges && reducePdfFileSizeEnabled)
+            {
+                string structuralOptimizedOutputPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_struct_opt_{Guid.NewGuid():N}.pdf");
+                string structuralCompactOutputPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_struct_compact_{Guid.NewGuid():N}.pdf");
+                try
+                {
+                    BuildRedactedPdfForOutputCore(
+                        structuralOptimizedOutputPath,
+                        additionalPagesToRemove,
+                        includeSupplementaryPages,
+                        showSuccessMessage: false,
+                        reduceFileSizeMode: true,
+                        skipPasswordPrompt: false,
+                        forcePdfStructureCompression: true);
+
+                    WriteCompactPdfWithLicenseMetadata(structuralCompactOutputPath, additionalPagesToRemove);
+
+                    bool optimizedExists = File.Exists(structuralOptimizedOutputPath);
+                    bool compactExists = File.Exists(structuralCompactOutputPath);
+                    if (!optimizedExists && !compactExists)
+                    {
+                        throw new IOException("Cannot build output PDF.");
+                    }
+
+                    string selectedPath = compactExists ? structuralCompactOutputPath : structuralOptimizedOutputPath;
+                    if (optimizedExists && compactExists)
+                    {
+                        long optimizedSize = new FileInfo(structuralOptimizedOutputPath).Length;
+                        long compactSize = new FileInfo(structuralCompactOutputPath).Length;
+                        selectedPath = optimizedSize <= compactSize ? structuralOptimizedOutputPath : structuralCompactOutputPath;
+                        if (DebugLogEnabled)
+                        {
+                            string selectedLabel = selectedPath == structuralOptimizedOutputPath ? "optimized" : "compact";
+                            LogDebug($"ReducePdfSize structural compare optimized={optimizedSize} compact={compactSize} selected={selectedLabel}");
+                        }
+                    }
+
+                    File.Copy(selectedPath, outputFilePath, overwrite: true);
+
+                    if (DebugLogEnabled && File.Exists(outputFilePath))
+                    {
+                        long inputSize = File.Exists(inputPdfPath) ? new FileInfo(inputPdfPath).Length : -1;
+                        long outputSize = new FileInfo(outputFilePath).Length;
+                        LogDebug($"ReducePdfSize final input={inputSize} output={outputSize} includeSupplementary={includeSupplementaryPages}");
+                    }
+
+                    if (showSuccessMessage)
+                    {
+                        MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(structuralOptimizedOutputPath))
+                    {
+                        try
+                        {
+                            File.Delete(structuralOptimizedOutputPath);
+                        }
+                        catch
+                        {
+                            // best effort cleanup
+                        }
+                    }
+
+                    if (File.Exists(structuralCompactOutputPath))
+                    {
+                        try
+                        {
+                            File.Delete(structuralCompactOutputPath);
+                        }
+                        catch
+                        {
+                            // best effort cleanup
+                        }
+                    }
+                }
+
+                return;
+            }
+
+            if (!reducePdfFileSizeEnabled)
+            {
+                BuildRedactedPdfForOutputCore(
+                    outputFilePath,
+                    additionalPagesToRemove,
+                    includeSupplementaryPages,
+                    showSuccessMessage,
+                    reduceFileSizeMode: false,
+                    skipPasswordPrompt: false,
+                    forcePdfStructureCompression: false);
+                if (DebugLogEnabled && File.Exists(outputFilePath))
+                {
+                    long inputSize = File.Exists(inputPdfPath) ? new FileInfo(inputPdfPath).Length : -1;
+                    long outputSize = new FileInfo(outputFilePath).Length;
+                    LogDebug($"ReducePdfSize disabled input={inputSize} output={outputSize} includeSupplementary={includeSupplementaryPages}");
+                }
+                return;
+            }
+
+            string optimizedOutputPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_opt_{Guid.NewGuid():N}.pdf");
+            string baselineOutputPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_base_{Guid.NewGuid():N}.pdf");
+            try
+            {
+                // First pass: with size reduction enabled (password prompt may appear here once).
+                BuildRedactedPdfForOutputCore(
+                    optimizedOutputPath,
+                    additionalPagesToRemove,
+                    includeSupplementaryPages,
+                    showSuccessMessage: false,
+                    reduceFileSizeMode: true,
+                    skipPasswordPrompt: false,
+                    forcePdfStructureCompression: true);
+
+                // Second pass: baseline without size reduction (no second password prompt).
+                BuildRedactedPdfForOutputCore(
+                    baselineOutputPath,
+                    additionalPagesToRemove,
+                    includeSupplementaryPages,
+                    showSuccessMessage: false,
+                    reduceFileSizeMode: false,
+                    skipPasswordPrompt: true,
+                    forcePdfStructureCompression: true);
+
+                bool optimizedExists = File.Exists(optimizedOutputPath);
+                bool baselineExists = File.Exists(baselineOutputPath);
+                if (!optimizedExists && !baselineExists)
+                {
+                    throw new IOException("Cannot build output PDF.");
+                }
+
+                string selectedPath = optimizedOutputPath;
+                if (!optimizedExists)
+                {
+                    selectedPath = baselineOutputPath;
+                }
+                else if (baselineExists)
+                {
+                    long optimizedSize = new FileInfo(optimizedOutputPath).Length;
+                    long baselineSize = new FileInfo(baselineOutputPath).Length;
+                    selectedPath = optimizedSize <= baselineSize ? optimizedOutputPath : baselineOutputPath;
+                    if (DebugLogEnabled)
+                    {
+                        string selectedLabel = selectedPath == optimizedOutputPath ? "optimized" : "baseline";
+                        LogDebug($"ReducePdfSize compare optimized={optimizedSize} baseline={baselineSize} selected={selectedLabel}");
+                    }
+                }
+                else if (DebugLogEnabled)
+                {
+                    long optimizedSize = new FileInfo(optimizedOutputPath).Length;
+                    LogDebug($"ReducePdfSize selected=optimized-only size={optimizedSize}");
+                }
+
+                File.Copy(selectedPath, outputFilePath, overwrite: true);
+
+                if (DebugLogEnabled && File.Exists(outputFilePath))
+                {
+                    long inputSize = File.Exists(inputPdfPath) ? new FileInfo(inputPdfPath).Length : -1;
+                    long outputSize = new FileInfo(outputFilePath).Length;
+                    LogDebug($"ReducePdfSize final input={inputSize} output={outputSize} includeSupplementary={includeSupplementaryPages}");
+                }
+
+                if (showSuccessMessage)
+                {
+                    MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            finally
+            {
+                if (File.Exists(optimizedOutputPath))
+                {
+                    try
+                    {
+                        File.Delete(optimizedOutputPath);
+                    }
+                    catch
+                    {
+                        // best effort cleanup
+                    }
+                }
+
+                if (File.Exists(baselineOutputPath))
+                {
+                    try
+                    {
+                        File.Delete(baselineOutputPath);
+                    }
+                    catch
+                    {
+                        // best effort cleanup
+                    }
+                }
+            }
+        }
+
+        private void ApplyLicenseMetadataOnly(string outputFilePath)
+        {
+            bool samePath = ArePathsEqual(inputPdfPath, outputFilePath);
+            string targetPath = samePath
+                ? Path.Combine(Path.GetTempPath(), $"anonpdfpro_meta_target_{Guid.NewGuid():N}.pdf")
+                : outputFilePath;
+
+            var readerProps = new ReaderProperties();
+            if (!string.IsNullOrEmpty(userPassword))
+            {
+                readerProps.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
+            }
+
+            var writerProps = new WriterProperties();
+            writerProps.SetCompressionLevel(9);
+            writerProps.SetFullCompressionMode(true);
+            using (var reader = new PdfReader(inputPdfPath, readerProps).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+            using (var writer = new PdfWriter(targetPath, writerProps))
+            using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader, writer, new StampingProperties().UseAppendMode()))
+            {
+                EnsureITextMetadataCompliance(pdfDoc, "metadata-only");
+            }
+
+            if (samePath)
+            {
+                File.Copy(targetPath, outputFilePath, overwrite: true);
+                try
+                {
+                    File.Delete(targetPath);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+
+        private void WriteCompactPdfWithLicenseMetadata(string outputFilePath, ISet<int> additionalPagesToRemove)
+        {
+            bool samePath = ArePathsEqual(inputPdfPath, outputFilePath);
+            string targetPath = samePath
+                ? Path.Combine(Path.GetTempPath(), $"anonpdfpro_compact_target_{Guid.NewGuid():N}.pdf")
+                : outputFilePath;
+
+            var pagesToSkip = new HashSet<int>(pagesToRemove);
+            if (additionalPagesToRemove != null)
+            {
+                pagesToSkip.UnionWith(additionalPagesToRemove);
+            }
+
+            var readerProps = new ReaderProperties();
+            if (!string.IsNullOrEmpty(userPassword))
+            {
+                readerProps.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
+            }
+
+            var writerProps = new WriterProperties();
+            writerProps.SetCompressionLevel(9);
+            writerProps.SetFullCompressionMode(true);
+
+            using (var reader = new PdfReader(inputPdfPath, readerProps).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+            using (var srcDoc = new iText.Kernel.Pdf.PdfDocument(reader))
+            using (var writer = new PdfWriter(targetPath, writerProps))
+            using (var destDoc = new iText.Kernel.Pdf.PdfDocument(writer))
+            {
+                int totalPages = srcDoc.GetNumberOfPages();
+                var pagesToCopy = Enumerable.Range(1, totalPages).Where(pageNumber => !pagesToSkip.Contains(pageNumber)).ToList();
+                if (pagesToCopy.Count == 0)
+                {
+                    throw new InvalidOperationException(Resources.Err_AllPagesMarked);
+                }
+
+                foreach (int pageNumber in pagesToCopy)
+                {
+                    srcDoc.CopyPagesTo(pageNumber, pageNumber, destDoc);
+                }
+
+                EnsureITextMetadataCompliance(destDoc, "compact");
+            }
+
+            if (samePath)
+            {
+                File.Copy(targetPath, outputFilePath, overwrite: true);
+                try
+                {
+                    File.Delete(targetPath);
+                }
+                catch
+                {
+                    // best effort cleanup
+                }
+            }
+        }
+
+        private void EnsureITextMetadataCompliance(iText.Kernel.Pdf.PdfDocument pdfDoc, string variantLabel = null)
+        {
+            if (pdfDoc == null)
+            {
+                return;
+            }
+
+            var info = pdfDoc.GetDocumentInfo();
+            info.SetMoreInfo("iTextCopyright", LocalizedText("Pdf_Metadata_iTextCopyright"));
+            info.SetMoreInfo("iTextLicense", LocalizedText("Pdf_Metadata_iTextLicense"));
+
+            string producer = info.GetProducer();
+            if (string.IsNullOrWhiteSpace(producer))
+            {
+                producer = "iText";
+            }
+            else if (producer.IndexOf("iText", StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                producer = producer + "; iText";
+            }
+
+            info.SetProducer(producer);
+
+            if (DebugLogEnabled)
+            {
+                string prefix = string.IsNullOrWhiteSpace(variantLabel) ? "PdfMetadata" : $"PdfMetadata {variantLabel}";
+                LogDebug($"{prefix} producer={producer} iTextCopyright={info.GetMoreInfo("iTextCopyright")} iTextLicense={info.GetMoreInfo("iTextLicense")}");
+            }
+        }
+
+        private bool IsNoContentChangeExport(ISet<int> additionalPagesToRemove, bool includeSupplementaryPages)
+        {
+            if (string.IsNullOrWhiteSpace(inputPdfPath) || !File.Exists(inputPdfPath))
+            {
+                return false;
+            }
+
+            if (LicenseManager.RequiresDemoWatermark)
+            {
+                return false;
+            }
+
+            if (setSavePassword.Checked)
+            {
+                // Password-protected save always requires regeneration.
+                return false;
+            }
+
+            if (redactionBlocks.Count > 0
+                || textAnnotations.Count > 0
+                || commentAnnotations.Count > 0
+                || rasterObjects.Count > 0
+                || arrowObjects.Count > 0
+                || vectorShapes.Count > 0)
+            {
+                return false;
+            }
+
+            if (pagesToRemove.Count > 0 || (additionalPagesToRemove != null && additionalPagesToRemove.Count > 0))
+            {
+                return false;
+            }
+
+            if (pageRotationOffsets.Any(kvp => NormalizeRotation(kvp.Value) != 0))
+            {
+                return false;
+            }
+
+            if (signatures.Count > 0 && !signaturesOriginalRadioButton.Checked)
+            {
+                return false;
+            }
+
+            if (includeSupplementaryPages)
+            {
+                // Even with no blocks now, keep strict guard if future supplementary sources are added.
+                bool canAppendSupplementary =
+                    (signatures.Count > 0 && signaturesReportRadioButton.Checked) ||
+                    redactionBlocks.Any(block => block != null && !string.IsNullOrWhiteSpace(block.ScopeId));
+                if (canAppendSupplementary)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool IsStructuralOnlyExport(ISet<int> additionalPagesToRemove, bool includeSupplementaryPages)
+        {
+            if (string.IsNullOrWhiteSpace(inputPdfPath) || !File.Exists(inputPdfPath))
+            {
+                return false;
+            }
+
+            if (LicenseManager.RequiresDemoWatermark)
+            {
+                return false;
+            }
+
+            if (setSavePassword.Checked)
+            {
+                return false;
+            }
+
+            if (redactionBlocks.Count > 0
+                || textAnnotations.Count > 0
+                || commentAnnotations.Count > 0
+                || rasterObjects.Count > 0
+                || arrowObjects.Count > 0
+                || vectorShapes.Count > 0)
+            {
+                return false;
+            }
+
+            bool hasPageSelectionChanges = pagesToRemove.Count > 0 || (additionalPagesToRemove != null && additionalPagesToRemove.Count > 0);
+            if (!hasPageSelectionChanges)
+            {
+                return false;
+            }
+
+            if (pageRotationOffsets.Any(kvp => NormalizeRotation(kvp.Value) != 0))
+            {
+                return false;
+            }
+
+            if (signatures.Count > 0 && !signaturesOriginalRadioButton.Checked)
+            {
+                return false;
+            }
+
+            if (includeSupplementaryPages)
+            {
+                bool canAppendSupplementary =
+                    (signatures.Count > 0 && signaturesReportRadioButton.Checked) ||
+                    redactionBlocks.Any(block => block != null && !string.IsNullOrWhiteSpace(block.ScopeId));
+                if (canAppendSupplementary)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private void PrintPdfMenuItem_Click(object sender, EventArgs e)
@@ -18427,18 +19222,18 @@ namespace AnonPDF
             using (var debugFont = new Font(this.Font.FontFamily, Math.Max(7f, this.Font.SizeInPoints - 1f), FontStyle.Bold))
             using (var debugBrush = new SolidBrush(System.Drawing.Color.Red))
             {
-                PointF[] corners = new[]
-                {
-                    new PointF(rect.Left, rect.Top),
-                    new PointF(rect.Right, rect.Top),
-                    new PointF(rect.Right, rect.Bottom),
-                    new PointF(rect.Left, rect.Bottom)
-                };
-
-                for (int i = 0; i < corners.Length; i++)
-                {
-                    graphics.DrawString((i + 1).ToString(CultureInfo.InvariantCulture), debugFont, debugBrush, corners[i].X + 1f, corners[i].Y + 1f);
-                }
+                //PointF[] corners = new[]
+                //{
+                //    new PointF(rect.Left, rect.Top),
+                //    new PointF(rect.Right, rect.Top),
+                //    new PointF(rect.Right, rect.Bottom),
+                //    new PointF(rect.Left, rect.Bottom)
+                //};
+                //
+                //for (int i = 0; i < corners.Length; i++)
+                //{
+                //    graphics.DrawString((i + 1).ToString(CultureInfo.InvariantCulture), debugFont, debugBrush, corners[i].X + 1f, corners[i].Y + 1f);
+                //}
             }
         }
 
@@ -18455,28 +19250,28 @@ namespace AnonPDF
                 return;
             }
 
-            PointF[] corners = new[]
-            {
-                new PointF(selectionRect.Left, selectionRect.Top),
-                new PointF(selectionRect.Right, selectionRect.Top),
-                new PointF(selectionRect.Right, selectionRect.Bottom),
-                new PointF(selectionRect.Left, selectionRect.Bottom)
-            };
-
-            pdfCanvas.SaveState();
-            pdfCanvas.SetFillColor(new DeviceRgb(220, 0, 0));
-            pdfCanvas.BeginText();
-            pdfCanvas.SetFontAndSize(font, 7f);
-
-            for (int i = 0; i < corners.Length; i++)
-            {
-                PointF cornerPdf = ConvertPointToPdfCoordinates(corners[i], pageNumber, rotation, includeBaseRotation);
-                pdfCanvas.SetTextMatrix(1, 0, 0, 1, cornerPdf.X, cornerPdf.Y);
-                pdfCanvas.ShowText((i + 1).ToString(CultureInfo.InvariantCulture));
-            }
-
-            pdfCanvas.EndText();
-            pdfCanvas.RestoreState();
+            //PointF[] corners = new[]
+            //{
+            //    new PointF(selectionRect.Left, selectionRect.Top),
+            //    new PointF(selectionRect.Right, selectionRect.Top),
+            //    new PointF(selectionRect.Right, selectionRect.Bottom),
+            //    new PointF(selectionRect.Left, selectionRect.Bottom)
+            //};
+            //
+            //pdfCanvas.SaveState();
+            //pdfCanvas.SetFillColor(new DeviceRgb(220, 0, 0));
+            //pdfCanvas.BeginText();
+            //pdfCanvas.SetFontAndSize(font, 7f);
+            //
+            //for (int i = 0; i < corners.Length; i++)
+            //{
+            //    PointF cornerPdf = ConvertPointToPdfCoordinates(corners[i], pageNumber, rotation, includeBaseRotation);
+            //    pdfCanvas.SetTextMatrix(1, 0, 0, 1, cornerPdf.X, cornerPdf.Y);
+            //    pdfCanvas.ShowText((i + 1).ToString(CultureInfo.InvariantCulture));
+            //}
+            //
+            //pdfCanvas.EndText();
+            //pdfCanvas.RestoreState();
         }
 
         private void RenderVectorShapesToPdf(
@@ -29681,7 +30476,61 @@ namespace AnonPDF
             return null;
         }
 
-        public bool ReencodePdfKeepOriginalCompression(string inputPdf, string outputPdf)
+        private RasterPageImageInfo GetPrimaryRasterInfoForPage(iText.Kernel.Pdf.PdfPage page)
+        {
+            if (page == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var pageSize = page.GetPageSize();
+                var listener = new RasterImageInfoExtractionListener(pageSize.GetWidth(), pageSize.GetHeight());
+                var processor = new PdfCanvasProcessor(listener);
+                processor.ProcessPageContent(page);
+
+                return listener.Images
+                    .OrderByDescending(img => img.CoverageRatio)
+                    .ThenByDescending(img => img.DisplayedWidthPoints * img.DisplayedHeightPoints)
+                    .FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                if (DebugLogEnabled)
+                {
+                    LogDebug("Raster preflight extraction failed: " + ex.Message);
+                }
+
+                return null;
+            }
+        }
+
+        private static string ExtractFilterName(PdfObject filterObj)
+        {
+            if (filterObj == null)
+            {
+                return null;
+            }
+
+            if (filterObj.IsName())
+            {
+                return ((PdfName)filterObj).GetValue();
+            }
+
+            if (filterObj.IsArray())
+            {
+                var arr = (PdfArray)filterObj;
+                if (arr.Size() > 0 && arr.Get(0) is PdfName firstFilter)
+                {
+                    return firstFilter.GetValue();
+                }
+            }
+
+            return null;
+        }
+
+        public bool ReencodePdfKeepOriginalCompression(string inputPdf, string outputPdf, bool reduceFileSizeMode = false)
         {
             bool isReencoded = false;
             reencodedPages.Clear();
@@ -29705,10 +30554,13 @@ namespace AnonPDF
 
                 // Get filter for each page
                 List<string> pageFilters = new List<string>();
+                List<RasterPageImageInfo> pagePrimaryImages = new List<RasterPageImageInfo>();
                 for (int i = 1; i <= numberOfPages; i++)
                 {
-                    string filterForPage = DetectMainFilterForPage(srcDoc.GetPage(i));
-                    pageFilters.Add(filterForPage);
+                    var page = srcDoc.GetPage(i);
+                    RasterPageImageInfo primaryRaster = GetPrimaryRasterInfoForPage(page);
+                    pagePrimaryImages.Add(primaryRaster);
+                    pageFilters.Add(primaryRaster?.Filter ?? DetectMainFilterForPage(page));
                 }
 
                 // If any page doesn't have specified filter â€“ reencoding is not performed
@@ -29724,18 +30576,33 @@ namespace AnonPDF
                     for (int i = 0; i < numberOfPages; i++)
                     {
                         int pageNumber = i + 1;
+                        RasterPageImageInfo primaryRaster = pagePrimaryImages[i];
+                        bool hasRedactionOnPage = redactionBlocks.Any(b => b.PageNumber == pageNumber);
+                        bool optimizationMode = reduceFileSizeMode;
+                        bool pageHasImageFilter = primaryRaster != null || !string.IsNullOrWhiteSpace(pageFilters[i]);
+                        bool pageHasText = false;
+                        bool pageLooksLikeScan = false;
 
-                        // If there are no redaction blocks for given page â€“ copy page without reencoding
-                        if (!redactionBlocks.Any(b => b.PageNumber == pageNumber))
+                        if (optimizationMode || hasRedactionOnPage)
+                        {
+                            string extractedText = iText.Kernel.Pdf.Canvas.Parser.PdfTextExtractor.GetTextFromPage(srcDoc.GetPage(pageNumber));
+                            pageHasText = !string.IsNullOrWhiteSpace(extractedText);
+                            pageLooksLikeScan = pageHasImageFilter && !pageHasText;
+                        }
+
+                        bool shouldOptimizePage = optimizationMode && pageLooksLikeScan;
+
+                        // If there are no redactions and page is not a scan candidate, copy page unchanged.
+                        if (!hasRedactionOnPage && !shouldOptimizePage)
                         {
                             srcDoc.CopyPagesTo(pageNumber, pageNumber, destDoc);
                             continue;
                         }
-                        if (!(safeModeCheckBox.Checked || pdfCleanUpToolError))
+
+                        if (!(safeModeCheckBox.Checked || pdfCleanUpToolError) && !shouldOptimizePage)
                         {
                             // Check if there are text objects on page.
-                            string extractedText = iText.Kernel.Pdf.Canvas.Parser.PdfTextExtractor.GetTextFromPage(srcDoc.GetPage(pageNumber));
-                            if (!string.IsNullOrWhiteSpace(extractedText))
+                            if (pageHasText)
                             {
                                 srcDoc.CopyPagesTo(pageNumber, pageNumber, destDoc);
                                 continue;
@@ -29787,19 +30654,61 @@ namespace AnonPDF
                             }
 
                             byte[] encodedBytes;
-                            // For "CCITTFaxDecode" perform reencoding using TIFF G4.
-                            if (pageFilters[i] == "CCITTFaxDecode")
+                            string selectedEncodingStrategy = null;
+                            RasterOptimizationProfile optimizationProfile = null;
+                            if (shouldOptimizePage)
                             {
-                                using (var oneBit = ConvertTo1Bit(bmp, 128))
+                                optimizationProfile = BuildRasterOptimizationProfile(
+                                    bmp,
+                                    primaryRaster,
+                                    pageFilters[i],
+                                    pageNumber,
+                                    dpi,
+                                    dpi,
+                                    bmpWidth,
+                                    bmpHeight,
+                                    pageWidthPoints,
+                                    pageHeightPoints);
+                                encodedBytes = EncodeBestForScannedPage(bmp, optimizationProfile, out selectedEncodingStrategy);
+                            }
+                            else
+                            {
+                                // For "CCITTFaxDecode" perform reencoding using TIFF G4.
+                                if (pageFilters[i] == "CCITTFaxDecode")
                                 {
-                                    encodedBytes = EncodeToTiffG4(oneBit);
+                                    using (var oneBit = ConvertTo1Bit(bmp, 128))
+                                    {
+                                        encodedBytes = EncodeToTiffG4(oneBit);
+                                    }
                                 }
-                            } else if (pageFilters[i] == "FlateDecode")
+                                else if (pageFilters[i] == "FlateDecode")
+                                {
+                                    encodedBytes = EncodeToPng(bmp);
+                                }
+                                else
+                                {
+                                    encodedBytes = EncodeToJpeg(bmp, quality: 90L);
+                                }
+                            }
+
+                            if (DebugLogEnabled && shouldOptimizePage)
                             {
-                                encodedBytes = EncodeToPng(bmp);
-                            } else
-                            {
-                                encodedBytes = EncodeToJpeg(bmp, quality: 90L);
+                                LogDebug(
+                                    $"Reencode profile page={pageNumber} filter={optimizationProfile?.OriginalFilter ?? "none"} " +
+                                    $"gray={optimizationProfile?.GrayscaleRatio.ToString("F3", CultureInfo.InvariantCulture) ?? "-"} " +
+                                    $"nearGray={optimizationProfile?.NearGrayscaleRatio.ToString("F3", CultureInfo.InvariantCulture) ?? "-"} " +
+                                    $"bw={optimizationProfile?.BilevelRatio.ToString("F3", CultureInfo.InvariantCulture) ?? "-"} " +
+                                    $"buckets={optimizationProfile?.LuminanceBucketCount.ToString(CultureInfo.InvariantCulture) ?? "-"} " +
+                                    $"textScore={optimizationProfile?.TextLikeScore.ToString("F3", CultureInfo.InvariantCulture) ?? "-"} " +
+                                    $"photoScore={optimizationProfile?.PhotoLikeScore.ToString("F3", CultureInfo.InvariantCulture) ?? "-"} " +
+                                    $"textLike={optimizationProfile?.LooksTextLike.ToString() ?? "-"} " +
+                                    $"photoLike={optimizationProfile?.LooksPhotoLike.ToString() ?? "-"} " +
+                                    $"fullPage={optimizationProfile?.IsFullPageImage.ToString() ?? "-"} " +
+                                    $"downsample={DescribeDownsampleRecommendation(optimizationProfile)} " +
+                                    $"workingDpi={optimizationProfile?.WorkingDpiX.ToString("F1", CultureInfo.InvariantCulture) ?? "-"}/{optimizationProfile?.WorkingDpiY.ToString("F1", CultureInfo.InvariantCulture) ?? "-"} " +
+                                    $"dpi={optimizationProfile?.EffectiveDpiX.ToString("F1", CultureInfo.InvariantCulture) ?? "-"}/{optimizationProfile?.EffectiveDpiY.ToString("F1", CultureInfo.InvariantCulture) ?? "-"} " +
+                                    $"px={optimizationProfile?.WidthPx.ToString(CultureInfo.InvariantCulture) ?? "-"}x{optimizationProfile?.HeightPx.ToString(CultureInfo.InvariantCulture) ?? "-"}");
+                                LogDebug($"Reencode optimize page={pageNumber} strategy={selectedEncodingStrategy ?? "default"} bytes={encodedBytes.Length}");
                             }
 
                             bmp.Dispose();
@@ -29819,8 +30728,579 @@ namespace AnonPDF
                     }
                 }
 
+                if (reduceFileSizeMode && isReencoded)
+                {
+                    long originalSize = new FileInfo(inputPdf).Length;
+                    long optimizedSize = File.Exists(outputPdf) ? new FileInfo(outputPdf).Length : long.MaxValue;
+                    if (optimizedSize >= originalSize)
+                    {
+                        if (DebugLogEnabled)
+                        {
+                            LogDebug($"Reencode skipped (no size gain): input={originalSize} output={optimizedSize}");
+                        }
+
+                        reencodedPages.Clear();
+                        return false;
+                    }
+                }
+
                 return isReencoded;
             }
+        }
+
+        private RasterOptimizationProfile BuildRasterOptimizationProfile(
+            Bitmap bmp,
+            RasterPageImageInfo primaryRaster,
+            string originalFilter,
+            int pageNumber,
+            int sourceDpiX,
+            int sourceDpiY,
+            int widthPx,
+            int heightPx,
+            double renderedWidthPoints,
+            double renderedHeightPoints)
+        {
+            var profile = AnalyzeBitmapForOptimization(bmp);
+            profile.PageNumber = pageNumber;
+            profile.OriginalFilter = originalFilter;
+            profile.SourceDpiX = sourceDpiX;
+            profile.SourceDpiY = sourceDpiY;
+            profile.WorkingDpiX = sourceDpiX;
+            profile.WorkingDpiY = sourceDpiY;
+            profile.WidthPx = primaryRaster?.PixelWidth ?? widthPx;
+            profile.HeightPx = primaryRaster?.PixelHeight ?? heightPx;
+            profile.RenderedWidthPoints = renderedWidthPoints;
+            profile.RenderedHeightPoints = renderedHeightPoints;
+            double displayedWidthPoints = primaryRaster?.DisplayedWidthPoints > 0d ? primaryRaster.DisplayedWidthPoints : renderedWidthPoints;
+            double displayedHeightPoints = primaryRaster?.DisplayedHeightPoints > 0d ? primaryRaster.DisplayedHeightPoints : renderedHeightPoints;
+            profile.EffectiveDpiX = displayedWidthPoints > 0.0 ? profile.WidthPx / (displayedWidthPoints / 72.0) : sourceDpiX;
+            profile.EffectiveDpiY = displayedHeightPoints > 0.0 ? profile.HeightPx / (displayedHeightPoints / 72.0) : sourceDpiY;
+            profile.IsFullPageImage = primaryRaster == null || primaryRaster.CoverageRatio >= 0.85d;
+            return profile;
+        }
+
+        private byte[] EncodeBestForScannedPage(Bitmap bmp, RasterOptimizationProfile profile, out string selectedStrategy)
+        {
+            if (profile == null)
+            {
+                selectedStrategy = "jpeg-color-q90-fallback";
+                return EncodeToJpeg(bmp, quality: 90L);
+            }
+
+            var candidates = new List<(RasterEncodingCandidate Candidate, byte[] Data)>();
+            foreach (var candidate in BuildRasterEncodingCandidates(profile))
+            {
+                try
+                {
+                    byte[] data = EncodeRasterWithStrategy(bmp, profile, candidate);
+                    if (data == null || data.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    candidates.Add((candidate, data));
+
+                    if (DebugLogEnabled && candidate.Strategy == RasterEncodingStrategy.PngGray2)
+                    {
+                        try
+                        {
+                            string previewPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_preview_p{profile.PageNumber}_gray2.png");
+                            File.WriteAllBytes(previewPath, data);
+                            LogDebug($"Reencode preview saved strategy={candidate.Label} page={profile.PageNumber} path={previewPath}");
+                        }
+                        catch (Exception ex)
+                        {
+                            LogDebug($"Reencode preview save failed strategy={candidate.Label} page={profile.PageNumber}: {ex.Message}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (DebugLogEnabled)
+                    {
+                        LogDebug($"Reencode candidate failed strategy={candidate.Label}: {ex.Message}");
+                    }
+                }
+            }
+
+            if (candidates.Count == 0)
+            {
+                const string fallbackLabel = "jpeg-color-q90-fallback";
+                selectedStrategy = fallbackLabel;
+                return EncodeRasterWithStrategy(
+                    bmp,
+                    profile,
+                    CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegColor90Fallback));
+            }
+
+            if (DebugLogEnabled)
+            {
+                foreach (var candidate in candidates)
+                {
+                    LogDebug($"Reencode candidate strategy={candidate.Candidate.Label} bytes={candidate.Data.Length}");
+                }
+            }
+
+            var best = candidates.OrderBy(c => c.Data.Length).First();
+            selectedStrategy =
+                $"{best.Candidate.Label};gray={profile.GrayscaleRatio.ToString("F3", CultureInfo.InvariantCulture)};" +
+                $"bw={profile.BilevelRatio.ToString("F3", CultureInfo.InvariantCulture)};" +
+                $"text={profile.TextLikeScore.ToString("F3", CultureInfo.InvariantCulture)};" +
+                $"photo={profile.PhotoLikeScore.ToString("F3", CultureInfo.InvariantCulture)}";
+            return best.Data;
+        }
+
+        private IEnumerable<RasterEncodingCandidate> BuildRasterEncodingCandidates(RasterOptimizationProfile profile)
+        {
+            if (profile == null)
+            {
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegColor90Fallback);
+                yield break;
+            }
+
+            bool mostlyGrayscale = IsMostlyGrayscaleRaster(profile);
+            bool bilevelCandidate = profile.BilevelRatio >= 0.995;
+            bool preferPhotoStrategies = profile.LooksPhotoLike && !profile.LooksTextLike;
+            bool allowTextDownsample = IsTextDownsampleCandidate(profile);
+            bool preferTextStrategies = (profile.LooksTextLike || allowTextDownsample) && !profile.LooksPhotoLike;
+            bool allowPhotoDownsample = profile.LooksPhotoLike &&
+                Math.Max(profile.EffectiveDpiX, profile.EffectiveDpiY) > RasterDownsamplePhotoThresholdDpi;
+
+            if (bilevelCandidate || string.Equals(profile.OriginalFilter, "CCITTFaxDecode", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.TiffG4);
+            }
+
+            if (mostlyGrayscale && !preferPhotoStrategies)
+            {
+                if (allowTextDownsample)
+                {
+                    yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.PngGray2, RasterDownsampleTextTargetDpi);
+                    yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.PngGray4, RasterDownsampleTextTargetDpi);
+                    yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.PngGray8, RasterDownsampleTextTargetDpi);
+                    yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegGray72, RasterDownsampleTextTargetDpi);
+                    yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegGray78, RasterDownsampleTextTargetDpi);
+                }
+
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.PngGray2);
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.PngGray4);
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.PngGray8);
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegGray72);
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegGray78);
+            }
+
+            if (!preferTextStrategies)
+            {
+                if (allowPhotoDownsample)
+                {
+                    yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegColor76, RasterDownsamplePhotoTargetDpi);
+                    yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegColor82, RasterDownsamplePhotoTargetDpi);
+                }
+
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegColor76);
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegColor82);
+            }
+            else
+            {
+                if (allowTextDownsample && !mostlyGrayscale)
+                {
+                    yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegColor82, RasterDownsampleTextTargetDpi);
+                }
+
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.JpegColor82);
+            }
+
+            if (string.Equals(profile.OriginalFilter, "FlateDecode", StringComparison.OrdinalIgnoreCase))
+            {
+                yield return CreateRasterEncodingCandidate(RasterEncodingStrategy.PngLossless);
+            }
+        }
+
+        private RasterEncodingCandidate CreateRasterEncodingCandidate(RasterEncodingStrategy strategy, int? targetDpi = null)
+        {
+            string strategyLabel = GetRasterEncodingStrategyLabel(strategy);
+            return new RasterEncodingCandidate
+            {
+                Strategy = strategy,
+                TargetDpi = targetDpi,
+                Label = targetDpi.HasValue ? $"{strategyLabel}@{targetDpi.Value}dpi" : strategyLabel
+            };
+        }
+
+        private static string GetRasterEncodingStrategyLabel(RasterEncodingStrategy strategy)
+        {
+            switch (strategy)
+            {
+                case RasterEncodingStrategy.TiffG4:
+                    return "tiff-g4";
+                case RasterEncodingStrategy.PngGray2:
+                    return "png-gray2";
+                case RasterEncodingStrategy.PngGray4:
+                    return "png-gray4";
+                case RasterEncodingStrategy.PngGray8:
+                    return "png-gray8";
+                case RasterEncodingStrategy.JpegGray72:
+                    return "jpeg-gray-q72";
+                case RasterEncodingStrategy.JpegGray78:
+                    return "jpeg-gray-q78";
+                case RasterEncodingStrategy.JpegColor76:
+                    return "jpeg-color-q76";
+                case RasterEncodingStrategy.JpegColor82:
+                    return "jpeg-color-q82";
+                case RasterEncodingStrategy.PngLossless:
+                    return "png";
+                default:
+                    return "jpeg-color-q90-fallback";
+            }
+        }
+
+        private byte[] EncodeRasterWithStrategy(Bitmap bmp, RasterOptimizationProfile profile, RasterEncodingCandidate candidate)
+        {
+            Bitmap sourceBitmap = bmp;
+            Bitmap downsampledBitmap = null;
+
+            try
+            {
+                if (candidate?.TargetDpi is int targetDpi)
+                {
+                    downsampledBitmap = DownsampleBitmapForTargetDpi(sourceBitmap, profile, targetDpi, candidate.Label);
+                    if (downsampledBitmap != null)
+                    {
+                        sourceBitmap = downsampledBitmap;
+                    }
+                }
+
+                switch (candidate?.Strategy ?? RasterEncodingStrategy.JpegColor90Fallback)
+                {
+                    case RasterEncodingStrategy.TiffG4:
+                        using (var oneBit = ConvertTo1Bit(sourceBitmap, 170))
+                        {
+                            return EncodeToTiffG4(oneBit);
+                        }
+
+                    case RasterEncodingStrategy.PngGray2:
+                        using (var gray2 = ConvertToGrayscale2(sourceBitmap))
+                        {
+                            return EncodeToPng(gray2);
+                        }
+
+                    case RasterEncodingStrategy.PngGray4:
+                        using (var gray4 = ConvertToGrayscale4(sourceBitmap))
+                        {
+                            return EncodeToPng(gray4);
+                        }
+
+                    case RasterEncodingStrategy.PngGray8:
+                        using (var gray8 = ConvertToGrayscale8(sourceBitmap))
+                        {
+                            return EncodeToPng(gray8);
+                        }
+
+                    case RasterEncodingStrategy.JpegGray72:
+                        return EncodeToJpegGrayscale(sourceBitmap, quality: 72L);
+
+                    case RasterEncodingStrategy.JpegGray78:
+                        return EncodeToJpegGrayscale(sourceBitmap, quality: 78L);
+
+                    case RasterEncodingStrategy.JpegColor76:
+                        return EncodeToJpeg(sourceBitmap, quality: 76L);
+
+                    case RasterEncodingStrategy.JpegColor82:
+                        return EncodeToJpeg(sourceBitmap, quality: 82L);
+
+                    case RasterEncodingStrategy.PngLossless:
+                        return EncodeToPng(sourceBitmap);
+
+                    default:
+                        return EncodeToJpeg(sourceBitmap, quality: 90L);
+                }
+            }
+            finally
+            {
+                downsampledBitmap?.Dispose();
+            }
+        }
+
+        private RasterOptimizationProfile AnalyzeBitmapForOptimization(Bitmap bmp)
+        {
+            var profile = new RasterOptimizationProfile();
+
+            if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0)
+            {
+                return profile;
+            }
+
+            int width = bmp.Width;
+            int height = bmp.Height;
+            int stepX = Math.Max(1, width / 600);
+            int stepY = Math.Max(1, height / 600);
+
+            DrawingRectangle rect = new DrawingRectangle(0, 0, width, height);
+            BitmapData bmpData = null;
+
+            try
+            {
+                bmpData = bmp.LockBits(rect, ImageLockMode.ReadOnly, bmp.PixelFormat);
+                int bpp = Math.Max(1, DrawingImage.GetPixelFormatSize(bmp.PixelFormat) / 8);
+                int strideAbs = Math.Abs(bmpData.Stride);
+                int totalRows = height;
+                byte[] buffer = new byte[strideAbs * totalRows];
+                System.Runtime.InteropServices.Marshal.Copy(bmpData.Scan0, buffer, 0, buffer.Length);
+
+                int total = 0;
+                int grayLike = 0;
+                int nearGrayLike = 0;
+                int bilevelLike = 0;
+                int horizontalEdgeCount = 0;
+                int verticalEdgeCount = 0;
+                int highVarianceCount = 0;
+                var luminanceBuckets = new HashSet<int>();
+
+                for (int y = 0; y < height; y += stepY)
+                {
+                    int sourceY = bmpData.Stride < 0 ? (height - 1 - y) : y;
+                    int rowStart = sourceY * strideAbs;
+                    for (int x = 0; x < width; x += stepX)
+                    {
+                        int idx = rowStart + x * bpp;
+                        if (idx + 2 >= buffer.Length)
+                        {
+                            continue;
+                        }
+
+                        byte b = buffer[idx];
+                        byte g = buffer[idx + 1];
+                        byte r = buffer[idx + 2];
+
+                        int rgDiff = Math.Abs(r - g);
+                        int gbDiff = Math.Abs(g - b);
+                        int rbDiff = Math.Abs(r - b);
+
+                        if (rgDiff <= 8 && gbDiff <= 8 && rbDiff <= 8)
+                        {
+                            grayLike++;
+                        }
+
+                        if (rgDiff <= 28 && gbDiff <= 28 && rbDiff <= 28)
+                        {
+                            nearGrayLike++;
+                        }
+
+                        int luminance = (299 * r + 587 * g + 114 * b) / 1000;
+                        luminanceBuckets.Add(luminance / 16);
+                        if (luminance <= 20 || luminance >= 235)
+                        {
+                            bilevelLike++;
+                        }
+
+                        if (x + stepX < width)
+                        {
+                            int idxRight = rowStart + (x + stepX) * bpp;
+                            if (idxRight + 2 < buffer.Length)
+                            {
+                                int lumRight = (299 * buffer[idxRight + 2] + 587 * buffer[idxRight + 1] + 114 * buffer[idxRight]) / 1000;
+                                if (Math.Abs(luminance - lumRight) >= 28)
+                                {
+                                    verticalEdgeCount++;
+                                }
+                            }
+                        }
+
+                        if (y + stepY < height)
+                        {
+                            int nextSourceY = bmpData.Stride < 0 ? (height - 1 - (y + stepY)) : (y + stepY);
+                            int idxDown = nextSourceY * strideAbs + x * bpp;
+                            if (idxDown + 2 < buffer.Length)
+                            {
+                                int lumDown = (299 * buffer[idxDown + 2] + 587 * buffer[idxDown + 1] + 114 * buffer[idxDown]) / 1000;
+                                if (Math.Abs(luminance - lumDown) >= 28)
+                                {
+                                    horizontalEdgeCount++;
+                                }
+                            }
+                        }
+
+                        if (luminance > 32 && luminance < 223)
+                        {
+                            highVarianceCount++;
+                        }
+
+                        total++;
+                    }
+                }
+
+                if (total > 0)
+                {
+                    profile.GrayscaleRatio = (double)grayLike / total;
+                    profile.NearGrayscaleRatio = (double)nearGrayLike / total;
+                    profile.BilevelRatio = (double)bilevelLike / total;
+                    profile.LuminanceBucketCount = luminanceBuckets.Count;
+
+                    double horizontalEdgeRatio = (double)horizontalEdgeCount / total;
+                    double verticalEdgeRatio = (double)verticalEdgeCount / total;
+                    double edgeRatio = horizontalEdgeRatio + verticalEdgeRatio;
+                    double midToneRatio = (double)highVarianceCount / total;
+                    profile.TextLikeScore = Clamp01(
+                        (profile.BilevelRatio * 0.45) +
+                        ((horizontalEdgeRatio + verticalEdgeRatio) * 1.35) +
+                        ((profile.LuminanceBucketCount <= 6 ? 1.0 : 0.0) * 0.25) -
+                        (midToneRatio * 0.30));
+                    profile.PhotoLikeScore = Clamp01(
+                        (midToneRatio * 0.70) +
+                        ((profile.LuminanceBucketCount / 16.0) * 0.35) +
+                        (edgeRatio * 0.10) -
+                        (profile.BilevelRatio * 0.30));
+                    profile.LooksTextLike = profile.TextLikeScore >= 0.55;
+                    profile.LooksPhotoLike = profile.PhotoLikeScore >= 0.55 && profile.PhotoLikeScore > profile.TextLikeScore;
+                }
+            }
+            finally
+            {
+                if (bmpData != null)
+                {
+                    bmp.UnlockBits(bmpData);
+                }
+            }
+
+            return profile;
+        }
+
+        private Bitmap DownsampleBitmapForTargetDpi(Bitmap sourceBitmap, RasterOptimizationProfile profile, int targetDpi, string candidateLabel)
+        {
+            if (sourceBitmap == null || profile == null || targetDpi <= 0)
+            {
+                return null;
+            }
+
+            double workingDpiX = profile.WorkingDpiX > 0d ? profile.WorkingDpiX : profile.SourceDpiX;
+            double workingDpiY = profile.WorkingDpiY > 0d ? profile.WorkingDpiY : profile.SourceDpiY;
+            if (workingDpiX <= 0d || workingDpiY <= 0d)
+            {
+                return null;
+            }
+
+            double scaleX = targetDpi / workingDpiX;
+            double scaleY = targetDpi / workingDpiY;
+            double scale = Math.Min(scaleX, scaleY);
+            if (scale >= 0.995d)
+            {
+                return null;
+            }
+
+            int targetWidth = Math.Max(1, (int)Math.Round(sourceBitmap.Width * scale));
+            int targetHeight = Math.Max(1, (int)Math.Round(sourceBitmap.Height * scale));
+            if (targetWidth >= sourceBitmap.Width || targetHeight >= sourceBitmap.Height)
+            {
+                return null;
+            }
+
+            if (DebugLogEnabled)
+            {
+                LogDebug(
+                    $"Reencode downsample page={profile.PageNumber} strategy={candidateLabel} " +
+                    $"fromDpi={workingDpiX.ToString("F1", CultureInfo.InvariantCulture)}/{workingDpiY.ToString("F1", CultureInfo.InvariantCulture)} " +
+                    $"toDpi={targetDpi} fromPx={sourceBitmap.Width}x{sourceBitmap.Height} toPx={targetWidth}x{targetHeight}");
+            }
+
+            return ResizeBitmapHighQuality(sourceBitmap, targetWidth, targetHeight, targetDpi);
+        }
+
+        private string DescribeDownsampleRecommendation(RasterOptimizationProfile profile)
+        {
+            if (profile == null)
+            {
+                return "none";
+            }
+
+            var recommendations = new List<string>();
+            if (IsTextDownsampleCandidate(profile))
+            {
+                recommendations.Add($"text->{RasterDownsampleTextTargetDpi}");
+            }
+
+            double workingDpi = Math.Max(
+                profile.WorkingDpiX > 0d ? profile.WorkingDpiX : profile.SourceDpiX,
+                profile.WorkingDpiY > 0d ? profile.WorkingDpiY : profile.SourceDpiY);
+            if (profile.LooksPhotoLike &&
+                Math.Max(profile.EffectiveDpiX, profile.EffectiveDpiY) > RasterDownsamplePhotoThresholdDpi &&
+                workingDpi > RasterDownsamplePhotoTargetDpi)
+            {
+                recommendations.Add($"photo->{RasterDownsamplePhotoTargetDpi}");
+            }
+
+            return recommendations.Count == 0 ? "none" : string.Join(",", recommendations);
+        }
+
+        private bool IsMostlyGrayscaleRaster(RasterOptimizationProfile profile)
+        {
+            return profile != null && (profile.GrayscaleRatio >= 0.985 || profile.NearGrayscaleRatio >= 0.96);
+        }
+
+        private bool IsTextDownsampleCandidate(RasterOptimizationProfile profile)
+        {
+            if (profile == null)
+            {
+                return false;
+            }
+
+            double workingDpi = Math.Max(
+                profile.WorkingDpiX > 0d ? profile.WorkingDpiX : profile.SourceDpiX,
+                profile.WorkingDpiY > 0d ? profile.WorkingDpiY : profile.SourceDpiY);
+            if (workingDpi <= RasterDownsampleTextTargetDpi)
+            {
+                return false;
+            }
+
+            double effectiveDpi = Math.Max(profile.EffectiveDpiX, profile.EffectiveDpiY);
+            if (effectiveDpi <= RasterDownsampleTextThresholdDpi)
+            {
+                return false;
+            }
+
+            if (!profile.IsFullPageImage || profile.PhotoLikeScore >= 0.15 || profile.BilevelRatio < 0.97)
+            {
+                return false;
+            }
+
+            return profile.LooksTextLike || profile.TextLikeScore >= 0.45 || IsMostlyGrayscaleRaster(profile);
+        }
+
+        private Bitmap ResizeBitmapHighQuality(Bitmap sourceBitmap, int targetWidth, int targetHeight, int targetDpi)
+        {
+            var resized = new Bitmap(targetWidth, targetHeight, PixelFormat.Format24bppRgb);
+            resized.SetResolution(targetDpi, targetDpi);
+
+            using (Graphics g = Graphics.FromImage(resized))
+            {
+                g.Clear(System.Drawing.Color.White);
+                g.CompositingMode = CompositingMode.SourceCopy;
+                g.CompositingQuality = CompositingQuality.HighQuality;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.SmoothingMode = SmoothingMode.HighQuality;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.DrawImage(
+                    sourceBitmap,
+                    new DrawingRectangle(0, 0, targetWidth, targetHeight),
+                    new DrawingRectangle(0, 0, sourceBitmap.Width, sourceBitmap.Height),
+                    GraphicsUnit.Pixel);
+            }
+
+            return resized;
+        }
+
+        private static double Clamp01(double value)
+        {
+            if (value < 0d)
+            {
+                return 0d;
+            }
+
+            if (value > 1d)
+            {
+                return 1d;
+            }
+
+            return value;
         }
 
 
@@ -29882,6 +31362,244 @@ namespace AnonPDF
             return bmp;
         }
 
+        private Bitmap ConvertToGrayscale8(Bitmap img)
+        {
+            int width = img.Width;
+            int height = img.Height;
+
+            Bitmap gray = new Bitmap(width, height, PixelFormat.Format8bppIndexed);
+            gray.SetResolution(img.HorizontalResolution, img.VerticalResolution);
+
+            ColorPalette palette = gray.Palette;
+            for (int i = 0; i < 256; i++)
+            {
+                palette.Entries[i] = System.Drawing.Color.FromArgb(i, i, i);
+            }
+            gray.Palette = palette;
+
+            DrawingRectangle rect = new DrawingRectangle(0, 0, width, height);
+            BitmapData srcData = img.LockBits(rect, ImageLockMode.ReadOnly, img.PixelFormat);
+            BitmapData dstData = gray.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format8bppIndexed);
+
+            try
+            {
+                int srcBpp = Math.Max(1, DrawingImage.GetPixelFormatSize(img.PixelFormat) / 8);
+                int srcStrideAbs = Math.Abs(srcData.Stride);
+                int dstStrideAbs = Math.Abs(dstData.Stride);
+
+                byte[] srcBuffer = new byte[srcStrideAbs * height];
+                byte[] dstBuffer = new byte[dstStrideAbs * height];
+
+                System.Runtime.InteropServices.Marshal.Copy(srcData.Scan0, srcBuffer, 0, srcBuffer.Length);
+
+                for (int y = 0; y < height; y++)
+                {
+                    int srcY = srcData.Stride < 0 ? (height - 1 - y) : y;
+                    int dstY = dstData.Stride < 0 ? (height - 1 - y) : y;
+                    int srcRow = srcY * srcStrideAbs;
+                    int dstRow = dstY * dstStrideAbs;
+
+                    for (int x = 0; x < width; x++)
+                    {
+                        int srcIndex = srcRow + x * srcBpp;
+                        if (srcIndex + 2 >= srcBuffer.Length)
+                        {
+                            continue;
+                        }
+
+                        byte b = srcBuffer[srcIndex];
+                        byte g = srcBuffer[srcIndex + 1];
+                        byte r = srcBuffer[srcIndex + 2];
+                        byte luminance = (byte)((299 * r + 587 * g + 114 * b) / 1000);
+                        dstBuffer[dstRow + x] = luminance;
+                    }
+                }
+
+                System.Runtime.InteropServices.Marshal.Copy(dstBuffer, 0, dstData.Scan0, dstBuffer.Length);
+            }
+            finally
+            {
+                img.UnlockBits(srcData);
+                gray.UnlockBits(dstData);
+            }
+
+            return gray;
+        }
+
+        private Bitmap ConvertToGrayscale2(Bitmap img)
+        {
+            int width = img.Width;
+            int height = img.Height;
+
+            Bitmap gray = new Bitmap(width, height, PixelFormat.Format4bppIndexed);
+            gray.SetResolution(img.HorizontalResolution, img.VerticalResolution);
+
+            ColorPalette palette = gray.Palette;
+            palette.Entries[0] = System.Drawing.Color.FromArgb(0, 0, 0);
+            palette.Entries[1] = System.Drawing.Color.FromArgb(85, 85, 85);
+            palette.Entries[2] = System.Drawing.Color.FromArgb(170, 170, 170);
+            palette.Entries[3] = System.Drawing.Color.FromArgb(255, 255, 255);
+            for (int i = 4; i < palette.Entries.Length; i++)
+            {
+                palette.Entries[i] = System.Drawing.Color.FromArgb(255, 255, 255);
+            }
+            gray.Palette = palette;
+
+            DrawingRectangle rect = new DrawingRectangle(0, 0, width, height);
+            BitmapData srcData = img.LockBits(rect, ImageLockMode.ReadOnly, img.PixelFormat);
+            BitmapData dstData = gray.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format4bppIndexed);
+
+            try
+            {
+                int srcBpp = Math.Max(1, DrawingImage.GetPixelFormatSize(img.PixelFormat) / 8);
+                int srcStrideAbs = Math.Abs(srcData.Stride);
+                int dstStrideAbs = Math.Abs(dstData.Stride);
+
+                byte[] srcBuffer = new byte[srcStrideAbs * height];
+                byte[] dstBuffer = new byte[dstStrideAbs * height];
+
+                System.Runtime.InteropServices.Marshal.Copy(srcData.Scan0, srcBuffer, 0, srcBuffer.Length);
+
+                for (int y = 0; y < height; y++)
+                {
+                    int srcY = srcData.Stride < 0 ? (height - 1 - y) : y;
+                    int dstY = dstData.Stride < 0 ? (height - 1 - y) : y;
+                    int srcRow = srcY * srcStrideAbs;
+                    int dstRow = dstY * dstStrideAbs;
+
+                    for (int x = 0; x < width; x++)
+                    {
+                        int srcIndex = srcRow + x * srcBpp;
+                        if (srcIndex + 2 >= srcBuffer.Length)
+                        {
+                            continue;
+                        }
+
+                        byte b = srcBuffer[srcIndex];
+                        byte g = srcBuffer[srcIndex + 1];
+                        byte r = srcBuffer[srcIndex + 2];
+                        int luminance = (299 * r + 587 * g + 114 * b) / 1000;
+
+                        byte paletteIndex;
+                        if (luminance < 64)
+                        {
+                            paletteIndex = 0;
+                        }
+                        else if (luminance < 128)
+                        {
+                            paletteIndex = 1;
+                        }
+                        else if (luminance < 192)
+                        {
+                            paletteIndex = 2;
+                        }
+                        else
+                        {
+                            paletteIndex = 3;
+                        }
+
+                        int dstIndex = dstRow + (x >> 1);
+                        if ((x & 1) == 0)
+                        {
+                            dstBuffer[dstIndex] = (byte)((paletteIndex << 4) | (dstBuffer[dstIndex] & 0x0F));
+                        }
+                        else
+                        {
+                            dstBuffer[dstIndex] = (byte)((dstBuffer[dstIndex] & 0xF0) | paletteIndex);
+                        }
+                    }
+                }
+
+                System.Runtime.InteropServices.Marshal.Copy(dstBuffer, 0, dstData.Scan0, dstBuffer.Length);
+            }
+            finally
+            {
+                img.UnlockBits(srcData);
+                gray.UnlockBits(dstData);
+            }
+
+            return gray;
+        }
+
+        private Bitmap ConvertToGrayscale4(Bitmap img)
+        {
+            int width = img.Width;
+            int height = img.Height;
+
+            Bitmap gray = new Bitmap(width, height, PixelFormat.Format4bppIndexed);
+            gray.SetResolution(img.HorizontalResolution, img.VerticalResolution);
+
+            ColorPalette palette = gray.Palette;
+            for (int i = 0; i < 16; i++)
+            {
+                int value = i * 17; // 0..255 in 16 uniform steps
+                palette.Entries[i] = System.Drawing.Color.FromArgb(value, value, value);
+            }
+            gray.Palette = palette;
+
+            DrawingRectangle rect = new DrawingRectangle(0, 0, width, height);
+            BitmapData srcData = img.LockBits(rect, ImageLockMode.ReadOnly, img.PixelFormat);
+            BitmapData dstData = gray.LockBits(rect, ImageLockMode.WriteOnly, PixelFormat.Format4bppIndexed);
+
+            try
+            {
+                int srcBpp = Math.Max(1, DrawingImage.GetPixelFormatSize(img.PixelFormat) / 8);
+                int srcStrideAbs = Math.Abs(srcData.Stride);
+                int dstStrideAbs = Math.Abs(dstData.Stride);
+
+                byte[] srcBuffer = new byte[srcStrideAbs * height];
+                byte[] dstBuffer = new byte[dstStrideAbs * height];
+
+                System.Runtime.InteropServices.Marshal.Copy(srcData.Scan0, srcBuffer, 0, srcBuffer.Length);
+
+                for (int y = 0; y < height; y++)
+                {
+                    int srcY = srcData.Stride < 0 ? (height - 1 - y) : y;
+                    int dstY = dstData.Stride < 0 ? (height - 1 - y) : y;
+                    int srcRow = srcY * srcStrideAbs;
+                    int dstRow = dstY * dstStrideAbs;
+
+                    for (int x = 0; x < width; x++)
+                    {
+                        int srcIndex = srcRow + x * srcBpp;
+                        if (srcIndex + 2 >= srcBuffer.Length)
+                        {
+                            continue;
+                        }
+
+                        byte b = srcBuffer[srcIndex];
+                        byte g = srcBuffer[srcIndex + 1];
+                        byte r = srcBuffer[srcIndex + 2];
+                        int luminance = (299 * r + 587 * g + 114 * b) / 1000;
+                        byte paletteIndex = (byte)((luminance + 8) / 17); // round to nearest 0..15
+                        if (paletteIndex > 15)
+                        {
+                            paletteIndex = 15;
+                        }
+
+                        int dstIndex = dstRow + (x >> 1);
+                        if ((x & 1) == 0)
+                        {
+                            dstBuffer[dstIndex] = (byte)((paletteIndex << 4) | (dstBuffer[dstIndex] & 0x0F));
+                        }
+                        else
+                        {
+                            dstBuffer[dstIndex] = (byte)((dstBuffer[dstIndex] & 0xF0) | paletteIndex);
+                        }
+                    }
+                }
+
+                System.Runtime.InteropServices.Marshal.Copy(dstBuffer, 0, dstData.Scan0, dstBuffer.Length);
+            }
+            finally
+            {
+                img.UnlockBits(srcData);
+                gray.UnlockBits(dstData);
+            }
+
+            return gray;
+        }
+
 
         private byte[] EncodeToTiffG4(Bitmap oneBitBmp)
         {
@@ -29939,6 +31657,39 @@ namespace AnonPDF
                 }
 
                 return ms.ToArray(); // bajty JPEG
+            }
+        }
+
+        private byte[] EncodeToJpegGrayscale(Bitmap bmp, long quality = 80L)
+        {
+            using (Bitmap gray = new Bitmap(bmp.Width, bmp.Height, PixelFormat.Format24bppRgb))
+            {
+                gray.SetResolution(bmp.HorizontalResolution, bmp.VerticalResolution);
+                using (Graphics g = Graphics.FromImage(gray))
+                using (ImageAttributes imageAttributes = new ImageAttributes())
+                {
+                    var colorMatrix = new ColorMatrix(new float[][]
+                    {
+                        new float[] { 0.299f, 0.299f, 0.299f, 0f, 0f },
+                        new float[] { 0.587f, 0.587f, 0.587f, 0f, 0f },
+                        new float[] { 0.114f, 0.114f, 0.114f, 0f, 0f },
+                        new float[] { 0f,     0f,     0f,     1f, 0f },
+                        new float[] { 0f,     0f,     0f,     0f, 1f }
+                    });
+                    imageAttributes.SetColorMatrix(colorMatrix);
+
+                    g.DrawImage(
+                        bmp,
+                        new DrawingRectangle(0, 0, gray.Width, gray.Height),
+                        0,
+                        0,
+                        bmp.Width,
+                        bmp.Height,
+                        GraphicsUnit.Pixel,
+                        imageAttributes);
+                }
+
+                return EncodeToJpeg(gray, quality);
             }
         }
 
@@ -35572,6 +37323,7 @@ namespace AnonPDF
                 X = x;
             }
         }
+
     }
 
     public static class AuditLogger

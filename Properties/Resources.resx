@@ -445,6 +445,9 @@ końcowy i trzeci punkt łuku.</value>
   <data name="Menu_CombineObjectsWithScanPages" xml:space="preserve">
     <value>Scal obiekty z obrazem strony</value>
   </data>
+  <data name="Menu_ReducePdfFileSize" xml:space="preserve">
+    <value>Zmniejsz rozmiar pliku PDF</value>
+  </data>
   <data name="Menu_IgnorePdfRestrictions" xml:space="preserve">
     <value>Pomijaj ograniczenia PDF</value>
   </data>
@@ -1556,10 +1559,10 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
     <value>HTTP {0}</value>
   </data>
   <data name="Pdf_Metadata_iTextCopyright" xml:space="preserve">
-    <value>Ten dokument został przetworzony z użyciem iText Core / Community na licencji AGPLv3. Copyright (c) iText Group NV.</value>
+    <value>Dokument utworzono lub zmodyfikowano przy użyciu iText Core / Community. Copyright (c) iText Group NV.</value>
   </data>
   <data name="Pdf_Metadata_iTextLicense" xml:space="preserve">
-    <value>Więcej informacji: https://www.gnu.org/licenses/agpl-3.0.html oraz https://itextpdf.com/.</value>
+    <value>Licencja AGPLv3: https://www.gnu.org/licenses/agpl-3.0.html | Informacje o iText: https://itextpdf.com/</value>
   </data>
   <data name="CacheStatus_IndexPage" xml:space="preserve">
     <value>indeksowanie strony: {0}</value>

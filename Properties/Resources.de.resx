@@ -282,10 +282,10 @@ Anwendung schließen und Installer jetzt starten?</value>
     <value>HTTP {0}</value>
   </data>
   <data name="Pdf_Metadata_iTextCopyright" xml:space="preserve">
-    <value>Dieses Dokument wurde mit iText Core / Community unter der AGPLv3-Lizenz verarbeitet. Copyright (c) iText Group NV.</value>
+    <value>Dieses Dokument wurde mit iText Core / Community erstellt oder geaendert. Copyright (c) iText Group NV.</value>
   </data>
   <data name="Pdf_Metadata_iTextLicense" xml:space="preserve">
-    <value>Weitere Informationen: https://www.gnu.org/licenses/agpl-3.0.html und https://itextpdf.com/.</value>
+    <value>AGPLv3-Lizenz: https://www.gnu.org/licenses/agpl-3.0.html | Informationen zu iText: https://itextpdf.com/</value>
   </data>
   <data name="CacheStatus_IndexPage" xml:space="preserve">
     <value>indexiere Seite: {0}</value>
@@ -638,6 +638,9 @@ und dritten Punkt setzen.</value>
   </data>
   <data name="Menu_CombineObjectsWithScanPages" xml:space="preserve">
     <value>Objekte mit Seitenbild zusammenführen</value>
+  </data>
+  <data name="Menu_ReducePdfFileSize" xml:space="preserve">
+    <value>PDF-Dateigröße reduzieren</value>
   </data>
   <data name="Menu_IgnorePdfRestrictions" xml:space="preserve">
     <value>PDF-Einschränkungen ignorieren</value>
