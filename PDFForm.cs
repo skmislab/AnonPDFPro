@@ -239,6 +239,7 @@ namespace AnonPDF
         private string lastFootnoteBadgeLayoutLogKey = string.Empty;
         private int busyCursorDepth;
         private bool isMiddleMousePanning;
+        private bool isRightMousePanning;
         private Point middlePanStartCursorScreen;
         private int middlePanStartScrollX;
         private int middlePanStartScrollY;
@@ -333,6 +334,7 @@ namespace AnonPDF
         private const float DefaultArrowThickness = 3f;
         private const float DefaultArrowHeadLength = 18f;
         private const float DefaultArrowHeadWidth = 12f;
+        private const int KeyboardViewportPanStep = 48;
         private readonly System.Drawing.Color DefaultArrowColor = System.Drawing.Color.Red;
         private const float SelectedObjectBorderWidth = 2f;
         private int vectorHandlePointIndex = -1;
@@ -8326,6 +8328,7 @@ namespace AnonPDF
 
             // Attach the ZoomPanel to Panel2
             mainAppSplitContainer.Panel2.Controls.Add(zoomPanel);
+            zoomPanel.MouseDown += ZoomPanel_MouseDown;
             zoomPanel.Visible = true;
 
             EnsureMaintenanceCountdownOverlay();
@@ -15111,7 +15114,7 @@ namespace AnonPDF
             LogDebug($"Resume state applied page={currentPage} zoom={scaleFactor.ToString(CultureInfo.InvariantCulture)} scroll={state.ScrollX},{state.ScrollY}");
         }
 
-        private bool TryBeginMiddleMousePan()
+        private bool TryBeginViewportPan(MouseButtons button)
         {
             ZoomPanel panel = GetZoomPanel();
             if (!(panel is ZoomPanel))
@@ -15126,7 +15129,19 @@ namespace AnonPDF
                 return false;
             }
 
-            isMiddleMousePanning = true;
+            if (button == MouseButtons.Middle)
+            {
+                isMiddleMousePanning = true;
+            }
+            else if (button == MouseButtons.Right)
+            {
+                isRightMousePanning = true;
+            }
+            else
+            {
+                return false;
+            }
+
             middlePanStartCursorScreen = Cursor.Position;
             middlePanStartScrollX = panel.HorizontalScroll.Value;
             middlePanStartScrollY = panel.VerticalScroll.Value;
@@ -15136,23 +15151,25 @@ namespace AnonPDF
             return true;
         }
 
-        private void UpdateMiddleMousePan()
+        private void UpdateViewportPan()
         {
-            if (!isMiddleMousePanning)
+            if (!IsViewportPanningActive())
             {
                 return;
             }
 
-            if ((Control.MouseButtons & MouseButtons.Middle) == 0)
+            bool middlePressed = (Control.MouseButtons & MouseButtons.Middle) == MouseButtons.Middle;
+            bool rightPressed = (Control.MouseButtons & MouseButtons.Right) == MouseButtons.Right;
+            if ((isMiddleMousePanning && !middlePressed) || (isRightMousePanning && !rightPressed))
             {
-                EndMiddleMousePan();
+                EndViewportPan();
                 return;
             }
 
             ZoomPanel panel = GetZoomPanel();
             if (!(panel is ZoomPanel))
             {
-                EndMiddleMousePan();
+                EndViewportPan();
                 return;
             }
 
@@ -15180,14 +15197,15 @@ namespace AnonPDF
             panel.Refresh();
         }
 
-        private void EndMiddleMousePan()
+        private void EndViewportPan()
         {
-            if (!isMiddleMousePanning)
+            if (!IsViewportPanningActive())
             {
                 return;
             }
 
             isMiddleMousePanning = false;
+            isRightMousePanning = false;
             pdfViewer.Capture = false;
             this.Cursor = middlePanPreviousCursor ?? Cursors.Default;
             middlePanPreviousCursor = null;
@@ -15195,14 +15213,16 @@ namespace AnonPDF
 
         private void PdfViewer_MouseCaptureChanged(object sender, EventArgs e)
         {
-            if (!isMiddleMousePanning)
+            if (!IsViewportPanningActive())
             {
                 return;
             }
 
-            if ((Control.MouseButtons & MouseButtons.Middle) == 0)
+            bool middlePressed = (Control.MouseButtons & MouseButtons.Middle) == MouseButtons.Middle;
+            bool rightPressed = (Control.MouseButtons & MouseButtons.Right) == MouseButtons.Right;
+            if ((isMiddleMousePanning && !middlePressed) || (isRightMousePanning && !rightPressed))
             {
-                EndMiddleMousePan();
+                EndViewportPan();
             }
         }
 
@@ -15908,7 +15928,7 @@ namespace AnonPDF
             isMarkerCtrlBoxMode = false;
             currentSelection = RectangleF.Empty;
 
-            if (!isMiddleMousePanning && !isVectorShapeCreationMode && !isCommentCreationMode)
+            if (!IsViewportPanningActive() && !isVectorShapeCreationMode && !isCommentCreationMode)
             {
                 this.Cursor = Cursors.Default;
             }
@@ -15995,6 +16015,8 @@ namespace AnonPDF
                 return;
             }
 
+            FocusDocumentViewport();
+
             if (e.Button == MouseButtons.Middle)
             {
                 isDrawing = false;
@@ -16013,8 +16035,36 @@ namespace AnonPDF
                 ClearArrowIconClickState();
                 ClearVectorIconClickState();
                 ResetCommentNoteMoveState();
-                TryBeginMiddleMousePan();
+                TryBeginViewportPan(MouseButtons.Middle);
                 return;
+            }
+
+            if (e.Button == MouseButtons.Right &&
+                !isVectorShapeCreationMode &&
+                !isCommentCreationMode &&
+                !IsPointOverInteractiveDocumentContent(e.Location))
+            {
+                isDrawing = false;
+                isMarkerCtrlBoxMode = false;
+                isMoving = false;
+                annotationToMove = null;
+                textMoveMouseOffset = PointF.Empty;
+                ResetRasterInteractionState();
+                ResetArrowInteractionState();
+                ResetVectorInteractionState();
+                ResetGroupMoveState();
+                currentSelection = RectangleF.Empty;
+                isClickOnIcon = false;
+                clickedIconType = IconType.None;
+                annotationForIcon = null;
+                ClearRasterIconClickState();
+                ClearArrowIconClickState();
+                ClearVectorIconClickState();
+                ResetCommentNoteMoveState();
+                if (TryBeginViewportPan(MouseButtons.Right))
+                {
+                    return;
+                }
             }
 
             if (isVectorShapeCreationMode)
@@ -16457,9 +16507,9 @@ namespace AnonPDF
                 return;
             }
 
-            if (isMiddleMousePanning)
+            if (IsViewportPanningActive())
             {
-                UpdateMiddleMousePan();
+                UpdateViewportPan();
                 return;
             }
 
@@ -17200,9 +17250,9 @@ namespace AnonPDF
             if (pdf == null)
                 return;
 
-            if (e.Button == MouseButtons.Middle)
+            if (e.Button == MouseButtons.Middle || (e.Button == MouseButtons.Right && isRightMousePanning))
             {
-                EndMiddleMousePan();
+                EndViewportPan();
                 return;
             }
 
@@ -17218,7 +17268,7 @@ namespace AnonPDF
                 isDrawing = false;
                 isMarkerCtrlBoxMode = false;
                 currentSelection = RectangleF.Empty;
-                if (!isMiddleMousePanning && !isVectorShapeCreationMode && !isCommentCreationMode)
+                if (!IsViewportPanningActive() && !isVectorShapeCreationMode && !isCommentCreationMode)
                 {
                     this.Cursor = Cursors.Default;
                 }
@@ -17721,6 +17771,11 @@ namespace AnonPDF
             BeginCommentCreationMode();
         }
 
+        private void ZoomPanel_MouseDown(object sender, MouseEventArgs e)
+        {
+            FocusDocumentViewport();
+        }
+
         private void OnMouseUpFinalizeUndoCapture(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left)
@@ -17765,7 +17820,7 @@ namespace AnonPDF
             isDrawing = false;
             isMarkerCtrlBoxMode = false;
             currentSelection = RectangleF.Empty;
-            if (!isMiddleMousePanning)
+            if (!IsViewportPanningActive())
             {
                 this.Cursor = Cursors.Default;
             }
@@ -24880,6 +24935,14 @@ namespace AnonPDF
                 return true;
             }
 
+            Keys keyCode = keyData & Keys.KeyCode;
+            if ((keyCode == Keys.Left || keyCode == Keys.Right || keyCode == Keys.Up || keyCode == Keys.Down) &&
+                !IsTextInputFocused() &&
+                TryPanDocumentViewport(keyData))
+            {
+                return true;
+            }
+
             if (keyData == (Keys.Control | Keys.A))
             {
                 if (IsTextInputFocused())
@@ -31303,6 +31366,144 @@ namespace AnonPDF
             return value;
         }
 
+        private void FocusDocumentViewport()
+        {
+            ZoomPanel panel = GetZoomPanel();
+            if (panel != null && panel.CanFocus && !panel.Focused)
+            {
+                panel.Focus();
+            }
+        }
+
+        private bool IsViewportPanningActive()
+        {
+            return isMiddleMousePanning || isRightMousePanning;
+        }
+
+        private bool IsDocumentViewportFocused()
+        {
+            ZoomPanel panel = GetZoomPanel();
+            if (panel == null)
+            {
+                return false;
+            }
+
+            if (panel.Focused || ReferenceEquals(this.ActiveControl, panel))
+            {
+                return true;
+            }
+
+            Control focusedControl = GetFocusedControl(this);
+            while (focusedControl != null)
+            {
+                if (ReferenceEquals(focusedControl, panel) || ReferenceEquals(focusedControl, pdfViewer))
+                {
+                    return true;
+                }
+
+                focusedControl = focusedControl.Parent;
+            }
+
+            return false;
+        }
+
+        private bool TryPanDocumentViewport(Keys keyData)
+        {
+            if (!IsDocumentViewportFocused())
+            {
+                return false;
+            }
+
+            ZoomPanel panel = GetZoomPanel();
+            if (panel == null)
+            {
+                return false;
+            }
+
+            Keys keyCode = keyData & Keys.KeyCode;
+            bool horizontal = keyCode == Keys.Left || keyCode == Keys.Right;
+            bool vertical = keyCode == Keys.Up || keyCode == Keys.Down;
+            if (!horizontal && !vertical)
+            {
+                return false;
+            }
+
+            bool canPanX = panel.HorizontalScroll.Visible && GetScrollMaximum(panel.HorizontalScroll) > panel.HorizontalScroll.Minimum;
+            bool canPanY = panel.VerticalScroll.Visible && GetScrollMaximum(panel.VerticalScroll) > panel.VerticalScroll.Minimum;
+
+            if ((horizontal && !canPanX) || (vertical && !canPanY))
+            {
+                return false;
+            }
+
+            int step = (keyData & Keys.Shift) == Keys.Shift ? KeyboardViewportPanStep * 3 : KeyboardViewportPanStep;
+            int targetX = panel.HorizontalScroll.Value;
+            int targetY = panel.VerticalScroll.Value;
+
+            switch (keyCode)
+            {
+                case Keys.Left:
+                    targetX -= step;
+                    break;
+                case Keys.Right:
+                    targetX += step;
+                    break;
+                case Keys.Up:
+                    targetY -= step;
+                    break;
+                case Keys.Down:
+                    targetY += step;
+                    break;
+            }
+
+            targetX = ClampScrollValue(targetX, panel.HorizontalScroll.Minimum, GetScrollMaximum(panel.HorizontalScroll));
+            targetY = ClampScrollValue(targetY, panel.VerticalScroll.Minimum, GetScrollMaximum(panel.VerticalScroll));
+            panel.AutoScrollPosition = new Point(targetX, targetY);
+            return true;
+        }
+
+        private bool IsPointOverInteractiveDocumentContent(Point location)
+        {
+            if (pdf == null || currentPage <= 0 || currentPage > numPages)
+            {
+                return false;
+            }
+
+            if (TryGetCommentAtPoint(location, out _, out _))
+            {
+                return true;
+            }
+
+            float dpiX;
+            float dpiY;
+            using (Graphics graphics = pdfViewer.CreateGraphics())
+            {
+                dpiX = graphics.DpiX;
+                dpiY = graphics.DpiY;
+            }
+
+            if (TryGetHitTextAtPoint(location, dpiX, dpiY, out _) ||
+                TryGetHitRasterAtPoint(location, out _) ||
+                TryGetHitArrowAtPoint(location, out _) ||
+                TryGetHitVectorShapeAtPoint(location, out _))
+            {
+                return true;
+            }
+
+            if (selectedVectorShape != null && selectedVectorShape.PageNumber == currentPage)
+            {
+                if (TryGetVectorHandleAtPoint(selectedVectorShape, location, out _) ||
+                    TryGetVectorSegmentAtPoint(selectedVectorShape, location, out _))
+                {
+                    return true;
+                }
+            }
+
+            float docX = location.X / scaleFactor;
+            float docY = location.Y / scaleFactor;
+            return redactionBlocks.Any(block => block != null && block.PageNumber == currentPage && block.Bounds.Contains(docX, docY));
+        }
+
 
         private Bitmap ConvertTo1Bit(Bitmap img, byte threshold)
         {
@@ -35813,9 +36014,21 @@ namespace AnonPDF
         public ZoomPanel()
         {
             DoubleBuffered = true;
+            TabStop = true;
             ResizeRedraw = true;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable, true);
             UpdateStyles();
+        }
+
+        protected override bool IsInputKey(Keys keyData)
+        {
+            Keys keyCode = keyData & Keys.KeyCode;
+            if (keyCode == Keys.Left || keyCode == Keys.Right || keyCode == Keys.Up || keyCode == Keys.Down)
+            {
+                return true;
+            }
+
+            return base.IsInputKey(keyData);
         }
 
         protected override void WndProc(ref Message m)
