@@ -145,6 +145,8 @@
             this.pagesTabControl = new System.Windows.Forms.TabControl();
             this.pagesListTabPage = new System.Windows.Forms.TabPage();
             this.thumbnailsTabPage = new System.Windows.Forms.TabPage();
+            this.layersTabPage = new System.Windows.Forms.TabPage();
+            this.layersTabPlaceholderPanel = new System.Windows.Forms.Panel();
             this.thumbnailsListView = new System.Windows.Forms.ListView();
             this.thumbnailsImageList = new System.Windows.Forms.ImageList(this.components);
             ((System.ComponentModel.ISupportInitialize)(this.pdfViewer)).BeginInit();
@@ -170,6 +172,7 @@
             this.pagesTabControl.SuspendLayout();
             this.pagesListTabPage.SuspendLayout();
             this.thumbnailsTabPage.SuspendLayout();
+            this.layersTabPage.SuspendLayout();
             this.SuspendLayout();
             // 
             // loadPdfButton
@@ -1345,6 +1348,7 @@
             // 
             this.pagesTabControl.Controls.Add(this.pagesListTabPage);
             this.pagesTabControl.Controls.Add(this.thumbnailsTabPage);
+            this.pagesTabControl.Controls.Add(this.layersTabPage);
             this.pagesTabControl.Dock = System.Windows.Forms.DockStyle.Fill;
             this.pagesTabControl.Location = new System.Drawing.Point(3, 52);
             this.pagesTabControl.Name = "pagesTabControl";
@@ -1375,6 +1379,26 @@
             this.thumbnailsTabPage.TabIndex = 1;
             this.thumbnailsTabPage.Text = Res("UI_Tab_Thumbnails");
             this.thumbnailsTabPage.UseVisualStyleBackColor = true;
+            // 
+            // layersTabPage
+            // 
+            this.layersTabPage.Controls.Add(this.layersTabPlaceholderPanel);
+            this.layersTabPage.Location = new System.Drawing.Point(4, 22);
+            this.layersTabPage.Name = "layersTabPage";
+            this.layersTabPage.Padding = new System.Windows.Forms.Padding(0);
+            this.layersTabPage.Size = new System.Drawing.Size(200, 827);
+            this.layersTabPage.TabIndex = 2;
+            this.layersTabPage.Text = Res("UI_Tab_Layers");
+            this.layersTabPage.UseVisualStyleBackColor = true;
+            // 
+            // layersTabPlaceholderPanel
+            // 
+            this.layersTabPlaceholderPanel.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
+            this.layersTabPlaceholderPanel.Dock = System.Windows.Forms.DockStyle.Fill;
+            this.layersTabPlaceholderPanel.Location = new System.Drawing.Point(0, 0);
+            this.layersTabPlaceholderPanel.Name = "layersTabPlaceholderPanel";
+            this.layersTabPlaceholderPanel.Size = new System.Drawing.Size(200, 827);
+            this.layersTabPlaceholderPanel.TabIndex = 0;
             // 
             // thumbnailsListView
             // 
@@ -1506,6 +1530,7 @@
             this.pagesTabControl.ResumeLayout(false);
             this.pagesListTabPage.ResumeLayout(false);
             this.thumbnailsTabPage.ResumeLayout(false);
+            this.layersTabPage.ResumeLayout(false);
             this.ResumeLayout(false);
 
         }
@@ -1622,6 +1647,8 @@
         private System.Windows.Forms.TabControl pagesTabControl;
         private System.Windows.Forms.TabPage pagesListTabPage;
         private System.Windows.Forms.TabPage thumbnailsTabPage;
+        private System.Windows.Forms.TabPage layersTabPage;
+        private System.Windows.Forms.Panel layersTabPlaceholderPanel;
         private System.Windows.Forms.ListView thumbnailsListView;
         private System.Windows.Forms.ImageList thumbnailsImageList;
         private System.Windows.Forms.ToolStripMenuItem copyToClipboardMenuItem;

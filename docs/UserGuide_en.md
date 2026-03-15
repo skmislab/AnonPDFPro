@@ -55,7 +55,7 @@ The main window consists of the following elements:
 
 > \- Help: open this user guide.
 
-- Side panel / page list - shows a text list of all pages in the loaded PDF ("Page 1", "Page 2", etc.).
+- Right panel - contains the `Page List`, `Thumbnails`, and `Layers` tabs. You can quickly switch pages, thumbnails, and layer attributes there.
 - Main preview area - displays the currently selected PDF page and allows you to draw/select areas to be redacted.
 - Toolbar - buttons for page navigation, zoom, and selection tools:
 
@@ -120,7 +120,7 @@ To create a redaction area:
 
 > **3.** In Marker mode you draw a horizontal strip; in Rectangle (box) mode you draw a rectangular area of any size.
 
-> **4.** In Marker mode, hold CTRL to draw a rectangular area as well.
+> **4.** In Marker mode, hold `CTRL` to switch drawing to rectangular (box) mode.
 
 > **5.** Release the mouse button to confirm the selection.
 
@@ -142,7 +142,7 @@ After marking all required areas, click Save PDF (or File → Save PDF). Select 
 
 ## 5.1 Page navigation
 
-Use the "First", "Previous", "Next", and "Last" buttons, or enter a page number in the page input box and press Enter.
+Use the "First", "Previous", "Next", and "Last" buttons, or enter a page number in the page input box and press Enter. You can rotate the current page with `CTRL + R`.
 
 ## 5.2 Selection navigation
 
@@ -153,6 +153,7 @@ If your document contains many selections, use "First selection", "Previous sele
 - Zoom in / Zoom out: use the "+" and "-" buttons or the "Min / Max" buttons to set minimum/maximum zoom.
 - Mouse wheel: scrolling moves the page vertically. When you reach the top/bottom edge, the application automatically switches to the previous/next page.
 - CTRL + mouse wheel: zoom out/in.
+- F11 switches full-screen mode on or off; ESC exits full-screen mode.
 
 # 6. Additional Features
 
@@ -197,7 +198,27 @@ When closing, the application may ask you to confirm exiting, especially if you 
 - "User Guide" - opens this help/instruction content.
 - "About" - shows version information, author, and copyright.
 
-## 6.9 Duplicating selections and objects
+## 6.9 Creating and managing objects
+
+You can add objects from the `Tools` menu or by using shortcuts:
+
+- `CTRL + A` - add an arrow.
+- `CTRL + F` - add a shape.
+- `CTRL + G` - add an image.
+- `CTRL + K` - add a comment.
+
+When working with objects, you can also use:
+
+- `CTRL + C` - copy the active object or active object group.
+- `CTRL + V` - paste an object from the clipboard. The pasted object is created on the active layer and keeps its original position.
+- `DELETE` - remove the active object or active object group.
+
+Modifiers while editing objects:
+
+- `ALT` while creating shapes forces proportions: rectangle -> square, ellipse -> circle, triangle -> equilateral.
+- `ALT` while resizing an image works symmetrically relative to the object center.
+
+## 6.10 Duplicating selections and objects
 
 In the context menu (right mouse button), you can use:
 
@@ -212,6 +233,19 @@ After selecting one of these options, a page range dialog is shown:
 For duplicated objects, an additional option is available:
 
 - `Delete duplicated objects` - removes duplicated object copies in the selected page range.
+
+## 6.11 Layers
+
+The application supports working layers for redaction selections and objects.
+
+- The `Layers` tab in the right panel lets you quickly change the active layer, visibility, and lock state.
+- `Tools -> Layers` opens the full layer management window.
+- New selections and new objects are created on the currently active layer.
+- Pasting an object from the clipboard creates a copy on the active layer and keeps the original position.
+- The `Work` layer is always on top and is not exported to the final PDF.
+- Hidden layers cannot be interacted with in the preview.
+- Locked layers block moving, editing, and deleting objects.
+- Project import keeps object-to-layer assignments.
 
 # 7. Common Issues and Tips
 
@@ -245,10 +279,11 @@ Recent versions include:
 
 - Printing from the `File` menu (`CTRL+P`) with range options: current page, selected page range, or whole document.
 - `Save page range to PDF` in the `File` menu, with the current page prefilled by default.
-- Two page preview tabs on the right: `Page List` and `Thumbnails`.
+- Three right-side tabs: `Page List`, `Thumbnails`, and `Layers`.
 - Dynamic thumbnail generation plus thumbnail cache for better performance on large documents.
-- Remembering the last selected right-side tab (`Page List` / `Thumbnails`).
+- Remembering the last selected right-side tab (`Page List` / `Thumbnails` / `Layers`).
 - Remembering right panel width between application launches.
 - Remembering and restoring scroll positions in right panels (`Page List` and `Thumbnails`) when resuming a project.
+- Working layers with separate visibility, lock state, and active layer selection.
 - Extended context menus for selections and objects (copy, cut, duplicate, remove duplicated copies).
 - `Undo` (`CTRL+Z`) and `Redo` (`CTRL+Y`).

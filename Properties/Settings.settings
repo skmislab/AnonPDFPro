@@ -68,6 +68,9 @@
     <Setting Name="UseThumbnailsTabInRightPanel" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
     </Setting>
+    <Setting Name="RightPanelSelectedTabKey" Type="System.String" Scope="User">
+      <Value Profile="(Default)">pages</Value>
+    </Setting>
     <Setting Name="RightPanelWidth" Type="System.Int32" Scope="User">
       <Value Profile="(Default)">218</Value>
     </Setting>

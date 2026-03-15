@@ -53,7 +53,7 @@ Główne okno aplikacji składa się z następujących elementów:
 
 > \- ?: wyświetla instrukcję użytkownika oraz informacje o aplikacji.
 
-- Panel boczny / Lista stron – wyświetla listę wszystkich stron załadowanego pliku PDF w formie tekstowej („Strona 1”, „Strona 2”, itd.).
+- Prawy panel – zawiera zakładki `Lista stron`, `Miniatury` i `Warstwy`. Możesz tam szybko przełączać strony, miniatury oraz atrybuty warstw.
 - Główny obszar podglądu – prezentuje aktualnie wybraną stronę PDF, umożliwia rysowanie/wybór obszarów do redakcji.
 - Pasek narzędzi – zawiera przyciski do nawigacji po stronach, przybliżania/oddalania, zaznaczania obszarów do zaciemniania:
 
@@ -118,7 +118,7 @@ Aby utworzyć obszar redakcji:
 
 > 3\. W przypadku „markera” rysujesz poziomy pas, a w przypadku „box” (prostokąt) – pełen obszar o dowolnym kształcie prostokątnym.
 
-> 4\. Gdy w trybie „markera naciśniesz przycisk CTRL to również narysujesz prostokąt o dowolnym kształcie.
+> 4\. Gdy w trybie „markera” przytrzymasz `CTRL`, przełączysz rysowanie na tryb prostokąta (box).
 
 > 5\. Zwolnij przycisk myszy, aby zatwierdzić zaznaczenie.
 
@@ -140,7 +140,7 @@ Po zaznaczeniu odpowiednich obszarów wybierz przycisk Zapisz plik PDF (lub z pa
 
 ## 5.1 Nawigacja stron
 
-Użyj przycisków „Pierwsza”, „Poprzednia”, „Następna”, „Ostatnia” lub wpisz numer strony w polu tekstowym i wciśnij Enter.
+Użyj przycisków „Pierwsza”, „Poprzednia”, „Następna”, „Ostatnia” lub wpisz numer strony w polu tekstowym i wciśnij Enter. Bieżącą stronę możesz obrócić skrótem `CTRL + R`.
 
 ## 5.2 Nawigacja zaznaczeń
 
@@ -151,6 +151,7 @@ Jeśli w dokumencie jest dużo zaznaczonych obszarów, możesz użyć przyciskó
 - Przybliżanie / Oddalanie: użyj przycisków „+” i „−” lub przycisków „Min / Max”, aby automatycznie ustawić minimalne/maksymalne powiększenie.
 - Kółko myszy: przewijanie kółkiem myszy powoduje przesuwanie strony w górę i w dół. Jeśli dojedziesz do górnej/dolnej krawędzi, aplikacja automatycznie przełączy się na poprzednią/następną stronę.
 - CTRL + kółko myszy: przytrzymanie CTRL powoduje pomniejszanie i powiększanie strony.
+- F11 przełącza tryb pełnoekranowy, a ESC zamyka tryb pełnoekranowy.
 
 # 6. Funkcje dodatkowe
 
@@ -195,33 +196,25 @@ Podczas zamykania aplikacja może zapytać, czy zapisać zmiany w projekcie ("Za
 - Menu \[?\] wyświetla instrukcję użytkownika oraz okno "O aplikacji".
 - O aplikacji - wyświetla informacje o wersji, autorze i prawach autorskich.
 
-## 6.9 Skróty klawiszowe i modyfikatory
+## 6.9 Dodawanie i obsługa obiektów
 
-CTRL + A - dodaj strzałkę.
+Obiekty możesz dodawać z menu `Narzędzia` lub skrótami:
 
-CTRL + F - dodaj kształt.
+- `CTRL + A` - dodaj strzałkę.
+- `CTRL + F` - dodaj kształt.
+- `CTRL + G` - dodaj obraz.
+- `CTRL + K` - dodaj komentarz.
 
-CTRL + G - dodaj obraz.
+Podczas pracy z obiektami dostępne są także:
 
-CTRL + K - dodaj komentarz.
+- `CTRL + C` - kopiuj aktywny obiekt lub grupę aktywnych obiektów.
+- `CTRL + V` - wklej obiekt ze schowka. Wklejony obiekt trafia na aktywną warstwę i zachowuje oryginalne położenie.
+- `DELETE` - usuń aktywny obiekt lub grupę aktywnych obiektów.
 
-CTRL + R - obróć bieżącą stronę.
+Modyfikatory podczas pracy z obiektami:
 
-CTRL + C - kopiuj (najpierw aktywny obiekt lub grupę obiektów; gdy brak aktywnego obiektu, kopiowany jest tekst z zaznaczeń).
-
-CTRL + V - wklej obiekt lub dane ze schowka.
-
-DELETE - usuń aktywny obiekt (lub grupę aktywnych obiektów).
-
-F11 - przełącz tryb pełnoekranowy, ESC - wyjście z trybu pełnoekranowego.
-
-CTRL + kółko myszy - zmiana powiększenia podglądu.
-
-ALT podczas tworzenia kształtów wymusza proporcje: prostokąt -\> kwadrat, elipsa -\> okrąg, trójkąt -\> równoboczny.
-
-ALT podczas zmiany rozmiaru obrazu działa symetrycznie względem środka obiektu.
-
-W trybie markera przytrzymanie CTRL przełącza rysowanie na tryb prostokąta (box).
+- `ALT` podczas tworzenia kształtów wymusza proporcje: prostokąt -> kwadrat, elipsa -> okrąg, trójkąt -> równoboczny.
+- `ALT` podczas zmiany rozmiaru obrazu działa symetrycznie względem środka obiektu.
 
 ## 6.10 Powielanie zaznaczeń i obiektów
 
@@ -238,6 +231,18 @@ Po wybraniu opcji pojawia się dialog zakresu stron:
 Dla obiektów powielonych dostępna jest także opcja:
 
 - `Usuń powielone obiekty` - usuwa kopie z wybranego zakresu stron.
+
+## 6.11 Warstwy
+
+Aplikacja obsługuje warstwy robocze dla zaznaczeń anonimizacyjnych i obiektów.
+
+- Zakładka `Warstwy` w prawym panelu pozwala szybko zmieniać aktywną warstwę, widoczność i blokadę.
+- `Narzędzia -> Warstwy` lub skrót `CTRL + L` otwierają pełne okno zarządzania warstwami.
+- Nowe zaznaczenia i nowe obiekty powstają na aktualnie aktywnej warstwie.
+- Warstwa `Robocza` jest zawsze najwyżej i nie trafia do finalnego PDF.
+- Ukryte warstwy nie biorą udziału w interakcji na podglądzie.
+- Zablokowane warstwy blokują przesuwanie, edycję i usuwanie obiektów.
+- Import projektu zachowuje przypisanie obiektów do warstw.
 
 # 7. Najczęstsze problemy i wskazówki
 
@@ -271,10 +276,11 @@ W ostatnich wersjach dodano m.in.:
 
 - Drukowanie z menu `Plik` (`CTRL+P`) z wyborem: bieżąca strona, zakres stron lub cały dokument.
 - Opcję `Zapisz zakres stron do PDF` (menu `Plik`) z domyślnym zakresem ustawionym na bieżącą stronę.
-- Dwie zakładki podglądu stron po prawej stronie: `Lista stron` i `Miniatury`.
+- Trzy zakładki po prawej stronie: `Lista stron`, `Miniatury` i `Warstwy`.
 - Dynamiczne generowanie miniaturek stron oraz pamięć podręczną miniaturek dla szybszej pracy na dużych dokumentach.
-- Zapamiętywanie ostatnio wybranej zakładki po prawej stronie (`Lista stron` / `Miniatury`).
+- Zapamiętywanie ostatnio wybranej zakładki po prawej stronie (`Lista stron` / `Miniatury` / `Warstwy`).
 - Zapamiętywanie szerokości prawego panelu między uruchomieniami aplikacji.
 - Zapamiętywanie i odtwarzanie pozycji przewijania w prawych panelach (`Lista stron` i `Miniatury`) po wznowieniu pracy z projektem.
+- Obsługę warstw roboczych z własną widocznością, blokadą i aktywną warstwą.
 - Rozszerzone menu kontekstowe dla zaznaczeń i obiektów (m.in. kopiowanie, wycinanie, powielanie, usuwanie kopii).
 - Funkcje `Cofnij` (`CTRL+Z`) i `Ponów` (`CTRL+Y`).

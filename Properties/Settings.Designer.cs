@@ -289,6 +289,18 @@ namespace AnonPDF.Properties {
         
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("pages")]
+        public string RightPanelSelectedTabKey {
+            get {
+                return ((string)(this["RightPanelSelectedTabKey"]));
+            }
+            set {
+                this["RightPanelSelectedTabKey"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("218")]
         public int RightPanelWidth {
             get {

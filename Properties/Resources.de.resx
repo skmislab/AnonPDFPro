@@ -789,6 +789,21 @@ und dritten Punkt setzen.</value>
   <data name="UI_Tab_Thumbnails" xml:space="preserve">
     <value>Miniaturen</value>
   </data>
+  <data name="UI_Tab_Layers" xml:space="preserve">
+    <value>Ebenen</value>
+  </data>
+  <data name="Layers_Tab_Header_Name" xml:space="preserve">
+    <value>Ebenenname</value>
+  </data>
+  <data name="Layers_Tab_Header_Active_Tooltip" xml:space="preserve">
+    <value>Aktive Ebene</value>
+  </data>
+  <data name="Layers_Tab_Header_Visible_Tooltip" xml:space="preserve">
+    <value>Sichtbarkeit der Ebene</value>
+  </data>
+  <data name="Layers_Tab_Header_Locked_Tooltip" xml:space="preserve">
+    <value>Sperre der Ebene</value>
+  </data>
   <data name="UI_Button_SavePdf" xml:space="preserve">
     <value>PDF speichern</value>
   </data>

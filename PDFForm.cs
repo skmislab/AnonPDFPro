@@ -95,6 +95,9 @@ namespace AnonPDF
         private const string ClassificationSourceManual = "manual";
         internal const string WorkLayerId = "work";
         internal const string DefaultLayerId = "default";
+        private const string RightPanelTabPagesKey = "pages";
+        private const string RightPanelTabThumbnailsKey = "thumbnails";
+        private const string RightPanelTabLayersKey = "layers";
         private const float FootnoteMarkerGapPx = 2f;
         private const int RasterDownsampleTextThresholdDpi = 300;
         private const int RasterDownsamplePhotoThresholdDpi = 220;
@@ -275,6 +278,8 @@ namespace AnonPDF
         private readonly HashSet<string> selectedRasterObjectIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> selectedArrowObjectIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> selectedVectorShapeIds = new HashSet<string>(StringComparer.Ordinal);
+        private DataGridView layersGridView;
+        private bool suppressLayersGridEvents;
         private ObjectClipboardSnapshot objectClipboardSnapshot;
         private int objectClipboardPasteCount;
         private bool preferObjectClipboardPaste;
@@ -283,6 +288,7 @@ namespace AnonPDF
         private bool isVectorShapeCreationMode;
         private bool isCommentCreationMode;
         private bool commentPreviewOverlayReady;
+        private bool delayCommentAndSelectionOverlayUntilPreviewReady;
         private bool isMovingCommentNote;
         private bool commentNoteMoveChanged;
         private CommentAnnotation commentNoteToMove;
@@ -1005,6 +1011,7 @@ namespace AnonPDF
 
             InitializeComponent();
             EnsureSystemLayers();
+            InitializeLayersTab();
             formSplitContainer.SplitterMoved += FormSplitContainer_SplitterMoved;
             ApplyRightPanelDividerFromSettings();
             autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
@@ -1656,17 +1663,102 @@ namespace AnonPDF
             }
         }
 
+        private void InitializeLayersTab()
+        {
+            if (layersTabPlaceholderPanel == null || layersGridView != null)
+            {
+                return;
+            }
+
+            layersGridView = new DataGridView
+            {
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeColumns = false,
+                AllowUserToResizeRows = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+                BackgroundColor = System.Drawing.SystemColors.Window,
+                BorderStyle = BorderStyle.None,
+                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
+                ClipboardCopyMode = DataGridViewClipboardCopyMode.Disable,
+                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
+                Dock = DockStyle.Fill,
+                EditMode = DataGridViewEditMode.EditOnEnter,
+                EnableHeadersVisualStyles = false,
+                MultiSelect = false,
+                ReadOnly = false,
+                RowHeadersVisible = false,
+                RowTemplate = { Height = 24 },
+                ScrollBars = ScrollBars.Vertical,
+                SelectionMode = DataGridViewSelectionMode.CellSelect
+            };
+
+            var activeColumn = new DataGridViewCheckBoxColumn
+            {
+                Name = "LayersActiveColumn",
+                Width = 28,
+                MinimumWidth = 28,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                HeaderText = "\u25C9",
+                ToolTipText = LocalizedText("Layers_Tab_Header_Active_Tooltip")
+            };
+            var visibleColumn = new DataGridViewCheckBoxColumn
+            {
+                Name = "LayersVisibleColumn",
+                Width = 28,
+                MinimumWidth = 28,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                HeaderText = "\U0001F441",
+                ToolTipText = LocalizedText("Layers_Tab_Header_Visible_Tooltip")
+            };
+            var lockedColumn = new DataGridViewCheckBoxColumn
+            {
+                Name = "LayersLockedColumn",
+                Width = 28,
+                MinimumWidth = 28,
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                HeaderText = "\U0001F512",
+                ToolTipText = LocalizedText("Layers_Tab_Header_Locked_Tooltip")
+            };
+            var nameColumn = new DataGridViewTextBoxColumn
+            {
+                Name = "LayersNameColumn",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                HeaderText = LocalizedText("Layers_Tab_Header_Name"),
+                ReadOnly = true,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            };
+
+            layersGridView.Columns.Add(activeColumn);
+            layersGridView.Columns.Add(visibleColumn);
+            layersGridView.Columns.Add(lockedColumn);
+            layersGridView.Columns.Add(nameColumn);
+
+            layersGridView.CurrentCellDirtyStateChanged += LayersGridView_CurrentCellDirtyStateChanged;
+            layersGridView.CellValueChanged += LayersGridView_CellValueChanged;
+            layersGridView.CellDoubleClick += LayersGridView_CellDoubleClick;
+
+            layersTabPlaceholderPanel.Controls.Clear();
+            layersTabPlaceholderPanel.Controls.Add(layersGridView);
+            RefreshLayersTab();
+        }
+
         private void ApplyLayerConfiguration(IEnumerable<LayerDefinition> layers, string nextActiveLayerId, bool markProjectChanged)
         {
-            documentLayers = NormalizeLayerDefinitions((layers ?? Enumerable.Empty<LayerDefinition>())
+            List<LayerDefinition> normalizedLayers = NormalizeLayerDefinitions((layers ?? Enumerable.Empty<LayerDefinition>())
                 .Select(layer => layer?.Clone())
                 .Where(layer => layer != null)
                 .ToList());
+            bool visibilityChanged = HasLayerVisibilityChanged(documentLayers, normalizedLayers);
+            documentLayers = normalizedLayers;
             activeLayerId = NormalizeLayerIdValue(nextActiveLayerId);
             EnsureObjectLayerAssignments();
+            PruneInvisibleLayerInteractionState();
+            delayCommentAndSelectionOverlayUntilPreviewReady = visibilityChanged;
             RebuildPageStatusesFromCurrentModel();
             ShowRedactPreview();
             UpdateCurrentPageObjectsMarker();
+            RefreshLayersTab();
             pagesListView?.Invalidate();
             thumbnailsListView?.Invalidate();
             pdfViewer?.Invalidate();
@@ -1676,6 +1768,420 @@ namespace AnonPDF
                 projectWasChangedAfterLastSave = true;
                 SyncProjectChangedFlagWithStateSignature();
             }
+        }
+
+        private static bool HasLayerVisibilityChanged(IEnumerable<LayerDefinition> previousLayers, IEnumerable<LayerDefinition> nextLayers)
+        {
+            var previousMap = (previousLayers ?? Enumerable.Empty<LayerDefinition>())
+                .Where(layer => layer != null)
+                .ToDictionary(layer => NormalizeLayerIdValue(layer.Id), layer => layer.IsVisible, StringComparer.OrdinalIgnoreCase);
+
+            foreach (LayerDefinition layer in nextLayers ?? Enumerable.Empty<LayerDefinition>())
+            {
+                if (layer == null)
+                {
+                    continue;
+                }
+
+                string layerId = NormalizeLayerIdValue(layer.Id);
+                bool previousVisible = previousMap.TryGetValue(layerId, out bool value) ? value : true;
+                if (previousVisible != layer.IsVisible)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void RefreshLayersTab()
+        {
+            if (layersGridView == null)
+            {
+                return;
+            }
+
+            suppressLayersGridEvents = true;
+            try
+            {
+                layersGridView.Rows.Clear();
+                foreach (LayerDefinition layer in documentLayers.OrderBy(layer => layer.Order))
+                {
+                    int rowIndex = layersGridView.Rows.Add(
+                        string.Equals(NormalizeLayerIdValue(activeLayerId), NormalizeLayerIdValue(layer.Id), StringComparison.OrdinalIgnoreCase),
+                        layer.IsVisible,
+                        layer.IsLocked,
+                        layer.Name);
+                    DataGridViewRow row = layersGridView.Rows[rowIndex];
+                    row.Tag = NormalizeLayerIdValue(layer.Id);
+                }
+
+                layersGridView.ClearSelection();
+                layersGridView.CurrentCell = null;
+            }
+            finally
+            {
+                suppressLayersGridEvents = false;
+            }
+        }
+
+        private void LayersGridView_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        {
+            if (layersGridView?.IsCurrentCellDirty == true)
+            {
+                layersGridView.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
+        }
+
+        private void LayersGridView_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            if (suppressLayersGridEvents || layersGridView == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            DataGridViewRow row = layersGridView.Rows[e.RowIndex];
+            string layerId = row.Tag as string;
+            if (string.IsNullOrWhiteSpace(layerId))
+            {
+                return;
+            }
+
+            List<LayerDefinition> updatedLayers = documentLayers.Select(layer => layer.Clone()).ToList();
+            LayerDefinition targetLayer = updatedLayers.FirstOrDefault(layer =>
+                string.Equals(NormalizeLayerIdValue(layer.Id), NormalizeLayerIdValue(layerId), StringComparison.OrdinalIgnoreCase));
+            if (targetLayer == null)
+            {
+                RefreshLayersTab();
+                return;
+            }
+
+            string nextActiveLayerId = activeLayerId;
+            bool changed = false;
+            string columnName = layersGridView.Columns[e.ColumnIndex].Name;
+
+            if (string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal))
+            {
+                bool makeActive = Convert.ToBoolean(row.Cells[e.ColumnIndex].Value ?? false);
+                if (makeActive)
+                {
+                    nextActiveLayerId = targetLayer.Id;
+                    changed = !string.Equals(NormalizeLayerIdValue(activeLayerId), NormalizeLayerIdValue(targetLayer.Id), StringComparison.OrdinalIgnoreCase);
+                }
+                else
+                {
+                    RefreshLayersTab();
+                    return;
+                }
+            }
+            else if (string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal))
+            {
+                bool nextVisible = Convert.ToBoolean(row.Cells[e.ColumnIndex].Value ?? false);
+                if (targetLayer.IsVisible != nextVisible)
+                {
+                    targetLayer.IsVisible = nextVisible;
+                    changed = true;
+                }
+            }
+            else if (string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
+            {
+                bool nextLocked = Convert.ToBoolean(row.Cells[e.ColumnIndex].Value ?? false);
+                if (targetLayer.IsLocked != nextLocked)
+                {
+                    targetLayer.IsLocked = nextLocked;
+                    changed = true;
+                }
+            }
+
+            if (!changed)
+            {
+                RefreshLayersTab();
+                return;
+            }
+
+            ApplyLayerConfiguration(updatedLayers, nextActiveLayerId, markProjectChanged: true);
+        }
+
+        private void LayersGridView_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (layersGridView == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            if (!string.Equals(layersGridView.Columns[e.ColumnIndex].Name, "LayersNameColumn", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            DataGridViewRow row = layersGridView.Rows[e.RowIndex];
+            string layerId = row.Tag as string;
+            if (string.IsNullOrWhiteSpace(layerId))
+            {
+                return;
+            }
+
+            LayerDefinition targetLayer = documentLayers.FirstOrDefault(layer =>
+                string.Equals(NormalizeLayerIdValue(layer.Id), NormalizeLayerIdValue(layerId), StringComparison.OrdinalIgnoreCase));
+            if (targetLayer == null || string.Equals(targetLayer.Id, WorkLayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (PromptForLayerNameFromMainForm(targetLayer.Name, out string newName))
+            {
+                if (string.IsNullOrWhiteSpace(newName) || string.Equals(newName, targetLayer.Name, StringComparison.CurrentCulture))
+                {
+                    RefreshLayersTab();
+                    return;
+                }
+
+                List<LayerDefinition> updatedLayers = documentLayers.Select(layer => layer.Clone()).ToList();
+                LayerDefinition editableLayer = updatedLayers.FirstOrDefault(layer =>
+                    string.Equals(NormalizeLayerIdValue(layer.Id), NormalizeLayerIdValue(layerId), StringComparison.OrdinalIgnoreCase));
+                if (editableLayer == null)
+                {
+                    RefreshLayersTab();
+                    return;
+                }
+
+                editableLayer.Name = newName;
+                ApplyLayerConfiguration(updatedLayers, activeLayerId, markProjectChanged: true);
+            }
+            else
+            {
+                RefreshLayersTab();
+            }
+        }
+
+        private bool PromptForLayerNameFromMainForm(string initialValue, out string layerName)
+        {
+            layerName = initialValue ?? string.Empty;
+
+            using (Form prompt = new Form())
+            using (TextBox inputTextBox = new TextBox())
+            using (Label label = new Label())
+            using (Button okButton = new Button())
+            using (Button cancelButton = new Button())
+            {
+                prompt.Text = LocalizedText("Dialog_Layers_Rename_Title");
+                prompt.StartPosition = FormStartPosition.CenterParent;
+                prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
+                prompt.MinimizeBox = false;
+                prompt.MaximizeBox = false;
+                prompt.ShowInTaskbar = false;
+                prompt.ClientSize = new Size(420, 125);
+
+                label.AutoSize = true;
+                label.Left = 12;
+                label.Top = 14;
+                label.Text = LocalizedText("Dialog_Layers_Rename_Label");
+
+                inputTextBox.Left = 12;
+                inputTextBox.Top = 38;
+                inputTextBox.Width = 396;
+                inputTextBox.Text = layerName;
+
+                okButton.Text = LocalizedText("Dialog_Button_Save");
+                okButton.Width = 100;
+                okButton.Height = 28;
+                okButton.Left = 206;
+                okButton.Top = 82;
+                okButton.DialogResult = DialogResult.OK;
+
+                cancelButton.Text = LocalizedText("Dialog_Button_Cancel");
+                cancelButton.Width = 100;
+                cancelButton.Height = 28;
+                cancelButton.Left = 308;
+                cancelButton.Top = 82;
+                cancelButton.DialogResult = DialogResult.Cancel;
+
+                prompt.Controls.Add(label);
+                prompt.Controls.Add(inputTextBox);
+                prompt.Controls.Add(okButton);
+                prompt.Controls.Add(cancelButton);
+                prompt.AcceptButton = okButton;
+                prompt.CancelButton = cancelButton;
+
+                prompt.Shown += (_, __) =>
+                {
+                    inputTextBox.Focus();
+                    inputTextBox.SelectAll();
+                };
+
+                if (prompt.ShowDialog(this) != DialogResult.OK)
+                {
+                    return false;
+                }
+
+                layerName = (inputTextBox.Text ?? string.Empty).Trim();
+                return true;
+            }
+        }
+
+        private void ApplyLayersTabLocalization()
+        {
+            if (layersGridView == null)
+            {
+                return;
+            }
+
+            if (layersGridView.Columns.Contains("LayersActiveColumn"))
+            {
+                layersGridView.Columns["LayersActiveColumn"].ToolTipText = LocalizedText("Layers_Tab_Header_Active_Tooltip");
+            }
+
+            if (layersGridView.Columns.Contains("LayersVisibleColumn"))
+            {
+                layersGridView.Columns["LayersVisibleColumn"].ToolTipText = LocalizedText("Layers_Tab_Header_Visible_Tooltip");
+            }
+
+            if (layersGridView.Columns.Contains("LayersLockedColumn"))
+            {
+                layersGridView.Columns["LayersLockedColumn"].ToolTipText = LocalizedText("Layers_Tab_Header_Locked_Tooltip");
+            }
+
+            if (layersGridView.Columns.Contains("LayersNameColumn"))
+            {
+                layersGridView.Columns["LayersNameColumn"].HeaderText = LocalizedText("Layers_Tab_Header_Name");
+            }
+        }
+
+        private void ApplyThemeToLayersGrid(UiThemePalette theme)
+        {
+            if (layersGridView == null || theme == null)
+            {
+                return;
+            }
+
+            layersGridView.BackgroundColor = theme.SectionBackColor;
+            layersGridView.GridColor = theme.BorderColor;
+            layersGridView.BorderStyle = BorderStyle.None;
+            layersGridView.DefaultCellStyle.BackColor = theme.SectionBackColor;
+            layersGridView.DefaultCellStyle.ForeColor = theme.TextPrimaryColor;
+            layersGridView.DefaultCellStyle.SelectionBackColor = theme.SectionBackColor;
+            layersGridView.DefaultCellStyle.SelectionForeColor = theme.TextPrimaryColor;
+            layersGridView.ColumnHeadersDefaultCellStyle.BackColor = theme.SectionBackColor;
+            layersGridView.ColumnHeadersDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
+            layersGridView.ColumnHeadersDefaultCellStyle.SelectionBackColor = theme.SectionBackColor;
+            layersGridView.ColumnHeadersDefaultCellStyle.SelectionForeColor = theme.TextPrimaryColor;
+            layersGridView.RowHeadersDefaultCellStyle.BackColor = theme.SectionBackColor;
+            layersGridView.RowHeadersDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
+            layersGridView.RowsDefaultCellStyle.BackColor = theme.SectionBackColor;
+            layersGridView.RowsDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
+            layersGridView.RowsDefaultCellStyle.SelectionBackColor = theme.SectionBackColor;
+            layersGridView.RowsDefaultCellStyle.SelectionForeColor = theme.TextPrimaryColor;
+            layersGridView.AlternatingRowsDefaultCellStyle.BackColor = theme.SectionBackColor;
+            layersGridView.AlternatingRowsDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
+            layersGridView.EnableHeadersVisualStyles = false;
+        }
+
+        private void PruneInvisibleLayerInteractionState()
+        {
+            selectedTextAnnotations.RemoveWhere(annotation => annotation == null || !IsLayerVisible(annotation.LayerId));
+            selectedRasterObjectIds.RemoveWhere(id =>
+            {
+                RasterObject rasterObject = rasterObjects.FirstOrDefault(r => r != null && string.Equals(r.Id, id, StringComparison.Ordinal));
+                return rasterObject == null || !IsLayerVisible(rasterObject.LayerId);
+            });
+            selectedArrowObjectIds.RemoveWhere(id =>
+            {
+                ArrowObject arrowObject = arrowObjects.FirstOrDefault(a => a != null && string.Equals(a.Id, id, StringComparison.Ordinal));
+                return arrowObject == null || !IsLayerVisible(arrowObject.LayerId);
+            });
+            selectedVectorShapeIds.RemoveWhere(id =>
+            {
+                VectorShapeObject vectorShape = vectorShapes.FirstOrDefault(v => v != null && string.Equals(v.Id, id, StringComparison.Ordinal));
+                return vectorShape == null || !IsLayerVisible(vectorShape.LayerId);
+            });
+
+            if (selectedTextAnnotation != null && !IsLayerVisible(selectedTextAnnotation.LayerId))
+            {
+                selectedTextAnnotation = null;
+            }
+
+            if (selectedRasterObject != null && !IsLayerVisible(selectedRasterObject.LayerId))
+            {
+                selectedRasterObject = null;
+            }
+
+            if (selectedArrowObject != null && !IsLayerVisible(selectedArrowObject.LayerId))
+            {
+                selectedArrowObject = null;
+            }
+
+            if (selectedVectorShape != null && !IsLayerVisible(selectedVectorShape.LayerId))
+            {
+                selectedVectorShape = null;
+            }
+
+            if (annotationToRotate != null && !IsLayerVisible(annotationToRotate.LayerId))
+            {
+                ResetTextRotationInteractionState();
+            }
+
+            if ((commentNoteToMove != null && !IsLayerVisible(commentNoteToMove.LayerId)) ||
+                (commentNoteToResize != null && !IsLayerVisible(commentNoteToResize.LayerId)))
+            {
+                ResetCommentNoteMoveState();
+            }
+
+            if ((rasterObjectToMove != null && !IsLayerVisible(rasterObjectToMove.LayerId)) ||
+                (rasterObjectToRotate != null && !IsLayerVisible(rasterObjectToRotate.LayerId)) ||
+                (rasterObjectToResize != null && !IsLayerVisible(rasterObjectToResize.LayerId)))
+            {
+                ResetRasterInteractionState();
+            }
+
+            if ((arrowObjectToMove != null && !IsLayerVisible(arrowObjectToMove.LayerId)) ||
+                (arrowObjectToAdjust != null && !IsLayerVisible(arrowObjectToAdjust.LayerId)))
+            {
+                ResetArrowInteractionState();
+            }
+
+            if ((vectorShapeToMove != null && !IsLayerVisible(vectorShapeToMove.LayerId)) ||
+                (vectorShapeToAdjust != null && !IsLayerVisible(vectorShapeToAdjust.LayerId)) ||
+                (vectorShapeToRotate != null && !IsLayerVisible(vectorShapeToRotate.LayerId)))
+            {
+                ResetVectorInteractionState();
+            }
+
+            if (groupMoveEntries.Any(entry => entry != null && !IsGroupMoveEntryLayerVisible(entry)))
+            {
+                ResetGroupMoveState();
+            }
+
+            CollapseGroupSelectionToSingleIfNeeded();
+        }
+
+        private bool IsGroupMoveEntryLayerVisible(GroupMoveEntry entry)
+        {
+            if (entry == null)
+            {
+                return true;
+            }
+
+            if (entry.Text != null)
+            {
+                return IsLayerVisible(entry.Text.LayerId);
+            }
+
+            if (entry.Raster != null)
+            {
+                return IsLayerVisible(entry.Raster.LayerId);
+            }
+
+            if (entry.Arrow != null)
+            {
+                return IsLayerVisible(entry.Arrow.LayerId);
+            }
+
+            if (entry.VectorShape != null)
+            {
+                return IsLayerVisible(entry.VectorShape.LayerId);
+            }
+
+            return true;
         }
 
         private Dictionary<string, int> BuildLayerUsageCounts()
@@ -4143,10 +4649,10 @@ namespace AnonPDF
                 objectClipboardSnapshot.Items[0].Type == ObjectClipboardItemType.Raster &&
                 objectClipboardSnapshot.Items[0].Raster != null;
 
-            float offset = 12f * (objectClipboardPasteCount + 1);
-            float baseX = objectClipboardSnapshot.SourceBounds.X + offset;
-            float baseY = objectClipboardSnapshot.SourceBounds.Y + offset;
+            float baseX = objectClipboardSnapshot.SourceBounds.X;
+            float baseY = objectClipboardSnapshot.SourceBounds.Y;
             DateTime now = DateTime.UtcNow;
+            string targetLayerId = GetResolvedActiveLayerId();
 
             var pastedTextAnnotations = new List<TextAnnotation>();
             var pastedRasterObjects = new List<RasterObject>();
@@ -4179,7 +4685,7 @@ namespace AnonPDF
                         {
                             Id = Guid.NewGuid().ToString("N"),
                             PageNumber = currentPage,
-                            LayerId = NormalizeLayerIdValue(item.Text.LayerId),
+                            LayerId = targetLayerId,
                             AnnotationText = item.Text.AnnotationText,
                             AnnotationFont = CloneFontSafe(item.Text.AnnotationFont),
                             AnnotationColor = item.Text.AnnotationColor,
@@ -4228,7 +4734,7 @@ namespace AnonPDF
                         {
                             Id = Guid.NewGuid().ToString("N"),
                             PageNumber = currentPage,
-                            LayerId = NormalizeLayerIdValue(item.Raster.LayerId),
+                            LayerId = targetLayerId,
                             Bounds = bounds,
                             InitialBounds = bounds,
                             Rotation = item.Raster.Rotation,
@@ -4260,7 +4766,7 @@ namespace AnonPDF
                         {
                             Id = Guid.NewGuid().ToString("N"),
                             PageNumber = currentPage,
-                            LayerId = NormalizeLayerIdValue(item.Arrow.LayerId),
+                            LayerId = targetLayerId,
                             Start = new PointF(baseX + item.Arrow.Start.X, baseY + item.Arrow.Start.Y),
                             End = new PointF(baseX + item.Arrow.End.X, baseY + item.Arrow.End.Y),
                             LineColorArgb = item.Arrow.LineColorArgb,
@@ -4287,7 +4793,7 @@ namespace AnonPDF
                         {
                             Id = Guid.NewGuid().ToString("N"),
                             PageNumber = currentPage,
-                            LayerId = NormalizeLayerIdValue(item.VectorShape.LayerId),
+                            LayerId = targetLayerId,
                             ShapeType = item.VectorShape.ShapeType,
                             Points = (item.VectorShape.Points ?? new List<PointF>())
                                 .Select(point => new PointF(baseX + point.X, baseY + point.Y))
@@ -5180,6 +5686,8 @@ namespace AnonPDF
             try { groupBoxFilter.Text = Resources.UI_Group_Filter; } catch { }
             try { pagesListTabPage.Text = LocalizedText("UI_Tab_PagesList"); } catch { }
             try { thumbnailsTabPage.Text = LocalizedText("UI_Tab_Thumbnails"); } catch { }
+            try { layersTabPage.Text = LocalizedText("UI_Tab_Layers"); } catch { }
+            ApplyLayersTabLocalization();
 
             UpdateWindowTitle();
             if (splashForm != null && !splashClosed && !splashForm.IsDisposed)
@@ -8195,6 +8703,10 @@ namespace AnonPDF
             pagesListTabPage.ForeColor = theme.TextPrimaryColor;
             thumbnailsTabPage.BackColor = theme.SectionBackColor;
             thumbnailsTabPage.ForeColor = theme.TextPrimaryColor;
+            layersTabPage.BackColor = theme.SectionBackColor;
+            layersTabPage.ForeColor = theme.TextPrimaryColor;
+            layersTabPlaceholderPanel.BackColor = theme.SectionBackColor;
+            ApplyThemeToLayersGrid(theme);
             tableLayoutPanel1.BackColor = theme.SectionBackColor;
 
             ApplyThemeToControls(mainAppSplitContainer.Panel1.Controls, theme);
@@ -11712,6 +12224,9 @@ namespace AnonPDF
             ClearRasterObjects();
             ClearArrowObjects();
             ClearVectorShapes();
+            documentLayers = new List<LayerDefinition>();
+            activeLayerId = DefaultLayerId;
+            EnsureSystemLayers();
             PdfTextSearcher.ClearCache();
             signaturesToRemove.Clear();
             hasCustomSignatureSelection = false;
@@ -14568,6 +15083,7 @@ namespace AnonPDF
             {
                 activeLayerId = DefaultLayerId;
             }
+            RefreshLayersTab();
         }
 
         private static List<LayerDefinition> NormalizeLayerDefinitions(IEnumerable<LayerDefinition> layers)
@@ -14765,6 +15281,11 @@ namespace AnonPDF
             return layer != null && layer.IsLocked;
         }
 
+        private bool IsObjectLayerVisible(object targetObject)
+        {
+            return targetObject == null || IsLayerVisible(GetLayerIdForGenericObject(targetObject));
+        }
+
         private bool IsTextAnnotationEffectivelyLocked(TextAnnotation annotation)
         {
             return annotation != null && (annotation.AnnotationIsLocked || IsLayerLocked(annotation.LayerId));
@@ -14919,6 +15440,7 @@ namespace AnonPDF
 
         private void RefreshAfterLayerAssignmentChange()
         {
+            PruneInvisibleLayerInteractionState();
             RebuildPageStatusesFromCurrentModel();
             ShowRedactPreview();
             UpdateCurrentPageObjectsMarker();
@@ -21816,7 +22338,7 @@ namespace AnonPDF
             }
 
             List<CommentAnnotation> comments = commentAnnotations
-                .Where(c => c != null && c.PageNumber == currentPage)
+                .Where(c => c != null && c.PageNumber == currentPage && IsLayerVisible(c.LayerId))
                 .OrderBy(c => c.Bounds.Top)
                 .ThenBy(c => c.Bounds.Left)
                 .ToList();
@@ -22025,7 +22547,7 @@ namespace AnonPDF
                 }
             }
 
-            if (commentPreviewOverlayReady)
+            if (!delayCommentAndSelectionOverlayUntilPreviewReady && commentPreviewOverlayReady)
             {
                 DrawCommentAnnotationsOnPreview(e.Graphics);
             }
@@ -22034,7 +22556,9 @@ namespace AnonPDF
                 redactionBlocks.Where(block => block != null && block.PageNumber == currentPage && IsLayerVisible(block.LayerId)));
 
             // Drawing saved redaction blocks for current page
-            foreach (var block in redactionBlocks.Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId)))
+            foreach (var block in delayCommentAndSelectionOverlayUntilPreviewReady
+                ? Enumerable.Empty<RedactionBlock>()
+                : redactionBlocks.Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId)))
             {
                 using (SolidBrush brush = new SolidBrush(System.Drawing.Color.FromArgb(128, 255, 0, 0)))
                 {
@@ -22408,14 +22932,33 @@ namespace AnonPDF
         {
             try
             {
-                if (pagesTabControl == null || pagesListTabPage == null || thumbnailsTabPage == null)
+                if (pagesTabControl == null || pagesListTabPage == null || thumbnailsTabPage == null || layersTabPage == null)
                 {
                     return;
                 }
 
-                bool useThumbnails = Properties.Settings.Default.UseThumbnailsTabInRightPanel;
-                pagesTabControl.SelectedTab = useThumbnails ? thumbnailsTabPage : pagesListTabPage;
-                if (useThumbnails)
+                string selectedTabKey = Properties.Settings.Default.RightPanelSelectedTabKey;
+                if (string.IsNullOrWhiteSpace(selectedTabKey))
+                {
+                    selectedTabKey = Properties.Settings.Default.UseThumbnailsTabInRightPanel
+                        ? RightPanelTabThumbnailsKey
+                        : RightPanelTabPagesKey;
+                }
+
+                switch (selectedTabKey)
+                {
+                    case RightPanelTabLayersKey:
+                        pagesTabControl.SelectedTab = layersTabPage;
+                        break;
+                    case RightPanelTabThumbnailsKey:
+                        pagesTabControl.SelectedTab = thumbnailsTabPage;
+                        break;
+                    default:
+                        pagesTabControl.SelectedTab = pagesListTabPage;
+                        break;
+                }
+
+                if (IsThumbnailsTabSelected())
                 {
                     thumbnailViewportTimer?.Start();
                 }
@@ -22430,11 +22973,33 @@ namespace AnonPDF
             }
         }
 
-        private void SaveRightPanelTabSelectionUserSetting(bool useThumbnails)
+        private string GetSelectedRightPanelTabKey()
+        {
+            if (pagesTabControl == null || pagesTabControl.SelectedTab == null)
+            {
+                return RightPanelTabPagesKey;
+            }
+
+            if (pagesTabControl.SelectedTab == thumbnailsTabPage)
+            {
+                return RightPanelTabThumbnailsKey;
+            }
+
+            if (pagesTabControl.SelectedTab == layersTabPage)
+            {
+                return RightPanelTabLayersKey;
+            }
+
+            return RightPanelTabPagesKey;
+        }
+
+        private void SaveRightPanelTabSelectionUserSetting()
         {
             try
             {
-                Properties.Settings.Default.UseThumbnailsTabInRightPanel = useThumbnails;
+                string selectedTabKey = GetSelectedRightPanelTabKey();
+                Properties.Settings.Default.RightPanelSelectedTabKey = selectedTabKey;
+                Properties.Settings.Default.UseThumbnailsTabInRightPanel = selectedTabKey == RightPanelTabThumbnailsKey;
                 Properties.Settings.Default.Save();
             }
             catch (Exception ex)
@@ -22531,7 +23096,7 @@ namespace AnonPDF
                 return;
             }
 
-            SaveRightPanelTabSelectionUserSetting(IsThumbnailsTabSelected());
+            SaveRightPanelTabSelectionUserSetting();
 
             if (IsThumbnailsTabSelected())
             {
@@ -22543,7 +23108,10 @@ namespace AnonPDF
             {
                 thumbnailViewportTimer?.Stop();
                 CancelThumbnailGeneration();
-                SyncPagesListSelectionToCurrentPage(ensureVisible: true);
+                if (pagesTabControl.SelectedTab == pagesListTabPage)
+                {
+                    SyncPagesListSelectionToCurrentPage(ensureVisible: true);
+                }
             }
         }
 
@@ -24144,10 +24712,19 @@ namespace AnonPDF
             var layerKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (ProjectData project in sourceProjects)
             {
+                if (project.Layers != null)
+                {
+                    foreach (LayerDefinition layer in project.Layers.Where(layer => layer != null))
+                    {
+                        AddOrReplaceLayerDefinition(mergedProject.Layers, layer);
+                    }
+                }
+
                 if (project.RedactionBlocks != null)
                 {
                     foreach (RedactionBlock block in project.RedactionBlocks.Where(block => block != null))
                     {
+                        block.LayerId = NormalizeImportedLayerId(block.LayerId);
                         AddOrReplaceRedactionBlock(mergedProject.RedactionBlocks, block);
                     }
                 }
@@ -24156,6 +24733,7 @@ namespace AnonPDF
                 {
                     foreach (CommentAnnotation comment in project.CommentAnnotations.Where(comment => comment != null))
                     {
+                        comment.LayerId = NormalizeImportedLayerId(comment.LayerId);
                         AddOrReplaceCommentAnnotation(mergedProject.CommentAnnotations, comment);
                     }
                 }
@@ -24172,6 +24750,7 @@ namespace AnonPDF
                 {
                     foreach (TextAnnotation annotation in project.TextAnnotations.Where(annotation => annotation != null))
                     {
+                        annotation.LayerId = NormalizeImportedLayerId(annotation.LayerId);
                         AddOrReplaceTextAnnotation(mergedProject.TextAnnotations, annotation);
                     }
                 }
@@ -24180,6 +24759,7 @@ namespace AnonPDF
                 {
                     foreach (RasterObject obj in project.RasterObjects.Where(obj => obj != null))
                     {
+                        obj.LayerId = NormalizeImportedLayerId(obj.LayerId);
                         AddOrReplaceRasterObject(mergedProject.RasterObjects, obj);
                     }
                 }
@@ -24188,6 +24768,7 @@ namespace AnonPDF
                 {
                     foreach (ArrowObject obj in project.ArrowObjects.Where(obj => obj != null))
                     {
+                        obj.LayerId = NormalizeImportedLayerId(obj.LayerId);
                         AddOrReplaceArrowObject(mergedProject.ArrowObjects, obj);
                     }
                 }
@@ -24196,6 +24777,7 @@ namespace AnonPDF
                 {
                     foreach (VectorShapeObject obj in project.VectorShapes.Where(obj => obj != null))
                     {
+                        obj.LayerId = NormalizeImportedLayerId(obj.LayerId);
                         AddOrReplaceVectorShapeObject(mergedProject.VectorShapes, obj);
                     }
                 }
@@ -24209,14 +24791,6 @@ namespace AnonPDF
                         {
                             mergedProject.ObjectLayers.Add(layer);
                         }
-                    }
-                }
-
-                if (project.Layers != null)
-                {
-                    foreach (LayerDefinition layer in project.Layers.Where(layer => layer != null))
-                    {
-                        AddOrReplaceLayerDefinition(mergedProject.Layers, layer);
                     }
                 }
 
@@ -24489,33 +25063,49 @@ namespace AnonPDF
             int existingIndex = target.FindIndex(layer => layer != null && string.Equals(NormalizeLayerIdValue(layer.Id), layerId, StringComparison.OrdinalIgnoreCase));
             if (existingIndex >= 0)
             {
-                LayerDefinition existing = target[existingIndex];
-                if (existing == null || !existing.IsSystem)
-                {
-                    target[existingIndex] = new LayerDefinition
-                    {
-                        Id = layerId,
-                        Name = NormalizeLayerDisplayName(candidate.Name, layerId),
-                        Order = candidate.Order,
-                        IsVisible = candidate.IsVisible,
-                        IsLocked = candidate.IsLocked,
-                        ExcludeFromExport = candidate.ExcludeFromExport,
-                        IsSystem = string.Equals(layerId, DefaultLayerId, StringComparison.OrdinalIgnoreCase)
-                    };
-                }
                 return;
+            }
+
+            int desiredOrder = Math.Max(1, candidate.Order);
+            foreach (LayerDefinition existingLayer in target.Where(layer =>
+                         layer != null &&
+                         !string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase) &&
+                         layer.Order >= desiredOrder))
+            {
+                existingLayer.Order++;
             }
 
             target.Add(new LayerDefinition
             {
                 Id = layerId,
                 Name = NormalizeLayerDisplayName(candidate.Name, layerId),
-                Order = candidate.Order,
-                IsVisible = candidate.IsVisible,
-                IsLocked = candidate.IsLocked,
+                Order = desiredOrder,
+                IsVisible = true,
+                IsLocked = false,
                 ExcludeFromExport = candidate.ExcludeFromExport,
                 IsSystem = string.Equals(layerId, DefaultLayerId, StringComparison.OrdinalIgnoreCase)
             });
+        }
+
+        private static string NormalizeImportedLayerId(string layerId)
+        {
+            string normalized = NormalizeLayerIdValue(layerId);
+            if (string.IsNullOrWhiteSpace(normalized))
+            {
+                return DefaultLayerId;
+            }
+
+            if (string.Equals(normalized, WorkLayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                return WorkLayerId;
+            }
+
+            if (string.Equals(normalized, DefaultLayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                return DefaultLayerId;
+            }
+
+            return normalized;
         }
 
         private static bool AreEquivalentRedactionBlocks(RedactionBlock left, RedactionBlock right)
@@ -29366,7 +29956,7 @@ namespace AnonPDF
 
         private void DrawSelectedRasterOverlayOnTop(Graphics graphics)
         {
-            if (graphics == null || selectedRasterObject == null || selectedRasterObject.PageNumber != currentPage || GetGroupSelectionCount() != 0)
+            if (graphics == null || selectedRasterObject == null || selectedRasterObject.PageNumber != currentPage || GetGroupSelectionCount() != 0 || !IsLayerVisible(selectedRasterObject.LayerId))
             {
                 return;
             }
@@ -29422,7 +30012,7 @@ namespace AnonPDF
 
         private void DrawSelectedArrowOverlayOnTop(Graphics graphics)
         {
-            if (graphics == null || selectedArrowObject == null || selectedArrowObject.PageNumber != currentPage || GetGroupSelectionCount() != 0)
+            if (graphics == null || selectedArrowObject == null || selectedArrowObject.PageNumber != currentPage || GetGroupSelectionCount() != 0 || !IsLayerVisible(selectedArrowObject.LayerId))
             {
                 return;
             }
@@ -29465,7 +30055,7 @@ namespace AnonPDF
 
         private void DrawSelectedVectorOverlayOnTop(Graphics graphics)
         {
-            if (graphics == null || selectedVectorShape == null || selectedVectorShape.PageNumber != currentPage || GetGroupSelectionCount() != 0)
+            if (graphics == null || selectedVectorShape == null || selectedVectorShape.PageNumber != currentPage || GetGroupSelectionCount() != 0 || !IsLayerVisible(selectedVectorShape.LayerId))
             {
                 return;
             }
@@ -29551,7 +30141,7 @@ namespace AnonPDF
 
         private void DrawSelectedTextOverlayOnTop(Graphics graphics)
         {
-            if (graphics == null || selectedTextAnnotation == null || selectedTextAnnotation.PageNumber != currentPage || GetGroupSelectionCount() != 0)
+            if (graphics == null || selectedTextAnnotation == null || selectedTextAnnotation.PageNumber != currentPage || GetGroupSelectionCount() != 0 || !IsLayerVisible(selectedTextAnnotation.LayerId))
             {
                 return;
             }
@@ -33138,10 +33728,6 @@ namespace AnonPDF
             {
                 // ignore
             }
-            finally
-            {
-                cts.Dispose();
-            }
         }
 
         private void StartAsyncRedactPreview(
@@ -33157,13 +33743,17 @@ namespace AnonPDF
             bool useSafeModeRendering = safeModeCheckBox.Checked || pdfCleanUpToolError;
             bool includeComments = commentsForPage != null && commentsForPage.Count > 0;
             var cts = new System.Threading.CancellationTokenSource();
+            var token = cts.Token;
             previewRenderCts = cts;
 
             Task.Run(() =>
             {
                 bool cleanupFailed = false;
                 DrawingImage previewImage = null;
-                cts.Token.ThrowIfCancellationRequested();
+                if (token.IsCancellationRequested)
+                {
+                    return null;
+                }
 
                 if (useSafeModeRendering)
                 {
@@ -33184,7 +33774,12 @@ namespace AnonPDF
 
                 if (includeComments && previewImage != null)
                 {
-                    cts.Token.ThrowIfCancellationRequested();
+                    if (token.IsCancellationRequested)
+                    {
+                        previewImage.Dispose();
+                        return null;
+                    }
+
                     DrawingImage withComments = RenderBitmapWithCommentHighlightsSnapshot(
                         previewImage,
                         commentsForPage,
@@ -33199,13 +33794,18 @@ namespace AnonPDF
                     previewImage = withComments;
                 }
 
-                cts.Token.ThrowIfCancellationRequested();
+                if (token.IsCancellationRequested)
+                {
+                    previewImage?.Dispose();
+                    return null;
+                }
+
                 return Tuple.Create(previewImage, cleanupFailed);
-            }, cts.Token).ContinueWith(t =>
+            }, token).ContinueWith(t =>
             {
                 try
                 {
-                    if (t.IsCanceled || cts.IsCancellationRequested)
+                    if (t.IsCanceled || token.IsCancellationRequested)
                     {
                         return;
                     }
@@ -33216,12 +33816,17 @@ namespace AnonPDF
                         return;
                     }
 
+                    if (t.Result == null)
+                    {
+                        return;
+                    }
+
                     DrawingImage previewImage = t.Result.Item1;
                     bool cleanupFailed = t.Result.Item2;
 
                     bool requestOutdated =
                         requestId != previewRenderRequestId ||
-                        cts.IsCancellationRequested ||
+                        token.IsCancellationRequested ||
                         currentPage != pageNumber ||
                         Math.Abs(scaleFactor - renderScale) > 0.0001f ||
                         !ArePathsEqual(sourcePdfPath, inputPdfPath);
@@ -33236,9 +33841,9 @@ namespace AnonPDF
                         pdfCleanUpToolError = true;
                     }
 
-                    commentPreviewOverlayReady = includeComments && previewImage != null;
-
                     pdfViewer.Image = previewImage;
+                    commentPreviewOverlayReady = includeComments && previewImage != null;
+                    delayCommentAndSelectionOverlayUntilPreviewReady = false;
                     pdfViewer.Invalidate();
                 }
                 finally
@@ -33373,10 +33978,19 @@ namespace AnonPDF
 
             bool hasBlocks = blocksForThisPage.Count > 0;
             bool hasComments = commentsForThisPage.Count > 0;
-            commentPreviewOverlayReady = false;
-
+            bool preserveExistingCommentOverlay =
+                !delayCommentAndSelectionOverlayUntilPreviewReady &&
+                hasComments &&
+                commentPreviewOverlayReady &&
+                commentNoteRectsDoc.Count > 0;
+            if (!preserveExistingCommentOverlay)
+            {
+                commentNoteRectsDoc.Clear();
+                commentPreviewOverlayReady = false;
+            }
             if (!hasBlocks && !hasComments)
             {
+                delayCommentAndSelectionOverlayUntilPreviewReady = false;
                 CancelPreviewRender();
                 pdfViewer.Image = RenderOriginalPage(currentPage);
                 return;

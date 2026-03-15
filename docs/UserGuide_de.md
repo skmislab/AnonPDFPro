@@ -51,7 +51,7 @@ Das Hauptfenster besteht aus folgenden Bereichen:
 
 > \- Obere Menüleiste mit den Bereichen Datei, Werkzeuge, Optionen und ?.
 
-> \- Seitenliste auf der linken Seite mit allen Seiten des geöffneten Dokuments.
+> \- Rechtes Panel mit den Tabs `Seitenliste`, `Miniaturen` und `Ebenen`. Dort können Seiten, Miniaturen und Ebenenattribute schnell umgeschaltet werden.
 
 > \- Hauptvorschau in der Mitte zur Bearbeitung der aktuellen Seite.
 
@@ -89,7 +89,7 @@ Zum Markieren eines Bereichs:
 
 > **3.** Im Marker-Modus zeichnen Sie zeilenorientiert; im Box-Modus frei rechteckig.
 
-> **4.** Im Marker-Modus können Sie mit gedrückter CTRL-Taste ebenfalls ein Rechteck aufziehen.
+> **4.** Im Marker-Modus schaltet gedrücktes `CTRL` auf das rechteckige Zeichnen (Box) um.
 
 > **5.** Lassen Sie die Maustaste los, um die Markierung zu Übernehmen.
 
@@ -111,7 +111,7 @@ Klicken Sie auf PDF speichern, wählen Sie den Zielpfad und speichern Sie die fi
 
 ## 5.1 Seitennavigation
 
-Verwenden Sie Erste, Vorherige, Nächste, Letzte oder geben Sie eine Seitenzahl direkt ein.
+Verwenden Sie Erste, Vorherige, Nächste, Letzte oder geben Sie eine Seitenzahl direkt ein. Die aktuelle Seite kann mit `CTRL + R` gedreht werden.
 
 ## 5.2 Navigation zwischen Markierungen
 
@@ -124,6 +124,8 @@ Mit den Funktionen Erste/Vorherige/Nächste/Letzte Markierung springen Sie schne
 > \- Mausrad: vertikales Scrollen.
 
 > \- CTRL + Mausrad: Zoomen.
+
+> \- F11 schaltet den Vollbildmodus um, ESC beendet den Vollbildmodus.
 
 # 6. Zusätzliche Funktionen
 
@@ -171,7 +173,33 @@ Beim Beenden fragt die Anwendung bei ungespeicherten Änderungen nach einer Best
 
 > \- Über: zeigt Versions- und Herstellerinformationen.
 
-## 6.9 Markierungen und Objekte duplizieren
+## 6.9 Objekte hinzufügen und bearbeiten
+
+Objekte können über das Menü `Werkzeuge` oder mit Tastenkürzeln hinzugefügt werden:
+
+> \- `CTRL + A` - Pfeil hinzufügen.
+
+> \- `CTRL + F` - Form hinzufügen.
+
+> \- `CTRL + G` - Bild hinzufügen.
+
+> \- `CTRL + K` - Kommentar hinzufügen.
+
+Für die Arbeit mit Objekten stehen außerdem zur Verfügung:
+
+> \- `CTRL + C` - aktives Objekt oder aktive Objektgruppe kopieren.
+
+> \- `CTRL + V` - Objekt aus der Zwischenablage einfügen. Das eingefügte Objekt wird auf der aktiven Ebene erstellt und behält seine ursprüngliche Position bei.
+
+> \- `DELETE` - aktives Objekt oder aktive Objektgruppe löschen.
+
+Modifikatoren bei der Objektbearbeitung:
+
+> \- `ALT` beim Erstellen von Formen erzwingt feste Proportionen: Rechteck -> Quadrat, Ellipse -> Kreis, Dreieck -> gleichseitig.
+
+> \- `ALT` beim Ändern der Bildgröße arbeitet symmetrisch zum Mittelpunkt des Objekts.
+
+## 6.10 Markierungen und Objekte duplizieren
 
 Im Kontextmenü (rechte Maustaste) stehen folgende Funktionen zur Verfügung:
 
@@ -188,6 +216,19 @@ Nach Auswahl wird ein Dialog mit Seitenbereich geöffnet:
 Für duplizierte Objekte gibt es zusätzlich:
 
 > \- `Duplizierte Objekte löschen` - entfernt Kopien im gewählten Seitenbereich.
+
+## 6.11 Ebenen
+
+Die Anwendung unterstützt Arbeitsebenen für Markierungen und Objekte.
+
+- Im Tab `Ebenen` im rechten Panel können aktive Ebene, Sichtbarkeit und Sperre schnell geändert werden.
+- `Werkzeuge -> Ebenen` öffnet das vollständige Ebenenfenster.
+- Neue Markierungen und neue Objekte werden auf der aktuell aktiven Ebene erstellt.
+- Das Einfügen eines Objekts aus der Zwischenablage erstellt eine Kopie auf der aktiven Ebene und behält die ursprüngliche Position bei.
+- Die Ebene `Robocza` liegt immer ganz oben und wird nicht in das finale PDF exportiert.
+- Mit ausgeblendeten Ebenen kann in der Vorschau nicht interagiert werden.
+- Gesperrte Ebenen blockieren Verschieben, Bearbeiten und Löschen von Objekten.
+- Beim Projektimport bleiben die Zuordnungen von Objekten zu Ebenen erhalten.
 
 # 7. Häufige Probleme und Hinweise
 
@@ -219,10 +260,11 @@ In den letzten Versionen wurden u. a. ergänzt:
 
 - Drucken über das Menü `Datei` (`CTRL+P`) mit Auswahl: aktuelle Seite, Seitenbereich oder gesamtes Dokument.
 - Option `Seitenbereich als PDF speichern` im Menü `Datei`, standardmäßig mit der aktuellen Seite vorbelegt.
-- Zwei Seitenansicht-Tabs rechts: `Seitenliste` und `Miniaturen`.
+- Drei Tabs auf der rechten Seite: `Seitenliste`, `Miniaturen` und `Ebenen`.
 - Dynamische Erzeugung von Miniaturen sowie Miniatur-Cache für bessere Leistung bei großen Dokumenten.
-- Speicherung des zuletzt gewählten rechten Tabs (`Seitenliste` / `Miniaturen`).
+- Speicherung des zuletzt gewählten rechten Tabs (`Seitenliste` / `Miniaturen` / `Ebenen`).
 - Speicherung der Breite des rechten Panels zwischen Programmstarts.
 - Speicherung und Wiederherstellung der Scroll-Positionen in den rechten Panels (`Seitenliste` und `Miniaturen`) beim Fortsetzen eines Projekts.
+- Unterstützung für Arbeitsebenen mit eigener Sichtbarkeit, Sperre und aktiver Ebene.
 - Erweiterte Kontextmenüs für Markierungen und Objekte (Kopieren, Ausschneiden, Duplizieren, duplizierte Kopien löschen).
 - `Rückgängig` (`CTRL+Z`) und `Wiederholen` (`CTRL+Y`).
