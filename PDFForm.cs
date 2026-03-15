@@ -1690,7 +1690,8 @@ namespace AnonPDF
                 RowHeadersVisible = false,
                 RowTemplate = { Height = 24 },
                 ScrollBars = ScrollBars.Vertical,
-                SelectionMode = DataGridViewSelectionMode.CellSelect
+                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                Cursor = Cursors.Default
             };
 
             var activeColumn = new DataGridViewCheckBoxColumn
@@ -1737,10 +1738,33 @@ namespace AnonPDF
             layersGridView.CurrentCellDirtyStateChanged += LayersGridView_CurrentCellDirtyStateChanged;
             layersGridView.CellValueChanged += LayersGridView_CellValueChanged;
             layersGridView.CellDoubleClick += LayersGridView_CellDoubleClick;
+            layersGridView.MouseEnter += LayersInteractionSurface_MouseEnter;
+            layersGridView.MouseMove += LayersInteractionSurface_MouseMove;
 
             layersTabPlaceholderPanel.Controls.Clear();
+            layersTabPlaceholderPanel.Cursor = Cursors.Default;
+            layersTabPlaceholderPanel.MouseEnter += LayersInteractionSurface_MouseEnter;
+            layersTabPlaceholderPanel.MouseMove += LayersInteractionSurface_MouseMove;
             layersTabPlaceholderPanel.Controls.Add(layersGridView);
             RefreshLayersTab();
+        }
+
+        private void LayersInteractionSurface_MouseEnter(object sender, EventArgs e)
+        {
+            if (IsViewportPanningActive())
+            {
+                EndViewportPan();
+            }
+
+            Cursor = Cursors.Default;
+        }
+
+        private void LayersInteractionSurface_MouseMove(object sender, MouseEventArgs e)
+        {
+            if (!IsViewportPanningActive() && Cursor != Cursors.Default)
+            {
+                Cursor = Cursors.Default;
+            }
         }
 
         private void ApplyLayerConfiguration(IEnumerable<LayerDefinition> layers, string nextActiveLayerId, bool markProjectChanged)
