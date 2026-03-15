@@ -422,6 +422,63 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="Dialog_Button_Cancel" xml:space="preserve">
     <value>Abbrechen</value>
   </data>
+  <data name="Dialog_Button_Save" xml:space="preserve">
+    <value>Speichern</value>
+  </data>
+  <data name="Dialog_Layers_Title" xml:space="preserve">
+    <value>Ebenen</value>
+  </data>
+  <data name="Dialog_Layers_Column_Active" xml:space="preserve">
+    <value>Aktiv</value>
+  </data>
+  <data name="Dialog_Layers_Column_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Dialog_Layers_Column_Visible" xml:space="preserve">
+    <value>Sichtbar</value>
+  </data>
+  <data name="Dialog_Layers_Column_Locked" xml:space="preserve">
+    <value>Gesperrt</value>
+  </data>
+  <data name="Dialog_Layers_Column_Export" xml:space="preserve">
+    <value>Export</value>
+  </data>
+  <data name="Dialog_Layers_Column_ObjectCount" xml:space="preserve">
+    <value>Objekte</value>
+  </data>
+  <data name="Dialog_Layers_Button_SetActive" xml:space="preserve">
+    <value>Aktiv setzen</value>
+  </data>
+  <data name="Dialog_Layers_Button_Add" xml:space="preserve">
+    <value>Hinzufuegen</value>
+  </data>
+  <data name="Dialog_Layers_Button_Delete" xml:space="preserve">
+    <value>Loeschen</value>
+  </data>
+  <data name="Dialog_Layers_Button_MoveUp" xml:space="preserve">
+    <value>Nach oben</value>
+  </data>
+  <data name="Dialog_Layers_Button_MoveDown" xml:space="preserve">
+    <value>Nach unten</value>
+  </data>
+  <data name="Dialog_Layers_NewLayerName" xml:space="preserve">
+    <value>Neue Ebene</value>
+  </data>
+  <data name="Dialog_Layers_NewLayerName_Numbered" xml:space="preserve">
+    <value>Neue Ebene {0}</value>
+  </data>
+  <data name="Dialog_Layers_DeleteSystemDenied" xml:space="preserve">
+    <value>Diese Ebene kann nicht geloescht werden.</value>
+  </data>
+  <data name="Dialog_Layers_DeleteNonEmpty" xml:space="preserve">
+    <value>Die Ebene kann nicht geloescht werden, da sie {0} Objekte enthaelt.</value>
+  </data>
+  <data name="Dialog_Layers_Rename_Title" xml:space="preserve">
+    <value>Ebenennamen aendern</value>
+  </data>
+  <data name="Dialog_Layers_Rename_Label" xml:space="preserve">
+    <value>Ebenenname:</value>
+  </data>
   <data name="Dialog_Button_Yes" xml:space="preserve">
     <value>Ja</value>
   </data>
@@ -590,6 +647,12 @@ und dritten Punkt setzen.</value>
   </data>
   <data name="Menu_AddBlankPage" xml:space="preserve">
     <value>Leere Seite hinzufuegen</value>
+  </data>
+  <data name="Menu_AddLayers" xml:space="preserve">
+    <value>Ebenen</value>
+  </data>
+  <data name="Layers_Context_MoveToLayer" xml:space="preserve">
+    <value>In Ebene verschieben</value>
   </data>
   <data name="Menu_PasteObjectFromClipboard" xml:space="preserve">
     <value>Objekt aus Zwischenablage einfuegen</value>
@@ -1325,6 +1388,9 @@ Bitte speichern Sie Ihre Arbeit und schließen Sie die Anwendung.
   <data name="Msg_PasteVectorGraphic_NotImplemented" xml:space="preserve">
     <value>Das Einfuegen von Vektorgrafiken aus der Zwischenablage wird im naechsten Schritt verfuegbar sein.</value>
   </data>
+  <data name="Msg_Layers_NotImplemented" xml:space="preserve">
+    <value>Die Ebenenverwaltung wird im naechsten Schritt verfuegbar sein.</value>
+  </data>
   <data name="Msg_PasteGraphic_NotImplemented" xml:space="preserve">
     <value>Das Einfuegen von Grafiken aus der Zwischenablage (Raster und Vektor) wird im naechsten Schritt verfuegbar sein.</value>
   </data>
@@ -1638,5 +1704,11 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   </data>
   <data name="Msg_Print_JobSubmitted" xml:space="preserve">
     <value>Dokument wurde an den Drucker gesendet.</value>
+  </data>
+  <data name="Layer_Work_DefaultName" xml:space="preserve">
+    <value>Arbeitsbereich</value>
+  </data>
+  <data name="Layer_Default_DefaultName" xml:space="preserve">
+    <value>Standard</value>
   </data>
 </root>

@@ -210,6 +210,9 @@
     <Compile Include="LegalBasesDictionaryDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="LayerManagementDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="SplashForm.cs">
       <SubType>Form</SubType>
     </Compile>

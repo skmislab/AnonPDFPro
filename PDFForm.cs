@@ -93,6 +93,8 @@ namespace AnonPDF
         private const string ClassificationSourceNone = "none";
         private const string ClassificationSourceAuto = "auto";
         private const string ClassificationSourceManual = "manual";
+        internal const string WorkLayerId = "work";
+        internal const string DefaultLayerId = "default";
         private const float FootnoteMarkerGapPx = 2f;
         private const int RasterDownsampleTextThresholdDpi = 300;
         private const int RasterDownsamplePhotoThresholdDpi = 220;
@@ -159,6 +161,8 @@ namespace AnonPDF
         private int? pendingViewScrollY;
         private HashSet<int> pagesToRemove = new HashSet<int>();
         private Dictionary<int, int> pageRotationOffsets = new Dictionary<int, int>();
+        private List<LayerDefinition> documentLayers = new List<LayerDefinition>();
+        private string activeLayerId = DefaultLayerId;
         private bool autoFootnotesEnabled = false;
         private string exclusionAuthorityName = string.Empty;
 
@@ -207,6 +211,7 @@ namespace AnonPDF
         private ToolStripMenuItem addShapeToolStripMenuItem;
         private ToolStripMenuItem addCommentToolStripMenuItem;
         private ToolStripMenuItem addBlankPageToolStripMenuItem;
+        private ToolStripMenuItem layersToolStripMenuItem;
         private ToolStripMenuItem snapToGridToolStripMenuItem;
         private ToolStripMenuItem addObjectsByPageRotationToolStripMenuItem;
         private ToolStripMenuItem legalBasesDictionaryToolStripMenuItem;
@@ -999,6 +1004,7 @@ namespace AnonPDF
             }
 
             InitializeComponent();
+            EnsureSystemLayers();
             formSplitContainer.SplitterMoved += FormSplitContainer_SplitterMoved;
             ApplyRightPanelDividerFromSettings();
             autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
@@ -1346,6 +1352,13 @@ namespace AnonPDF
                 Name = "addBlankPageToolStripMenuItem",
                 Enabled = false
             };
+            layersToolStripMenuItem = new ToolStripMenuItem
+            {
+                Name = "layersToolStripMenuItem",
+                ShortcutKeys = Keys.Control | Keys.L,
+                Enabled = true
+            };
+            layersToolStripMenuItem.Click += LayersToolStripMenuItem_Click;
             snapToGridToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "snapToGridToolStripMenuItem",
@@ -1497,12 +1510,13 @@ namespace AnonPDF
             menuAddItem.DropDownItems.Add(addTextMenuItem);
             menuAddItem.DropDownItems.Add(addShapeToolStripMenuItem);
             menuAddItem.DropDownItems.Add(addRasterImageToolStripMenuItem);
+            menuAddItem.DropDownItems.Add(addCommentToolStripMenuItem);
+            menuAddItem.DropDownItems.Add(addBlankPageToolStripMenuItem);
             menuAddItem.DropDownItems.Add(new ToolStripSeparator());
             menuAddItem.DropDownItems.Add(copyToClipboardMenuItem);
             menuAddItem.DropDownItems.Add(pasteObjectFromClipboardToolStripMenuItem);
             menuAddItem.DropDownItems.Add(new ToolStripSeparator());
-            menuAddItem.DropDownItems.Add(addCommentToolStripMenuItem);
-            menuAddItem.DropDownItems.Add(addBlankPageToolStripMenuItem);
+            menuAddItem.DropDownItems.Add(layersToolStripMenuItem);
             menuAddItem.DropDownItems.Add(new ToolStripSeparator());
             menuAddItem.DropDownItems.Add(snapToGridToolStripMenuItem);
             menuAddItem.DropDownItems.Add(addObjectsByPageRotationToolStripMenuItem);
@@ -1571,6 +1585,11 @@ namespace AnonPDF
                 addBlankPageToolStripMenuItem.Text = LocalizedText("Menu_AddBlankPage");
             }
 
+            if (layersToolStripMenuItem != null)
+            {
+                layersToolStripMenuItem.Text = LocalizedText("Menu_AddLayers");
+            }
+
             if (legalBasesDictionaryToolStripMenuItem != null)
             {
                 legalBasesDictionaryToolStripMenuItem.Text = LocalizedText("Menu_AddLegalBasesDictionary");
@@ -1606,6 +1625,100 @@ namespace AnonPDF
 
             addObjectsByPageRotationEnabled = addObjectsByPageRotationToolStripMenuItem.Checked;
             SaveAddObjectsByPageRotationUserSetting(addObjectsByPageRotationEnabled);
+        }
+
+        private void LayersToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            OpenLayersDialog();
+        }
+
+        private void OpenLayersDialog()
+        {
+            EnsureObjectLayerAssignments();
+            List<LayerDefinition> originalLayers = documentLayers.Select(layer => layer.Clone()).ToList();
+            string originalActiveLayerId = activeLayerId;
+
+            using (var dialog = new LayerManagementDialog(
+                documentLayers.Select(layer => layer.Clone()).ToList(),
+                activeLayerId,
+                BuildLayerUsageCounts()))
+            {
+                dialog.PreviewChanged += (previewLayers, previewActiveLayerId) =>
+                    ApplyLayerConfiguration(previewLayers, previewActiveLayerId, markProjectChanged: false);
+
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    ApplyLayerConfiguration(originalLayers, originalActiveLayerId, markProjectChanged: false);
+                    return;
+                }
+
+                ApplyLayerConfiguration(dialog.GetLayers(), dialog.GetActiveLayerId(), markProjectChanged: true);
+            }
+        }
+
+        private void ApplyLayerConfiguration(IEnumerable<LayerDefinition> layers, string nextActiveLayerId, bool markProjectChanged)
+        {
+            documentLayers = NormalizeLayerDefinitions((layers ?? Enumerable.Empty<LayerDefinition>())
+                .Select(layer => layer?.Clone())
+                .Where(layer => layer != null)
+                .ToList());
+            activeLayerId = NormalizeLayerIdValue(nextActiveLayerId);
+            EnsureObjectLayerAssignments();
+            RebuildPageStatusesFromCurrentModel();
+            ShowRedactPreview();
+            UpdateCurrentPageObjectsMarker();
+            pagesListView?.Invalidate();
+            thumbnailsListView?.Invalidate();
+            pdfViewer?.Invalidate();
+
+            if (markProjectChanged)
+            {
+                projectWasChangedAfterLastSave = true;
+                SyncProjectChangedFlagWithStateSignature();
+            }
+        }
+
+        private Dictionary<string, int> BuildLayerUsageCounts()
+        {
+            var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            void AddCount(string layerId)
+            {
+                string normalized = NormalizeLayerIdValue(layerId);
+                counts[normalized] = counts.TryGetValue(normalized, out int existing) ? existing + 1 : 1;
+            }
+
+            foreach (RedactionBlock block in redactionBlocks.Where(block => block != null))
+            {
+                AddCount(block.LayerId);
+            }
+
+            foreach (CommentAnnotation comment in commentAnnotations.Where(comment => comment != null))
+            {
+                AddCount(comment.LayerId);
+            }
+
+            foreach (TextAnnotation annotation in textAnnotations.Where(annotation => annotation != null))
+            {
+                AddCount(annotation.LayerId);
+            }
+
+            foreach (RasterObject rasterObject in rasterObjects.Where(rasterObject => rasterObject != null))
+            {
+                AddCount(rasterObject.LayerId);
+            }
+
+            foreach (ArrowObject arrowObject in arrowObjects.Where(arrowObject => arrowObject != null))
+            {
+                AddCount(arrowObject.LayerId);
+            }
+
+            foreach (VectorShapeObject vectorShape in vectorShapes.Where(vectorShape => vectorShape != null))
+            {
+                AddCount(vectorShape.LayerId);
+            }
+
+            return counts;
         }
 
         private void LegalBasesDictionaryToolStripMenuItem_Click(object sender, EventArgs e)
@@ -2958,31 +3071,70 @@ namespace AnonPDF
             return -1;
         }
 
+        private string GetObjectLayerId(ObjectLayerEntry entry)
+        {
+            if (entry == null || string.IsNullOrWhiteSpace(entry.Id))
+            {
+                return DefaultLayerId;
+            }
+
+            string entryId = entry.Id.Trim();
+            switch (entry.Type)
+            {
+                case LayerObjectType.Text:
+                    return NormalizeLayerIdValue(textAnnotations.FirstOrDefault(a => a != null && string.Equals(a.Id, entryId, StringComparison.Ordinal))?.LayerId);
+                case LayerObjectType.Raster:
+                    return NormalizeLayerIdValue(rasterObjects.FirstOrDefault(r => r != null && string.Equals(r.Id, entryId, StringComparison.Ordinal))?.LayerId);
+                case LayerObjectType.Arrow:
+                    return NormalizeLayerIdValue(arrowObjects.FirstOrDefault(a => a != null && string.Equals(a.Id, entryId, StringComparison.Ordinal))?.LayerId);
+                case LayerObjectType.VectorShape:
+                    return NormalizeLayerIdValue(vectorShapes.FirstOrDefault(v => v != null && string.Equals(v.Id, entryId, StringComparison.Ordinal))?.LayerId);
+                default:
+                    return DefaultLayerId;
+            }
+        }
+
         private bool BringLayerToFront(LayerObjectType type, string id)
         {
             int index = GetLayerIndex(type, id);
-            if (index < 0 || index == objectLayerOrder.Count - 1)
+            if (index < 0)
             {
                 return false;
             }
 
             var entry = objectLayerOrder[index];
+            string sourceLayerId = GetObjectLayerId(entry);
             objectLayerOrder.RemoveAt(index);
-            objectLayerOrder.Add(entry);
+            int targetIndex = objectLayerOrder.FindLastIndex(candidate => string.Equals(GetObjectLayerId(candidate), sourceLayerId, StringComparison.OrdinalIgnoreCase));
+            if (targetIndex < 0)
+            {
+                objectLayerOrder.Insert(index, entry);
+                return false;
+            }
+
+            objectLayerOrder.Insert(targetIndex + 1, entry);
             return true;
         }
 
         private bool SendLayerToBack(LayerObjectType type, string id)
         {
             int index = GetLayerIndex(type, id);
-            if (index <= 0)
+            if (index < 0)
             {
                 return false;
             }
 
             var entry = objectLayerOrder[index];
+            string sourceLayerId = GetObjectLayerId(entry);
             objectLayerOrder.RemoveAt(index);
-            objectLayerOrder.Insert(0, entry);
+            int targetIndex = objectLayerOrder.FindIndex(candidate => string.Equals(GetObjectLayerId(candidate), sourceLayerId, StringComparison.OrdinalIgnoreCase));
+            if (targetIndex < 0)
+            {
+                objectLayerOrder.Insert(index, entry);
+                return false;
+            }
+
+            objectLayerOrder.Insert(targetIndex, entry);
             return true;
         }
 
@@ -2995,6 +3147,7 @@ namespace AnonPDF
             }
 
             ObjectLayerEntry sourceEntry = objectLayerOrder[index];
+            string sourceLayerId = GetObjectLayerId(sourceEntry);
             if (!TryGetLayerEntryPageAndBounds(sourceEntry, out int sourcePage, out RectangleF sourceBounds))
             {
                 return false;
@@ -3005,6 +3158,11 @@ namespace AnonPDF
             {
                 ObjectLayerEntry candidate = objectLayerOrder[i];
                 if (!TryGetLayerEntryPageAndBounds(candidate, out int candidatePage, out RectangleF candidateBounds))
+                {
+                    continue;
+                }
+
+                if (!string.Equals(GetObjectLayerId(candidate), sourceLayerId, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -3043,6 +3201,7 @@ namespace AnonPDF
             }
 
             ObjectLayerEntry sourceEntry = objectLayerOrder[index];
+            string sourceLayerId = GetObjectLayerId(sourceEntry);
             if (!TryGetLayerEntryPageAndBounds(sourceEntry, out int sourcePage, out RectangleF sourceBounds))
             {
                 return false;
@@ -3053,6 +3212,11 @@ namespace AnonPDF
             {
                 ObjectLayerEntry candidate = objectLayerOrder[i];
                 if (!TryGetLayerEntryPageAndBounds(candidate, out int candidatePage, out RectangleF candidateBounds))
+                {
+                    continue;
+                }
+
+                if (!string.Equals(GetObjectLayerId(candidate), sourceLayerId, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -3207,22 +3371,42 @@ namespace AnonPDF
             }
         }
 
+        private IEnumerable<ObjectLayerEntry> EnumerateObjectLayerEntriesInVisualOrder(Func<ObjectLayerEntry, bool> predicate = null)
+        {
+            EnsureSystemLayers();
+            EnsureObjectLayerOrder();
+
+            var layerOrderLookup = documentLayers
+                .Select((layer, index) => new { LayerId = NormalizeLayerIdValue(layer.Id), Index = index })
+                .ToDictionary(item => item.LayerId, item => item.Index, StringComparer.OrdinalIgnoreCase);
+
+            IEnumerable<ObjectLayerEntry> orderedEntries = objectLayerOrder
+                .Where(entry => entry != null && !string.IsNullOrWhiteSpace(entry.Id))
+                .OrderBy(entry =>
+                {
+                    string layerId = GetObjectLayerId(entry);
+                    return layerOrderLookup.TryGetValue(layerId, out int index) ? -index : int.MinValue;
+                })
+                .ThenBy(entry => objectLayerOrder.IndexOf(entry));
+
+            if (predicate != null)
+            {
+                orderedEntries = orderedEntries.Where(predicate);
+            }
+
+            return orderedEntries;
+        }
+
         private IEnumerable<object> GetOrderedObjectsForCurrentPage()
         {
-            EnsureObjectLayerOrder();
-            foreach (var entry in objectLayerOrder)
+            foreach (var entry in EnumerateObjectLayerEntriesInVisualOrder())
             {
-                if (entry == null || string.IsNullOrWhiteSpace(entry.Id))
-                {
-                    continue;
-                }
-
                 switch (entry.Type)
                 {
                     case LayerObjectType.Text:
                     {
                         var annotation = textAnnotations.FirstOrDefault(a => a != null && a.PageNumber == currentPage && string.Equals(a.Id, entry.Id, StringComparison.Ordinal));
-                        if (annotation != null)
+                        if (annotation != null && IsLayerVisible(annotation.LayerId))
                         {
                             yield return annotation;
                         }
@@ -3231,7 +3415,7 @@ namespace AnonPDF
                     case LayerObjectType.Raster:
                     {
                         var rasterObject = rasterObjects.FirstOrDefault(r => r != null && r.PageNumber == currentPage && string.Equals(r.Id, entry.Id, StringComparison.Ordinal));
-                        if (rasterObject != null)
+                        if (rasterObject != null && IsLayerVisible(rasterObject.LayerId))
                         {
                             yield return rasterObject;
                         }
@@ -3240,7 +3424,7 @@ namespace AnonPDF
                     case LayerObjectType.Arrow:
                     {
                         var arrowObject = arrowObjects.FirstOrDefault(a => a != null && a.PageNumber == currentPage && string.Equals(a.Id, entry.Id, StringComparison.Ordinal));
-                        if (arrowObject != null)
+                        if (arrowObject != null && IsLayerVisible(arrowObject.LayerId))
                         {
                             yield return arrowObject;
                         }
@@ -3249,7 +3433,7 @@ namespace AnonPDF
                     case LayerObjectType.VectorShape:
                     {
                         var vectorShape = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == currentPage && string.Equals(v.Id, entry.Id, StringComparison.Ordinal));
-                        if (vectorShape != null)
+                        if (vectorShape != null && IsLayerVisible(vectorShape.LayerId))
                         {
                             yield return vectorShape;
                         }
@@ -3261,18 +3445,15 @@ namespace AnonPDF
 
         private IEnumerable<object> GetOrderedGraphicObjectsForExport()
         {
-            EnsureObjectLayerOrder();
-            foreach (var entry in objectLayerOrder)
+            foreach (var entry in EnumerateObjectLayerEntriesInVisualOrder(entry =>
+                entry.Type == LayerObjectType.Raster ||
+                entry.Type == LayerObjectType.Arrow ||
+                entry.Type == LayerObjectType.VectorShape))
             {
-                if (entry == null || string.IsNullOrWhiteSpace(entry.Id))
-                {
-                    continue;
-                }
-
                 if (entry.Type == LayerObjectType.Raster)
                 {
                     var rasterObject = rasterObjects.FirstOrDefault(r => r != null && string.Equals(r.Id, entry.Id, StringComparison.Ordinal));
-                    if (rasterObject != null)
+                    if (rasterObject != null && ShouldExportLayer(rasterObject.LayerId))
                     {
                         yield return rasterObject;
                     }
@@ -3280,7 +3461,7 @@ namespace AnonPDF
                 else if (entry.Type == LayerObjectType.Arrow)
                 {
                     var arrowObject = arrowObjects.FirstOrDefault(a => a != null && string.Equals(a.Id, entry.Id, StringComparison.Ordinal));
-                    if (arrowObject != null)
+                    if (arrowObject != null && ShouldExportLayer(arrowObject.LayerId))
                     {
                         yield return arrowObject;
                     }
@@ -3288,7 +3469,7 @@ namespace AnonPDF
                 else if (entry.Type == LayerObjectType.VectorShape)
                 {
                     var vectorShape = vectorShapes.FirstOrDefault(v => v != null && string.Equals(v.Id, entry.Id, StringComparison.Ordinal));
-                    if (vectorShape != null)
+                    if (vectorShape != null && ShouldExportLayer(vectorShape.LayerId))
                     {
                         yield return vectorShape;
                     }
@@ -3455,20 +3636,14 @@ namespace AnonPDF
         {
             var orderedSelection = new List<object>();
             var addedKeys = new HashSet<string>(StringComparer.Ordinal);
-            EnsureObjectLayerOrder();
 
             string BuildKey(ObjectClipboardItemType type, string id)
             {
                 return $"{type}:{id}";
             }
 
-            foreach (ObjectLayerEntry layer in objectLayerOrder)
+            foreach (ObjectLayerEntry layer in EnumerateObjectLayerEntriesInVisualOrder())
             {
-                if (layer == null || string.IsNullOrWhiteSpace(layer.Id))
-                {
-                    continue;
-                }
-
                 switch (layer.Type)
                 {
                     case LayerObjectType.Text:
@@ -3690,6 +3865,7 @@ namespace AnonPDF
                             textAnnotation.AnnotationBounds.Height),
                         Text = new TextAnnotation
                         {
+                            LayerId = NormalizeLayerIdValue(textAnnotation.LayerId),
                             AnnotationText = textAnnotation.AnnotationText,
                             AnnotationFont = CloneFontSafe(textAnnotation.AnnotationFont),
                             AnnotationColor = textAnnotation.AnnotationColor,
@@ -3716,6 +3892,7 @@ namespace AnonPDF
                             rasterObject.Bounds.Height),
                         Raster = new RasterObject
                         {
+                            LayerId = NormalizeLayerIdValue(rasterObject.LayerId),
                             Rotation = rasterObject.Rotation,
                             Opacity = rasterObject.Opacity,
                             TransparentBackground = rasterObject.TransparentBackground,
@@ -3737,6 +3914,7 @@ namespace AnonPDF
                         Type = ObjectClipboardItemType.Arrow,
                         Arrow = new ArrowObject
                         {
+                            LayerId = NormalizeLayerIdValue(arrowObject.LayerId),
                             Start = new PointF(
                                 arrowObject.Start.X - snapshot.SourceBounds.X,
                                 arrowObject.Start.Y - snapshot.SourceBounds.Y),
@@ -3760,6 +3938,7 @@ namespace AnonPDF
                         Type = ObjectClipboardItemType.VectorShape,
                         VectorShape = new VectorShapeObject
                         {
+                            LayerId = NormalizeLayerIdValue(vectorShapeObject.LayerId),
                             ShapeType = vectorShapeObject.ShapeType,
                             Points = (vectorShapeObject.Points ?? new List<PointF>())
                                 .Select(point => new PointF(point.X - snapshot.SourceBounds.X, point.Y - snapshot.SourceBounds.Y))
@@ -3906,14 +4085,9 @@ namespace AnonPDF
                 return true;
             }
 
-            if (annotation.AnnotationIsLocked)
+            if (IsTextAnnotationEffectivelyLocked(annotation))
             {
-                MessageBox.Show(
-                    this,
-                    string.Format(LocalizedText("Msg_TextPositionInfo"), LocalizedText("Msg_TextAnnotation_Locked")),
-                    Resources.Title_Info,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                ShowLockedLayerInfo();
                 return true;
             }
 
@@ -4005,6 +4179,7 @@ namespace AnonPDF
                         {
                             Id = Guid.NewGuid().ToString("N"),
                             PageNumber = currentPage,
+                            LayerId = NormalizeLayerIdValue(item.Text.LayerId),
                             AnnotationText = item.Text.AnnotationText,
                             AnnotationFont = CloneFontSafe(item.Text.AnnotationFont),
                             AnnotationColor = item.Text.AnnotationColor,
@@ -4053,6 +4228,7 @@ namespace AnonPDF
                         {
                             Id = Guid.NewGuid().ToString("N"),
                             PageNumber = currentPage,
+                            LayerId = NormalizeLayerIdValue(item.Raster.LayerId),
                             Bounds = bounds,
                             InitialBounds = bounds,
                             Rotation = item.Raster.Rotation,
@@ -4084,6 +4260,7 @@ namespace AnonPDF
                         {
                             Id = Guid.NewGuid().ToString("N"),
                             PageNumber = currentPage,
+                            LayerId = NormalizeLayerIdValue(item.Arrow.LayerId),
                             Start = new PointF(baseX + item.Arrow.Start.X, baseY + item.Arrow.Start.Y),
                             End = new PointF(baseX + item.Arrow.End.X, baseY + item.Arrow.End.Y),
                             LineColorArgb = item.Arrow.LineColorArgb,
@@ -4110,6 +4287,7 @@ namespace AnonPDF
                         {
                             Id = Guid.NewGuid().ToString("N"),
                             PageNumber = currentPage,
+                            LayerId = NormalizeLayerIdValue(item.VectorShape.LayerId),
                             ShapeType = item.VectorShape.ShapeType,
                             Points = (item.VectorShape.Points ?? new List<PointF>())
                                 .Select(point => new PointF(baseX + point.X, baseY + point.Y))
@@ -4573,10 +4751,10 @@ namespace AnonPDF
             }
 
             bool hasLockedSelection =
-                selectedTextAnnotations.Any(t => t != null && t.PageNumber == currentPage && t.AnnotationIsLocked) ||
-                selectedRasterObjectIds.Any(id => rasterObjects.Any(r => r != null && r.PageNumber == currentPage && r.Id == id && r.IsLocked)) ||
-                selectedArrowObjectIds.Any(id => arrowObjects.Any(a => a != null && a.PageNumber == currentPage && a.Id == id && a.IsLocked)) ||
-                selectedVectorShapeIds.Any(id => vectorShapes.Any(v => v != null && v.PageNumber == currentPage && v.Id == id && v.IsLocked));
+                selectedTextAnnotations.Any(t => t != null && t.PageNumber == currentPage && IsTextAnnotationEffectivelyLocked(t)) ||
+                selectedRasterObjectIds.Any(id => rasterObjects.Any(r => r != null && r.PageNumber == currentPage && r.Id == id && IsRasterObjectEffectivelyLocked(r))) ||
+                selectedArrowObjectIds.Any(id => arrowObjects.Any(a => a != null && a.PageNumber == currentPage && a.Id == id && IsArrowObjectEffectivelyLocked(a))) ||
+                selectedVectorShapeIds.Any(id => vectorShapes.Any(v => v != null && v.PageNumber == currentPage && v.Id == id && IsVectorShapeEffectivelyLocked(v)));
 
             if (hasLockedSelection)
             {
@@ -4595,7 +4773,7 @@ namespace AnonPDF
             float maxX = float.MinValue;
             float maxY = float.MinValue;
 
-            foreach (var text in selectedTextAnnotations.Where(t => t != null && t.PageNumber == currentPage && !t.AnnotationIsLocked))
+            foreach (var text in selectedTextAnnotations.Where(t => t != null && t.PageNumber == currentPage && !IsTextAnnotationEffectivelyLocked(t)))
             {
                 RectangleF bounds = text.AnnotationBounds;
                 groupMoveEntries.Add(new GroupMoveEntry
@@ -4613,7 +4791,7 @@ namespace AnonPDF
 
             foreach (var rasterId in selectedRasterObjectIds)
             {
-                RasterObject raster = rasterObjects.FirstOrDefault(r => r != null && r.PageNumber == currentPage && r.Id == rasterId && !r.IsLocked);
+                RasterObject raster = rasterObjects.FirstOrDefault(r => r != null && r.PageNumber == currentPage && r.Id == rasterId && !IsRasterObjectEffectivelyLocked(r));
                 if (raster == null)
                 {
                     continue;
@@ -4635,7 +4813,7 @@ namespace AnonPDF
 
             foreach (var arrowId in selectedArrowObjectIds)
             {
-                ArrowObject arrow = arrowObjects.FirstOrDefault(a => a != null && a.PageNumber == currentPage && a.Id == arrowId && !a.IsLocked);
+                ArrowObject arrow = arrowObjects.FirstOrDefault(a => a != null && a.PageNumber == currentPage && a.Id == arrowId && !IsArrowObjectEffectivelyLocked(a));
                 if (arrow == null)
                 {
                     continue;
@@ -4661,7 +4839,7 @@ namespace AnonPDF
 
             foreach (var vectorId in selectedVectorShapeIds)
             {
-                VectorShapeObject vector = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == currentPage && v.Id == vectorId && !v.IsLocked);
+                VectorShapeObject vector = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == currentPage && v.Id == vectorId && !IsVectorShapeEffectivelyLocked(v));
                 if (vector == null)
                 {
                     continue;
@@ -5753,6 +5931,7 @@ namespace AnonPDF
                         TextAnnotation newAnnotation = new TextAnnotation
                         {
                             PageNumber = currentPage,
+                            LayerId = GetResolvedActiveLayerId(),
                             AnnotationText = dlg.AnnotationText,
                             AnnotationFont = dlg.AnnotationFont,
                             AnnotationColor = dlg.AnnotationColor,
@@ -5844,6 +6023,7 @@ namespace AnonPDF
             TextAnnotation copy = new TextAnnotation
             {
                 PageNumber = currentPage,
+                LayerId = NormalizeLayerIdValue(source.LayerId),
                 AnnotationText = source.AnnotationText,
                 AnnotationFont = source.AnnotationFont,
                 AnnotationColor = source.AnnotationColor,
@@ -5951,6 +6131,12 @@ namespace AnonPDF
                 return true;
             }
 
+            if (IsTextAnnotationEffectivelyLocked(annotation))
+            {
+                ShowLockedLayerInfo();
+                return true;
+            }
+
             DialogResult result = MessageBox.Show(
                 this,
                 Resources.Msg_Confirm_DeleteTextAnnotation,
@@ -5990,6 +6176,12 @@ namespace AnonPDF
 
             if (!EnsureCurrentPageEditable(true))
             {
+                return true;
+            }
+
+            if (IsRasterObjectEffectivelyLocked(rasterObject))
+            {
+                ShowLockedLayerInfo();
                 return true;
             }
 
@@ -6038,6 +6230,12 @@ namespace AnonPDF
                 return true;
             }
 
+            if (IsArrowObjectEffectivelyLocked(arrowObject))
+            {
+                ShowLockedLayerInfo();
+                return true;
+            }
+
             DialogResult deleteResult = MessageBox.Show(
                 this,
                 LocalizedText("Msg_Confirm_DeleteRasterObject"),
@@ -6080,6 +6278,12 @@ namespace AnonPDF
 
             if (!EnsureCurrentPageEditable(true))
             {
+                return true;
+            }
+
+            if (IsVectorShapeEffectivelyLocked(vectorShape))
+            {
+                ShowLockedLayerInfo();
                 return true;
             }
 
@@ -6130,14 +6334,9 @@ namespace AnonPDF
                 return true;
             }
 
-            if (rasterObject.IsLocked)
+            if (IsRasterObjectEffectivelyLocked(rasterObject))
             {
-                MessageBox.Show(
-                    this,
-                    string.Format(LocalizedText("Msg_TextPositionInfo"), LocalizedText("Msg_TextAnnotation_Locked")),
-                    Resources.Title_Info,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                ShowLockedLayerInfo();
                 return true;
             }
 
@@ -6168,14 +6367,9 @@ namespace AnonPDF
                 return true;
             }
 
-            if (arrowObject.IsLocked)
+            if (IsArrowObjectEffectivelyLocked(arrowObject))
             {
-                MessageBox.Show(
-                    this,
-                    string.Format(LocalizedText("Msg_TextPositionInfo"), LocalizedText("Msg_TextAnnotation_Locked")),
-                    Resources.Title_Info,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                ShowLockedLayerInfo();
                 return true;
             }
 
@@ -6206,14 +6400,9 @@ namespace AnonPDF
                 return true;
             }
 
-            if (vectorShape.IsLocked)
+            if (IsVectorShapeEffectivelyLocked(vectorShape))
             {
-                MessageBox.Show(
-                    this,
-                    string.Format(LocalizedText("Msg_TextPositionInfo"), LocalizedText("Msg_TextAnnotation_Locked")),
-                    Resources.Title_Info,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                ShowLockedLayerInfo();
                 return true;
             }
 
@@ -6350,6 +6539,7 @@ namespace AnonPDF
             {
                 Id = Guid.NewGuid().ToString("N"),
                 PageNumber = source.PageNumber,
+                LayerId = NormalizeLayerIdValue(source.LayerId),
                 ShapeType = source.ShapeType,
                 Points = (source.Points ?? new List<PointF>())
                     .Select(point => new PointF(point.X + 12f, point.Y + 12f))
@@ -9326,7 +9516,7 @@ namespace AnonPDF
         private DrawingImage RenderCurrentPageWithSelections()
         {
             // Get selections for the current page
-            var blocksForThisPage = redactionBlocks.Where(b => b.PageNumber == currentPage);
+            var blocksForThisPage = redactionBlocks.Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId));
             if (!blocksForThisPage.Any())
                 return RenderOriginalPage(currentPage);
 
@@ -9367,7 +9557,7 @@ namespace AnonPDF
         private DrawingImage RenderCurrentPageWithPdfCleanUp()
         {
             // Get selections for the current page
-            var blocksForThisPage = redactionBlocks.Where(b => b.PageNumber == currentPage);
+            var blocksForThisPage = redactionBlocks.Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId));
             if (blocksForThisPage.Any())
             {
                 // If safeMode is selected â€“ redaction on bitmap
@@ -9970,7 +10160,7 @@ namespace AnonPDF
             }
 
             var candidatePages = new HashSet<int>();
-            foreach (TextAnnotation annotation in textAnnotations.Where(a => a != null))
+            foreach (TextAnnotation annotation in textAnnotations.Where(a => a != null && ShouldExportLayer(a.LayerId)))
             {
                 if (annotation.PageNumber >= 1 && annotation.PageNumber <= pageCount && !removedPages.Contains(annotation.PageNumber))
                 {
@@ -9978,7 +10168,7 @@ namespace AnonPDF
                 }
             }
 
-            foreach (RasterObject rasterObject in rasterObjects.Where(r => r != null))
+            foreach (RasterObject rasterObject in rasterObjects.Where(r => r != null && ShouldExportLayer(r.LayerId)))
             {
                 if (rasterObject.PageNumber >= 1 && rasterObject.PageNumber <= pageCount && !removedPages.Contains(rasterObject.PageNumber))
                 {
@@ -9986,7 +10176,7 @@ namespace AnonPDF
                 }
             }
 
-            foreach (VectorShapeObject vectorShape in vectorShapes.Where(v => v != null))
+            foreach (VectorShapeObject vectorShape in vectorShapes.Where(v => v != null && ShouldExportLayer(v.LayerId)))
             {
                 if (vectorShape.PageNumber >= 1 && vectorShape.PageNumber <= pageCount && !removedPages.Contains(vectorShape.PageNumber))
                 {
@@ -10328,8 +10518,15 @@ namespace AnonPDF
             using (PdfWriter writer = new PdfWriter(outputFile, writerProps))
             using (iText.Kernel.Pdf.PdfDocument pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader, writer))
             {
+                List<RedactionBlock> exportRedactionBlocks = redactionBlocks
+                    .Where(block => block != null && ShouldExportLayer(block.LayerId))
+                    .ToList();
+                List<TextAnnotation> exportTextAnnotations = textAnnotations
+                    .Where(annotation => annotation != null && ShouldExportLayer(annotation.LayerId))
+                    .ToList();
+
                 ApplyRotationOffsetsToDocument(pdfDoc, pagesWithBakedRotation);
-                LogDebug($"RedactText input={inputFile} output={outputFile} safeMode={safeModeCheckBox.Checked} cleanupError={pdfCleanUpToolError} blocks={redactionBlocks.Count} bakedPages={(pagesWithBakedRotation == null ? 0 : pagesWithBakedRotation.Count)}");
+                LogDebug($"RedactText input={inputFile} output={outputFile} safeMode={safeModeCheckBox.Checked} cleanupError={pdfCleanUpToolError} blocks={exportRedactionBlocks.Count} bakedPages={(pagesWithBakedRotation == null ? 0 : pagesWithBakedRotation.Count)}");
 
                 if (combineObjectsWithScanPagesEnabled)
                 {
@@ -10615,7 +10812,7 @@ namespace AnonPDF
                 PdfCleanUpTool cleanUpTool = new PdfCleanUpTool(pdfDoc);
                 var redactionVisualPdfBoundsByBlock = new Dictionary<RedactionBlock, RectangleF>();
                 // Group redaction blocks by pages
-                var blocksByPage = redactionBlocks.GroupBy(b => b.PageNumber);
+                var blocksByPage = exportRedactionBlocks.GroupBy(b => b.PageNumber);
                 var visitedPages = new HashSet<int>();
 
                 foreach (var pageGroup in blocksByPage)
@@ -10722,7 +10919,7 @@ namespace AnonPDF
 
                 // --- Section for rendering captions from textAnnotations list ---
                 // Iterate over each annotation to be rendered on the given page.
-                foreach (var annotation in textAnnotations)
+                foreach (var annotation in exportTextAnnotations)
                 {
                     // Make sure the page number is correct
                     if (annotation.PageNumber < 1 || annotation.PageNumber > pdfDoc.GetNumberOfPages())
@@ -11049,7 +11246,7 @@ namespace AnonPDF
                     }
                 }
 
-                List<RedactionBlock> footnoteBlocksForExport = redactionBlocks
+                List<RedactionBlock> footnoteBlocksForExport = exportRedactionBlocks
                     .Where(block =>
                         block != null &&
                         !effectivePagesToRemove.Contains(block.PageNumber))
@@ -11771,7 +11968,8 @@ namespace AnonPDF
                 || vectorShapes.Count > 0
                 || pagesToRemove.Count > 0
                 || pageRotationOffsets.Count > 0
-                || hasCustomSignatureSelection;
+                || hasCustomSignatureSelection
+                || HasLayerProjectContent();
         }
 
         private bool HasOpenedOrSavedProject()
@@ -14260,7 +14458,501 @@ namespace AnonPDF
                 || vectorShapes.Count > 0
                 || pagesToRemove.Count > 0
                 || pageRotationOffsets.Count > 0
-                || hasCustomSignatureSelection;
+                || hasCustomSignatureSelection
+                || HasLayerProjectContent();
+        }
+
+        private bool HasLayerProjectContent()
+        {
+            EnsureSystemLayers();
+
+            if (!string.Equals(GetResolvedActiveLayerId(), DefaultLayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            List<LayerDefinition> normalizedLayers = NormalizeLayerDefinitions(documentLayers);
+            if (normalizedLayers.Count != 2)
+            {
+                return true;
+            }
+
+            LayerDefinition workLayer = normalizedLayers.FirstOrDefault(layer => string.Equals(layer.Id, WorkLayerId, StringComparison.OrdinalIgnoreCase));
+            LayerDefinition defaultLayer = normalizedLayers.FirstOrDefault(layer => string.Equals(layer.Id, DefaultLayerId, StringComparison.OrdinalIgnoreCase));
+            if (workLayer == null || defaultLayer == null)
+            {
+                return true;
+            }
+
+            bool workMatchesDefault =
+                string.Equals(workLayer.Name, GetDefaultLayerDisplayName(WorkLayerId), StringComparison.CurrentCulture) &&
+                workLayer.Order == 0 &&
+                workLayer.IsVisible &&
+                !workLayer.IsLocked &&
+                workLayer.ExcludeFromExport &&
+                workLayer.IsSystem;
+
+            bool defaultMatchesDefault =
+                string.Equals(defaultLayer.Name, GetDefaultLayerDisplayName(DefaultLayerId), StringComparison.CurrentCulture) &&
+                defaultLayer.Order == 1 &&
+                defaultLayer.IsVisible &&
+                !defaultLayer.IsLocked &&
+                !defaultLayer.ExcludeFromExport &&
+                defaultLayer.IsSystem;
+
+            return !workMatchesDefault || !defaultMatchesDefault;
+        }
+
+        private static string NormalizeLayerIdValue(string layerId)
+        {
+            string normalized = (layerId ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(normalized) ? DefaultLayerId : normalized;
+        }
+
+        internal static string NormalizeLayerIdForExternalUse(string layerId)
+        {
+            return NormalizeLayerIdValue(layerId);
+        }
+
+        private static string NormalizeLayerDisplayName(string name, string layerId)
+        {
+            string normalizedName = (name ?? string.Empty).Trim();
+            if (!string.IsNullOrWhiteSpace(normalizedName))
+            {
+                return normalizedName;
+            }
+
+            return GetDefaultLayerDisplayName(layerId);
+        }
+
+        private static string GetDefaultLayerDisplayName(string layerId)
+        {
+            string resourceKey = string.Equals(layerId, WorkLayerId, StringComparison.OrdinalIgnoreCase)
+                ? "Layer_Work_DefaultName"
+                : string.Equals(layerId, DefaultLayerId, StringComparison.OrdinalIgnoreCase)
+                    ? "Layer_Default_DefaultName"
+                    : null;
+
+            if (!string.IsNullOrWhiteSpace(resourceKey))
+            {
+                CultureInfo culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
+                string localized = Resources.ResourceManager.GetString(resourceKey, culture);
+                if (!string.IsNullOrWhiteSpace(localized))
+                {
+                    return localized;
+                }
+            }
+
+            return layerId;
+        }
+
+        private static LayerDefinition CreateSystemLayer(string layerId, string name, int order, bool excludeFromExport)
+        {
+            return new LayerDefinition
+            {
+                Id = layerId,
+                Name = name,
+                Order = order,
+                IsVisible = true,
+                IsLocked = false,
+                ExcludeFromExport = excludeFromExport,
+                IsSystem = true
+            };
+        }
+
+        private void EnsureSystemLayers()
+        {
+            documentLayers = NormalizeLayerDefinitions(documentLayers);
+            activeLayerId = NormalizeLayerIdValue(activeLayerId);
+            if (!documentLayers.Any(layer => string.Equals(layer.Id, activeLayerId, StringComparison.OrdinalIgnoreCase)))
+            {
+                activeLayerId = DefaultLayerId;
+            }
+        }
+
+        private static List<LayerDefinition> NormalizeLayerDefinitions(IEnumerable<LayerDefinition> layers)
+        {
+            var normalizedLayers = new List<LayerDefinition>();
+            var byId = new Dictionary<string, LayerDefinition>(StringComparer.OrdinalIgnoreCase);
+            LayerDefinition workCandidate = null;
+            LayerDefinition defaultCandidate = null;
+
+            if (layers != null)
+            {
+                foreach (LayerDefinition layer in layers.Where(layer => layer != null))
+                {
+                    string layerId = NormalizeLayerIdValue(layer.Id);
+                    if (string.Equals(layerId, WorkLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        workCandidate ??= layer;
+                        continue;
+                    }
+
+                    if (string.Equals(layerId, DefaultLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        defaultCandidate ??= layer;
+                        continue;
+                    }
+
+                    if (byId.ContainsKey(layerId))
+                    {
+                        continue;
+                    }
+
+                    var normalized = new LayerDefinition
+                    {
+                        Id = layerId,
+                        Name = NormalizeLayerDisplayName(layer.Name, layerId),
+                        Order = layer.Order,
+                        IsVisible = layer.IsVisible,
+                        IsLocked = layer.IsLocked,
+                        ExcludeFromExport = layer.ExcludeFromExport,
+                        IsSystem = false
+                    };
+                    byId[layerId] = normalized;
+                    normalizedLayers.Add(normalized);
+                }
+            }
+
+            normalizedLayers = normalizedLayers
+                .OrderBy(layer => layer.Order)
+                .ThenBy(layer => layer.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+
+            var workLayer = CreateSystemLayer(WorkLayerId, GetDefaultLayerDisplayName(WorkLayerId), 0, excludeFromExport: true);
+            if (workCandidate != null)
+            {
+                workLayer.IsVisible = workCandidate.IsVisible;
+                workLayer.IsLocked = workCandidate.IsLocked;
+            }
+
+            var orderedNonWorkLayers = new List<LayerDefinition>
+            {
+                new LayerDefinition
+                {
+                    Id = DefaultLayerId,
+                    Name = NormalizeLayerDisplayName(defaultCandidate?.Name, DefaultLayerId),
+                    Order = defaultCandidate?.Order ?? 0,
+                    IsVisible = defaultCandidate?.IsVisible ?? true,
+                    IsLocked = defaultCandidate?.IsLocked ?? false,
+                    ExcludeFromExport = defaultCandidate?.ExcludeFromExport ?? false,
+                    IsSystem = true
+                }
+            };
+            orderedNonWorkLayers.AddRange(normalizedLayers);
+
+            orderedNonWorkLayers = orderedNonWorkLayers
+                .OrderBy(layer => layer.Order)
+                .ThenBy(layer => layer.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+
+            var result = new List<LayerDefinition> { workLayer };
+
+            int nextOrder = 1;
+            foreach (LayerDefinition layer in orderedNonWorkLayers)
+            {
+                layer.Order = nextOrder++;
+                result.Add(layer);
+            }
+
+            return result;
+        }
+
+        private void EnsureObjectLayerAssignments()
+        {
+            EnsureSystemLayers();
+
+            void RegisterLayerId(string layerId)
+            {
+                string normalized = NormalizeLayerIdValue(layerId);
+                if (documentLayers.Any(layer => string.Equals(layer.Id, normalized, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return;
+                }
+
+                int nextOrder = documentLayers.Count == 0 ? 0 : documentLayers.Max(layer => layer.Order) + 1;
+                documentLayers.Add(new LayerDefinition
+                {
+                    Id = normalized,
+                    Name = NormalizeLayerDisplayName(normalized, normalized),
+                    Order = nextOrder,
+                    IsVisible = true,
+                    IsLocked = false,
+                    ExcludeFromExport = false,
+                    IsSystem = false
+                });
+            }
+
+            foreach (RedactionBlock block in redactionBlocks ?? Enumerable.Empty<RedactionBlock>())
+            {
+                block.LayerId = NormalizeLayerIdValue(block.LayerId);
+                RegisterLayerId(block.LayerId);
+            }
+
+            foreach (CommentAnnotation comment in commentAnnotations ?? Enumerable.Empty<CommentAnnotation>())
+            {
+                comment.LayerId = NormalizeLayerIdValue(comment.LayerId);
+                RegisterLayerId(comment.LayerId);
+            }
+
+            foreach (TextAnnotation annotation in textAnnotations ?? Enumerable.Empty<TextAnnotation>())
+            {
+                annotation.LayerId = NormalizeLayerIdValue(annotation.LayerId);
+                RegisterLayerId(annotation.LayerId);
+            }
+
+            foreach (RasterObject rasterObject in rasterObjects ?? Enumerable.Empty<RasterObject>())
+            {
+                rasterObject.LayerId = NormalizeLayerIdValue(rasterObject.LayerId);
+                RegisterLayerId(rasterObject.LayerId);
+            }
+
+            foreach (ArrowObject arrowObject in arrowObjects ?? Enumerable.Empty<ArrowObject>())
+            {
+                arrowObject.LayerId = NormalizeLayerIdValue(arrowObject.LayerId);
+                RegisterLayerId(arrowObject.LayerId);
+            }
+
+            foreach (VectorShapeObject vectorShape in vectorShapes ?? Enumerable.Empty<VectorShapeObject>())
+            {
+                vectorShape.LayerId = NormalizeLayerIdValue(vectorShape.LayerId);
+                RegisterLayerId(vectorShape.LayerId);
+            }
+
+            documentLayers = NormalizeLayerDefinitions(documentLayers);
+            activeLayerId = NormalizeLayerIdValue(activeLayerId);
+            if (!documentLayers.Any(layer => string.Equals(layer.Id, activeLayerId, StringComparison.OrdinalIgnoreCase)))
+            {
+                activeLayerId = DefaultLayerId;
+            }
+        }
+
+        private string GetResolvedActiveLayerId()
+        {
+            EnsureSystemLayers();
+            string normalized = NormalizeLayerIdValue(activeLayerId);
+            if (!documentLayers.Any(layer => string.Equals(layer.Id, normalized, StringComparison.OrdinalIgnoreCase)))
+            {
+                normalized = DefaultLayerId;
+                activeLayerId = normalized;
+            }
+
+            return normalized;
+        }
+
+        private LayerDefinition GetLayerDefinition(string layerId)
+        {
+            string normalized = NormalizeLayerIdValue(layerId);
+            EnsureSystemLayers();
+            return documentLayers.FirstOrDefault(layer => string.Equals(layer.Id, normalized, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool IsLayerVisible(string layerId)
+        {
+            LayerDefinition layer = GetLayerDefinition(layerId);
+            return layer == null || layer.IsVisible;
+        }
+
+        private bool ShouldExportLayer(string layerId)
+        {
+            LayerDefinition layer = GetLayerDefinition(layerId);
+            return layer == null || !layer.ExcludeFromExport;
+        }
+
+        private bool IsLayerLocked(string layerId)
+        {
+            LayerDefinition layer = GetLayerDefinition(layerId);
+            return layer != null && layer.IsLocked;
+        }
+
+        private bool IsTextAnnotationEffectivelyLocked(TextAnnotation annotation)
+        {
+            return annotation != null && (annotation.AnnotationIsLocked || IsLayerLocked(annotation.LayerId));
+        }
+
+        private bool IsRasterObjectEffectivelyLocked(RasterObject rasterObject)
+        {
+            return rasterObject != null && (rasterObject.IsLocked || IsLayerLocked(rasterObject.LayerId));
+        }
+
+        private bool IsArrowObjectEffectivelyLocked(ArrowObject arrowObject)
+        {
+            return arrowObject != null && (arrowObject.IsLocked || IsLayerLocked(arrowObject.LayerId));
+        }
+
+        private bool IsVectorShapeEffectivelyLocked(VectorShapeObject vectorShape)
+        {
+            return vectorShape != null && (vectorShape.IsLocked || IsLayerLocked(vectorShape.LayerId));
+        }
+
+        private bool IsCommentAnnotationEffectivelyLocked(CommentAnnotation comment)
+        {
+            return comment != null && IsLayerLocked(comment.LayerId);
+        }
+
+        private bool IsRedactionBlockEffectivelyLocked(RedactionBlock block)
+        {
+            return block != null && IsLayerLocked(block.LayerId);
+        }
+
+        private void ShowLockedLayerInfo()
+        {
+            MessageBox.Show(
+                this,
+                string.Format(LocalizedText("Msg_TextPositionInfo"), LocalizedText("Msg_TextAnnotation_Locked")),
+                Resources.Title_Info,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+
+        private string GetMoveToLayerContextMenuText()
+        {
+            return LocalizedText("Layers_Context_MoveToLayer");
+        }
+
+        private ToolStripMenuItem BuildMoveToLayerMenuItem(string currentLayerId, Action<string> moveAction)
+        {
+            EnsureObjectLayerAssignments();
+
+            var menuItem = new ToolStripMenuItem(GetMoveToLayerContextMenuText());
+            foreach (LayerDefinition layer in documentLayers.OrderBy(layer => layer.Order))
+            {
+                string layerId = NormalizeLayerIdValue(layer.Id);
+                var layerItem = new ToolStripMenuItem(layer.Name)
+                {
+                    Checked = !string.IsNullOrWhiteSpace(currentLayerId) &&
+                              string.Equals(layerId, NormalizeLayerIdValue(currentLayerId), StringComparison.OrdinalIgnoreCase),
+                    Enabled = !IsLayerLocked(layerId) &&
+                              (string.IsNullOrWhiteSpace(currentLayerId) ||
+                               !string.Equals(layerId, NormalizeLayerIdValue(currentLayerId), StringComparison.OrdinalIgnoreCase))
+                };
+                layerItem.Click += (_, __) => moveAction(layerId);
+                menuItem.DropDownItems.Add(layerItem);
+            }
+
+            return menuItem;
+        }
+
+        private bool TrySetObjectLayer(object targetObject, string targetLayerId)
+        {
+            string normalizedLayerId = NormalizeLayerIdValue(targetLayerId);
+            if (IsLayerLocked(normalizedLayerId))
+            {
+                return false;
+            }
+
+            switch (targetObject)
+            {
+                case TextAnnotation annotation:
+                    if (string.Equals(NormalizeLayerIdValue(annotation.LayerId), normalizedLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    annotation.LayerId = normalizedLayerId;
+                    return true;
+                case RasterObject rasterObject:
+                    if (string.Equals(NormalizeLayerIdValue(rasterObject.LayerId), normalizedLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    rasterObject.LayerId = normalizedLayerId;
+                    return true;
+                case ArrowObject arrowObject:
+                    if (string.Equals(NormalizeLayerIdValue(arrowObject.LayerId), normalizedLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    arrowObject.LayerId = normalizedLayerId;
+                    return true;
+                case VectorShapeObject vectorShape:
+                    if (string.Equals(NormalizeLayerIdValue(vectorShape.LayerId), normalizedLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    vectorShape.LayerId = normalizedLayerId;
+                    return true;
+                case CommentAnnotation comment:
+                    if (string.Equals(NormalizeLayerIdValue(comment.LayerId), normalizedLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    comment.LayerId = normalizedLayerId;
+                    return true;
+                case RedactionBlock block:
+                    if (string.Equals(NormalizeLayerIdValue(block.LayerId), normalizedLayerId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    block.LayerId = normalizedLayerId;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private string GetLayerIdForGenericObject(object targetObject)
+        {
+            switch (targetObject)
+            {
+                case TextAnnotation annotation:
+                    return NormalizeLayerIdValue(annotation.LayerId);
+                case RasterObject rasterObject:
+                    return NormalizeLayerIdValue(rasterObject.LayerId);
+                case ArrowObject arrowObject:
+                    return NormalizeLayerIdValue(arrowObject.LayerId);
+                case VectorShapeObject vectorShape:
+                    return NormalizeLayerIdValue(vectorShape.LayerId);
+                case CommentAnnotation comment:
+                    return NormalizeLayerIdValue(comment.LayerId);
+                case RedactionBlock block:
+                    return NormalizeLayerIdValue(block.LayerId);
+                default:
+                    return DefaultLayerId;
+            }
+        }
+
+        private void RefreshAfterLayerAssignmentChange()
+        {
+            RebuildPageStatusesFromCurrentModel();
+            ShowRedactPreview();
+            UpdateCurrentPageObjectsMarker();
+            pagesListView?.Invalidate();
+            thumbnailsListView?.Invalidate();
+            pdfViewer?.Invalidate();
+            projectWasChangedAfterLastSave = true;
+            SyncProjectChangedFlagWithStateSignature();
+        }
+
+        private void MoveObjectToLayerFromContext(object targetObject, string targetLayerId)
+        {
+            if (!TrySetObjectLayer(targetObject, targetLayerId))
+            {
+                return;
+            }
+
+            RefreshAfterLayerAssignmentChange();
+        }
+
+        private void MoveSelectedObjectsToLayerFromContext(IEnumerable<object> objects, string targetLayerId)
+        {
+            bool changed = false;
+            foreach (object targetObject in objects ?? Enumerable.Empty<object>())
+            {
+                changed = TrySetObjectLayer(targetObject, targetLayerId) || changed;
+            }
+
+            if (!changed)
+            {
+                return;
+            }
+
+            RefreshAfterLayerAssignmentChange();
         }
 
         private ProjectData BuildCurrentProjectDataSnapshot(bool includeViewState)
@@ -14290,6 +14982,8 @@ namespace AnonPDF
                 StampTextAnnotationCreated(annotation);
             }
 
+            EnsureObjectLayerAssignments();
+
             return new ProjectData
             {
                 RedactionBlocks = redactionBlocks ?? new List<RedactionBlock>(),
@@ -14299,6 +14993,8 @@ namespace AnonPDF
                 RasterObjects = rasterObjects ?? new List<RasterObject>(),
                 ArrowObjects = arrowObjects ?? new List<ArrowObject>(),
                 VectorShapes = vectorShapes ?? new List<VectorShapeObject>(),
+                Layers = documentLayers.Select(layer => layer.Clone()).ToList(),
+                ActiveLayerId = activeLayerId,
                 ObjectLayers = BuildProjectObjectLayersSnapshot(),
                 PageRotationOffsets = pageRotationOffsets == null
                     ? new Dictionary<int, int>()
@@ -15963,6 +16659,7 @@ namespace AnonPDF
             {
                 Id = Guid.NewGuid().ToString("N"),
                 PageNumber = currentPage,
+                LayerId = GetResolvedActiveLayerId(),
                 ShapeType = activeVectorShapeType.ToString(),
                 Points = vectorShapeDraftPoints.ToList(),
                 StrokeColorArgb = activeVectorShapeDefaults.StrokeColorArgb,
@@ -16205,6 +16902,12 @@ namespace AnonPDF
                     ClearGroupSelection();
                     ResetGroupMoveState();
 
+                    if (IsCommentAnnotationEffectivelyLocked(hitComment))
+                    {
+                        pdfViewer.Invalidate();
+                        return;
+                    }
+
                     if (IsPointInCommentResizeHandle(e.Location, hitNoteRect))
                     {
                         BeginUndoCapture("Resize comment");
@@ -16352,7 +17055,7 @@ namespace AnonPDF
                         return;
                     }
 
-                    if (!hitAnnotation.AnnotationIsLocked)
+                    if (!IsTextAnnotationEffectivelyLocked(hitAnnotation))
                     {
                         BeginUndoCapture("Move text");
                         annotationToMove = hitAnnotation;
@@ -17189,7 +17892,7 @@ namespace AnonPDF
                 pdfViewer.Invalidate();
             } else if (isMoving && !isClickOnIcon)
             {
-                if (annotationToMove != null && !annotationToMove.AnnotationIsLocked)
+                if (annotationToMove != null && !IsTextAnnotationEffectivelyLocked(annotationToMove))
                 {
                     // Get current annotation Bounds (in "scaled" units, i.e. independent of zoom)
                     RectangleF bounds = annotationToMove.AnnotationBounds;
@@ -17628,6 +18331,7 @@ namespace AnonPDF
                                     {
                                         Id = Guid.NewGuid().ToString("N"),
                                         PageNumber = currentPage,
+                                        LayerId = GetResolvedActiveLayerId(),
                                         Bounds = rect,
                                         CommentText = commentText,
                                         HighlightColorArgb = highlightColor.ToArgb(),
@@ -17870,7 +18574,7 @@ namespace AnonPDF
             }
 
             return commentAnnotations
-                .Where(c => c != null && c.PageNumber == pageNumber)
+                .Where(c => c != null && c.PageNumber == pageNumber && IsLayerVisible(c.LayerId))
                 .OrderBy(c => c.Bounds.Top)
                 .ThenBy(c => c.Bounds.Left)
                 .ToList();
@@ -18431,6 +19135,7 @@ namespace AnonPDF
 
             var menu = new ContextMenuStrip();
             menu.Items.Add(GetEditCommentContextMenuText(), null, (_, __) => EditCommentAnnotation(comment));
+            menu.Items.Add(BuildMoveToLayerMenuItem(comment.LayerId, targetLayerId => MoveObjectToLayerFromContext(comment, targetLayerId)));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(GetDeleteObjectContextMenuText(), null, (_, __) => DeleteObjectFromContext(comment));
             menu.Show(pdfViewer, location);
@@ -18493,6 +19198,15 @@ namespace AnonPDF
             bool hitObjectIsPartOfSelection = IsObjectSelectedInCurrentSelection(hitObject);
             if (multiSelectionActive && hitObjectIsPartOfSelection)
             {
+                List<object> selectedObjects = GetSelectedObjectsOnCurrentPageInLayerOrder();
+                string sharedLayerId = selectedObjects
+                    .Select(GetLayerIdForGenericObject)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(2)
+                    .Count() == 1
+                    ? GetLayerIdForGenericObject(selectedObjects.FirstOrDefault())
+                    : null;
+
                 var groupMenu = new ContextMenuStrip();
                 var copySelectedItem = new ToolStripMenuItem(Resources.Menu_CopyToClipboard);
                 copySelectedItem.Click += (_, __) => TryCopySelectedObjectsToInternalClipboard();
@@ -18502,6 +19216,8 @@ namespace AnonPDF
                 cutSelectedItem.Click += (_, __) => CutSelectedObjectsFromContext(useGroupSelection: true);
                 groupMenu.Items.Add(cutSelectedItem);
 
+                groupMenu.Items.Add(new ToolStripSeparator());
+                groupMenu.Items.Add(BuildMoveToLayerMenuItem(sharedLayerId, targetLayerId => MoveSelectedObjectsToLayerFromContext(selectedObjects, targetLayerId)));
                 groupMenu.Items.Add(new ToolStripSeparator());
                 groupMenu.Items.Add(GetDeleteSelectedObjectsContextMenuText(), null, (_, __) => DeleteSelectedGroupObjectsWithConfirmation());
                 groupMenu.Show(pdfViewer, location);
@@ -18564,6 +19280,8 @@ namespace AnonPDF
             cutObjectItem.Click += (_, __) => CutSelectedObjectsFromContext(useGroupSelection: false, hitObject: hitObject);
             menu.Items.Add(cutObjectItem);
             menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(BuildMoveToLayerMenuItem(GetLayerIdForGenericObject(hitObject), targetLayerId => MoveObjectToLayerFromContext(hitObject, targetLayerId)));
+            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(duplicateObjectItem);
             var deleteDuplicatedObjectsItem = new ToolStripMenuItem(GetDeleteDuplicatedObjectsContextMenuText())
             {
@@ -18608,6 +19326,8 @@ namespace AnonPDF
             };
             deleteDuplicatedSelectionsItem.Click += (_, __) => DeleteDuplicatedObjectsByGroupId(block.DuplicateGroupId, block.PageNumber);
             menu.Items.Add(deleteDuplicatedSelectionsItem);
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(BuildMoveToLayerMenuItem(block.LayerId, targetLayerId => MoveObjectToLayerFromContext(block, targetLayerId)));
             menu.Items.Add(new ToolStripSeparator());
 
             bool hasDynamicScopes = exclusionScopesCatalog.Count > 0;
@@ -19071,6 +19791,7 @@ namespace AnonPDF
         private RedactionBlock CreateRedactionBlockWithAutomaticClassification(RectangleF bounds, int pageNumber, bool isMarkerSelection = false)
         {
             var block = new RedactionBlock(bounds, pageNumber);
+            block.LayerId = GetResolvedActiveLayerId();
             block.IsMarkerSelection = isMarkerSelection;
             StampRedactionBlockCreated(block);
             NormalizeRedactionBlockMetadata(block);
@@ -20181,6 +20902,7 @@ namespace AnonPDF
 
             List<CommentAnnotation> exportComments = commentAnnotations
                 .Where(c => c != null && c.PageNumber >= 1 && c.PageNumber <= pdfDoc.GetNumberOfPages())
+                .Where(c => ShouldExportLayer(c.LayerId))
                 .Where(c => removedPages == null || !removedPages.Contains(c.PageNumber))
                 .Where(c => excludedPages == null || !excludedPages.Contains(c.PageNumber))
                 .OrderBy(c => c.PageNumber)
@@ -20444,6 +21166,12 @@ namespace AnonPDF
         {
             if (blockToRemove == null)
             {
+                return;
+            }
+
+            if (IsRedactionBlockEffectivelyLocked(blockToRemove))
+            {
+                ShowLockedLayerInfo();
                 return;
             }
 
@@ -21302,10 +22030,11 @@ namespace AnonPDF
                 DrawCommentAnnotationsOnPreview(e.Graphics);
             }
 
-            Dictionary<string, int> previewBasisNumberMap = BuildLegalBasisFootnoteNumberMap();
+            Dictionary<string, int> previewBasisNumberMap = BuildLegalBasisFootnoteNumberMap(
+                redactionBlocks.Where(block => block != null && block.PageNumber == currentPage && IsLayerVisible(block.LayerId)));
 
             // Drawing saved redaction blocks for current page
-            foreach (var block in redactionBlocks.Where(b => b.PageNumber == currentPage))
+            foreach (var block in redactionBlocks.Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId)))
             {
                 using (SolidBrush brush = new SolidBrush(System.Drawing.Color.FromArgb(128, 255, 0, 0)))
                 {
@@ -22934,6 +23663,8 @@ namespace AnonPDF
                         .Where(obj => obj != null && obj.PageNumber >= 1 && obj.PageNumber <= numPages)
                         .ToList();
                     Dictionary<int, int> rotationOffsetsJson = projectData.PageRotationOffsets ?? new Dictionary<int, int>();
+                    List<LayerDefinition> layersJson = projectData.Layers ?? new List<LayerDefinition>();
+                    string activeLayerIdJson = projectData.ActiveLayerId;
                     List<string> signaturesToRemoveJson = projectData.SignaturesToRemove;
                     string signaturesMode = projectData.SignaturesMode;
                     autoFootnotesEnabled = projectData.AutoFootnotesEnabled ?? Properties.Settings.Default.AutoFootnotesEnabled;
@@ -23016,6 +23747,9 @@ namespace AnonPDF
                     {
                         NormalizeVectorShape(vectorShape);
                     }
+                    documentLayers = NormalizeLayerDefinitions(layersJson);
+                    activeLayerId = NormalizeLayerIdValue(activeLayerIdJson);
+                    EnsureObjectLayerAssignments();
                     LoadProjectObjectLayerOrder(projectData.ObjectLayers);
 
                     pageRotationOffsets = rotationOffsetsJson
@@ -23400,6 +24134,8 @@ namespace AnonPDF
                 RasterObjects = new List<RasterObject>(),
                 ArrowObjects = new List<ArrowObject>(),
                 VectorShapes = new List<VectorShapeObject>(),
+                Layers = new List<LayerDefinition>(),
+                ActiveLayerId = DefaultLayerId,
                 ObjectLayers = new List<ProjectObjectLayer>(),
                 PageRotationOffsets = new Dictionary<int, int>(),
                 SignaturesToRemove = new List<string>()
@@ -23473,6 +24209,14 @@ namespace AnonPDF
                         {
                             mergedProject.ObjectLayers.Add(layer);
                         }
+                    }
+                }
+
+                if (project.Layers != null)
+                {
+                    foreach (LayerDefinition layer in project.Layers.Where(layer => layer != null))
+                    {
+                        AddOrReplaceLayerDefinition(mergedProject.Layers, layer);
                     }
                 }
 
@@ -23729,6 +24473,51 @@ namespace AnonPDF
             }
         }
 
+        private static void AddOrReplaceLayerDefinition(List<LayerDefinition> target, LayerDefinition candidate)
+        {
+            if (target == null || candidate == null)
+            {
+                return;
+            }
+
+            string layerId = NormalizeLayerIdValue(candidate.Id);
+            if (string.Equals(layerId, WorkLayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            int existingIndex = target.FindIndex(layer => layer != null && string.Equals(NormalizeLayerIdValue(layer.Id), layerId, StringComparison.OrdinalIgnoreCase));
+            if (existingIndex >= 0)
+            {
+                LayerDefinition existing = target[existingIndex];
+                if (existing == null || !existing.IsSystem)
+                {
+                    target[existingIndex] = new LayerDefinition
+                    {
+                        Id = layerId,
+                        Name = NormalizeLayerDisplayName(candidate.Name, layerId),
+                        Order = candidate.Order,
+                        IsVisible = candidate.IsVisible,
+                        IsLocked = candidate.IsLocked,
+                        ExcludeFromExport = candidate.ExcludeFromExport,
+                        IsSystem = string.Equals(layerId, DefaultLayerId, StringComparison.OrdinalIgnoreCase)
+                    };
+                }
+                return;
+            }
+
+            target.Add(new LayerDefinition
+            {
+                Id = layerId,
+                Name = NormalizeLayerDisplayName(candidate.Name, layerId),
+                Order = candidate.Order,
+                IsVisible = candidate.IsVisible,
+                IsLocked = candidate.IsLocked,
+                ExcludeFromExport = candidate.ExcludeFromExport,
+                IsSystem = string.Equals(layerId, DefaultLayerId, StringComparison.OrdinalIgnoreCase)
+            });
+        }
+
         private static bool AreEquivalentRedactionBlocks(RedactionBlock left, RedactionBlock right)
         {
             if (left == null || right == null)
@@ -23738,6 +24527,7 @@ namespace AnonPDF
 
             if (left.PageNumber != right.PageNumber ||
                 !AreSameRectangle(left.Bounds, right.Bounds) ||
+                !string.Equals(NormalizeLayerIdValue(left.LayerId), NormalizeLayerIdValue(right.LayerId), StringComparison.OrdinalIgnoreCase) ||
                 left.FootnoteNumber != right.FootnoteNumber ||
                 !string.Equals(left.ScopeId?.Trim(), right.ScopeId?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(left.ClassificationSource?.Trim(), right.ClassificationSource?.Trim(), StringComparison.OrdinalIgnoreCase) ||
@@ -23770,6 +24560,7 @@ namespace AnonPDF
         {
             return left != null && right != null &&
                    left.PageNumber == right.PageNumber &&
+                   string.Equals(NormalizeLayerIdValue(left.LayerId), NormalizeLayerIdValue(right.LayerId), StringComparison.OrdinalIgnoreCase) &&
                    AreSameRectangle(left.Bounds, right.Bounds) &&
                    string.Equals(left.CommentText, right.CommentText, StringComparison.Ordinal) &&
                    left.HighlightColorArgb == right.HighlightColorArgb &&
@@ -23785,6 +24576,7 @@ namespace AnonPDF
         {
             return left != null && right != null &&
                    left.PageNumber == right.PageNumber &&
+                   string.Equals(NormalizeLayerIdValue(left.LayerId), NormalizeLayerIdValue(right.LayerId), StringComparison.OrdinalIgnoreCase) &&
                    string.Equals(left.AnnotationText, right.AnnotationText, StringComparison.Ordinal) &&
                    AreSameRectangle(left.AnnotationBounds, right.AnnotationBounds) &&
                    left.AnnotationColor.ToArgb() == right.AnnotationColor.ToArgb() &&
@@ -23801,6 +24593,7 @@ namespace AnonPDF
         {
             return left != null && right != null &&
                    left.PageNumber == right.PageNumber &&
+                   string.Equals(NormalizeLayerIdValue(left.LayerId), NormalizeLayerIdValue(right.LayerId), StringComparison.OrdinalIgnoreCase) &&
                    AreSameRectangle(left.Bounds, right.Bounds) &&
                    AreSameRectangle(left.InitialBounds, right.InitialBounds) &&
                    NormalizeRotationStatic(left.Rotation) == NormalizeRotationStatic(right.Rotation) &&
@@ -23819,6 +24612,7 @@ namespace AnonPDF
         {
             return left != null && right != null &&
                    left.PageNumber == right.PageNumber &&
+                   string.Equals(NormalizeLayerIdValue(left.LayerId), NormalizeLayerIdValue(right.LayerId), StringComparison.OrdinalIgnoreCase) &&
                    AreSamePoint(left.Start, right.Start) &&
                    AreSamePoint(left.End, right.End) &&
                    left.LineColorArgb == right.LineColorArgb &&
@@ -23832,6 +24626,7 @@ namespace AnonPDF
         {
             if (left == null || right == null ||
                 left.PageNumber != right.PageNumber ||
+                !string.Equals(NormalizeLayerIdValue(left.LayerId), NormalizeLayerIdValue(right.LayerId), StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(left.ShapeType, right.ShapeType, StringComparison.OrdinalIgnoreCase) ||
                 left.StrokeColorArgb != right.StrokeColorArgb ||
                 !AreSameFloat(left.StrokeWidth, right.StrokeWidth) ||
@@ -25278,6 +26073,7 @@ namespace AnonPDF
             {
                 Id = Guid.NewGuid().ToString("N"),
                 PageNumber = currentPage,
+                LayerId = GetResolvedActiveLayerId(),
                 Bounds = initialBounds,
                 InitialBounds = initialBounds,
                 Rotation = 0,
@@ -25352,6 +26148,7 @@ namespace AnonPDF
             {
                 Id = Guid.NewGuid().ToString("N"),
                 PageNumber = currentPage,
+                LayerId = GetResolvedActiveLayerId(),
                 Start = start,
                 End = end,
                 LineColorArgb = DefaultArrowColor.ToArgb(),
@@ -26691,6 +27488,12 @@ namespace AnonPDF
                     return;
                 }
 
+                if (IsCommentAnnotationEffectivelyLocked(commentAnnotation))
+                {
+                    ShowLockedLayerInfo();
+                    return;
+                }
+
                 RemoveCommentAnnotation(commentAnnotation);
             }
         }
@@ -26763,6 +27566,17 @@ namespace AnonPDF
                 redactionsToRemove.Count;
             if (totalToRemove <= 0)
             {
+                return;
+            }
+
+            if (textToRemove.Any(IsTextAnnotationEffectivelyLocked) ||
+                rasterToRemove.Any(IsRasterObjectEffectivelyLocked) ||
+                arrowsToRemove.Any(IsArrowObjectEffectivelyLocked) ||
+                vectorToRemove.Any(IsVectorShapeEffectivelyLocked) ||
+                commentsToRemove.Any(IsCommentAnnotationEffectivelyLocked) ||
+                redactionsToRemove.Any(IsRedactionBlockEffectivelyLocked))
+            {
+                ShowLockedLayerInfo();
                 return;
             }
 
@@ -26990,6 +27804,7 @@ namespace AnonPDF
                 {
                     Id = Guid.NewGuid().ToString("N"),
                     PageNumber = targetPage,
+                    LayerId = NormalizeLayerIdValue(sourceAnnotation.LayerId),
                     AnnotationText = sourceAnnotation.AnnotationText,
                     AnnotationFont = CloneFontSafe(sourceAnnotation.AnnotationFont),
                     AnnotationColor = sourceAnnotation.AnnotationColor,
@@ -27043,6 +27858,7 @@ namespace AnonPDF
                 {
                     Id = Guid.NewGuid().ToString("N"),
                     PageNumber = targetPage,
+                    LayerId = NormalizeLayerIdValue(sourceRaster.LayerId),
                     Bounds = sourceRaster.Bounds,
                     InitialBounds = sourceRaster.Bounds,
                     Rotation = sourceRaster.Rotation,
@@ -27101,6 +27917,7 @@ namespace AnonPDF
                 {
                     Id = Guid.NewGuid().ToString("N"),
                     PageNumber = targetPage,
+                    LayerId = NormalizeLayerIdValue(sourceArrow.LayerId),
                     Start = sourceArrow.Start,
                     End = sourceArrow.End,
                     LineColorArgb = sourceArrow.LineColorArgb,
@@ -27154,6 +27971,7 @@ namespace AnonPDF
                 {
                     Id = Guid.NewGuid().ToString("N"),
                     PageNumber = targetPage,
+                    LayerId = NormalizeLayerIdValue(sourceShape.LayerId),
                     ShapeType = sourceShape.ShapeType,
                     Points = (sourceShape.Points ?? new List<PointF>())
                         .Select(point => new PointF(point.X, point.Y))
@@ -27213,6 +28031,7 @@ namespace AnonPDF
                 {
                     Id = Guid.NewGuid().ToString("N"),
                     PageNumber = targetPage,
+                    LayerId = NormalizeLayerIdValue(sourceComment.LayerId),
                     Bounds = sourceComment.Bounds,
                     CommentText = sourceComment.CommentText,
                     HighlightColorArgb = sourceComment.HighlightColorArgb,
@@ -27289,6 +28108,7 @@ namespace AnonPDF
         {
             var clone = new RedactionBlock(source.Bounds, pageNumber)
             {
+                LayerId = NormalizeLayerIdValue(source.LayerId),
                 FootnoteNumber = source.FootnoteNumber,
                 ScopeId = string.IsNullOrWhiteSpace(source.ScopeId) ? null : source.ScopeId.Trim(),
                 ClassificationSource = string.IsNullOrWhiteSpace(source.ClassificationSource) ? ClassificationSourceNone : source.ClassificationSource.Trim(),
@@ -27588,13 +28408,13 @@ namespace AnonPDF
                 return false;
             }
 
-            if (!selectedVectorShape.IsLocked && TryGetVectorHandleAtPoint(selectedVectorShape, location, out int handleIndex))
+            if (!IsVectorShapeEffectivelyLocked(selectedVectorShape) && TryGetVectorHandleAtPoint(selectedVectorShape, location, out int handleIndex))
             {
                 this.Cursor = GetVectorHandleCursor(selectedVectorShape, handleIndex);
                 return true;
             }
 
-            if (!selectedVectorShape.IsLocked &&
+            if (!IsVectorShapeEffectivelyLocked(selectedVectorShape) &&
                 TryGetVectorRotationHandleRect(selectedVectorShape, out RectangleF rotationHandleRect, out _) &&
                 rotationHandleRect.Contains(location))
             {
@@ -27604,7 +28424,7 @@ namespace AnonPDF
 
             if (IsPointNearVectorShape(selectedVectorShape, location))
             {
-                this.Cursor = selectedVectorShape.IsLocked ? Cursors.Default : Cursors.SizeAll;
+                this.Cursor = IsVectorShapeEffectivelyLocked(selectedVectorShape) ? Cursors.Default : Cursors.SizeAll;
                 return true;
             }
 
@@ -27618,7 +28438,7 @@ namespace AnonPDF
                 return false;
             }
 
-            if (!selectedArrowObject.IsLocked && TryGetArrowHandleAtPoint(selectedArrowObject, location, out ArrowHandleType handleType))
+            if (!IsArrowObjectEffectivelyLocked(selectedArrowObject) && TryGetArrowHandleAtPoint(selectedArrowObject, location, out ArrowHandleType handleType))
             {
                 this.Cursor = GetArrowHandleCursor(selectedArrowObject, handleType);
                 return true;
@@ -27626,7 +28446,7 @@ namespace AnonPDF
 
             if (IsPointNearArrowLine(selectedArrowObject, location))
             {
-                this.Cursor = selectedArrowObject.IsLocked ? Cursors.Default : Cursors.SizeAll;
+                this.Cursor = IsArrowObjectEffectivelyLocked(selectedArrowObject) ? Cursors.Default : Cursors.SizeAll;
                 return true;
             }
 
@@ -27635,7 +28455,7 @@ namespace AnonPDF
 
         private bool TryHandleVectorShapeMouseDown(Point location)
         {
-            if (selectedVectorShape != null && selectedVectorShape.PageNumber == currentPage && !selectedVectorShape.IsLocked)
+            if (selectedVectorShape != null && selectedVectorShape.PageNumber == currentPage && !IsVectorShapeEffectivelyLocked(selectedVectorShape))
             {
                 if (TryGetVectorHandleAtPoint(selectedVectorShape, location, out int selectedHandleIndex))
                 {
@@ -27701,7 +28521,7 @@ namespace AnonPDF
             EnsureVectorShapeId(hitVectorShape);
             selectedVectorShape = hitVectorShape;
             ClearGroupSelection();
-            if (hitVectorShape.IsLocked)
+            if (IsVectorShapeEffectivelyLocked(hitVectorShape))
             {
                 return true;
             }
@@ -27760,7 +28580,7 @@ namespace AnonPDF
 
         private bool TryHandleArrowMouseDown(Point location)
         {
-            if (selectedArrowObject != null && selectedArrowObject.PageNumber == currentPage && !selectedArrowObject.IsLocked)
+            if (selectedArrowObject != null && selectedArrowObject.PageNumber == currentPage && !IsArrowObjectEffectivelyLocked(selectedArrowObject))
             {
                 if (TryGetArrowHandleAtPoint(selectedArrowObject, location, out ArrowHandleType selectedHandle) &&
                     selectedHandle != ArrowHandleType.None)
@@ -27794,7 +28614,7 @@ namespace AnonPDF
             selectedVectorShape = null;
             ClearGroupSelection();
 
-            if (hitArrow.IsLocked)
+            if (IsArrowObjectEffectivelyLocked(hitArrow))
             {
                 return true;
             }
@@ -28686,7 +29506,7 @@ namespace AnonPDF
                 }
             }
 
-            if (!selectedVectorShape.IsLocked && TryGetVectorRotationHandleRect(selectedVectorShape, out RectangleF handleRect, out PointF connectorPoint))
+            if (!IsVectorShapeEffectivelyLocked(selectedVectorShape) && TryGetVectorRotationHandleRect(selectedVectorShape, out RectangleF handleRect, out PointF connectorPoint))
             {
                 PointF handleCenter = new PointF(
                     handleRect.X + (handleRect.Width / 2f),
@@ -28703,7 +29523,7 @@ namespace AnonPDF
                 }
             }
 
-            if (!selectedVectorShape.IsLocked && TryGetVectorHandleRects(selectedVectorShape, out Dictionary<int, RectangleF> handleRects))
+            if (!IsVectorShapeEffectivelyLocked(selectedVectorShape) && TryGetVectorHandleRects(selectedVectorShape, out Dictionary<int, RectangleF> handleRects))
             {
                 using (var handleBrush = new SolidBrush(System.Drawing.Color.White))
                 using (var handlePen = new Pen(System.Drawing.Color.OrangeRed, 1.5f))
@@ -28751,7 +29571,7 @@ namespace AnonPDF
                 }
             }
 
-            if (!selectedTextAnnotation.AnnotationIsLocked &&
+            if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation) &&
                 TryGetAnnotationRotationHandleRect(selectedTextAnnotation, graphics.DpiX, graphics.DpiY, out RectangleF handleRect, out PointF connectorPoint))
             {
                 PointF handleCenter = new PointF(
@@ -28979,7 +29799,7 @@ namespace AnonPDF
                 return false;
             }
 
-            if (!selectedTextAnnotation.AnnotationIsLocked &&
+            if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation) &&
                 TryGetAnnotationRotationHandleRect(selectedTextAnnotation, dpiX, dpiY, out RectangleF handleRect, out _) &&
                 handleRect.Contains(location))
             {
@@ -28990,7 +29810,7 @@ namespace AnonPDF
             Rectangle annotationRect = GetAnnotationScreenRect(selectedTextAnnotation, dpiX, dpiY);
             if (annotationRect.Contains(location))
             {
-                this.Cursor = selectedTextAnnotation.AnnotationIsLocked ? Cursors.Default : Cursors.SizeAll;
+                this.Cursor = IsTextAnnotationEffectivelyLocked(selectedTextAnnotation) ? Cursors.Default : Cursors.SizeAll;
                 return true;
             }
 
@@ -29001,7 +29821,7 @@ namespace AnonPDF
         {
             if (selectedTextAnnotation == null ||
                 selectedTextAnnotation.PageNumber != currentPage ||
-                selectedTextAnnotation.AnnotationIsLocked)
+                IsTextAnnotationEffectivelyLocked(selectedTextAnnotation))
             {
                 return false;
             }
@@ -29114,6 +29934,7 @@ namespace AnonPDF
             {
                 Id = Guid.NewGuid().ToString("N"),
                 PageNumber = currentPage,
+                LayerId = NormalizeLayerIdValue(source.LayerId),
                 Bounds = copyBounds,
                 InitialBounds = copyBounds,
                 Rotation = source.Rotation,
@@ -29178,6 +29999,7 @@ namespace AnonPDF
             {
                 Id = Guid.NewGuid().ToString("N"),
                 PageNumber = currentPage,
+                LayerId = NormalizeLayerIdValue(source.LayerId),
                 Start = start,
                 End = end,
                 LineColorArgb = source.LineColorArgb,
@@ -29755,7 +30577,7 @@ namespace AnonPDF
                 return false;
             }
 
-            if (selectedRasterObject.IsLocked)
+            if (IsRasterObjectEffectivelyLocked(selectedRasterObject))
             {
                 if (IsPointInsideRasterObject(selectedRasterObject, location))
                 {
@@ -29794,7 +30616,7 @@ namespace AnonPDF
 
         private bool TryHandleRasterMouseDown(Point location)
         {
-            if (selectedRasterObject != null && selectedRasterObject.PageNumber == currentPage && !selectedRasterObject.IsLocked)
+            if (selectedRasterObject != null && selectedRasterObject.PageNumber == currentPage && !IsRasterObjectEffectivelyLocked(selectedRasterObject))
             {
                 if (TryGetRasterResizeHandleAtPoint(selectedRasterObject, location, out RasterResizeHandleType handle))
                 {
@@ -29843,7 +30665,7 @@ namespace AnonPDF
             selectedVectorShape = null;
             ClearGroupSelection();
             ClearRasterIconClickState();
-            if (hitObject.IsLocked)
+            if (IsRasterObjectEffectivelyLocked(hitObject))
             {
                 return true;
             }
@@ -32526,21 +33348,23 @@ namespace AnonPDF
         private void ShowRedactPreview()
         {
             var blocksForThisPage = redactionBlocks
-                .Where(b => b.PageNumber == currentPage)
+                .Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId))
                 .Select(b => new RedactionBlock
                 {
                     Bounds = b.Bounds,
                     PageNumber = b.PageNumber,
+                    LayerId = b.LayerId,
                     IsMarkerSelection = b.IsMarkerSelection
                 })
                 .ToList();
 
             var commentsForThisPage = commentAnnotations
-                .Where(c => c != null && c.PageNumber == currentPage)
+                .Where(c => c != null && c.PageNumber == currentPage && IsLayerVisible(c.LayerId))
                 .Select(c => new CommentAnnotation
                 {
                     Id = c.Id,
                     PageNumber = c.PageNumber,
+                    LayerId = c.LayerId,
                     Bounds = c.Bounds,
                     HighlightColorArgb = c.HighlightColorArgb,
                     IsMarkerSelection = c.IsMarkerSelection
@@ -32564,11 +33388,12 @@ namespace AnonPDF
         private DrawingImage RenderBitmapWithCommentHighlights(DrawingImage sourceImage)
         {
             List<CommentAnnotation> commentsForCurrentPage = commentAnnotations
-                .Where(c => c != null && c.PageNumber == currentPage)
+                .Where(c => c != null && c.PageNumber == currentPage && IsLayerVisible(c.LayerId))
                 .Select(c => new CommentAnnotation
                 {
                     Id = c.Id,
                     PageNumber = c.PageNumber,
+                    LayerId = c.LayerId,
                     Bounds = c.Bounds,
                     HighlightColorArgb = c.HighlightColorArgb,
                     IsMarkerSelection = c.IsMarkerSelection
@@ -33716,6 +34541,8 @@ namespace AnonPDF
 
         public int PageNumber { get; set; }
 
+        public string LayerId { get; set; }
+
         public string AnnotationText { get; set; }
 
         public Font AnnotationFont { get; set; }
@@ -33746,6 +34573,7 @@ namespace AnonPDF
         {
             Id = Guid.NewGuid().ToString("N");
             PageNumber = 1;
+            LayerId = PDFForm.DefaultLayerId;
             AnnotationText = "";
             AnnotationFont = new Font("Arial", 12);
             AnnotationColor = System.Drawing.Color.Black;
@@ -33766,6 +34594,7 @@ namespace AnonPDF
         {
             Id = Guid.NewGuid().ToString("N");
             PageNumber = pageNumber;
+            LayerId = PDFForm.DefaultLayerId;
             AnnotationText = text;
             AnnotationFont = font;
             AnnotationColor = color;
@@ -36089,6 +36918,7 @@ namespace AnonPDF
     {
         public System.Drawing.RectangleF Bounds { get; set; }
         public int PageNumber { get; set; }
+        public string LayerId { get; set; }
         public int? FootnoteNumber { get; set; }
         public string ScopeId { get; set; }
         public List<string> BasisIds { get; set; }
@@ -36102,6 +36932,7 @@ namespace AnonPDF
 
         public RedactionBlock()
         {
+            LayerId = PDFForm.DefaultLayerId;
             FootnoteNumber = null;
             ScopeId = null;
             BasisIds = new List<string>();
@@ -36128,6 +36959,7 @@ namespace AnonPDF
     {
         public string Id { get; set; }
         public int PageNumber { get; set; }
+        public string LayerId { get; set; }
         public RectangleF Bounds { get; set; }
         public string CommentText { get; set; }
         public int HighlightColorArgb { get; set; } = System.Drawing.Color.FromArgb(255, 235, 59).ToArgb();
@@ -36144,6 +36976,7 @@ namespace AnonPDF
         public CommentAnnotation()
         {
             Id = Guid.NewGuid().ToString("N");
+            LayerId = PDFForm.DefaultLayerId;
             CommentText = string.Empty;
             DuplicateGroupId = null;
         }
@@ -36337,6 +37170,8 @@ namespace AnonPDF
         public List<RasterObject> RasterObjects { get; set; }
         public List<ArrowObject> ArrowObjects { get; set; }
         public List<VectorShapeObject> VectorShapes { get; set; }
+        public List<LayerDefinition> Layers { get; set; }
+        public string ActiveLayerId { get; set; }
         public List<ProjectObjectLayer> ObjectLayers { get; set; }
         public Dictionary<int, int> PageRotationOffsets { get; set; }
         public int CurrentPage { get; set; }
@@ -36356,6 +37191,7 @@ namespace AnonPDF
     {
         public string Id { get; set; }
         public int PageNumber { get; set; }
+        public string LayerId { get; set; } = PDFForm.DefaultLayerId;
         public RectangleF Bounds { get; set; }
         public RectangleF InitialBounds { get; set; }
         public int Rotation { get; set; }
@@ -36376,6 +37212,7 @@ namespace AnonPDF
     {
         public string Id { get; set; }
         public int PageNumber { get; set; }
+        public string LayerId { get; set; } = PDFForm.DefaultLayerId;
         public PointF Start { get; set; }
         public PointF End { get; set; }
         public int LineColorArgb { get; set; } = System.Drawing.Color.Red.ToArgb();
@@ -36392,6 +37229,7 @@ namespace AnonPDF
     {
         public string Id { get; set; }
         public int PageNumber { get; set; }
+        public string LayerId { get; set; } = PDFForm.DefaultLayerId;
         public string ShapeType { get; set; }
         public List<PointF> Points { get; set; } = new List<PointF>();
         public int StrokeColorArgb { get; set; } = System.Drawing.Color.Blue.ToArgb();
@@ -36411,6 +37249,31 @@ namespace AnonPDF
     {
         public string Type { get; set; }
         public string Id { get; set; }
+    }
+
+    public class LayerDefinition
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public int Order { get; set; }
+        public bool IsVisible { get; set; } = true;
+        public bool IsLocked { get; set; }
+        public bool ExcludeFromExport { get; set; }
+        public bool IsSystem { get; set; }
+
+        public LayerDefinition Clone()
+        {
+            return new LayerDefinition
+            {
+                Id = Id,
+                Name = Name,
+                Order = Order,
+                IsVisible = IsVisible,
+                IsLocked = IsLocked,
+                ExcludeFromExport = ExcludeFromExport,
+                IsSystem = IsSystem
+            };
+        }
     }
 
     public class ResumeState

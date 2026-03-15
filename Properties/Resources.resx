@@ -228,6 +228,63 @@
   <data name="Dialog_Button_Cancel" xml:space="preserve">
     <value>Anuluj</value>
   </data>
+  <data name="Dialog_Button_Save" xml:space="preserve">
+    <value>Zapisz</value>
+  </data>
+  <data name="Dialog_Layers_Title" xml:space="preserve">
+    <value>Warstwy</value>
+  </data>
+  <data name="Dialog_Layers_Column_Active" xml:space="preserve">
+    <value>Aktywna</value>
+  </data>
+  <data name="Dialog_Layers_Column_Name" xml:space="preserve">
+    <value>Nazwa</value>
+  </data>
+  <data name="Dialog_Layers_Column_Visible" xml:space="preserve">
+    <value>Widoczna</value>
+  </data>
+  <data name="Dialog_Layers_Column_Locked" xml:space="preserve">
+    <value>Blokada</value>
+  </data>
+  <data name="Dialog_Layers_Column_Export" xml:space="preserve">
+    <value>Eksport</value>
+  </data>
+  <data name="Dialog_Layers_Column_ObjectCount" xml:space="preserve">
+    <value>Obiekty</value>
+  </data>
+  <data name="Dialog_Layers_Button_SetActive" xml:space="preserve">
+    <value>Ustaw aktywną</value>
+  </data>
+  <data name="Dialog_Layers_Button_Add" xml:space="preserve">
+    <value>Dodaj</value>
+  </data>
+  <data name="Dialog_Layers_Button_Delete" xml:space="preserve">
+    <value>Usuń</value>
+  </data>
+  <data name="Dialog_Layers_Button_MoveUp" xml:space="preserve">
+    <value>Wyżej</value>
+  </data>
+  <data name="Dialog_Layers_Button_MoveDown" xml:space="preserve">
+    <value>Niżej</value>
+  </data>
+  <data name="Dialog_Layers_NewLayerName" xml:space="preserve">
+    <value>Nowa warstwa</value>
+  </data>
+  <data name="Dialog_Layers_NewLayerName_Numbered" xml:space="preserve">
+    <value>Nowa warstwa {0}</value>
+  </data>
+  <data name="Dialog_Layers_DeleteSystemDenied" xml:space="preserve">
+    <value>Tej warstwy nie można usunąć.</value>
+  </data>
+  <data name="Dialog_Layers_DeleteNonEmpty" xml:space="preserve">
+    <value>Nie można usunąć warstwy, ponieważ zawiera {0} obiektów.</value>
+  </data>
+  <data name="Dialog_Layers_Rename_Title" xml:space="preserve">
+    <value>Zmień nazwę warstwy</value>
+  </data>
+  <data name="Dialog_Layers_Rename_Label" xml:space="preserve">
+    <value>Nazwa warstwy:</value>
+  </data>
   <data name="Dialog_Button_Yes" xml:space="preserve">
     <value>Tak</value>
   </data>
@@ -396,6 +453,12 @@ końcowy i trzeci punkt łuku.</value>
   </data>
   <data name="Menu_AddBlankPage" xml:space="preserve">
     <value>Dodaj pustą stronę</value>
+  </data>
+  <data name="Menu_AddLayers" xml:space="preserve">
+    <value>Warstwy</value>
+  </data>
+  <data name="Layers_Context_MoveToLayer" xml:space="preserve">
+    <value>Przenieś do warstwy</value>
   </data>
   <data name="Menu_PasteObjectFromClipboard" xml:space="preserve">
     <value>Wklej obiekt ze schowka</value>
@@ -1134,6 +1197,9 @@ Skontaktuj się z autorem aplikacji.</value>
   <data name="Msg_PasteVectorGraphic_NotImplemented" xml:space="preserve">
     <value>Wklejanie grafiki wektorowej ze schowka będzie dostępne w kolejnym etapie.</value>
   </data>
+  <data name="Msg_Layers_NotImplemented" xml:space="preserve">
+    <value>Zarządzanie warstwami będzie dostępne w kolejnym etapie.</value>
+  </data>
   <data name="Msg_PasteGraphic_NotImplemented" xml:space="preserve">
     <value>Wklejanie grafiki ze schowka (rastrowej i wektorowej) będzie dostępne w kolejnym etapie.</value>
   </data>
@@ -1743,5 +1809,11 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   </data>
   <data name="Msg_Print_JobSubmitted" xml:space="preserve">
     <value>Dokument został wysłany do drukarki.</value>
+  </data>
+  <data name="Layer_Work_DefaultName" xml:space="preserve">
+    <value>Robocza</value>
+  </data>
+  <data name="Layer_Default_DefaultName" xml:space="preserve">
+    <value>Domyślna</value>
   </data>
 </root>

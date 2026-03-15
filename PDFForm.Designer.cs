@@ -936,7 +936,7 @@
             // openLastPdfProjectToolStripMenuItem
             // 
             this.openLastPdfProjectToolStripMenuItem.Name = "openLastPdfProjectToolStripMenuItem";
-            this.openLastPdfProjectToolStripMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.L)));
+            this.openLastPdfProjectToolStripMenuItem.ShortcutKeys = System.Windows.Forms.Keys.None;
             this.openLastPdfProjectToolStripMenuItem.Size = new System.Drawing.Size(261, 22);
             this.openLastPdfProjectToolStripMenuItem.Text = Res("Menu_OpenLast");
             this.openLastPdfProjectToolStripMenuItem.Click += new System.EventHandler(this.OpenLastPdfProjectToolStripMenuItem_Click);

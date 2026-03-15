@@ -228,6 +228,63 @@
   <data name="Dialog_Button_Cancel" xml:space="preserve">
     <value>Cancel</value>
   </data>
+  <data name="Dialog_Button_Save" xml:space="preserve">
+    <value>Save</value>
+  </data>
+  <data name="Dialog_Layers_Title" xml:space="preserve">
+    <value>Layers</value>
+  </data>
+  <data name="Dialog_Layers_Column_Active" xml:space="preserve">
+    <value>Active</value>
+  </data>
+  <data name="Dialog_Layers_Column_Name" xml:space="preserve">
+    <value>Name</value>
+  </data>
+  <data name="Dialog_Layers_Column_Visible" xml:space="preserve">
+    <value>Visible</value>
+  </data>
+  <data name="Dialog_Layers_Column_Locked" xml:space="preserve">
+    <value>Locked</value>
+  </data>
+  <data name="Dialog_Layers_Column_Export" xml:space="preserve">
+    <value>Export</value>
+  </data>
+  <data name="Dialog_Layers_Column_ObjectCount" xml:space="preserve">
+    <value>Objects</value>
+  </data>
+  <data name="Dialog_Layers_Button_SetActive" xml:space="preserve">
+    <value>Set active</value>
+  </data>
+  <data name="Dialog_Layers_Button_Add" xml:space="preserve">
+    <value>Add</value>
+  </data>
+  <data name="Dialog_Layers_Button_Delete" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="Dialog_Layers_Button_MoveUp" xml:space="preserve">
+    <value>Up</value>
+  </data>
+  <data name="Dialog_Layers_Button_MoveDown" xml:space="preserve">
+    <value>Down</value>
+  </data>
+  <data name="Dialog_Layers_NewLayerName" xml:space="preserve">
+    <value>New layer</value>
+  </data>
+  <data name="Dialog_Layers_NewLayerName_Numbered" xml:space="preserve">
+    <value>New layer {0}</value>
+  </data>
+  <data name="Dialog_Layers_DeleteSystemDenied" xml:space="preserve">
+    <value>This layer cannot be deleted.</value>
+  </data>
+  <data name="Dialog_Layers_DeleteNonEmpty" xml:space="preserve">
+    <value>The layer cannot be deleted because it contains {0} objects.</value>
+  </data>
+  <data name="Dialog_Layers_Rename_Title" xml:space="preserve">
+    <value>Rename layer</value>
+  </data>
+  <data name="Dialog_Layers_Rename_Label" xml:space="preserve">
+    <value>Layer name:</value>
+  </data>
   <data name="Dialog_Button_Yes" xml:space="preserve">
     <value>Yes</value>
   </data>
@@ -396,6 +453,12 @@ and a third arc point.</value>
   </data>
   <data name="Menu_AddBlankPage" xml:space="preserve">
     <value>Add blank page</value>
+  </data>
+  <data name="Menu_AddLayers" xml:space="preserve">
+    <value>Layers</value>
+  </data>
+  <data name="Layers_Context_MoveToLayer" xml:space="preserve">
+    <value>Move to layer</value>
   </data>
   <data name="Menu_PasteObjectFromClipboard" xml:space="preserve">
     <value>Paste object from clipboard</value>
@@ -1134,6 +1197,9 @@ Contact the application author.</value>
   <data name="Msg_PasteVectorGraphic_NotImplemented" xml:space="preserve">
     <value>Pasting vector graphics from the clipboard will be available in the next stage.</value>
   </data>
+  <data name="Msg_Layers_NotImplemented" xml:space="preserve">
+    <value>Layer management will be available in the next stage.</value>
+  </data>
   <data name="Msg_PasteGraphic_NotImplemented" xml:space="preserve">
     <value>Pasting graphics from the clipboard (raster and vector) will be available in the next stage.</value>
   </data>
@@ -1743,5 +1809,11 @@ Close the application and run the installer now?</value>
   </data>
   <data name="Msg_Print_JobSubmitted" xml:space="preserve">
     <value>Document was sent to the printer.</value>
+  </data>
+  <data name="Layer_Work_DefaultName" xml:space="preserve">
+    <value>Work</value>
+  </data>
+  <data name="Layer_Default_DefaultName" xml:space="preserve">
+    <value>Default</value>
   </data>
 </root>
