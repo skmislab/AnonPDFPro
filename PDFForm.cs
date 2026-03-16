@@ -300,6 +300,10 @@ namespace AnonPDF
         private RectangleF commentNoteStartRectDoc = RectangleF.Empty;
         private readonly Dictionary<string, RectangleF> commentNoteRectsDoc = new Dictionary<string, RectangleF>(StringComparer.Ordinal);
         private const float CommentNoteResizeHandleSizePx = 10f;
+        private TextDialogDefaults activeTextDialogDefaults = TextDialogDefaults.CreateDefault();
+        private CommentDialogDefaults activeCommentDialogDefaults = CommentDialogDefaults.CreateDefault();
+        private RasterDialogDefaults activeRasterDialogDefaults = RasterDialogDefaults.CreateDefault();
+        private ArrowDialogDefaults activeArrowDialogDefaults = ArrowDialogDefaults.CreateDefault();
         private VectorShapeType activeVectorShapeType = VectorShapeType.Polyline;
         private VectorShapeDefaults activeVectorShapeDefaults = VectorShapeDefaults.CreateDefault();
         private readonly List<PointF> vectorShapeDraftPoints = new List<PointF>();
@@ -464,6 +468,17 @@ namespace AnonPDF
             DashDotDot
         }
 
+        private enum VectorLineEndingKind
+        {
+            None,
+            Arrow,
+            OpenArrow,
+            DoubleOpenArrow,
+            Circle,
+            FilledCircle,
+            Bar
+        }
+
         private enum VectorFillPatternKind
         {
             Solid,
@@ -482,6 +497,8 @@ namespace AnonPDF
             public float FillOpacity { get; set; }
             public VectorShapeStrokeKind StrokeKind { get; set; }
             public VectorFillPatternKind FillPattern { get; set; }
+            public VectorLineEndingKind StartEnding { get; set; }
+            public VectorLineEndingKind EndEnding { get; set; }
 
             public static VectorShapeDefaults CreateDefault()
             {
@@ -494,7 +511,9 @@ namespace AnonPDF
                     FillPatternColorArgb = System.Drawing.Color.FromArgb(0, 0, 0, 0).ToArgb(),
                     FillOpacity = 0.18f,
                     StrokeKind = VectorShapeStrokeKind.Solid,
-                    FillPattern = VectorFillPatternKind.Solid
+                    FillPattern = VectorFillPatternKind.Solid,
+                    StartEnding = VectorLineEndingKind.None,
+                    EndEnding = VectorLineEndingKind.None
                 };
             }
 
@@ -509,7 +528,135 @@ namespace AnonPDF
                     FillPatternColorArgb = FillPatternColorArgb,
                     FillOpacity = FillOpacity,
                     StrokeKind = StrokeKind,
-                    FillPattern = FillPattern
+                    FillPattern = FillPattern,
+                    StartEnding = StartEnding,
+                    EndEnding = EndEnding
+                };
+            }
+        }
+
+        private sealed class TextDialogDefaults
+        {
+            public Font AnnotationFont { get; set; }
+            public System.Drawing.Color AnnotationColor { get; set; }
+            public System.Drawing.Color AnnotationBackgroundColor { get; set; }
+            public bool IsRichTextMode { get; set; }
+            public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
+            public int AnnotationRotation { get; set; }
+
+            public static TextDialogDefaults CreateDefault()
+            {
+                return new TextDialogDefaults
+                {
+                    AnnotationFont = new Font("Arial", 12f),
+                    AnnotationColor = System.Drawing.Color.Black,
+                    AnnotationBackgroundColor = System.Drawing.Color.Transparent,
+                    IsRichTextMode = false,
+                    AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Left,
+                    AnnotationRotation = 0
+                };
+            }
+
+            public TextDialogDefaults Clone()
+            {
+                return new TextDialogDefaults
+                {
+                    AnnotationFont = AnnotationFont == null ? null : (Font)AnnotationFont.Clone(),
+                    AnnotationColor = AnnotationColor,
+                    AnnotationBackgroundColor = AnnotationBackgroundColor,
+                    IsRichTextMode = IsRichTextMode,
+                    AnnotationAlignment = AnnotationAlignment,
+                    AnnotationRotation = AnnotationRotation
+                };
+            }
+        }
+
+        private sealed class CommentDialogDefaults
+        {
+            public System.Drawing.Color HighlightColor { get; set; }
+            public System.Drawing.Color TextColor { get; set; }
+
+            public static CommentDialogDefaults CreateDefault()
+            {
+                return new CommentDialogDefaults
+                {
+                    HighlightColor = DefaultCommentHighlightColor,
+                    TextColor = DefaultCommentTextColor
+                };
+            }
+
+            public CommentDialogDefaults Clone()
+            {
+                return new CommentDialogDefaults
+                {
+                    HighlightColor = HighlightColor,
+                    TextColor = TextColor
+                };
+            }
+        }
+
+        private sealed class RasterDialogDefaults
+        {
+            public int Rotation { get; set; }
+            public float RasterOpacity { get; set; }
+            public bool TransparentBackground { get; set; }
+            public bool LockAspect { get; set; }
+            public bool IsLocked { get; set; }
+
+            public static RasterDialogDefaults CreateDefault()
+            {
+                return new RasterDialogDefaults
+                {
+                    Rotation = 0,
+                    RasterOpacity = 1f,
+                    TransparentBackground = false,
+                    LockAspect = true,
+                    IsLocked = false
+                };
+            }
+
+            public RasterDialogDefaults Clone()
+            {
+                return new RasterDialogDefaults
+                {
+                    Rotation = Rotation,
+                    RasterOpacity = RasterOpacity,
+                    TransparentBackground = TransparentBackground,
+                    LockAspect = LockAspect,
+                    IsLocked = IsLocked
+                };
+            }
+        }
+
+        private sealed class ArrowDialogDefaults
+        {
+            public System.Drawing.Color ArrowColor { get; set; }
+            public float ThicknessValue { get; set; }
+            public float HeadLengthValue { get; set; }
+            public float HeadWidthValue { get; set; }
+            public bool IsLocked { get; set; }
+
+            public static ArrowDialogDefaults CreateDefault()
+            {
+                return new ArrowDialogDefaults
+                {
+                    ArrowColor = System.Drawing.Color.Red,
+                    ThicknessValue = DefaultArrowThickness,
+                    HeadLengthValue = DefaultArrowHeadLength,
+                    HeadWidthValue = DefaultArrowHeadWidth,
+                    IsLocked = false
+                };
+            }
+
+            public ArrowDialogDefaults Clone()
+            {
+                return new ArrowDialogDefaults
+                {
+                    ArrowColor = ArrowColor,
+                    ThicknessValue = ThicknessValue,
+                    HeadLengthValue = HeadLengthValue,
+                    HeadWidthValue = HeadWidthValue,
+                    IsLocked = IsLocked
                 };
             }
         }
@@ -4528,6 +4675,8 @@ namespace AnonPDF
                             FillOpacity = NormalizeVectorFillOpacity(vectorShapeObject.FillOpacity),
                             StrokeStyle = vectorShapeObject.StrokeStyle,
                             FillPattern = vectorShapeObject.FillPattern,
+                            StartLineEnding = vectorShapeObject.StartLineEnding,
+                            EndLineEnding = vectorShapeObject.EndLineEnding,
                             IsLocked = vectorShapeObject.IsLocked
                         }
                     });
@@ -4877,6 +5026,8 @@ namespace AnonPDF
                             FillOpacity = NormalizeVectorFillOpacity(item.VectorShape.FillOpacity),
                             StrokeStyle = item.VectorShape.StrokeStyle,
                             FillPattern = item.VectorShape.FillPattern,
+                            StartLineEnding = item.VectorShape.StartLineEnding,
+                            EndLineEnding = item.VectorShape.EndLineEnding,
                             IsLocked = item.VectorShape.IsLocked,
                             CreatedAtUtc = now,
                             UpdatedAtUtc = now
@@ -6533,10 +6684,18 @@ namespace AnonPDF
                         saveProjectMenuItem.Enabled = true;
                     };
                 }
-                else if (!string.IsNullOrWhiteSpace(initialText))
+                else
                 {
-                    dlg.AnnotationText = initialText;
+                    ApplyTextDialogDefaultsToDialog(dlg, activeTextDialogDefaults);
+                    if (!string.IsNullOrWhiteSpace(initialText))
+                    {
+                        dlg.AnnotationText = initialText;
+                    }
                 }
+                dlg.RestoreDefaultsAction = dialog =>
+                {
+                    ApplyTextDialogDefaultsToDialog(dialog, TextDialogDefaults.CreateDefault());
+                };
 
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
@@ -6596,6 +6755,7 @@ namespace AnonPDF
 
                     }
 
+                    CaptureTextDialogDefaults(dlg);
                     pdfViewer.Invalidate();
 
                     projectWasChangedAfterLastSave = true;
@@ -7180,6 +7340,8 @@ namespace AnonPDF
                 FillOpacity = source.FillOpacity,
                 StrokeStyle = source.StrokeStyle,
                 FillPattern = source.FillPattern,
+                StartLineEnding = source.StartLineEnding,
+                EndLineEnding = source.EndLineEnding,
                 IsLocked = source.IsLocked,
                 CreatedAtUtc = DateTime.UtcNow,
                 UpdatedAtUtc = DateTime.UtcNow,
@@ -10069,6 +10231,41 @@ namespace AnonPDF
                     }
                 }
             }
+        }
+
+        private void ApplyTextDialogDefaultsToDialog(EditTextDialog dialog, TextDialogDefaults defaults)
+        {
+            if (dialog == null || defaults == null)
+            {
+                return;
+            }
+
+            dialog.AnnotationText = string.Empty;
+            dialog.AnnotationRichText = string.Empty;
+            dialog.AnnotationFont = defaults.AnnotationFont == null ? new Font("Arial", 12f) : (Font)defaults.AnnotationFont.Clone();
+            dialog.AnnotationColor = defaults.AnnotationColor;
+            dialog.AnnotationBackgroundColor = defaults.AnnotationBackgroundColor;
+            dialog.IsRichTextMode = defaults.IsRichTextMode;
+            dialog.AnnotationAlignment = defaults.AnnotationAlignment;
+            dialog.AnnotationRotation = defaults.AnnotationRotation;
+        }
+
+        private void CaptureTextDialogDefaults(EditTextDialog dialog)
+        {
+            if (dialog == null)
+            {
+                return;
+            }
+
+            activeTextDialogDefaults = new TextDialogDefaults
+            {
+                AnnotationFont = dialog.AnnotationFont == null ? new Font("Arial", 12f) : (Font)dialog.AnnotationFont.Clone(),
+                AnnotationColor = dialog.AnnotationColor,
+                AnnotationBackgroundColor = dialog.AnnotationBackgroundColor,
+                IsRichTextMode = dialog.IsRichTextMode,
+                AnnotationAlignment = dialog.AnnotationAlignment,
+                AnnotationRotation = dialog.AnnotationRotation
+            };
         }
 
         private bool IsNearlyWhite(byte r, byte g, byte b, int tolerance = 10)
@@ -16839,6 +17036,7 @@ namespace AnonPDF
 
             using (var prompt = new Form())
             {
+                UiThemePalette theme = CurrentTheme;
                 prompt.Text = GetShapeToolDialogTitle();
                 prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -16846,7 +17044,9 @@ namespace AnonPDF
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
                 prompt.Width = 620;
-                prompt.Height = 340;
+                prompt.Height = 380;
+                prompt.BackColor = theme.SectionBackColor;
+                prompt.ForeColor = theme.TextPrimaryColor;
 
                 var shapeButtons = new Dictionary<VectorShapeType, Button>();
 
@@ -16873,6 +17073,7 @@ namespace AnonPDF
                 bool useMaterialIcons = TryGetShapeIconFontFamily(out ignoredShapeIconFamily);
                 var shapeButtonToolTip = new ToolTip();
                 var shapeButtonImages = new List<Image>();
+                Action refreshShapeButtons = null;
                 prompt.Disposed += (_, __) => shapeButtonToolTip?.Dispose();
                 prompt.Disposed += (_, __) =>
                 {
@@ -16893,8 +17094,16 @@ namespace AnonPDF
                         TextAlign = ContentAlignment.MiddleCenter,
                         TextImageRelation = TextImageRelation.Overlay,
                         Tag = shapeType,
-                        UseCompatibleTextRendering = true
+                        UseCompatibleTextRendering = true,
+                        UseVisualStyleBackColor = false,
+                        FlatStyle = FlatStyle.Flat
                     };
+                    button.FlatAppearance.BorderSize = 1;
+                    button.FlatAppearance.BorderColor = theme.BorderColor;
+                    button.FlatAppearance.MouseDownBackColor = theme.SelectionBackColor;
+                    button.FlatAppearance.MouseOverBackColor = theme.PanelBackColor;
+                    button.BackColor = theme.SecondaryButtonBackColor;
+                    button.ForeColor = theme.SecondaryButtonForeColor;
                     shapeButtonToolTip.SetToolTip(button, GetShapeTypeInputTooltip(shapeType));
                     if (useMaterialIcons && TryCreateShapeIconBitmap(shapeType, 30, out Bitmap iconBitmap))
                     {
@@ -16915,12 +17124,7 @@ namespace AnonPDF
                         }
 
                         selectedShape = shapeType;
-                        foreach (var pair in shapeButtons)
-                        {
-                            pair.Value.BackColor = pair.Key == selectedShape
-                                ? System.Drawing.Color.FromArgb(220, 240, 255)
-                                : SystemColors.Control;
-                        }
+                        refreshShapeButtons?.Invoke();
                         refreshVectorStyleControls?.Invoke();
                     };
 
@@ -17105,9 +17309,32 @@ namespace AnonPDF
                 checkNoStrokeColor.CheckedChanged += (_, __) => refreshVectorStyleControls?.Invoke();
                 checkNoFillColor.CheckedChanged += (_, __) => refreshVectorStyleControls?.Invoke();
                 comboFillPattern.SelectedIndexChanged += (_, __) => refreshVectorStyleControls?.Invoke();
+                var labelStartEnding = new Label { Left = 12, Top = 248, Width = 120, Text = LocalizedText("Vector_Dialog_LineStartEnding") };
+                var comboStartEnding = new ComboBox
+                {
+                    Left = 140,
+                    Top = 244,
+                    Width = 140,
+                    DropDownStyle = ComboBoxStyle.DropDownList
+                };
+                AddVectorLineEndingItems(comboStartEnding);
+                comboStartEnding.SelectedIndex = GetVectorLineEndingComboIndex(working.StartEnding);
+
+                var labelEndEnding = new Label { Left = 300, Top = 248, Width = 110, Text = LocalizedText("Vector_Dialog_LineEndEnding") };
+                var comboEndEnding = new ComboBox
+                {
+                    Left = 412,
+                    Top = 244,
+                    Width = 184,
+                    DropDownStyle = ComboBoxStyle.DropDownList
+                };
+                AddVectorLineEndingItems(comboEndEnding);
+                comboEndEnding.SelectedIndex = GetVectorLineEndingComboIndex(working.EndEnding);
+
                 refreshVectorStyleControls = () =>
                 {
                     bool supportsFill = ShapeTypeSupportsFill(selectedShape);
+                    bool supportsLineEndings = selectedShape == VectorShapeType.Polyline;
                     bool hasStroke = !checkNoStrokeColor.Checked;
                     bool hasFill = supportsFill && !checkNoFillColor.Checked;
                     bool hasPattern = hasFill && comboFillPattern.SelectedIndex > 0;
@@ -17127,10 +17354,76 @@ namespace AnonPDF
                     comboFillPattern.Enabled = hasFill;
                     labelFillPatternColor.Enabled = hasPattern;
                     buttonFillPatternColor.Enabled = hasPattern;
+                    labelStartEnding.Enabled = supportsLineEndings && hasStroke;
+                    comboStartEnding.Enabled = supportsLineEndings && hasStroke;
+                    labelEndEnding.Enabled = supportsLineEndings && hasStroke;
+                    comboEndEnding.Enabled = supportsLineEndings && hasStroke;
                 };
 
-                var buttonOk = new Button { Left = 364, Top = 252, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
-                var buttonCancel = new Button { Left = 486, Top = 252, Width = 110, Text = GetCancelButtonText(), DialogResult = DialogResult.Cancel };
+                refreshShapeButtons = () =>
+                {
+                    foreach (var pair in shapeButtons)
+                    {
+                        bool isSelected = pair.Key == selectedShape;
+                        Button currentButton = pair.Value;
+                        currentButton.BackColor = isSelected
+                            ? theme.SelectionBackColor
+                            : theme.SecondaryButtonBackColor;
+                        currentButton.FlatAppearance.BorderColor = isSelected
+                            ? theme.BorderColor
+                            : theme.BorderColor;
+                        currentButton.FlatAppearance.BorderSize = isSelected ? 2 : 1;
+                        currentButton.Padding = isSelected
+                            ? new Padding(1, 1, 0, 0)
+                            : new Padding(0);
+                        currentButton.ForeColor = currentButton.Enabled ? theme.SecondaryButtonForeColor : theme.TextSecondaryColor;
+                    }
+                };
+
+                Action<VectorShapeDefaults> applyDefaultsToControls = defaults =>
+                {
+                    if (defaults == null)
+                    {
+                        return;
+                    }
+
+                    selectedShape = lockShapeType ? selectedShape : defaults.ShapeType;
+                    checkNoStrokeColor.Checked = !HasVisibleVectorColor(defaults.StrokeColorArgb);
+                    System.Drawing.Color strokeColor = System.Drawing.Color.FromArgb(defaults.StrokeColorArgb);
+                    buttonStrokeColor.BackColor = System.Drawing.Color.FromArgb(strokeColor.R, strokeColor.G, strokeColor.B);
+                    numericStrokeWidth.Value = (decimal)NormalizeVectorStrokeWidth(defaults.StrokeWidth);
+                    comboStrokeStyle.SelectedIndex = (int)defaults.StrokeKind;
+                    checkNoFillColor.Checked = !HasVisibleVectorColor(defaults.FillColorArgb) || NormalizeVectorFillOpacity(defaults.FillOpacity) <= 0f;
+                    System.Drawing.Color fillColor = System.Drawing.Color.FromArgb(defaults.FillColorArgb);
+                    buttonFillColor.BackColor = System.Drawing.Color.FromArgb(fillColor.R, fillColor.G, fillColor.B);
+                    numericFillOpacity.Value = (decimal)Math.Round(NormalizeVectorFillOpacity(defaults.FillOpacity) * 100f);
+                    comboFillPattern.SelectedIndex = (int)defaults.FillPattern;
+                    System.Drawing.Color patternColor = System.Drawing.Color.FromArgb(defaults.FillPatternColorArgb);
+                    if (patternColor.A == 0)
+                    {
+                        patternColor = System.Drawing.Color.Black;
+                    }
+                    buttonFillPatternColor.BackColor = System.Drawing.Color.FromArgb(patternColor.R, patternColor.G, patternColor.B);
+                    comboStartEnding.SelectedIndex = GetVectorLineEndingComboIndex(defaults.StartEnding);
+                    comboEndEnding.SelectedIndex = GetVectorLineEndingComboIndex(defaults.EndEnding);
+                    refreshShapeButtons?.Invoke();
+                    refreshVectorStyleControls?.Invoke();
+                };
+
+                var buttonRestoreDefaults = new Button
+                {
+                    Left = 212,
+                    Top = 292,
+                    Width = 140,
+                    Text = GetRestoreSettingsButtonText()
+                };
+                buttonRestoreDefaults.Click += (_, __) =>
+                {
+                    applyDefaultsToControls(VectorShapeDefaults.CreateDefault());
+                };
+
+                var buttonOk = new Button { Left = 364, Top = 292, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
+                var buttonCancel = new Button { Left = 486, Top = 292, Width = 110, Text = GetCancelButtonText(), DialogResult = DialogResult.Cancel };
 
                 prompt.Controls.Add(labelShapes);
                 prompt.Controls.Add(shapesPanel);
@@ -17150,15 +17443,18 @@ namespace AnonPDF
                 prompt.Controls.Add(labelFillPatternColor);
                 prompt.Controls.Add(buttonFillPatternColor);
                 prompt.Controls.Add(checkNoFillColor);
+                prompt.Controls.Add(labelStartEnding);
+                prompt.Controls.Add(comboStartEnding);
+                prompt.Controls.Add(labelEndEnding);
+                prompt.Controls.Add(comboEndEnding);
+                prompt.Controls.Add(buttonRestoreDefaults);
                 prompt.Controls.Add(buttonOk);
                 prompt.Controls.Add(buttonCancel);
                 prompt.AcceptButton = buttonOk;
                 prompt.CancelButton = buttonCancel;
 
-                if (shapeButtons.TryGetValue(selectedShape, out Button selectedButton))
-                {
-                    selectedButton.PerformClick();
-                }
+                refreshShapeButtons?.Invoke();
+                refreshVectorStyleControls?.Invoke();
 
                 if (lockShapeType)
                 {
@@ -17167,11 +17463,18 @@ namespace AnonPDF
                         bool isSelected = pair.Key == selectedShape;
                         pair.Value.Enabled = isSelected;
                         pair.Value.BackColor = isSelected
-                            ? System.Drawing.Color.FromArgb(220, 240, 255)
-                            : SystemColors.Control;
+                            ? theme.SelectionBackColor
+                            : theme.SecondaryButtonBackColor;
+                        pair.Value.FlatAppearance.BorderColor = isSelected
+                            ? theme.BorderColor
+                            : theme.BorderColor;
+                        pair.Value.FlatAppearance.BorderSize = isSelected ? 2 : 1;
+                        pair.Value.Padding = isSelected
+                            ? new Padding(1, 1, 0, 0)
+                            : new Padding(0);
+                        pair.Value.ForeColor = pair.Value.Enabled ? theme.SecondaryButtonForeColor : theme.TextSecondaryColor;
                     }
                 }
-                refreshVectorStyleControls?.Invoke();
 
                 if (prompt.ShowDialog(this) != DialogResult.OK)
                 {
@@ -17228,6 +17531,13 @@ namespace AnonPDF
                     default:
                         working.StrokeKind = VectorShapeStrokeKind.Solid;
                         break;
+                }
+                working.StartEnding = ParseVectorLineEndingKind(GetSelectedVectorLineEndingValue(comboStartEnding));
+                working.EndEnding = ParseVectorLineEndingKind(GetSelectedVectorLineEndingValue(comboEndEnding));
+                if (selectedShape != VectorShapeType.Polyline || checkNoStrokeColor.Checked)
+                {
+                    working.StartEnding = VectorLineEndingKind.None;
+                    working.EndEnding = VectorLineEndingKind.None;
                 }
 
                 selectedDefaults = working;
@@ -17312,6 +17622,8 @@ namespace AnonPDF
                 FillOpacity = NormalizeVectorFillOpacity(activeVectorShapeDefaults.FillOpacity),
                 StrokeStyle = activeVectorShapeDefaults.StrokeKind.ToString(),
                 FillPattern = activeVectorShapeDefaults.FillPattern.ToString(),
+                StartLineEnding = activeVectorShapeDefaults.StartEnding.ToString(),
+                EndLineEnding = activeVectorShapeDefaults.EndEnding.ToString(),
                 CreatedAtUtc = DateTime.UtcNow,
                 UpdatedAtUtc = DateTime.UtcNow
             };
@@ -18964,8 +19276,8 @@ namespace AnonPDF
                             {
                                 if (PromptForCommentText(
                                     string.Empty,
-                                    DefaultCommentHighlightColor,
-                                    DefaultCommentTextColor,
+                                    activeCommentDialogDefaults.HighlightColor,
+                                    activeCommentDialogDefaults.TextColor,
                                     out string commentText,
                                     out System.Drawing.Color highlightColor,
                                     out System.Drawing.Color textColor))
@@ -19481,6 +19793,11 @@ namespace AnonPDF
             return LocalizedText("Comment_Context_Delete");
         }
 
+        private string GetRestoreSettingsButtonText()
+        {
+            return LocalizedText("UI_Button_RestoreSettings");
+        }
+
         private bool PromptForCommentText(
             string initialValue,
             System.Drawing.Color initialHighlightColor,
@@ -19589,6 +19906,20 @@ namespace AnonPDF
                     }
                 };
 
+                var restoreButton = new Button
+                {
+                    Text = GetRestoreSettingsButtonText(),
+                    Size = new Size(138, 32),
+                    Location = new Point(12, prompt.ClientSize.Height - 44),
+                    Anchor = AnchorStyles.Left | AnchorStyles.Bottom
+                };
+                restoreButton.Click += (_, __) =>
+                {
+                    textBox.Text = string.Empty;
+                    highlightPreview.BackColor = DefaultCommentHighlightColor;
+                    textColorPreview.BackColor = DefaultCommentTextColor;
+                };
+
                 var okButton = new Button
                 {
                     Text = Resources.Merge_OK,
@@ -19615,6 +19946,7 @@ namespace AnonPDF
                 prompt.Controls.Add(textColorLabel);
                 prompt.Controls.Add(textColorPreview);
                 prompt.Controls.Add(textColorButton);
+                prompt.Controls.Add(restoreButton);
                 prompt.Controls.Add(okButton);
                 prompt.Controls.Add(cancelButton);
                 // Enter in multiline textbox inserts a new line instead of closing dialog.
@@ -19634,8 +19966,18 @@ namespace AnonPDF
 
                 highlightColor = highlightPreview.BackColor;
                 textColor = textColorPreview.BackColor;
+                CaptureCommentDialogDefaults(highlightColor, textColor);
                 return true;
             }
+        }
+
+        private void CaptureCommentDialogDefaults(System.Drawing.Color highlightColor, System.Drawing.Color textColor)
+        {
+            activeCommentDialogDefaults = new CommentDialogDefaults
+            {
+                HighlightColor = highlightColor,
+                TextColor = textColor
+            };
         }
 
         private void AddCommentAnnotation(CommentAnnotation comment)
@@ -20736,6 +21078,8 @@ namespace AnonPDF
                 bool isClosed = IsShapeClosed(shapeType);
                 bool supportsFill = ShapeTypeSupportsFill(shapeType);
                 bool hasStroke = HasVisibleVectorColor(vectorShape.StrokeColorArgb);
+                float strokeWidth = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth);
+                System.Drawing.Color strokeColor = System.Drawing.Color.FromArgb(vectorShape.StrokeColorArgb);
                 float fillOpacity = supportsFill ? NormalizeVectorFillOpacity(vectorShape.FillOpacity) : 0f;
                 bool hasFill = supportsFill && HasVisibleVectorColor(vectorShape.FillColorArgb) && fillOpacity > 0f;
                 VectorFillPatternKind fillPattern = ParseVectorFillPattern(vectorShape.FillPattern);
@@ -20748,8 +21092,6 @@ namespace AnonPDF
                 pdfCanvas.SaveState();
                 if (hasStroke)
                 {
-                    System.Drawing.Color strokeColor = System.Drawing.Color.FromArgb(vectorShape.StrokeColorArgb);
-                    float strokeWidth = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth);
                     pdfCanvas.SetStrokeColor(new DeviceRgb(strokeColor.R, strokeColor.G, strokeColor.B));
                     pdfCanvas.SetLineWidth(strokeWidth);
                     pdfCanvas.SetLineJoinStyle(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.LineJoinStyle.ROUND);
@@ -20813,12 +21155,29 @@ namespace AnonPDF
                 }
                 else if (hasStroke)
                 {
-                    pdfCanvas.MoveTo(pdfPoints[0].X, pdfPoints[0].Y);
-                    for (int i = 1; i < pdfPoints.Count; i++)
+                    IList<PointF> strokePdfPoints = shapeType == VectorShapeType.Polyline
+                        ? GetPolylineStrokePointsWithEndings(
+                            pdfPoints.ToArray(),
+                            ParseVectorLineEndingKind(vectorShape.StartLineEnding),
+                            ParseVectorLineEndingKind(vectorShape.EndLineEnding),
+                            strokeWidth).ToList()
+                        : pdfPoints.ToList();
+                    pdfCanvas.MoveTo(strokePdfPoints[0].X, strokePdfPoints[0].Y);
+                    for (int i = 1; i < strokePdfPoints.Count; i++)
                     {
-                        pdfCanvas.LineTo(pdfPoints[i].X, pdfPoints[i].Y);
+                        pdfCanvas.LineTo(strokePdfPoints[i].X, strokePdfPoints[i].Y);
                     }
                     pdfCanvas.Stroke();
+                    if (shapeType == VectorShapeType.Polyline)
+                    {
+                        ApplyVectorLineEndingsToPdf(
+                            pdfCanvas,
+                            pdfPoints,
+                            ParseVectorLineEndingKind(vectorShape.StartLineEnding),
+                            ParseVectorLineEndingKind(vectorShape.EndLineEnding),
+                            strokeWidth,
+                            strokeColor);
+                    }
                 }
 
                 pdfCanvas.RestoreState();
@@ -20850,6 +21209,107 @@ namespace AnonPDF
                 case VectorShapeStrokeKind.DashDotDot:
                     pdfCanvas.SetLineDash(new float[] { 4f * unit, 2f * unit, unit, 2f * unit, unit, 2f * unit }, 0f);
                     break;
+            }
+        }
+
+        private static void ApplyVectorLineEndingsToPdf(
+            iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
+            IList<PointF> points,
+            VectorLineEndingKind startEnding,
+            VectorLineEndingKind endEnding,
+            float strokeWidth,
+            System.Drawing.Color strokeColor)
+        {
+            if (pdfCanvas == null || points == null || points.Count < 2)
+            {
+                return;
+            }
+
+            DrawSingleVectorLineEndingToPdf(pdfCanvas, points[0], points[1], startEnding, strokeWidth, strokeColor);
+            DrawSingleVectorLineEndingToPdf(pdfCanvas, points[points.Count - 1], points[points.Count - 2], endEnding, strokeWidth, strokeColor);
+        }
+
+        private static void DrawSingleVectorLineEndingToPdf(
+            iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
+            PointF anchor,
+            PointF towardPoint,
+            VectorLineEndingKind ending,
+            float strokeWidth,
+            System.Drawing.Color strokeColor)
+        {
+            if (pdfCanvas == null || ending == VectorLineEndingKind.None)
+            {
+                return;
+            }
+
+            float dx = anchor.X - towardPoint.X;
+            float dy = anchor.Y - towardPoint.Y;
+            float length = (float)Math.Sqrt((dx * dx) + (dy * dy));
+            if (length < 0.001f)
+            {
+                return;
+            }
+
+            float ux = dx / length;
+            float uy = dy / length;
+            float px = -uy;
+            float py = ux;
+            GetVectorLineEndingMetrics(ending, strokeWidth, out float markerLength, out float markerWidth, out float radius);
+            pdfCanvas.SetLineDash(0);
+            pdfCanvas.SetStrokeColor(new DeviceRgb(strokeColor.R, strokeColor.G, strokeColor.B));
+            pdfCanvas.SetFillColor(new DeviceRgb(strokeColor.R, strokeColor.G, strokeColor.B));
+
+            switch (ending)
+            {
+                case VectorLineEndingKind.Arrow:
+                {
+                    PointF baseCenter = new PointF(anchor.X - (ux * markerLength), anchor.Y - (uy * markerLength));
+                    PointF left = new PointF(baseCenter.X + (px * (markerWidth / 2f)), baseCenter.Y + (py * (markerWidth / 2f)));
+                    PointF right = new PointF(baseCenter.X - (px * (markerWidth / 2f)), baseCenter.Y - (py * (markerWidth / 2f)));
+                    pdfCanvas.MoveTo(anchor.X, anchor.Y);
+                    pdfCanvas.LineTo(left.X, left.Y);
+                    pdfCanvas.LineTo(right.X, right.Y);
+                    pdfCanvas.ClosePath();
+                    pdfCanvas.Fill();
+                    break;
+                }
+                case VectorLineEndingKind.OpenArrow:
+                {
+                    PointF baseCenter = new PointF(anchor.X - (ux * markerLength), anchor.Y - (uy * markerLength));
+                    PointF left = new PointF(baseCenter.X + (px * (markerWidth / 2f)), baseCenter.Y + (py * (markerWidth / 2f)));
+                    PointF right = new PointF(baseCenter.X - (px * (markerWidth / 2f)), baseCenter.Y - (py * (markerWidth / 2f)));
+                    pdfCanvas.MoveTo(anchor.X, anchor.Y);
+                    pdfCanvas.LineTo(left.X, left.Y);
+                    pdfCanvas.MoveTo(anchor.X, anchor.Y);
+                    pdfCanvas.LineTo(right.X, right.Y);
+                    pdfCanvas.Stroke();
+                    break;
+                }
+                case VectorLineEndingKind.DoubleOpenArrow:
+                {
+                    DrawOpenArrowToPdf(pdfCanvas, anchor, ux, uy, px, py, markerLength, markerWidth);
+                    float secondaryOffset = GetDoubleOpenArrowSecondaryOffset(markerLength, strokeWidth);
+                    PointF secondAnchor = new PointF(anchor.X - (ux * secondaryOffset), anchor.Y - (uy * secondaryOffset));
+                    DrawOpenArrowToPdf(pdfCanvas, secondAnchor, ux, uy, px, py, markerLength, markerWidth);
+                    break;
+                }
+                case VectorLineEndingKind.Circle:
+                    pdfCanvas.Circle(anchor.X, anchor.Y, radius);
+                    pdfCanvas.Stroke();
+                    break;
+                case VectorLineEndingKind.FilledCircle:
+                    pdfCanvas.Circle(anchor.X, anchor.Y, radius);
+                    pdfCanvas.FillStroke();
+                    break;
+                case VectorLineEndingKind.Bar:
+                {
+                    PointF left = new PointF(anchor.X + (px * radius), anchor.Y + (py * radius));
+                    PointF right = new PointF(anchor.X - (px * radius), anchor.Y - (py * radius));
+                    pdfCanvas.MoveTo(left.X, left.Y);
+                    pdfCanvas.LineTo(right.X, right.Y);
+                    pdfCanvas.Stroke();
+                    break;
+                }
             }
         }
 
@@ -21922,10 +22382,14 @@ namespace AnonPDF
                 bool isSelectedVector = IsVectorShapeSelected(vectorShape);
                 bool hasStrokeColor = HasVisibleVectorColor(vectorShape.StrokeColorArgb);
                 bool drawStroke = hasStrokeColor || isSelectedVector;
+                System.Drawing.Color strokeRenderColor = pen.Color;
+                VectorLineEndingKind startEnding = ParseVectorLineEndingKind(vectorShape.StartLineEnding);
+                VectorLineEndingKind endEnding = ParseVectorLineEndingKind(vectorShape.EndLineEnding);
                 if (isSelectedVector)
                 {
                     pen.Color = System.Drawing.Color.Red;
                     pen.Width = Math.Max(SelectedObjectBorderWidth, pen.Width + 1f);
+                    strokeRenderColor = pen.Color;
                 }
                 pen.DashStyle = ToDrawingDashStyle(strokeKind);
                 pen.LineJoin = LineJoin.Round;
@@ -21983,7 +22447,20 @@ namespace AnonPDF
                 {
                     if (drawStroke)
                     {
-                        graphics.DrawLines(pen, points);
+                        PointF[] strokePoints = shapeType == VectorShapeType.Polyline
+                            ? GetPolylineStrokePointsWithEndings(points, startEnding, endEnding, pen.Width)
+                            : points;
+                        graphics.DrawLines(pen, strokePoints);
+                        if (shapeType == VectorShapeType.Polyline)
+                        {
+                            DrawVectorLineEndingsOnPreview(
+                                graphics,
+                                points,
+                                startEnding,
+                                endEnding,
+                                strokeRenderColor,
+                                pen.Width);
+                        }
                     }
                 }
             }
@@ -22550,6 +23027,246 @@ namespace AnonPDF
                     }
                 }
             }
+        }
+
+        private void DrawVectorLineEndingsOnPreview(
+            Graphics graphics,
+            PointF[] points,
+            VectorLineEndingKind startEnding,
+            VectorLineEndingKind endEnding,
+            System.Drawing.Color strokeColor,
+            float strokeWidthPx)
+        {
+            if (graphics == null || points == null || points.Length < 2)
+            {
+                return;
+            }
+
+            DrawSingleVectorLineEndingOnPreview(graphics, points[0], points[1], startEnding, strokeColor, strokeWidthPx);
+            DrawSingleVectorLineEndingOnPreview(graphics, points[points.Length - 1], points[points.Length - 2], endEnding, strokeColor, strokeWidthPx);
+        }
+
+        private void DrawSingleVectorLineEndingOnPreview(
+            Graphics graphics,
+            PointF anchor,
+            PointF towardPoint,
+            VectorLineEndingKind ending,
+            System.Drawing.Color strokeColor,
+            float strokeWidthPx)
+        {
+            if (graphics == null || ending == VectorLineEndingKind.None)
+            {
+                return;
+            }
+
+            PointF direction = new PointF(anchor.X - towardPoint.X, anchor.Y - towardPoint.Y);
+            float length = (float)Math.Sqrt((direction.X * direction.X) + (direction.Y * direction.Y));
+            if (length < 0.001f)
+            {
+                return;
+            }
+
+            float ux = direction.X / length;
+            float uy = direction.Y / length;
+            float px = -uy;
+            float py = ux;
+            GetVectorLineEndingMetrics(ending, strokeWidthPx, out float markerLength, out float markerWidth, out float radius);
+
+            using (var pen = new Pen(strokeColor, Math.Max(1f, strokeWidthPx)))
+            using (var brush = new SolidBrush(strokeColor))
+            {
+                pen.LineJoin = LineJoin.Round;
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+
+                switch (ending)
+                {
+                    case VectorLineEndingKind.Arrow:
+                    {
+                        PointF baseCenter = new PointF(anchor.X - (ux * markerLength), anchor.Y - (uy * markerLength));
+                        PointF left = new PointF(baseCenter.X + (px * (markerWidth / 2f)), baseCenter.Y + (py * (markerWidth / 2f)));
+                        PointF right = new PointF(baseCenter.X - (px * (markerWidth / 2f)), baseCenter.Y - (py * (markerWidth / 2f)));
+                        graphics.FillPolygon(brush, new[] { anchor, left, right });
+                        break;
+                    }
+                    case VectorLineEndingKind.OpenArrow:
+                    {
+                        PointF baseCenter = new PointF(anchor.X - (ux * markerLength), anchor.Y - (uy * markerLength));
+                        PointF left = new PointF(baseCenter.X + (px * (markerWidth / 2f)), baseCenter.Y + (py * (markerWidth / 2f)));
+                        PointF right = new PointF(baseCenter.X - (px * (markerWidth / 2f)), baseCenter.Y - (py * (markerWidth / 2f)));
+                        graphics.DrawLine(pen, anchor, left);
+                        graphics.DrawLine(pen, anchor, right);
+                        break;
+                    }
+                    case VectorLineEndingKind.DoubleOpenArrow:
+                    {
+                        DrawOpenArrowOnPreview(graphics, pen, anchor, ux, uy, px, py, markerLength, markerWidth);
+                        float secondaryOffset = GetDoubleOpenArrowSecondaryOffset(markerLength, strokeWidthPx);
+                        PointF secondAnchor = new PointF(anchor.X - (ux * secondaryOffset), anchor.Y - (uy * secondaryOffset));
+                        DrawOpenArrowOnPreview(graphics, pen, secondAnchor, ux, uy, px, py, markerLength, markerWidth);
+                        break;
+                    }
+                    case VectorLineEndingKind.Circle:
+                        graphics.DrawEllipse(pen, anchor.X - radius, anchor.Y - radius, radius * 2f, radius * 2f);
+                        break;
+                    case VectorLineEndingKind.FilledCircle:
+                        graphics.FillEllipse(brush, anchor.X - radius, anchor.Y - radius, radius * 2f, radius * 2f);
+                        graphics.DrawEllipse(pen, anchor.X - radius, anchor.Y - radius, radius * 2f, radius * 2f);
+                        break;
+                    case VectorLineEndingKind.Bar:
+                    {
+                        PointF left = new PointF(anchor.X + (px * radius), anchor.Y + (py * radius));
+                        PointF right = new PointF(anchor.X - (px * radius), anchor.Y - (py * radius));
+                        graphics.DrawLine(pen, left, right);
+                        break;
+                    }
+                }
+            }
+        }
+
+        private static PointF[] GetPolylineStrokePointsWithEndings(
+            PointF[] points,
+            VectorLineEndingKind startEnding,
+            VectorLineEndingKind endEnding,
+            float strokeWidth)
+        {
+            if (points == null || points.Length < 2)
+            {
+                return points ?? Array.Empty<PointF>();
+            }
+
+            PointF[] adjusted = points.Select(point => new PointF(point.X, point.Y)).ToArray();
+            float startInset = GetVectorLineEndingInset(startEnding, strokeWidth);
+            float endInset = GetVectorLineEndingInset(endEnding, strokeWidth);
+
+            if (startInset > 0f)
+            {
+                adjusted[0] = MovePointTowards(adjusted[0], adjusted[1], startInset);
+            }
+
+            if (endInset > 0f)
+            {
+                adjusted[adjusted.Length - 1] = MovePointTowards(adjusted[adjusted.Length - 1], adjusted[adjusted.Length - 2], endInset);
+            }
+
+            return adjusted;
+        }
+
+        private static PointF MovePointTowards(PointF start, PointF target, float distance)
+        {
+            float dx = target.X - start.X;
+            float dy = target.Y - start.Y;
+            float length = (float)Math.Sqrt((dx * dx) + (dy * dy));
+            if (length < 0.001f || distance <= 0f)
+            {
+                return start;
+            }
+
+            float appliedDistance = Math.Min(distance, Math.Max(0f, length - 0.001f));
+            float ux = dx / length;
+            float uy = dy / length;
+            return new PointF(start.X + (ux * appliedDistance), start.Y + (uy * appliedDistance));
+        }
+
+        private static float GetVectorLineEndingInset(VectorLineEndingKind ending, float strokeWidth)
+        {
+            GetVectorLineEndingMetrics(ending, strokeWidth, out float markerLength, out _, out float radius);
+            float width = Math.Max(1f, strokeWidth);
+            switch (ending)
+            {
+                case VectorLineEndingKind.Arrow:
+                    return Math.Max(markerLength * 0.92f, width * 2.8f);
+                case VectorLineEndingKind.OpenArrow:
+                    return Math.Max(width * 0.55f, 0.9f);
+                case VectorLineEndingKind.DoubleOpenArrow:
+                    return GetDoubleOpenArrowSecondaryOffset(markerLength, width) + Math.Max(width * 0.35f, 0.6f);
+                case VectorLineEndingKind.Circle:
+                case VectorLineEndingKind.FilledCircle:
+                    return radius + (width * 0.65f);
+                case VectorLineEndingKind.Bar:
+                    return Math.Max(4f, width * 0.95f);
+                default:
+                    return 0f;
+            }
+        }
+
+        private static void GetVectorLineEndingMetrics(
+            VectorLineEndingKind ending,
+            float strokeWidth,
+            out float markerLength,
+            out float markerWidth,
+            out float radius)
+        {
+            float width = Math.Max(1f, strokeWidth);
+            markerLength = 0f;
+            markerWidth = 0f;
+            radius = 0f;
+
+            switch (ending)
+            {
+                case VectorLineEndingKind.Arrow:
+                    markerLength = Math.Max(14f, width * 4.6f);
+                    markerWidth = Math.Max(12f, width * 4.1f);
+                    break;
+                case VectorLineEndingKind.OpenArrow:
+                    markerLength = Math.Max(14.5f, width * 4.0f);
+                    markerWidth = Math.Max(22f, width * 6.6f);
+                    break;
+                case VectorLineEndingKind.DoubleOpenArrow:
+                    markerLength = Math.Max(14.5f, width * 4.0f);
+                    markerWidth = Math.Max(22f, width * 6.6f);
+                    break;
+                case VectorLineEndingKind.Circle:
+                case VectorLineEndingKind.FilledCircle:
+                    radius = Math.Max(6f, width * 1.55f);
+                    break;
+                case VectorLineEndingKind.Bar:
+                    radius = Math.Max(4f, width * 0.95f);
+                    break;
+            }
+        }
+
+        private static void DrawOpenArrowOnPreview(
+            Graphics graphics,
+            Pen pen,
+            PointF anchor,
+            float ux,
+            float uy,
+            float px,
+            float py,
+            float markerLength,
+            float markerWidth)
+        {
+            PointF baseCenter = new PointF(anchor.X - (ux * markerLength), anchor.Y - (uy * markerLength));
+            PointF left = new PointF(baseCenter.X + (px * (markerWidth / 2f)), baseCenter.Y + (py * (markerWidth / 2f)));
+            PointF right = new PointF(baseCenter.X - (px * (markerWidth / 2f)), baseCenter.Y - (py * (markerWidth / 2f)));
+            graphics.DrawLine(pen, anchor, left);
+            graphics.DrawLine(pen, anchor, right);
+        }
+
+        private static void DrawOpenArrowToPdf(
+            iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
+            PointF anchor,
+            float ux,
+            float uy,
+            float px,
+            float py,
+            float markerLength,
+            float markerWidth)
+        {
+            PointF baseCenter = new PointF(anchor.X - (ux * markerLength), anchor.Y - (uy * markerLength));
+            PointF left = new PointF(baseCenter.X + (px * (markerWidth / 2f)), baseCenter.Y + (py * (markerWidth / 2f)));
+            PointF right = new PointF(baseCenter.X - (px * (markerWidth / 2f)), baseCenter.Y - (py * (markerWidth / 2f)));
+            pdfCanvas.MoveTo(anchor.X, anchor.Y);
+            pdfCanvas.LineTo(left.X, left.Y);
+            pdfCanvas.MoveTo(anchor.X, anchor.Y);
+            pdfCanvas.LineTo(right.X, right.Y);
+            pdfCanvas.Stroke();
+        }
+
+        private static float GetDoubleOpenArrowSecondaryOffset(float markerLength, float strokeWidth)
+        {
+            return Math.Max(markerLength * 0.52f, Math.Max(1f, strokeWidth) * 3.1f);
         }
 
         private Bitmap RenderRichTextToBitmap(TextAnnotation annotation, int widthPx, int heightPx, System.Drawing.Color backgroundColor, float fontScale = 1f)
@@ -25361,6 +26078,8 @@ namespace AnonPDF
                 !AreSameFloat(left.FillOpacity, right.FillOpacity) ||
                 !string.Equals(left.StrokeStyle, right.StrokeStyle, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(left.FillPattern, right.FillPattern, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(left.StartLineEnding, right.StartLineEnding, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(left.EndLineEnding, right.EndLineEnding, StringComparison.OrdinalIgnoreCase) ||
                 left.IsLocked != right.IsLocked)
             {
                 return false;
@@ -26813,11 +27532,11 @@ namespace AnonPDF
                 LayerId = GetResolvedActiveLayerId(),
                 Bounds = initialBounds,
                 InitialBounds = initialBounds,
-                Rotation = 0,
-                Opacity = 1f,
-                TransparentBackground = false,
-                LockAspect = true,
-                IsLocked = false,
+                Rotation = NormalizeRotation(activeRasterDialogDefaults.Rotation),
+                Opacity = NormalizeOpacity(activeRasterDialogDefaults.RasterOpacity),
+                TransparentBackground = activeRasterDialogDefaults.TransparentBackground,
+                LockAspect = activeRasterDialogDefaults.LockAspect,
+                IsLocked = activeRasterDialogDefaults.IsLocked,
                 SourceType = sourceType,
                 FilePath = filePath,
                 EmbeddedBytes = embeddedBytes,
@@ -26888,11 +27607,11 @@ namespace AnonPDF
                 LayerId = GetResolvedActiveLayerId(),
                 Start = start,
                 End = end,
-                LineColorArgb = DefaultArrowColor.ToArgb(),
-                Thickness = DefaultArrowThickness,
-                HeadLength = DefaultArrowHeadLength,
-                HeadWidth = DefaultArrowHeadWidth,
-                IsLocked = false,
+                LineColorArgb = activeArrowDialogDefaults.ArrowColor.ToArgb(),
+                Thickness = NormalizeArrowThickness(activeArrowDialogDefaults.ThicknessValue),
+                HeadLength = NormalizeArrowHeadLength(activeArrowDialogDefaults.HeadLengthValue),
+                HeadWidth = NormalizeArrowHeadWidth(activeArrowDialogDefaults.HeadWidthValue),
+                IsLocked = activeArrowDialogDefaults.IsLocked,
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now
             };
@@ -26947,6 +27666,7 @@ namespace AnonPDF
                 dlg.HeadLengthValue = NormalizeArrowHeadLength(arrowObject.HeadLength);
                 dlg.HeadWidthValue = NormalizeArrowHeadWidth(arrowObject.HeadWidth);
                 dlg.IsLocked = arrowObject.IsLocked;
+                dlg.RestoreDefaultsAction = dialog => ApplyArrowDialogDefaults(dialog, ArrowDialogDefaults.CreateDefault());
                 dlg.ApplyChanges = () =>
                 {
                     ApplyArrowObjectDialogChanges(arrowObject, dlg);
@@ -26958,7 +27678,39 @@ namespace AnonPDF
                 }
 
                 ApplyArrowObjectDialogChanges(arrowObject, dlg);
+                CaptureArrowDialogDefaults(dlg);
             }
+        }
+
+        private void ApplyArrowDialogDefaults(EditArrowDialog dialog, ArrowDialogDefaults defaults)
+        {
+            if (dialog == null || defaults == null)
+            {
+                return;
+            }
+
+            dialog.ArrowColor = defaults.ArrowColor;
+            dialog.ThicknessValue = defaults.ThicknessValue;
+            dialog.HeadLengthValue = defaults.HeadLengthValue;
+            dialog.HeadWidthValue = defaults.HeadWidthValue;
+            dialog.IsLocked = defaults.IsLocked;
+        }
+
+        private void CaptureArrowDialogDefaults(EditArrowDialog dialog)
+        {
+            if (dialog == null)
+            {
+                return;
+            }
+
+            activeArrowDialogDefaults = new ArrowDialogDefaults
+            {
+                ArrowColor = dialog.ArrowColor,
+                ThicknessValue = NormalizeArrowThickness(dialog.ThicknessValue),
+                HeadLengthValue = NormalizeArrowHeadLength(dialog.HeadLengthValue),
+                HeadWidthValue = NormalizeArrowHeadWidth(dialog.HeadWidthValue),
+                IsLocked = dialog.IsLocked
+            };
         }
 
         private bool ApplyArrowObjectDialogChanges(ArrowObject arrowObject, EditArrowDialog dlg)
@@ -27020,7 +27772,9 @@ namespace AnonPDF
                 FillPatternColorArgb = vectorShape.FillPatternColorArgb,
                 FillOpacity = NormalizeVectorFillOpacity(vectorShape.FillOpacity),
                 StrokeKind = ParseVectorStrokeKind(vectorShape.StrokeStyle),
-                FillPattern = ParseVectorFillPattern(vectorShape.FillPattern)
+                FillPattern = ParseVectorFillPattern(vectorShape.FillPattern),
+                StartEnding = ParseVectorLineEndingKind(vectorShape.StartLineEnding),
+                EndEnding = ParseVectorLineEndingKind(vectorShape.EndLineEnding)
             };
 
             if (!TryPromptShapeDefaults(out VectorShapeDefaults selectedDefaults, initialDefaults, lockShapeType: true))
@@ -27041,7 +27795,9 @@ namespace AnonPDF
                 vectorShape.FillPatternColorArgb != selectedDefaults.FillPatternColorArgb ||
                 !AreSameFloat(NormalizeVectorFillOpacity(vectorShape.FillOpacity), NormalizeVectorFillOpacity(selectedDefaults.FillOpacity)) ||
                 !string.Equals(vectorShape.StrokeStyle ?? string.Empty, selectedDefaults.StrokeKind.ToString(), StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(vectorShape.FillPattern ?? string.Empty, selectedDefaults.FillPattern.ToString(), StringComparison.OrdinalIgnoreCase);
+                !string.Equals(vectorShape.FillPattern ?? string.Empty, selectedDefaults.FillPattern.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(vectorShape.StartLineEnding ?? string.Empty, selectedDefaults.StartEnding.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(vectorShape.EndLineEnding ?? string.Empty, selectedDefaults.EndEnding.ToString(), StringComparison.OrdinalIgnoreCase);
 
             if (!changed)
             {
@@ -27056,6 +27812,9 @@ namespace AnonPDF
             vectorShape.FillOpacity = NormalizeVectorFillOpacity(selectedDefaults.FillOpacity);
             vectorShape.StrokeStyle = selectedDefaults.StrokeKind.ToString();
             vectorShape.FillPattern = selectedDefaults.FillPattern.ToString();
+            vectorShape.StartLineEnding = selectedDefaults.StartEnding.ToString();
+            vectorShape.EndLineEnding = selectedDefaults.EndEnding.ToString();
+            activeVectorShapeDefaults = selectedDefaults.Clone();
             NormalizeVectorShape(vectorShape);
             ConstrainVectorShapeToPage(vectorShape);
             vectorShape.UpdatedAtUtc = DateTime.UtcNow;
@@ -27422,6 +28181,70 @@ namespace AnonPDF
             }
 
             return VectorShapeStrokeKind.Solid;
+        }
+
+        private static VectorLineEndingKind ParseVectorLineEndingKind(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return VectorLineEndingKind.None;
+            }
+
+            if (Enum.TryParse(value.Trim(), true, out VectorLineEndingKind parsed))
+            {
+                return parsed;
+            }
+
+            return VectorLineEndingKind.None;
+        }
+
+        private sealed class VectorLineEndingOption
+        {
+            public VectorLineEndingKind Kind { get; set; }
+            public string DisplayName { get; set; }
+            public override string ToString() => DisplayName ?? Kind.ToString();
+        }
+
+        private static IEnumerable<VectorLineEndingOption> GetVectorLineEndingOptions()
+        {
+            yield return new VectorLineEndingOption { Kind = VectorLineEndingKind.None, DisplayName = LocalizedText("Vector_LineEnding_None") };
+            yield return new VectorLineEndingOption { Kind = VectorLineEndingKind.Arrow, DisplayName = LocalizedText("Vector_LineEnding_Arrow") };
+            yield return new VectorLineEndingOption { Kind = VectorLineEndingKind.OpenArrow, DisplayName = LocalizedText("Vector_LineEnding_OpenArrow") };
+            yield return new VectorLineEndingOption { Kind = VectorLineEndingKind.DoubleOpenArrow, DisplayName = LocalizedText("Vector_LineEnding_DoubleOpenArrow") };
+            yield return new VectorLineEndingOption { Kind = VectorLineEndingKind.Circle, DisplayName = LocalizedText("Vector_LineEnding_Circle") };
+            yield return new VectorLineEndingOption { Kind = VectorLineEndingKind.FilledCircle, DisplayName = LocalizedText("Vector_LineEnding_FilledCircle") };
+            yield return new VectorLineEndingOption { Kind = VectorLineEndingKind.Bar, DisplayName = LocalizedText("Vector_LineEnding_Bar") };
+        }
+
+        private static void AddVectorLineEndingItems(ComboBox comboBox)
+        {
+            if (comboBox == null)
+            {
+                return;
+            }
+
+            comboBox.Items.Clear();
+            foreach (VectorLineEndingOption option in GetVectorLineEndingOptions())
+            {
+                comboBox.Items.Add(option);
+            }
+        }
+
+        private static int GetVectorLineEndingComboIndex(VectorLineEndingKind kind)
+        {
+            VectorLineEndingOption[] options = GetVectorLineEndingOptions().ToArray();
+            int index = Array.FindIndex(options, option => option.Kind == kind);
+            return index >= 0 ? index : 0;
+        }
+
+        private static string GetSelectedVectorLineEndingValue(ComboBox comboBox)
+        {
+            if (comboBox?.SelectedItem is VectorLineEndingOption option)
+            {
+                return option.Kind.ToString();
+            }
+
+            return VectorLineEndingKind.None.ToString();
         }
 
         private static VectorFillPatternKind ParseVectorFillPattern(string value)
@@ -27842,6 +28665,8 @@ namespace AnonPDF
             vectorShape.StrokeWidth = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth);
             vectorShape.FillOpacity = NormalizeVectorFillOpacity(vectorShape.FillOpacity);
             vectorShape.StrokeStyle = ParseVectorStrokeKind(vectorShape.StrokeStyle).ToString();
+            vectorShape.StartLineEnding = ParseVectorLineEndingKind(vectorShape.StartLineEnding).ToString();
+            vectorShape.EndLineEnding = ParseVectorLineEndingKind(vectorShape.EndLineEnding).ToString();
             vectorShape.FillPattern = ParseVectorFillPattern(vectorShape.FillPattern).ToString();
             System.Drawing.Color patternColor = System.Drawing.Color.FromArgb(vectorShape.FillPatternColorArgb);
             vectorShape.FillPatternColorArgb = System.Drawing.Color.FromArgb(patternColor.A, patternColor.R, patternColor.G, patternColor.B).ToArgb();
@@ -28722,6 +29547,8 @@ namespace AnonPDF
                     FillOpacity = sourceShape.FillOpacity,
                     StrokeStyle = sourceShape.StrokeStyle,
                     FillPattern = sourceShape.FillPattern,
+                    StartLineEnding = sourceShape.StartLineEnding,
+                    EndLineEnding = sourceShape.EndLineEnding,
                     IsLocked = sourceShape.IsLocked,
                     CreatedAtUtc = now,
                     UpdatedAtUtc = now,
@@ -31033,6 +31860,7 @@ namespace AnonPDF
                 {
                     return TrySelectRasterImagePath(out string selectedPath) ? selectedPath : string.Empty;
                 };
+                dlg.RestoreDefaultsAction = dialog => ApplyRasterDialogDefaults(dialog, RasterDialogDefaults.CreateDefault());
                 dlg.ApplyChanges = () =>
                 {
                     ApplyRasterObjectDialogChanges(rasterObject, dlg);
@@ -31044,7 +31872,39 @@ namespace AnonPDF
                 }
 
                 ApplyRasterObjectDialogChanges(rasterObject, dlg);
+                CaptureRasterDialogDefaults(dlg);
             }
+        }
+
+        private void ApplyRasterDialogDefaults(EditRasterDialog dialog, RasterDialogDefaults defaults)
+        {
+            if (dialog == null || defaults == null)
+            {
+                return;
+            }
+
+            dialog.Rotation = defaults.Rotation;
+            dialog.RasterOpacity = defaults.RasterOpacity;
+            dialog.TransparentBackground = defaults.TransparentBackground;
+            dialog.LockAspect = defaults.LockAspect;
+            dialog.IsLocked = defaults.IsLocked;
+        }
+
+        private void CaptureRasterDialogDefaults(EditRasterDialog dialog)
+        {
+            if (dialog == null)
+            {
+                return;
+            }
+
+            activeRasterDialogDefaults = new RasterDialogDefaults
+            {
+                Rotation = NormalizeRotation(dialog.Rotation),
+                RasterOpacity = NormalizeOpacity(dialog.RasterOpacity),
+                TransparentBackground = dialog.TransparentBackground,
+                LockAspect = dialog.LockAspect,
+                IsLocked = dialog.IsLocked
+            };
         }
 
         private void ResetRasterObjectSize(RasterObject rasterObject)
@@ -35429,6 +36289,7 @@ namespace AnonPDF
         private FlowLayoutPanel rotationPresetPanel;
         private GroupBox groupBoxSymbols;
         private FlowLayoutPanel symbolsPanel;
+        private Button btnRestoreDefaults;
         private Button btnOK;
         private Button btnCancel;
         private System.Drawing.Color lastBackgroundColorBeforeTransparent = System.Drawing.Color.White;
@@ -35443,6 +36304,7 @@ namespace AnonPDF
         public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
         public int AnnotationRotation { get; set; }
         public Action ApplyChanges { get; set; }
+        public Action<EditTextDialog> RestoreDefaultsAction { get; set; }
         private bool suppressAutoApply;
 
         public EditTextDialog()
@@ -35761,6 +36623,14 @@ namespace AnonPDF
             };
             btnOK.Click += BtnOK_Click;
 
+            btnRestoreDefaults = new Button
+            {
+                Text = GetResourceText("UI_Button_RestoreSettings"),
+                Location = new Point(90, 510),
+                Size = new Size(140, 30)
+            };
+            btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
+
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
@@ -35784,6 +36654,7 @@ namespace AnonPDF
             this.Controls.Add(groupBoxAlignment);
             this.Controls.Add(groupBoxRotation);
             this.Controls.Add(groupBoxSymbols);
+            this.Controls.Add(btnRestoreDefaults);
             this.Controls.Add(btnOK);
             this.Controls.Add(btnCancel);
 
@@ -35796,22 +36667,48 @@ namespace AnonPDF
         {
             base.OnLoad(e);
             suppressAutoApply = true;
-            // Load previously set values into form controls
-            txtText.Text = AnnotationText;
-            // Update the font label
+            ApplyPropertiesToControls();
+            suppressAutoApply = false;
+        }
+
+        private void BtnRestoreDefaults_Click(object sender, EventArgs e)
+        {
+            if (RestoreDefaultsAction == null)
+            {
+                return;
+            }
+
+            string preservedText = txtText.Text ?? string.Empty;
+            RestoreDefaultsAction(this);
+            AnnotationText = preservedText;
+            AnnotationRichText = null;
+            suppressAutoApply = true;
+            try
+            {
+                ApplyPropertiesToControls();
+            }
+            finally
+            {
+                suppressAutoApply = false;
+            }
+            TryApplyChanges();
+        }
+
+        private void ApplyPropertiesToControls()
+        {
+            txtText.Text = AnnotationText ?? string.Empty;
             UpdateFontDisplay();
 
-            // Set alignment - select appropriate radio button
             switch (AnnotationAlignment)
             {
-                case System.Windows.Forms.HorizontalAlignment.Left:
-                    rbLeft.Checked = true;
-                    break;
                 case System.Windows.Forms.HorizontalAlignment.Center:
                     rbCenter.Checked = true;
                     break;
                 case System.Windows.Forms.HorizontalAlignment.Right:
                     rbRight.Checked = true;
+                    break;
+                default:
+                    rbLeft.Checked = true;
                     break;
             }
 
@@ -35829,12 +36726,11 @@ namespace AnonPDF
                 }
                 catch
                 {
-                    txtText.Text = AnnotationText;
+                    txtText.Text = AnnotationText ?? string.Empty;
                 }
             }
             SetRichMode(IsRichTextMode, updateState: false);
             ApplyAlignmentToEditor();
-            suppressAutoApply = false;
         }
 
         private static System.Drawing.Color GetContrastingTextColor(System.Drawing.Color color)
@@ -36255,6 +37151,7 @@ namespace AnonPDF
         private Button btnResetAspect;
         private Button btnResetOneToOne;
 
+        private Button btnRestoreDefaults;
         private Button btnOK;
         private Button btnCancel;
 
@@ -36283,6 +37180,7 @@ namespace AnonPDF
         public float PageHeight { get; set; }
         public Func<string> SelectReplacementImage { get; set; }
         public Action ApplyChanges { get; set; }
+        public Action<EditRasterDialog> RestoreDefaultsAction { get; set; }
 
         public EditRasterDialog()
         {
@@ -36476,6 +37374,14 @@ namespace AnonPDF
             };
             btnOK.Click += BtnOK_Click;
 
+            btnRestoreDefaults = new Button
+            {
+                Text = Resources.ResourceManager.GetString("UI_Button_RestoreSettings", Resources.Culture ?? CultureInfo.CurrentUICulture) ?? "UI_Button_RestoreSettings",
+                Location = new Point(92, 386),
+                Size = new Size(136, 30)
+            };
+            btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
+
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
@@ -36488,6 +37394,7 @@ namespace AnonPDF
             Controls.Add(groupRotation);
             Controls.Add(groupOptions);
             Controls.Add(groupSource);
+            Controls.Add(btnRestoreDefaults);
             Controls.Add(btnOK);
             Controls.Add(btnCancel);
 
@@ -36821,6 +37728,34 @@ namespace AnonPDF
             SyncPropertiesFromControls();
         }
 
+        private void BtnRestoreDefaults_Click(object sender, EventArgs e)
+        {
+            if (RestoreDefaultsAction == null)
+            {
+                return;
+            }
+
+            RestoreDefaultsAction(this);
+            suppressAutoApply = true;
+            suppressDimensionSync = true;
+            try
+            {
+                nudRotation.Value = NormalizeAngle(Rotation);
+                nudOpacity.Value = ClampDecimal((decimal)(Math.Max(0f, Math.Min(1f, RasterOpacity)) * 100f), nudOpacity.Minimum, nudOpacity.Maximum);
+                chkTransparentBackground.Checked = TransparentBackground;
+                chkLockAspect.Checked = LockAspect;
+                chkLocked.Checked = IsLocked;
+                RecalculateAspectRatio();
+                lockedAspectRatio = aspectRatio > 0m ? aspectRatio : 1m;
+            }
+            finally
+            {
+                suppressDimensionSync = false;
+                suppressAutoApply = false;
+            }
+            TryApplyChanges();
+        }
+
         private void SyncPropertiesFromControls()
         {
             PositionX = (float)nudX.Value;
@@ -36896,6 +37831,7 @@ namespace AnonPDF
         private NumericUpDown nudHeadLength;
         private NumericUpDown nudHeadWidth;
         private CheckBox chkLocked;
+        private Button btnRestoreDefaults;
         private Button btnOK;
         private Button btnCancel;
         private bool suppressAutoApply;
@@ -36906,6 +37842,7 @@ namespace AnonPDF
         public float HeadWidthValue { get; set; } = 12f;
         public bool IsLocked { get; set; }
         public Action ApplyChanges { get; set; }
+        public Action<EditArrowDialog> RestoreDefaultsAction { get; set; }
 
         public EditArrowDialog()
         {
@@ -36979,6 +37916,14 @@ namespace AnonPDF
             };
             btnOK.Click += BtnOK_Click;
 
+            btnRestoreDefaults = new Button
+            {
+                Text = Resources.ResourceManager.GetString("UI_Button_RestoreSettings", Resources.Culture ?? CultureInfo.CurrentUICulture) ?? "UI_Button_RestoreSettings",
+                Location = new Point(16, 202),
+                Size = new Size(140, 30)
+            };
+            btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
+
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
@@ -36996,6 +37941,7 @@ namespace AnonPDF
             Controls.Add(lblHeadWidth);
             Controls.Add(nudHeadWidth);
             Controls.Add(chkLocked);
+            Controls.Add(btnRestoreDefaults);
             Controls.Add(btnOK);
             Controls.Add(btnCancel);
 
@@ -37052,6 +37998,30 @@ namespace AnonPDF
         private void BtnOK_Click(object sender, EventArgs e)
         {
             SyncPropertiesFromControls();
+        }
+
+        private void BtnRestoreDefaults_Click(object sender, EventArgs e)
+        {
+            if (RestoreDefaultsAction == null)
+            {
+                return;
+            }
+
+            RestoreDefaultsAction(this);
+            suppressAutoApply = true;
+            try
+            {
+                btnColor.BackColor = ArrowColor;
+                nudThickness.Value = ClampValue((decimal)ThicknessValue, nudThickness.Minimum, nudThickness.Maximum);
+                nudHeadLength.Value = ClampValue((decimal)HeadLengthValue, nudHeadLength.Minimum, nudHeadLength.Maximum);
+                nudHeadWidth.Value = ClampValue((decimal)HeadWidthValue, nudHeadWidth.Minimum, nudHeadWidth.Maximum);
+                chkLocked.Checked = IsLocked;
+            }
+            finally
+            {
+                suppressAutoApply = false;
+            }
+            TryApplyChanges();
         }
 
         private void SyncPropertiesFromControls()
@@ -38002,6 +38972,8 @@ namespace AnonPDF
         public float FillOpacity { get; set; } = 0.18f;
         public string StrokeStyle { get; set; } = "solid";
         public string FillPattern { get; set; } = "solid";
+        public string StartLineEnding { get; set; } = "None";
+        public string EndLineEnding { get; set; } = "None";
         public bool IsLocked { get; set; }
         public string DuplicateGroupId { get; set; }
         public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

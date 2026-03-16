@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <root>
   <resheader name="resmimetype">
     <value>text/microsoft-resx</value>
@@ -1725,5 +1725,35 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   </data>
   <data name="Layer_Default_DefaultName" xml:space="preserve">
     <value>Standard</value>
+  </data>
+  <data name="Vector_Dialog_LineStartEnding" xml:space="preserve">
+    <value>Linienanfang</value>
+  </data>
+  <data name="Vector_Dialog_LineEndEnding" xml:space="preserve">
+    <value>Linienende</value>
+  </data>
+  <data name="Vector_LineEnding_None" xml:space="preserve">
+    <value>Keine</value>
+  </data>
+  <data name="Vector_LineEnding_Arrow" xml:space="preserve">
+    <value>Pfeil</value>
+  </data>
+  <data name="Vector_LineEnding_OpenArrow" xml:space="preserve">
+    <value>Offener Pfeil</value>
+  </data>
+  <data name="Vector_LineEnding_DoubleOpenArrow" xml:space="preserve">
+    <value>Doppelter offener Pfeil</value>
+  </data>
+  <data name="Vector_LineEnding_Circle" xml:space="preserve">
+    <value>Kreis</value>
+  </data>
+  <data name="Vector_LineEnding_FilledCircle" xml:space="preserve">
+    <value>Gefüllter Kreis</value>
+  </data>
+  <data name="Vector_LineEnding_Bar" xml:space="preserve">
+    <value>Querstrich</value>
+  </data>
+  <data name="UI_Button_RestoreSettings" xml:space="preserve">
+    <value>Einstellungen wiederherstellen</value>
   </data>
 </root>
