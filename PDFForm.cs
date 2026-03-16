@@ -1335,7 +1335,7 @@ namespace AnonPDF
             addArrowToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "addArrowToolStripMenuItem",
-                ShortcutKeys = Keys.Control | Keys.A,
+                ShortcutKeys = Keys.Control | Keys.Shift | Keys.A,
                 Enabled = false
             };
             addArrowToolStripMenuItem.Click += AddArrowToolStripMenuItem_Click;
@@ -4933,6 +4933,55 @@ namespace AnonPDF
             selectedVectorShapeIds.Clear();
         }
 
+        private bool SelectAllObjectsOnCurrentPage()
+        {
+            string activeLayer = GetResolvedActiveLayerId();
+            List<object> visibleObjects = GetOrderedObjectsForCurrentPage()
+                .Where(obj => string.Equals(GetLayerIdForGenericObject(obj), activeLayer, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (visibleObjects.Count == 0)
+            {
+                return false;
+            }
+
+            ResetTextRotationInteractionState();
+            ResetRasterInteractionState();
+            ResetArrowInteractionState();
+            ResetVectorInteractionState();
+            ResetCommentNoteMoveState();
+            ResetGroupMoveState();
+
+            selectedTextAnnotation = null;
+            selectedRasterObject = null;
+            selectedArrowObject = null;
+            selectedVectorShape = null;
+            ClearGroupSelection();
+
+            foreach (object visibleObject in visibleObjects)
+            {
+                if (visibleObject is TextAnnotation textAnnotation)
+                {
+                    selectedTextAnnotations.Add(textAnnotation);
+                }
+                else if (visibleObject is RasterObject rasterObject && !string.IsNullOrWhiteSpace(rasterObject.Id))
+                {
+                    selectedRasterObjectIds.Add(rasterObject.Id);
+                }
+                else if (visibleObject is ArrowObject arrowObject && !string.IsNullOrWhiteSpace(arrowObject.Id))
+                {
+                    selectedArrowObjectIds.Add(arrowObject.Id);
+                }
+                else if (visibleObject is VectorShapeObject vectorShapeObject && !string.IsNullOrWhiteSpace(vectorShapeObject.Id))
+                {
+                    selectedVectorShapeIds.Add(vectorShapeObject.Id);
+                }
+            }
+
+            CollapseGroupSelectionToSingleIfNeeded();
+            pdfViewer?.Invalidate();
+            return true;
+        }
+
         private void ResetGroupMoveState()
         {
             isMovingObjectGroup = false;
@@ -5025,7 +5074,7 @@ namespace AnonPDF
         private bool TryGetHitArrowAtPoint(Point location, out ArrowObject hitArrow)
         {
             hitArrow = arrowObjects
-                .Where(obj => obj != null && obj.PageNumber == currentPage)
+                .Where(obj => obj != null && obj.PageNumber == currentPage && IsLayerVisible(obj.LayerId))
                 .Reverse()
                 .FirstOrDefault(obj => IsPointNearArrowLine(obj, location) || TryGetArrowHandleAtPoint(obj, location, out _));
             return hitArrow != null;
@@ -5034,7 +5083,7 @@ namespace AnonPDF
         private bool TryGetHitRasterAtPoint(Point location, out RasterObject hitRaster)
         {
             hitRaster = rasterObjects
-                .Where(obj => obj != null && obj.PageNumber == currentPage)
+                .Where(obj => obj != null && obj.PageNumber == currentPage && IsLayerVisible(obj.LayerId))
                 .Reverse()
                 .FirstOrDefault(obj => IsPointInsideRasterObject(obj, location));
             return hitRaster != null;
@@ -5043,7 +5092,7 @@ namespace AnonPDF
         private bool TryGetHitTextAtPoint(Point location, float dpiX, float dpiY, out TextAnnotation hitText)
         {
             hitText = textAnnotations
-                .Where(a => a != null && a.PageNumber == currentPage)
+                .Where(a => a != null && a.PageNumber == currentPage && IsLayerVisible(a.LayerId))
                 .Reverse()
                 .FirstOrDefault(a => GetAnnotationScreenRect(a, dpiX, dpiY).Contains(location));
             return hitText != null;
@@ -5144,7 +5193,7 @@ namespace AnonPDF
                 }
 
                 VectorShapeObject candidate = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == currentPage && string.Equals(v.Id, layer.Id, StringComparison.Ordinal));
-                if (candidate == null)
+                if (candidate == null || !IsLayerVisible(candidate.LayerId))
                 {
                     continue;
                 }
@@ -26359,6 +26408,17 @@ namespace AnonPDF
                     return base.ProcessCmdKey(ref msg, keyData);
                 }
 
+                SelectAllObjectsOnCurrentPage();
+                return true;
+            }
+
+            if (keyData == (Keys.Control | Keys.Shift | Keys.A))
+            {
+                if (IsTextInputFocused())
+                {
+                    return base.ProcessCmdKey(ref msg, keyData);
+                }
+
                 AddArrowObject();
                 return true;
             }
@@ -28017,6 +28077,8 @@ namespace AnonPDF
             removeNodeItem.Click += (_, __) => RemoveVectorNode(target, nodeIndex);
             menu.Items.Add(removeNodeItem);
 
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(BuildMoveToLayerMenuItem(target.LayerId, targetLayerId => MoveObjectToLayerFromContext(target, targetLayerId)));
             menu.Items.Add(new ToolStripSeparator());
             var copyObjectItem = new ToolStripMenuItem(Resources.Menu_CopyToClipboard);
             copyObjectItem.Click += (_, __) => TryCopySelectedObjectsToInternalClipboard();
