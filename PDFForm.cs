@@ -1769,19 +1769,25 @@ namespace AnonPDF
 
         private void ApplyLayerConfiguration(IEnumerable<LayerDefinition> layers, string nextActiveLayerId, bool markProjectChanged)
         {
+            List<LayerDefinition> previousLayers = documentLayers
+                .Select(layer => layer?.Clone())
+                .Where(layer => layer != null)
+                .ToList();
             List<LayerDefinition> normalizedLayers = NormalizeLayerDefinitions((layers ?? Enumerable.Empty<LayerDefinition>())
                 .Select(layer => layer?.Clone())
                 .Where(layer => layer != null)
                 .ToList());
-            bool visibilityChanged = HasLayerVisibilityChanged(documentLayers, normalizedLayers);
+            bool visibilityChanged = HasLayerVisibilityChanged(previousLayers, normalizedLayers);
+            bool previewNeedsRefresh = visibilityChanged && DoesLayerVisibilityChangeAffectCurrentPreview(previousLayers, normalizedLayers);
             documentLayers = normalizedLayers;
             activeLayerId = NormalizeLayerIdValue(nextActiveLayerId);
             EnsureObjectLayerAssignments();
             PruneInvisibleLayerInteractionState();
-            delayCommentAndSelectionOverlayUntilPreviewReady = visibilityChanged;
-            RebuildPageStatusesFromCurrentModel();
-            ShowRedactPreview();
-            UpdateCurrentPageObjectsMarker();
+            delayCommentAndSelectionOverlayUntilPreviewReady = previewNeedsRefresh;
+            if (previewNeedsRefresh)
+            {
+                ShowRedactPreview();
+            }
             RefreshLayersTab();
             pagesListView?.Invalidate();
             thumbnailsListView?.Invalidate();
@@ -1816,6 +1822,48 @@ namespace AnonPDF
             }
 
             return false;
+        }
+
+        private bool DoesLayerVisibilityChangeAffectCurrentPreview(IEnumerable<LayerDefinition> previousLayers, IEnumerable<LayerDefinition> nextLayers)
+        {
+            if (currentPage <= 0)
+            {
+                return false;
+            }
+
+            var previousVisibility = (previousLayers ?? Enumerable.Empty<LayerDefinition>())
+                .Where(layer => layer != null)
+                .ToDictionary(layer => NormalizeLayerIdValue(layer.Id), layer => layer.IsVisible, StringComparer.OrdinalIgnoreCase);
+
+            var changedLayerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (LayerDefinition layer in nextLayers ?? Enumerable.Empty<LayerDefinition>())
+            {
+                if (layer == null)
+                {
+                    continue;
+                }
+
+                string layerId = NormalizeLayerIdValue(layer.Id);
+                bool oldVisible = previousVisibility.TryGetValue(layerId, out bool previousValue) ? previousValue : true;
+                if (oldVisible != layer.IsVisible)
+                {
+                    changedLayerIds.Add(layerId);
+                }
+            }
+
+            if (changedLayerIds.Count == 0)
+            {
+                return false;
+            }
+
+            return redactionBlocks.Any(block =>
+                       block != null &&
+                       block.PageNumber == currentPage &&
+                       changedLayerIds.Contains(NormalizeLayerIdValue(block.LayerId)))
+                   || commentAnnotations.Any(comment =>
+                       comment != null &&
+                       comment.PageNumber == currentPage &&
+                       changedLayerIds.Contains(NormalizeLayerIdValue(comment.LayerId)));
         }
 
         private void RefreshLayersTab()
@@ -12300,6 +12348,7 @@ namespace AnonPDF
             documentLayers = new List<LayerDefinition>();
             activeLayerId = DefaultLayerId;
             EnsureSystemLayers();
+            RefreshLayersTab();
             PdfTextSearcher.ClearCache();
             signaturesToRemove.Clear();
             hasCustomSignatureSelection = false;
@@ -15156,7 +15205,6 @@ namespace AnonPDF
             {
                 activeLayerId = DefaultLayerId;
             }
-            RefreshLayersTab();
         }
 
         private static List<LayerDefinition> NormalizeLayerDefinitions(IEnumerable<LayerDefinition> layers)
@@ -20706,21 +20754,7 @@ namespace AnonPDF
                     pdfCanvas.SetLineWidth(strokeWidth);
                     pdfCanvas.SetLineJoinStyle(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.LineJoinStyle.ROUND);
                     pdfCanvas.SetLineCapStyle(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.LineCapStyle.ROUND);
-                    switch (strokeKind)
-                    {
-                        case VectorShapeStrokeKind.Dash:
-                            pdfCanvas.SetLineDash(6f, 4f);
-                            break;
-                        case VectorShapeStrokeKind.Dot:
-                            pdfCanvas.SetLineDash(1.5f, 3f);
-                            break;
-                        case VectorShapeStrokeKind.DashDot:
-                            pdfCanvas.SetLineDash(new float[] { 6f, 3f, 1.5f, 3f }, 0f);
-                            break;
-                        case VectorShapeStrokeKind.DashDotDot:
-                            pdfCanvas.SetLineDash(new float[] { 6f, 3f, 1.5f, 3f, 1.5f, 3f }, 0f);
-                            break;
-                    }
+                    ApplyVectorStrokeDashPattern(pdfCanvas, strokeKind, strokeWidth);
                 }
 
                 if (isClosed && pdfPoints.Count >= 3)
@@ -20788,6 +20822,34 @@ namespace AnonPDF
                 }
 
                 pdfCanvas.RestoreState();
+            }
+        }
+
+        private static void ApplyVectorStrokeDashPattern(
+            iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
+            VectorShapeStrokeKind strokeKind,
+            float strokeWidth)
+        {
+            if (pdfCanvas == null || strokeKind == VectorShapeStrokeKind.Solid)
+            {
+                return;
+            }
+
+            float unit = Math.Max(1f, strokeWidth);
+            switch (strokeKind)
+            {
+                case VectorShapeStrokeKind.Dash:
+                    pdfCanvas.SetLineDash(new float[] { 4f * unit, 2f * unit }, 0f);
+                    break;
+                case VectorShapeStrokeKind.Dot:
+                    pdfCanvas.SetLineDash(new float[] { unit, 2f * unit }, 0f);
+                    break;
+                case VectorShapeStrokeKind.DashDot:
+                    pdfCanvas.SetLineDash(new float[] { 4f * unit, 2f * unit, unit, 2f * unit }, 0f);
+                    break;
+                case VectorShapeStrokeKind.DashDotDot:
+                    pdfCanvas.SetLineDash(new float[] { 4f * unit, 2f * unit, unit, 2f * unit, unit, 2f * unit }, 0f);
+                    break;
             }
         }
 
@@ -24391,6 +24453,7 @@ namespace AnonPDF
                     documentLayers = NormalizeLayerDefinitions(layersJson);
                     activeLayerId = NormalizeLayerIdValue(activeLayerIdJson);
                     EnsureObjectLayerAssignments();
+                    RefreshLayersTab();
                     LoadProjectObjectLayerOrder(projectData.ObjectLayers);
 
                     pageRotationOffsets = rotationOffsetsJson
