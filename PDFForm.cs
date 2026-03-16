@@ -408,8 +408,12 @@ namespace AnonPDF
         private sealed class ObjectClipboardSnapshot
         {
             public RectangleF SourceBounds { get; set; }
+            public float SourcePageWidth { get; set; }
+            public float SourcePageHeight { get; set; }
             public List<ObjectClipboardItem> Items { get; } = new List<ObjectClipboardItem>();
         }
+
+        private const string AppObjectClipboardFormat = "AnonPDFPro.Objects";
 
         private sealed class GroupMoveEntry
         {
@@ -4556,8 +4560,9 @@ namespace AnonPDF
             return orderedSelection;
         }
 
-        private bool TryCopySelectedObjectsToInternalClipboard()
+        private bool TryBuildObjectClipboardSnapshot(out ObjectClipboardSnapshot snapshot)
         {
+            snapshot = null;
             if (pdf == null || numPages <= 0)
             {
                 return false;
@@ -4591,10 +4596,15 @@ namespace AnonPDF
                 return false;
             }
 
-            var snapshot = new ObjectClipboardSnapshot
+            snapshot = new ObjectClipboardSnapshot
             {
                 SourceBounds = RectangleF.FromLTRB(minX, minY, maxX, maxY)
             };
+            var sourcePageSize = GetPageSizeWithOffset(currentPage);
+            snapshot.SourcePageWidth = sourcePageSize.Width;
+            snapshot.SourcePageHeight = sourcePageSize.Height;
+
+            RectangleF snapshotSourceBounds = snapshot.SourceBounds;
 
             foreach (object selectedObject in selectedObjects)
             {
@@ -4604,8 +4614,8 @@ namespace AnonPDF
                     {
                         Type = ObjectClipboardItemType.Text,
                         Bounds = new RectangleF(
-                            textAnnotation.AnnotationBounds.X - snapshot.SourceBounds.X,
-                            textAnnotation.AnnotationBounds.Y - snapshot.SourceBounds.Y,
+                            textAnnotation.AnnotationBounds.X - snapshotSourceBounds.X,
+                            textAnnotation.AnnotationBounds.Y - snapshotSourceBounds.Y,
                             textAnnotation.AnnotationBounds.Width,
                             textAnnotation.AnnotationBounds.Height),
                         Text = new TextAnnotation
@@ -4634,8 +4644,8 @@ namespace AnonPDF
                     {
                         Type = ObjectClipboardItemType.Raster,
                         Bounds = new RectangleF(
-                            rasterObject.Bounds.X - snapshot.SourceBounds.X,
-                            rasterObject.Bounds.Y - snapshot.SourceBounds.Y,
+                            rasterObject.Bounds.X - snapshotSourceBounds.X,
+                            rasterObject.Bounds.Y - snapshotSourceBounds.Y,
                             rasterObject.Bounds.Width,
                             rasterObject.Bounds.Height),
                         Raster = new RasterObject
@@ -4664,11 +4674,11 @@ namespace AnonPDF
                         {
                             LayerId = NormalizeLayerIdValue(arrowObject.LayerId),
                             Start = new PointF(
-                                arrowObject.Start.X - snapshot.SourceBounds.X,
-                                arrowObject.Start.Y - snapshot.SourceBounds.Y),
+                                arrowObject.Start.X - snapshotSourceBounds.X,
+                                arrowObject.Start.Y - snapshotSourceBounds.Y),
                             End = new PointF(
-                                arrowObject.End.X - snapshot.SourceBounds.X,
-                                arrowObject.End.Y - snapshot.SourceBounds.Y),
+                                arrowObject.End.X - snapshotSourceBounds.X,
+                                arrowObject.End.Y - snapshotSourceBounds.Y),
                             LineColorArgb = arrowObject.LineColorArgb,
                             Thickness = NormalizeArrowThickness(arrowObject.Thickness),
                             BorderColorArgb = arrowObject.BorderColorArgb,
@@ -4691,7 +4701,7 @@ namespace AnonPDF
                             LayerId = NormalizeLayerIdValue(vectorShapeObject.LayerId),
                             ShapeType = vectorShapeObject.ShapeType,
                             Points = (vectorShapeObject.Points ?? new List<PointF>())
-                                .Select(point => new PointF(point.X - snapshot.SourceBounds.X, point.Y - snapshot.SourceBounds.Y))
+                                .Select(point => new PointF(point.X - snapshotSourceBounds.X, point.Y - snapshotSourceBounds.Y))
                                 .ToList(),
                             StrokeColorArgb = vectorShapeObject.StrokeColorArgb,
                             StrokeWidth = NormalizeVectorStrokeWidth(vectorShapeObject.StrokeWidth),
@@ -4710,14 +4720,499 @@ namespace AnonPDF
 
             if (snapshot.Items.Count == 0)
             {
+                snapshot = null;
                 return false;
             }
 
+            return true;
+        }
+
+        private void ClearInternalObjectClipboard()
+        {
+            objectClipboardSnapshot = null;
+            objectClipboardPasteCount = 0;
+            preferObjectClipboardPaste = false;
+            clipboardSequenceAtLastInternalObjectCopy = 0;
+        }
+
+        private void SetInternalObjectClipboardFallback(ObjectClipboardSnapshot snapshot)
+        {
             objectClipboardSnapshot = snapshot;
             objectClipboardPasteCount = 0;
-            preferObjectClipboardPaste = true;
+            preferObjectClipboardPaste = snapshot != null;
             clipboardSequenceAtLastInternalObjectCopy = TryGetClipboardSequenceNumberSafe();
+        }
+
+        private bool TryCopySelectedObjectsToClipboard()
+        {
+            if (!TryBuildObjectClipboardSnapshot(out ObjectClipboardSnapshot snapshot) || snapshot == null)
+            {
+                return false;
+            }
+
+            if (TryWriteObjectSnapshotToSystemClipboard(snapshot))
+            {
+                ClearInternalObjectClipboard();
+                preferObjectClipboardPaste = true;
+                clipboardSequenceAtLastInternalObjectCopy = TryGetClipboardSequenceNumberSafe();
+                return true;
+            }
+
+            SetInternalObjectClipboardFallback(snapshot);
             return true;
+        }
+
+        private bool TryWriteObjectSnapshotToSystemClipboard(ObjectClipboardSnapshot snapshot)
+        {
+            if (snapshot == null || snapshot.Items.Count == 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                string serialized = SerializeObjectClipboardSnapshot(snapshot);
+                if (string.IsNullOrWhiteSpace(serialized))
+                {
+                    return false;
+                }
+
+                var dataObject = new DataObject();
+                dataObject.SetData(AppObjectClipboardFormat, false, serialized);
+                Clipboard.SetDataObject(dataObject, true);
+
+                ObjectClipboardSnapshot verification;
+                return TryReadObjectSnapshotFromSystemClipboard(out verification) &&
+                       verification != null &&
+                       verification.Items.Count > 0;
+            }
+            catch (ExternalException)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Object clipboard system copy failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryReadObjectSnapshotFromSystemClipboard(out ObjectClipboardSnapshot snapshot)
+        {
+            snapshot = null;
+
+            try
+            {
+                IDataObject clipboardData = Clipboard.GetDataObject();
+                if (clipboardData == null || !clipboardData.GetDataPresent(AppObjectClipboardFormat))
+                {
+                    return false;
+                }
+
+                object rawData = clipboardData.GetData(AppObjectClipboardFormat);
+                string serialized = rawData as string;
+                if (string.IsNullOrWhiteSpace(serialized))
+                {
+                    return false;
+                }
+
+                snapshot = DeserializeObjectClipboardSnapshot(serialized);
+                return snapshot != null && snapshot.Items.Count > 0;
+            }
+            catch (ExternalException)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Object clipboard system read failed: " + ex.Message);
+                snapshot = null;
+                return false;
+            }
+        }
+
+        private static string SerializeObjectClipboardSnapshot(ObjectClipboardSnapshot snapshot)
+        {
+            if (snapshot == null)
+            {
+                return null;
+            }
+
+            var root = new JObject
+            {
+                ["Version"] = 1,
+                ["SourceBounds"] = SerializeRectangleF(snapshot.SourceBounds),
+                ["SourcePageWidth"] = snapshot.SourcePageWidth,
+                ["SourcePageHeight"] = snapshot.SourcePageHeight
+            };
+
+            var items = new JArray();
+            foreach (ObjectClipboardItem item in snapshot.Items.Where(i => i != null))
+            {
+                var itemJson = new JObject
+                {
+                    ["Type"] = item.Type.ToString()
+                };
+
+                if (item.Type == ObjectClipboardItemType.Text)
+                {
+                    itemJson["Bounds"] = SerializeRectangleF(item.Bounds);
+                    itemJson["Text"] = SerializeTextAnnotationForClipboard(item.Text);
+                }
+                else if (item.Type == ObjectClipboardItemType.Raster)
+                {
+                    itemJson["Bounds"] = SerializeRectangleF(item.Bounds);
+                    itemJson["Raster"] = SerializeRasterObjectForClipboard(item.Raster);
+                }
+                else if (item.Type == ObjectClipboardItemType.Arrow)
+                {
+                    itemJson["Arrow"] = SerializeArrowObjectForClipboard(item.Arrow);
+                }
+                else if (item.Type == ObjectClipboardItemType.VectorShape)
+                {
+                    itemJson["VectorShape"] = SerializeVectorShapeObjectForClipboard(item.VectorShape);
+                }
+
+                items.Add(itemJson);
+            }
+
+            root["Items"] = items;
+            return root.ToString(Formatting.None);
+        }
+
+        private static ObjectClipboardSnapshot DeserializeObjectClipboardSnapshot(string serialized)
+        {
+            if (string.IsNullOrWhiteSpace(serialized))
+            {
+                return null;
+            }
+
+            JObject root = JObject.Parse(serialized);
+            var snapshot = new ObjectClipboardSnapshot
+            {
+                SourceBounds = DeserializeRectangleF(root["SourceBounds"]),
+                SourcePageWidth = root.Value<float?>("SourcePageWidth") ?? 0f,
+                SourcePageHeight = root.Value<float?>("SourcePageHeight") ?? 0f
+            };
+
+            foreach (JObject itemJson in root["Items"] as JArray ?? new JArray())
+            {
+                if (itemJson == null)
+                {
+                    continue;
+                }
+
+                string typeText = itemJson.Value<string>("Type");
+                ObjectClipboardItemType type;
+                if (!Enum.TryParse(typeText, true, out type))
+                {
+                    continue;
+                }
+
+                var item = new ObjectClipboardItem
+                {
+                    Type = type
+                };
+
+                switch (type)
+                {
+                    case ObjectClipboardItemType.Text:
+                        item.Bounds = DeserializeRectangleF(itemJson["Bounds"]);
+                        item.Text = DeserializeTextAnnotationForClipboard(itemJson["Text"] as JObject);
+                        break;
+                    case ObjectClipboardItemType.Raster:
+                        item.Bounds = DeserializeRectangleF(itemJson["Bounds"]);
+                        item.Raster = DeserializeRasterObjectForClipboard(itemJson["Raster"] as JObject);
+                        break;
+                    case ObjectClipboardItemType.Arrow:
+                        item.Arrow = DeserializeArrowObjectForClipboard(itemJson["Arrow"] as JObject);
+                        break;
+                    case ObjectClipboardItemType.VectorShape:
+                        item.VectorShape = DeserializeVectorShapeObjectForClipboard(itemJson["VectorShape"] as JObject);
+                        break;
+                }
+
+                if (item.Text != null || item.Raster != null || item.Arrow != null || item.VectorShape != null)
+                {
+                    snapshot.Items.Add(item);
+                }
+            }
+
+            return snapshot;
+        }
+
+        private static JObject SerializeRectangleF(RectangleF rect)
+        {
+            return new JObject
+            {
+                ["X"] = rect.X,
+                ["Y"] = rect.Y,
+                ["Width"] = rect.Width,
+                ["Height"] = rect.Height
+            };
+        }
+
+        private static RectangleF DeserializeRectangleF(JToken token)
+        {
+            if (!(token is JObject rect))
+            {
+                return RectangleF.Empty;
+            }
+
+            return new RectangleF(
+                rect.Value<float?>("X") ?? 0f,
+                rect.Value<float?>("Y") ?? 0f,
+                rect.Value<float?>("Width") ?? 0f,
+                rect.Value<float?>("Height") ?? 0f);
+        }
+
+        private static JObject SerializePointF(PointF point)
+        {
+            return new JObject
+            {
+                ["X"] = point.X,
+                ["Y"] = point.Y
+            };
+        }
+
+        private static PointF DeserializePointF(JToken token)
+        {
+            if (!(token is JObject point))
+            {
+                return PointF.Empty;
+            }
+
+            return new PointF(
+                point.Value<float?>("X") ?? 0f,
+                point.Value<float?>("Y") ?? 0f);
+        }
+
+        private static JObject SerializeFont(Font font)
+        {
+            Font source = font ?? SystemFonts.DefaultFont;
+            return new JObject
+            {
+                ["Family"] = source.FontFamily.Name,
+                ["Size"] = source.Size,
+                ["Style"] = (int)source.Style
+            };
+        }
+
+        private static Font DeserializeFont(JObject fontJson)
+        {
+            if (fontJson == null)
+            {
+                return (Font)SystemFonts.DefaultFont.Clone();
+            }
+
+            string family = fontJson.Value<string>("Family") ?? SystemFonts.DefaultFont.FontFamily.Name;
+            float size = fontJson.Value<float?>("Size") ?? SystemFonts.DefaultFont.Size;
+            FontStyle style = (FontStyle)(fontJson.Value<int?>("Style") ?? (int)SystemFonts.DefaultFont.Style);
+
+            try
+            {
+                return new Font(family, size, style);
+            }
+            catch
+            {
+                return (Font)SystemFonts.DefaultFont.Clone();
+            }
+        }
+
+        private static JObject SerializeTextAnnotationForClipboard(TextAnnotation text)
+        {
+            if (text == null)
+            {
+                return null;
+            }
+
+            return new JObject
+            {
+                ["AnnotationText"] = text.AnnotationText ?? string.Empty,
+                ["AnnotationFont"] = SerializeFont(text.AnnotationFont),
+                ["AnnotationColorArgb"] = text.AnnotationColor.ToArgb(),
+                ["AnnotationBackgroundColorArgb"] = text.AnnotationBackgroundColorArgb,
+                ["AnnotationBorderColorArgb"] = text.AnnotationBorderColorArgb,
+                ["AnnotationBorderWidth"] = text.AnnotationBorderWidth,
+                ["AnnotationFrameMargin"] = text.AnnotationFrameMargin,
+                ["AnnotationContentMode"] = text.AnnotationContentMode,
+                ["AnnotationRichText"] = text.AnnotationRichText,
+                ["AnnotationAlignment"] = (int)text.AnnotationAlignment,
+                ["AnnotationRotation"] = text.AnnotationRotation,
+                ["AnnotationIsLocked"] = text.AnnotationIsLocked
+            };
+        }
+
+        private static TextAnnotation DeserializeTextAnnotationForClipboard(JObject textJson)
+        {
+            if (textJson == null)
+            {
+                return null;
+            }
+
+            return new TextAnnotation
+            {
+                AnnotationText = textJson.Value<string>("AnnotationText") ?? string.Empty,
+                AnnotationFont = DeserializeFont(textJson["AnnotationFont"] as JObject),
+                AnnotationColor = System.Drawing.Color.FromArgb(textJson.Value<int?>("AnnotationColorArgb") ?? System.Drawing.Color.Black.ToArgb()),
+                AnnotationBackgroundColorArgb = textJson.Value<int?>("AnnotationBackgroundColorArgb") ?? System.Drawing.Color.Transparent.ToArgb(),
+                AnnotationBorderColorArgb = textJson.Value<int?>("AnnotationBorderColorArgb") ?? System.Drawing.Color.Black.ToArgb(),
+                AnnotationBorderWidth = NormalizeAnnotationBorderWidth(textJson.Value<float?>("AnnotationBorderWidth") ?? 0f),
+                AnnotationFrameMargin = NormalizeAnnotationFrameMargin(textJson.Value<float?>("AnnotationFrameMargin") ?? 0f),
+                AnnotationContentMode = textJson.Value<string>("AnnotationContentMode") ?? "plain",
+                AnnotationRichText = textJson.Value<string>("AnnotationRichText"),
+                AnnotationAlignment = (System.Windows.Forms.HorizontalAlignment)(textJson.Value<int?>("AnnotationAlignment") ?? (int)System.Windows.Forms.HorizontalAlignment.Left),
+                AnnotationRotation = textJson.Value<int?>("AnnotationRotation") ?? 0,
+                AnnotationIsLocked = textJson.Value<bool?>("AnnotationIsLocked") ?? false
+            };
+        }
+
+        private static JObject SerializeRasterObjectForClipboard(RasterObject raster)
+        {
+            if (raster == null)
+            {
+                return null;
+            }
+
+            return new JObject
+            {
+                ["Rotation"] = raster.Rotation,
+                ["Opacity"] = raster.Opacity,
+                ["TransparentBackground"] = raster.TransparentBackground,
+                ["LockAspect"] = raster.LockAspect,
+                ["IsLocked"] = raster.IsLocked,
+                ["SourceType"] = raster.SourceType,
+                ["FilePath"] = raster.FilePath,
+                ["MimeType"] = raster.MimeType,
+                ["EmbeddedBytesBase64"] = raster.EmbeddedBytes == null ? null : Convert.ToBase64String(raster.EmbeddedBytes)
+            };
+        }
+
+        private static RasterObject DeserializeRasterObjectForClipboard(JObject rasterJson)
+        {
+            if (rasterJson == null)
+            {
+                return null;
+            }
+
+            string embeddedBase64 = rasterJson.Value<string>("EmbeddedBytesBase64");
+            byte[] embeddedBytes = null;
+            if (!string.IsNullOrWhiteSpace(embeddedBase64))
+            {
+                try
+                {
+                    embeddedBytes = Convert.FromBase64String(embeddedBase64);
+                }
+                catch
+                {
+                    embeddedBytes = null;
+                }
+            }
+
+            return new RasterObject
+            {
+                Rotation = rasterJson.Value<int?>("Rotation") ?? 0,
+                Opacity = rasterJson.Value<float?>("Opacity") ?? 1f,
+                TransparentBackground = rasterJson.Value<bool?>("TransparentBackground") ?? false,
+                LockAspect = rasterJson.Value<bool?>("LockAspect") ?? false,
+                IsLocked = rasterJson.Value<bool?>("IsLocked") ?? false,
+                SourceType = rasterJson.Value<string>("SourceType"),
+                FilePath = rasterJson.Value<string>("FilePath"),
+                MimeType = rasterJson.Value<string>("MimeType"),
+                EmbeddedBytes = embeddedBytes
+            };
+        }
+
+        private static JObject SerializeArrowObjectForClipboard(ArrowObject arrow)
+        {
+            if (arrow == null)
+            {
+                return null;
+            }
+
+            return new JObject
+            {
+                ["Start"] = SerializePointF(arrow.Start),
+                ["End"] = SerializePointF(arrow.End),
+                ["LineColorArgb"] = arrow.LineColorArgb,
+                ["Thickness"] = arrow.Thickness,
+                ["BorderColorArgb"] = arrow.BorderColorArgb,
+                ["BorderWidth"] = arrow.BorderWidth,
+                ["HeadLength"] = arrow.HeadLength,
+                ["HeadWidth"] = arrow.HeadWidth,
+                ["IsLocked"] = arrow.IsLocked
+            };
+        }
+
+        private static ArrowObject DeserializeArrowObjectForClipboard(JObject arrowJson)
+        {
+            if (arrowJson == null)
+            {
+                return null;
+            }
+
+            return new ArrowObject
+            {
+                Start = DeserializePointF(arrowJson["Start"]),
+                End = DeserializePointF(arrowJson["End"]),
+                LineColorArgb = arrowJson.Value<int?>("LineColorArgb") ?? System.Drawing.Color.Red.ToArgb(),
+                Thickness = NormalizeArrowThickness(arrowJson.Value<float?>("Thickness") ?? DefaultArrowThickness),
+                BorderColorArgb = arrowJson.Value<int?>("BorderColorArgb") ?? System.Drawing.Color.Black.ToArgb(),
+                BorderWidth = NormalizeArrowBorderWidth(arrowJson.Value<float?>("BorderWidth") ?? 0f),
+                HeadLength = NormalizeArrowHeadLength(arrowJson.Value<float?>("HeadLength") ?? DefaultArrowHeadLength),
+                HeadWidth = NormalizeArrowHeadWidth(arrowJson.Value<float?>("HeadWidth") ?? DefaultArrowHeadWidth),
+                IsLocked = arrowJson.Value<bool?>("IsLocked") ?? false
+            };
+        }
+
+        private static JObject SerializeVectorShapeObjectForClipboard(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null)
+            {
+                return null;
+            }
+
+            return new JObject
+            {
+                ["ShapeType"] = vectorShape.ShapeType,
+                ["Points"] = new JArray((vectorShape.Points ?? new List<PointF>()).Select(SerializePointF)),
+                ["StrokeColorArgb"] = vectorShape.StrokeColorArgb,
+                ["StrokeWidth"] = vectorShape.StrokeWidth,
+                ["FillColorArgb"] = vectorShape.FillColorArgb,
+                ["FillPatternColorArgb"] = vectorShape.FillPatternColorArgb,
+                ["FillOpacity"] = vectorShape.FillOpacity,
+                ["StrokeStyle"] = vectorShape.StrokeStyle,
+                ["FillPattern"] = vectorShape.FillPattern,
+                ["StartLineEnding"] = vectorShape.StartLineEnding,
+                ["EndLineEnding"] = vectorShape.EndLineEnding,
+                ["IsLocked"] = vectorShape.IsLocked
+            };
+        }
+
+        private static VectorShapeObject DeserializeVectorShapeObjectForClipboard(JObject vectorJson)
+        {
+            if (vectorJson == null)
+            {
+                return null;
+            }
+
+            return new VectorShapeObject
+            {
+                ShapeType = vectorJson.Value<string>("ShapeType"),
+                Points = (vectorJson["Points"] as JArray ?? new JArray())
+                    .Select(DeserializePointF)
+                    .ToList(),
+                StrokeColorArgb = vectorJson.Value<int?>("StrokeColorArgb") ?? System.Drawing.Color.Blue.ToArgb(),
+                StrokeWidth = NormalizeVectorStrokeWidth(vectorJson.Value<float?>("StrokeWidth") ?? 2f),
+                FillColorArgb = vectorJson.Value<int?>("FillColorArgb") ?? System.Drawing.Color.Gold.ToArgb(),
+                FillPatternColorArgb = vectorJson.Value<int?>("FillPatternColorArgb") ?? System.Drawing.Color.Transparent.ToArgb(),
+                FillOpacity = NormalizeVectorFillOpacity(vectorJson.Value<float?>("FillOpacity") ?? 0.18f),
+                StrokeStyle = vectorJson.Value<string>("StrokeStyle") ?? "solid",
+                FillPattern = vectorJson.Value<string>("FillPattern") ?? "solid",
+                StartLineEnding = vectorJson.Value<string>("StartLineEnding") ?? "None",
+                EndLineEnding = vectorJson.Value<string>("EndLineEnding") ?? "None",
+                IsLocked = vectorJson.Value<bool?>("IsLocked") ?? false
+            };
         }
 
         private void CutSelectedObjectsFromContext(bool useGroupSelection, object hitObject = null)
@@ -4729,7 +5224,7 @@ namespace AnonPDF
                     return;
                 }
 
-                if (!TryCopySelectedObjectsToInternalClipboard())
+                if (!TryCopySelectedObjectsToClipboard())
                 {
                     return;
                 }
@@ -4743,7 +5238,7 @@ namespace AnonPDF
                 return;
             }
 
-            if (!TryCopySelectedObjectsToInternalClipboard())
+            if (!TryCopySelectedObjectsToClipboard())
             {
                 return;
             }
@@ -4777,6 +5272,19 @@ namespace AnonPDF
             }
 
             return currentSequence != clipboardSequenceAtLastInternalObjectCopy;
+        }
+
+        private bool TryPasteObjectsFromSystemClipboard()
+        {
+            ObjectClipboardSnapshot snapshot;
+            if (!TryReadObjectSnapshotFromSystemClipboard(out snapshot) || snapshot == null)
+            {
+                return false;
+            }
+
+            preferObjectClipboardPaste = true;
+            clipboardSequenceAtLastInternalObjectCopy = TryGetClipboardSequenceNumberSafe();
+            return TryPasteObjectsFromSnapshot(snapshot);
         }
 
         private bool BringTextAnnotationToFront(TextAnnotation annotation)
@@ -4872,9 +5380,9 @@ namespace AnonPDF
             menu.Show(pdfViewer, location);
         }
 
-        private bool TryPasteObjectsFromInternalClipboard()
+        private bool TryPasteObjectsFromSnapshot(ObjectClipboardSnapshot snapshot)
         {
-            if (objectClipboardSnapshot == null || objectClipboardSnapshot.Items.Count == 0)
+            if (snapshot == null || snapshot.Items.Count == 0)
             {
                 return false;
             }
@@ -4890,13 +5398,18 @@ namespace AnonPDF
             }
 
             bool isSingleRasterPaste =
-                objectClipboardSnapshot.Items.Count == 1 &&
-                objectClipboardSnapshot.Items[0] != null &&
-                objectClipboardSnapshot.Items[0].Type == ObjectClipboardItemType.Raster &&
-                objectClipboardSnapshot.Items[0].Raster != null;
+                snapshot.Items.Count == 1 &&
+                snapshot.Items[0] != null &&
+                snapshot.Items[0].Type == ObjectClipboardItemType.Raster &&
+                snapshot.Items[0].Raster != null;
 
-            float baseX = objectClipboardSnapshot.SourceBounds.X;
-            float baseY = objectClipboardSnapshot.SourceBounds.Y;
+            var targetPageSize = GetPageSizeWithOffset(currentPage);
+            float sourcePageWidth = snapshot.SourcePageWidth > 0f ? snapshot.SourcePageWidth : targetPageSize.Width;
+            float sourcePageHeight = snapshot.SourcePageHeight > 0f ? snapshot.SourcePageHeight : targetPageSize.Height;
+            float relativeBaseX = sourcePageWidth > 0f ? snapshot.SourceBounds.X / sourcePageWidth : 0f;
+            float relativeBaseY = sourcePageHeight > 0f ? snapshot.SourceBounds.Y / sourcePageHeight : 0f;
+            float baseX = targetPageSize.Width * relativeBaseX;
+            float baseY = targetPageSize.Height * relativeBaseY;
             DateTime now = DateTime.UtcNow;
             string targetLayerId = GetResolvedActiveLayerId();
 
@@ -4905,7 +5418,7 @@ namespace AnonPDF
             var pastedArrowObjects = new List<ArrowObject>();
             var pastedVectorShapes = new List<VectorShapeObject>();
 
-            foreach (ObjectClipboardItem item in objectClipboardSnapshot.Items)
+            foreach (ObjectClipboardItem item in snapshot.Items)
             {
                 if (item == null)
                 {
@@ -5209,6 +5722,11 @@ namespace AnonPDF
             CollapseGroupSelectionToSingleIfNeeded();
             pdfViewer?.Invalidate();
             return true;
+        }
+
+        private bool TryPasteObjectsFromInternalClipboard()
+        {
+            return TryPasteObjectsFromSnapshot(objectClipboardSnapshot);
         }
 
         private void ResetGroupMoveState()
@@ -20375,7 +20893,7 @@ namespace AnonPDF
 
                 var groupMenu = new ContextMenuStrip();
                 var copySelectedItem = new ToolStripMenuItem(Resources.Menu_CopyToClipboard);
-                copySelectedItem.Click += (_, __) => TryCopySelectedObjectsToInternalClipboard();
+                copySelectedItem.Click += (_, __) => TryCopySelectedObjectsToClipboard();
                 groupMenu.Items.Add(copySelectedItem);
 
                 var cutSelectedItem = new ToolStripMenuItem(GetCutObjectContextMenuText());
@@ -20440,7 +20958,7 @@ namespace AnonPDF
             }
 
             var copyObjectItem = new ToolStripMenuItem(Resources.Menu_CopyToClipboard);
-            copyObjectItem.Click += (_, __) => TryCopySelectedObjectsToInternalClipboard();
+            copyObjectItem.Click += (_, __) => TryCopySelectedObjectsToClipboard();
             menu.Items.Add(copyObjectItem);
             var cutObjectItem = new ToolStripMenuItem(GetCutObjectContextMenuText());
             cutObjectItem.Click += (_, __) => CutSelectedObjectsFromContext(useGroupSelection: false, hitObject: hitObject);
@@ -27506,7 +28024,7 @@ namespace AnonPDF
                     return base.ProcessCmdKey(ref msg, keyData);
                 }
 
-                if (TryCopySelectedObjectsToInternalClipboard())
+                if (TryCopySelectedObjectsToClipboard())
                 {
                     return true;
                 }
@@ -27523,6 +28041,12 @@ namespace AnonPDF
                 }
 
                 BeginUndoCapture("Paste object");
+                if (TryPasteObjectsFromSystemClipboard())
+                {
+                    CommitUndoCapture();
+                    return true;
+                }
+
                 bool externalClipboardContentAvailable = IsExternalClipboardContentAvailable();
                 if (HasNewerExternalClipboardData(externalClipboardContentAvailable) &&
                     TryHandleGlobalPasteShortcut())
@@ -27656,7 +28180,8 @@ namespace AnonPDF
                     return false;
                 }
 
-                return clipboardData.GetDataPresent(DataFormats.UnicodeText) ||
+                return clipboardData.GetDataPresent(AppObjectClipboardFormat) ||
+                       clipboardData.GetDataPresent(DataFormats.UnicodeText) ||
                        clipboardData.GetDataPresent(DataFormats.Text) ||
                        clipboardData.GetDataPresent(DataFormats.Bitmap) ||
                        clipboardData.GetDataPresent(DataFormats.EnhancedMetafile) ||
@@ -29287,7 +29812,7 @@ namespace AnonPDF
             menu.Items.Add(BuildMoveToLayerMenuItem(target.LayerId, targetLayerId => MoveObjectToLayerFromContext(target, targetLayerId)));
             menu.Items.Add(new ToolStripSeparator());
             var copyObjectItem = new ToolStripMenuItem(Resources.Menu_CopyToClipboard);
-            copyObjectItem.Click += (_, __) => TryCopySelectedObjectsToInternalClipboard();
+            copyObjectItem.Click += (_, __) => TryCopySelectedObjectsToClipboard();
             menu.Items.Add(copyObjectItem);
             var cutObjectItem = new ToolStripMenuItem(GetCutObjectContextMenuText());
             cutObjectItem.Click += (_, __) => CutSelectedObjectsFromContext(useGroupSelection: false, hitObject: target);
@@ -36489,6 +37014,12 @@ namespace AnonPDF
         private void PasteObjectFromClipboardToolStripMenuItem_Click(object sender, EventArgs e)
         {
             BeginUndoCapture("Paste object");
+            if (TryPasteObjectsFromSystemClipboard())
+            {
+                CommitUndoCapture();
+                return;
+            }
+
             bool externalClipboardContentAvailable = IsExternalClipboardContentAvailable();
             if (HasNewerExternalClipboardData(externalClipboardContentAvailable) &&
                 TryHandleGlobalPasteShortcut())
@@ -36545,7 +37076,7 @@ namespace AnonPDF
 
         private void CopyToClipboardToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (TryCopySelectedObjectsToInternalClipboard())
+            if (TryCopySelectedObjectsToClipboard())
             {
                 return;
             }
