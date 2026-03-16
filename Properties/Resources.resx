@@ -1801,6 +1801,18 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
     <value>Kreska</value>
   </data>
   <data name="UI_Button_RestoreSettings" xml:space="preserve">
+
     <value>Przywr&#243;&#263; ustawienia</value>
+
+  </data>
+
+  <data name="EditText_LabelBorderColor" xml:space="preserve">
+    <value>Kolor ramki</value>
+  </data>
+  <data name="EditText_LabelBorderWidth" xml:space="preserve">
+    <value>Grubo&#347;&#263; ramki</value>
+  </data>
+  <data name="EditText_LabelFrameMargin" xml:space="preserve">
+    <value>Margines ramki</value>
   </data>
 </root>

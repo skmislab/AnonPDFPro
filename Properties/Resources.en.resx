@@ -1801,6 +1801,18 @@ Close the application and run the installer now?</value>
     <value>Bar</value>
   </data>
   <data name="UI_Button_RestoreSettings" xml:space="preserve">
+
     <value>Restore settings</value>
+
+  </data>
+
+  <data name="EditText_LabelBorderColor" xml:space="preserve">
+    <value>Border color</value>
+  </data>
+  <data name="EditText_LabelBorderWidth" xml:space="preserve">
+    <value>Border width</value>
+  </data>
+  <data name="EditText_LabelFrameMargin" xml:space="preserve">
+    <value>Frame margin</value>
   </data>
 </root>

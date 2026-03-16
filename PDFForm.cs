@@ -349,8 +349,10 @@ namespace AnonPDF
         private const float DefaultArrowThickness = 3f;
         private const float DefaultArrowHeadLength = 18f;
         private const float DefaultArrowHeadWidth = 12f;
+        private const float DefaultArrowBorderWidth = 0f;
         private const int KeyboardViewportPanStep = 48;
         private readonly System.Drawing.Color DefaultArrowColor = System.Drawing.Color.Red;
+        private readonly System.Drawing.Color DefaultArrowBorderColor = System.Drawing.Color.Black;
         private const float SelectedObjectBorderWidth = 2f;
         private int vectorHandlePointIndex = -1;
         private float vectorRotationStartAngle;
@@ -540,6 +542,9 @@ namespace AnonPDF
             public Font AnnotationFont { get; set; }
             public System.Drawing.Color AnnotationColor { get; set; }
             public System.Drawing.Color AnnotationBackgroundColor { get; set; }
+            public System.Drawing.Color AnnotationBorderColor { get; set; }
+            public float AnnotationBorderWidth { get; set; }
+            public float AnnotationFrameMargin { get; set; }
             public bool IsRichTextMode { get; set; }
             public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
             public int AnnotationRotation { get; set; }
@@ -551,6 +556,9 @@ namespace AnonPDF
                     AnnotationFont = new Font("Arial", 12f),
                     AnnotationColor = System.Drawing.Color.Black,
                     AnnotationBackgroundColor = System.Drawing.Color.Transparent,
+                    AnnotationBorderColor = System.Drawing.Color.Black,
+                    AnnotationBorderWidth = 0f,
+                    AnnotationFrameMargin = 0f,
                     IsRichTextMode = false,
                     AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Left,
                     AnnotationRotation = 0
@@ -564,6 +572,9 @@ namespace AnonPDF
                     AnnotationFont = AnnotationFont == null ? null : (Font)AnnotationFont.Clone(),
                     AnnotationColor = AnnotationColor,
                     AnnotationBackgroundColor = AnnotationBackgroundColor,
+                    AnnotationBorderColor = AnnotationBorderColor,
+                    AnnotationBorderWidth = AnnotationBorderWidth,
+                    AnnotationFrameMargin = AnnotationFrameMargin,
                     IsRichTextMode = IsRichTextMode,
                     AnnotationAlignment = AnnotationAlignment,
                     AnnotationRotation = AnnotationRotation
@@ -631,7 +642,9 @@ namespace AnonPDF
         private sealed class ArrowDialogDefaults
         {
             public System.Drawing.Color ArrowColor { get; set; }
+            public System.Drawing.Color BorderColor { get; set; }
             public float ThicknessValue { get; set; }
+            public float BorderWidthValue { get; set; }
             public float HeadLengthValue { get; set; }
             public float HeadWidthValue { get; set; }
             public bool IsLocked { get; set; }
@@ -641,7 +654,9 @@ namespace AnonPDF
                 return new ArrowDialogDefaults
                 {
                     ArrowColor = System.Drawing.Color.Red,
+                    BorderColor = System.Drawing.Color.Black,
                     ThicknessValue = DefaultArrowThickness,
+                    BorderWidthValue = DefaultArrowBorderWidth,
                     HeadLengthValue = DefaultArrowHeadLength,
                     HeadWidthValue = DefaultArrowHeadWidth,
                     IsLocked = false
@@ -653,7 +668,9 @@ namespace AnonPDF
                 return new ArrowDialogDefaults
                 {
                     ArrowColor = ArrowColor,
+                    BorderColor = BorderColor,
                     ThicknessValue = ThicknessValue,
+                    BorderWidthValue = BorderWidthValue,
                     HeadLengthValue = HeadLengthValue,
                     HeadWidthValue = HeadWidthValue,
                     IsLocked = IsLocked
@@ -3554,6 +3571,9 @@ namespace AnonPDF
                 return;
             }
 
+            annotation.AnnotationBorderWidth = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth);
+            annotation.AnnotationFrameMargin = NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
+
             DateTime created = NormalizeUtcTimestamp(annotation.CreatedAtUtc);
             DateTime updated = NormalizeUtcTimestamp(annotation.UpdatedAtUtc);
 
@@ -4595,6 +4615,9 @@ namespace AnonPDF
                             AnnotationFont = CloneFontSafe(textAnnotation.AnnotationFont),
                             AnnotationColor = textAnnotation.AnnotationColor,
                             AnnotationBackgroundColorArgb = textAnnotation.AnnotationBackgroundColorArgb,
+                            AnnotationBorderColorArgb = textAnnotation.AnnotationBorderColorArgb,
+                            AnnotationBorderWidth = textAnnotation.AnnotationBorderWidth,
+                            AnnotationFrameMargin = textAnnotation.AnnotationFrameMargin,
                             AnnotationContentMode = textAnnotation.AnnotationContentMode,
                             AnnotationRichText = textAnnotation.AnnotationRichText,
                             AnnotationAlignment = textAnnotation.AnnotationAlignment,
@@ -4648,6 +4671,8 @@ namespace AnonPDF
                                 arrowObject.End.Y - snapshot.SourceBounds.Y),
                             LineColorArgb = arrowObject.LineColorArgb,
                             Thickness = NormalizeArrowThickness(arrowObject.Thickness),
+                            BorderColorArgb = arrowObject.BorderColorArgb,
+                            BorderWidth = NormalizeArrowBorderWidth(arrowObject.BorderWidth),
                             HeadLength = NormalizeArrowHeadLength(arrowObject.HeadLength),
                             HeadWidth = NormalizeArrowHeadWidth(arrowObject.HeadWidth),
                             IsLocked = arrowObject.IsLocked
@@ -4911,6 +4936,9 @@ namespace AnonPDF
                             AnnotationFont = CloneFontSafe(item.Text.AnnotationFont),
                             AnnotationColor = item.Text.AnnotationColor,
                             AnnotationBackgroundColorArgb = item.Text.AnnotationBackgroundColorArgb,
+                            AnnotationBorderColorArgb = item.Text.AnnotationBorderColorArgb,
+                            AnnotationBorderWidth = item.Text.AnnotationBorderWidth,
+                            AnnotationFrameMargin = item.Text.AnnotationFrameMargin,
                             AnnotationContentMode = item.Text.AnnotationContentMode,
                             AnnotationRichText = item.Text.AnnotationRichText,
                             AnnotationAlignment = item.Text.AnnotationAlignment,
@@ -4992,6 +5020,8 @@ namespace AnonPDF
                             End = new PointF(baseX + item.Arrow.End.X, baseY + item.Arrow.End.Y),
                             LineColorArgb = item.Arrow.LineColorArgb,
                             Thickness = NormalizeArrowThickness(item.Arrow.Thickness),
+                            BorderColorArgb = item.Arrow.BorderColorArgb,
+                            BorderWidth = NormalizeArrowBorderWidth(item.Arrow.BorderWidth),
                             HeadLength = NormalizeArrowHeadLength(item.Arrow.HeadLength),
                             HeadWidth = NormalizeArrowHeadWidth(item.Arrow.HeadWidth),
                             IsLocked = item.Arrow.IsLocked,
@@ -6243,6 +6273,11 @@ namespace AnonPDF
 
         private static SizeF GetAnnotationSize(string text, Font font, int rotation)
         {
+            return RotateSize(GetAnnotationPlainContentSize(text, font), rotation);
+        }
+
+        private static SizeF GetAnnotationPlainContentSize(string text, Font font)
+        {
             if (text == null)
                 text = string.Empty;
 
@@ -6266,17 +6301,7 @@ namespace AnonPDF
             }
 
             float height = Math.Max(lineHeight * Math.Max(lines.Length, 1), lineHeight);
-            rotation = NormalizeRotation(rotation);
-            if (rotation == 0)
-                return new SizeF(maxWidth, height);
-
-            float angle = (float)(rotation * Math.PI / 180.0);
-            float cos = Math.Abs((float)Math.Cos(angle));
-            float sin = Math.Abs((float)Math.Sin(angle));
-            float rotatedWidth = (maxWidth * cos) + (height * sin);
-            float rotatedHeight = (maxWidth * sin) + (height * cos);
-
-            return new SizeF(rotatedWidth, rotatedHeight);
+            return new SizeF(maxWidth, height);
         }
 
         private static SizeF RotateSize(SizeF size, int rotation)
@@ -6296,6 +6321,11 @@ namespace AnonPDF
         }
 
         private static SizeF GetRichAnnotationSize(string plainText, string richText, Font fallbackFont, int rotation)
+        {
+            return RotateSize(GetRichAnnotationContentSize(plainText, richText, fallbackFont), rotation);
+        }
+
+        private static SizeF GetRichAnnotationContentSize(string plainText, string richText, Font fallbackFont)
         {
             if (fallbackFont == null)
             {
@@ -6321,7 +6351,7 @@ namespace AnonPDF
                 }
             }
 
-            SizeF baseSize = GetAnnotationSize(content, fallbackFont, 0);
+            SizeF baseSize = GetAnnotationPlainContentSize(content, fallbackFont);
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
             using (StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone())
             {
@@ -6334,8 +6364,76 @@ namespace AnonPDF
                 SizeF paddedSize = new SizeF(
                     Math.Max(1f, baseSize.Width + extraWidth),
                     Math.Max(1f, baseSize.Height + extraHeight));
-                return RotateSize(paddedSize, rotation);
+                return paddedSize;
             }
+        }
+
+        private static float NormalizeAnnotationBorderWidth(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return 0f;
+            }
+
+            return Math.Max(0f, Math.Min(24f, value));
+        }
+
+        private static float NormalizeAnnotationFrameMargin(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return 0f;
+            }
+
+            return Math.Max(0f, Math.Min(120f, value));
+        }
+
+        private static System.Drawing.Color GetAnnotationBorderColor(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return System.Drawing.Color.Transparent;
+            }
+
+            try
+            {
+                return System.Drawing.Color.FromArgb(annotation.AnnotationBorderColorArgb);
+            }
+            catch
+            {
+                return System.Drawing.Color.Transparent;
+            }
+        }
+
+        private static float GetAnnotationFramePadding(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return 0f;
+            }
+
+            return NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
+        }
+
+        private static SizeF GetAnnotationOuterSizeFromContent(SizeF contentSize, float borderWidth, float frameMargin, int rotation)
+        {
+            float padding = NormalizeAnnotationBorderWidth(borderWidth) + NormalizeAnnotationFrameMargin(frameMargin);
+            SizeF outerUnrotated = new SizeF(
+                Math.Max(1f, contentSize.Width + (2f * padding)),
+                Math.Max(1f, contentSize.Height + (2f * padding)));
+            return RotateSize(outerUnrotated, rotation);
+        }
+
+        private static SizeF GetAnnotationContentSize(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return SizeF.Empty;
+            }
+
+            return IsRichTextMode(annotation)
+                ? GetRichAnnotationContentSize(annotation.AnnotationText, annotation.AnnotationRichText, annotation.AnnotationFont)
+                : GetAnnotationPlainContentSize(annotation.AnnotationText, annotation.AnnotationFont);
         }
 
         private static SizeF MeasureRichInkBounds(RichTextBox richTextBox, float minWidthPx, float minHeightPx)
@@ -6530,13 +6628,21 @@ namespace AnonPDF
 
         private static void ApplyAnnotationFromDialog(TextAnnotation annotation, EditTextDialog dlg)
         {
-            SizeF textSize = dlg.IsRichTextMode
-                ? GetRichAnnotationSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont, dlg.AnnotationRotation)
-                : GetAnnotationSize(dlg.AnnotationText, dlg.AnnotationFont, dlg.AnnotationRotation);
+            SizeF contentSize = dlg.IsRichTextMode
+                ? GetRichAnnotationContentSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont)
+                : GetAnnotationPlainContentSize(dlg.AnnotationText, dlg.AnnotationFont);
+            SizeF textSize = GetAnnotationOuterSizeFromContent(
+                contentSize,
+                dlg.AnnotationBorderWidth,
+                dlg.AnnotationFrameMargin,
+                dlg.AnnotationRotation);
             annotation.AnnotationText = dlg.AnnotationText;
             annotation.AnnotationFont = dlg.AnnotationFont;
             annotation.AnnotationColor = dlg.AnnotationColor;
             annotation.AnnotationBackgroundColorArgb = dlg.AnnotationBackgroundColor.ToArgb();
+            annotation.AnnotationBorderColorArgb = dlg.AnnotationBorderColor.ToArgb();
+            annotation.AnnotationBorderWidth = NormalizeAnnotationBorderWidth(dlg.AnnotationBorderWidth);
+            annotation.AnnotationFrameMargin = NormalizeAnnotationFrameMargin(dlg.AnnotationFrameMargin);
             annotation.AnnotationContentMode = dlg.IsRichTextMode ? "rich" : "plain";
             annotation.AnnotationRichText = dlg.IsRichTextMode ? dlg.AnnotationRichText : null;
             annotation.AnnotationAlignment = dlg.AnnotationAlignment;
@@ -6671,6 +6777,9 @@ namespace AnonPDF
                     dlg.AnnotationFont = annotation.AnnotationFont;
                     dlg.AnnotationColor = annotation.AnnotationColor;
                     dlg.AnnotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
+                    dlg.AnnotationBorderColor = GetAnnotationBorderColor(annotation);
+                    dlg.AnnotationBorderWidth = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth);
+                    dlg.AnnotationFrameMargin = NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
                     dlg.IsRichTextMode = string.Equals(annotation.AnnotationContentMode, "rich", StringComparison.OrdinalIgnoreCase);
                     dlg.AnnotationRichText = annotation.AnnotationRichText;
                     dlg.AnnotationAlignment = annotation.AnnotationAlignment;
@@ -6701,8 +6810,16 @@ namespace AnonPDF
                 {
                     // Calculate text size using the selected font
                     SizeF textSize = dlg.IsRichTextMode
-                        ? GetRichAnnotationSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont, dlg.AnnotationRotation)
-                        : GetAnnotationSize(dlg.AnnotationText, dlg.AnnotationFont, dlg.AnnotationRotation);
+                        ? GetAnnotationOuterSizeFromContent(
+                            GetRichAnnotationContentSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont),
+                            dlg.AnnotationBorderWidth,
+                            dlg.AnnotationFrameMargin,
+                            dlg.AnnotationRotation)
+                        : GetAnnotationOuterSizeFromContent(
+                            GetAnnotationPlainContentSize(dlg.AnnotationText, dlg.AnnotationFont),
+                            dlg.AnnotationBorderWidth,
+                            dlg.AnnotationFrameMargin,
+                            dlg.AnnotationRotation);
 
                     float boxWidth = textSize.Width;
                     float boxHeight = textSize.Height;
@@ -6724,6 +6841,9 @@ namespace AnonPDF
                             AnnotationFont = dlg.AnnotationFont,
                             AnnotationColor = dlg.AnnotationColor,
                             AnnotationBackgroundColorArgb = dlg.AnnotationBackgroundColor.ToArgb(),
+                            AnnotationBorderColorArgb = dlg.AnnotationBorderColor.ToArgb(),
+                            AnnotationBorderWidth = NormalizeAnnotationBorderWidth(dlg.AnnotationBorderWidth),
+                            AnnotationFrameMargin = NormalizeAnnotationFrameMargin(dlg.AnnotationFrameMargin),
                             AnnotationContentMode = dlg.IsRichTextMode ? "rich" : "plain",
                             AnnotationRichText = dlg.IsRichTextMode ? dlg.AnnotationRichText : null,
                             AnnotationAlignment = dlg.AnnotationAlignment,
@@ -6817,6 +6937,9 @@ namespace AnonPDF
                 AnnotationFont = source.AnnotationFont,
                 AnnotationColor = source.AnnotationColor,
                 AnnotationBackgroundColorArgb = source.AnnotationBackgroundColorArgb,
+                AnnotationBorderColorArgb = source.AnnotationBorderColorArgb,
+                AnnotationBorderWidth = source.AnnotationBorderWidth,
+                AnnotationFrameMargin = source.AnnotationFrameMargin,
                 AnnotationContentMode = source.AnnotationContentMode,
                 AnnotationRichText = source.AnnotationRichText,
                 AnnotationAlignment = source.AnnotationAlignment,
@@ -10248,6 +10371,9 @@ namespace AnonPDF
             dialog.IsRichTextMode = defaults.IsRichTextMode;
             dialog.AnnotationAlignment = defaults.AnnotationAlignment;
             dialog.AnnotationRotation = defaults.AnnotationRotation;
+            dialog.AnnotationBorderColor = defaults.AnnotationBorderColor;
+            dialog.AnnotationBorderWidth = defaults.AnnotationBorderWidth;
+            dialog.AnnotationFrameMargin = defaults.AnnotationFrameMargin;
         }
 
         private void CaptureTextDialogDefaults(EditTextDialog dialog)
@@ -10264,7 +10390,10 @@ namespace AnonPDF
                 AnnotationBackgroundColor = dialog.AnnotationBackgroundColor,
                 IsRichTextMode = dialog.IsRichTextMode,
                 AnnotationAlignment = dialog.AnnotationAlignment,
-                AnnotationRotation = dialog.AnnotationRotation
+                AnnotationRotation = dialog.AnnotationRotation,
+                AnnotationBorderColor = dialog.AnnotationBorderColor,
+                AnnotationBorderWidth = NormalizeAnnotationBorderWidth(dialog.AnnotationBorderWidth),
+                AnnotationFrameMargin = NormalizeAnnotationFrameMargin(dialog.AnnotationFrameMargin)
             };
         }
 
@@ -11817,6 +11946,10 @@ namespace AnonPDF
                        annotation.AnnotationBounds.Width * scaleX,
                        annotation.AnnotationBounds.Height * scaleY
                     );
+                    float framePaddingXPt = GetAnnotationFramePadding(annotation) * scaleX;
+                    float framePaddingYPt = GetAnnotationFramePadding(annotation) * scaleY;
+                    System.Drawing.Color annotationBorderColor = GetAnnotationBorderColor(annotation);
+                    float annotationBorderWidthPt = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) * scaleX;
                     float maxGdiWidthPt = 0f;
                     float maxPdfWidth = 0f;
                     var lineRuns = new List<List<(string Text, PdfFont Font)>>();
@@ -11874,13 +12007,16 @@ namespace AnonPDF
                     }
 
                     int lineCount = Math.Max(lines.Length, 1);
-                    float layoutWidth = maxGdiWidthPt;
-                    float layoutHeight = lineHeightPt * lineCount;
+                    SizeF contentSize = GetAnnotationContentSize(annotation);
+                    float contentWidthPt = contentSize.Width * scaleX;
+                    float contentHeightPt = contentSize.Height * scaleY;
+                    float layoutWidth = contentWidthPt + (2f * framePaddingXPt);
+                    float layoutHeight = contentHeightPt + (2f * framePaddingYPt);
                     bool isRichAnnotation = IsRichTextMode(annotation);
                     if (isRichAnnotation)
                     {
-                        layoutWidth = Math.Max(1f, scaledAnnotationBounds.Width);
-                        layoutHeight = Math.Max(1f, scaledAnnotationBounds.Height);
+                        contentWidthPt = Math.Max(1f, contentWidthPt);
+                        contentHeightPt = Math.Max(1f, contentHeightPt);
                     }
                     float horizontalScaling = 1f;
                     if (maxPdfWidth > 0f && maxGdiWidthPt > 0f)
@@ -11902,7 +12038,7 @@ namespace AnonPDF
                     PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
                     System.Drawing.Color annotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
 
-                    if (!isRichAnnotation && annotationBackgroundColor.A > 0)
+                    if (annotationBackgroundColor.A > 0)
                     {
                         PointF TransformCorner(float x, float y)
                         {
@@ -11941,6 +12077,41 @@ namespace AnonPDF
                         pdfCanvas.RestoreState();
                     }
 
+                    if (annotationBorderColor.A > 0 && annotationBorderWidthPt > 0f)
+                    {
+                        PointF TransformCorner(float x, float y)
+                        {
+                            float tx = (x * rotCos) - (y * rotSin) + rotationOffset.X;
+                            float ty = (x * rotSin) + (y * rotCos) + rotationOffset.Y;
+                            return new PointF(
+                                scaledAnnotationBounds.X + tx,
+                                scaledAnnotationBounds.Y + ty);
+                        }
+
+                        PointF[] viewCorners = new[]
+                        {
+                            TransformCorner(0f, 0f),
+                            TransformCorner(layoutWidth, 0f),
+                            TransformCorner(layoutWidth, layoutHeight),
+                            TransformCorner(0f, layoutHeight)
+                        };
+
+                        PointF[] pdfCorners = viewCorners
+                            .Select(point => ConvertPointToPdfCoordinates(point, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked))
+                            .ToArray();
+
+                        pdfCanvas.SaveState();
+                        pdfCanvas.SetLineWidth(Math.Max(0.1f, annotationBorderWidthPt));
+                        pdfCanvas.SetStrokeColor(new DeviceRgb(annotationBorderColor.R, annotationBorderColor.G, annotationBorderColor.B));
+                        pdfCanvas.MoveTo(pdfCorners[0].X, pdfCorners[0].Y);
+                        pdfCanvas.LineTo(pdfCorners[1].X, pdfCorners[1].Y);
+                        pdfCanvas.LineTo(pdfCorners[2].X, pdfCorners[2].Y);
+                        pdfCanvas.LineTo(pdfCorners[3].X, pdfCorners[3].Y);
+                        pdfCanvas.ClosePath();
+                        pdfCanvas.Stroke();
+                        pdfCanvas.RestoreState();
+                    }
+
                     if (isRichAnnotation)
                     {
                         float richDpiX;
@@ -11950,14 +12121,14 @@ namespace AnonPDF
                             richDpiX = gRich.DpiX;
                             richDpiY = gRich.DpiY;
                         }
-                        int bitmapWidth = Math.Max(1, (int)Math.Ceiling(layoutWidth * (richDpiX / 72f) * 2f));
-                        int bitmapHeight = Math.Max(1, (int)Math.Ceiling(layoutHeight * (richDpiY / 72f) * 2f));
+                        int bitmapWidth = Math.Max(1, (int)Math.Ceiling(contentWidthPt * (richDpiX / 72f) * 2f));
+                        int bitmapHeight = Math.Max(1, (int)Math.Ceiling(contentHeightPt * (richDpiY / 72f) * 2f));
                         float richAlignmentOffset = GetRichAlignmentOffset(richDpiX, annotation.AnnotationAlignment);
                         using (Bitmap richBitmap = RenderRichTextToBitmap(
                             annotation,
                             bitmapWidth,
                             bitmapHeight,
-                            annotationBackgroundColor,
+                            System.Drawing.Color.Transparent,
                             2f))
                         using (var pngStream = new MemoryStream())
                         {
@@ -11966,17 +12137,19 @@ namespace AnonPDF
 
                             PointF TransformCorner(float x, float y)
                             {
-                                float tx = ((x - richAlignmentOffset) * rotCos) - (y * rotSin) + rotationOffset.X;
-                                float ty = (x * rotSin) + (y * rotCos) + rotationOffset.Y;
+                                float localX = x - richAlignmentOffset + framePaddingXPt;
+                                float localY = y + framePaddingYPt;
+                                float tx = (localX * rotCos) - (localY * rotSin) + rotationOffset.X;
+                                float ty = (localX * rotSin) + (localY * rotCos) + rotationOffset.Y;
                                 return new PointF(
                                     scaledAnnotationBounds.X + tx,
                                     scaledAnnotationBounds.Y + ty);
                             }
 
                             PointF topLeftView = TransformCorner(0f, 0f);
-                            PointF topRightView = TransformCorner(layoutWidth, 0f);
-                            PointF bottomLeftView = TransformCorner(0f, layoutHeight);
-                            PointF bottomRightView = TransformCorner(layoutWidth, layoutHeight);
+                            PointF topRightView = TransformCorner(contentWidthPt, 0f);
+                            PointF bottomLeftView = TransformCorner(0f, contentHeightPt);
+                            PointF bottomRightView = TransformCorner(contentWidthPt, contentHeightPt);
 
                             PointF topLeftPdf = ConvertPointToPdfCoordinates(topLeftView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
                             PointF topRightPdf = ConvertPointToPdfCoordinates(topRightView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
@@ -12015,16 +12188,16 @@ namespace AnonPDF
                         switch (annotation.AnnotationAlignment)
                         {
                             case System.Windows.Forms.HorizontalAlignment.Center:
-                                localX = (layoutWidth - lineWidthPt) / 2f;
+                                localX = Math.Max(0f, (contentWidthPt - lineWidthPt) / 2f);
                                 break;
                             case System.Windows.Forms.HorizontalAlignment.Right:
-                                localX = layoutWidth - lineWidthPt;
+                                localX = Math.Max(0f, contentWidthPt - lineWidthPt);
                                 break;
                         }
 
                         float localY = i * lineHeightPt;
-                        float localBaseX = localX;
-                        float localBaseY = localY + gdiAscentPt;
+                        float localBaseX = framePaddingXPt + localX;
+                        float localBaseY = framePaddingYPt + localY + gdiAscentPt;
                         float rotatedX = localBaseX * rotCos - localBaseY * rotSin + rotationOffset.X;
                         float rotatedY = localBaseX * rotSin + localBaseY * rotCos + rotationOffset.Y;
                         PointF baselineView = new PointF(
@@ -13433,6 +13606,7 @@ namespace AnonPDF
                 arrowObject.End = new PointF(pageSize.Height - end.Y, end.X);
                 ConstrainArrowToPage(arrowObject);
                 arrowObject.Thickness = NormalizeArrowThickness(arrowObject.Thickness);
+                arrowObject.BorderWidth = NormalizeArrowBorderWidth(arrowObject.BorderWidth);
                 arrowObject.HeadLength = NormalizeArrowHeadLength(arrowObject.HeadLength);
                 arrowObject.HeadWidth = NormalizeArrowHeadWidth(arrowObject.HeadWidth);
                 if (!IsArrowColorValid(arrowObject))
@@ -16112,6 +16286,7 @@ namespace AnonPDF
                 }
 
                 arrow.Thickness = NormalizeArrowThickness(arrow.Thickness);
+                arrow.BorderWidth = NormalizeArrowBorderWidth(arrow.BorderWidth);
                 arrow.HeadLength = NormalizeArrowHeadLength(arrow.HeadLength);
                 arrow.HeadWidth = NormalizeArrowHeadWidth(arrow.HeadWidth);
                 ConstrainArrowToPage(arrow);
@@ -18362,9 +18537,14 @@ namespace AnonPDF
                 int updatedRotation = NormalizeRotation(textRotationStartValue + (int)Math.Round(delta));
                 int previousRotation = NormalizeRotation(annotationToRotate.AnnotationRotation);
                 annotationToRotate.AnnotationRotation = updatedRotation;
-                SizeF rotatedSize = IsRichTextMode(annotationToRotate)
-                    ? GetRichAnnotationSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationRichText, annotationToRotate.AnnotationFont, updatedRotation)
-                    : GetAnnotationSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationFont, updatedRotation);
+                SizeF contentSize = IsRichTextMode(annotationToRotate)
+                    ? GetRichAnnotationContentSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationRichText, annotationToRotate.AnnotationFont)
+                    : GetAnnotationPlainContentSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationFont);
+                SizeF rotatedSize = GetAnnotationOuterSizeFromContent(
+                    contentSize,
+                    annotationToRotate.AnnotationBorderWidth,
+                    annotationToRotate.AnnotationFrameMargin,
+                    updatedRotation);
                 annotationToRotate.AnnotationBounds = new RectangleF(
                     textRotationStartCenterDoc.X - (rotatedSize.Width / 2f),
                     textRotationStartCenterDoc.Y - (rotatedSize.Height / 2f),
@@ -18396,6 +18576,7 @@ namespace AnonPDF
 
                 ConstrainArrowToPage(arrowObjectToAdjust);
                 arrowObjectToAdjust.Thickness = NormalizeArrowThickness(arrowObjectToAdjust.Thickness);
+                arrowObjectToAdjust.BorderWidth = NormalizeArrowBorderWidth(arrowObjectToAdjust.BorderWidth);
                 arrowObjectToAdjust.HeadLength = NormalizeArrowHeadLength(arrowObjectToAdjust.HeadLength);
                 arrowObjectToAdjust.HeadWidth = NormalizeArrowHeadWidth(arrowObjectToAdjust.HeadWidth);
                 arrowObjectToAdjust.UpdatedAtUtc = DateTime.UtcNow;
@@ -21518,10 +21699,13 @@ namespace AnonPDF
             PointF endPdf = ConvertPointToPdfCoordinates(endView, pageNumber, rotation, includeBaseRotation: !baseRotationBaked);
 
             float thickness = NormalizeArrowThickness(arrowObject.Thickness);
+            float borderWidth = NormalizeArrowBorderWidth(arrowObject.BorderWidth);
             float headLength = NormalizeArrowHeadLength(arrowObject.HeadLength);
             float headWidth = NormalizeArrowHeadWidth(arrowObject.HeadWidth);
             System.Drawing.Color lineColor = GetArrowColor(arrowObject);
+            System.Drawing.Color borderColor = GetArrowBorderColor(arrowObject);
             var deviceColor = new DeviceRgb(lineColor.R, lineColor.G, lineColor.B);
+            var borderDeviceColor = new DeviceRgb(borderColor.R, borderColor.G, borderColor.B);
 
             pdfCanvas.SaveState();
             pdfCanvas.SetLineWidth(thickness);
@@ -21532,6 +21716,40 @@ namespace AnonPDF
 
             if (TryBuildArrowHead(startView, endView, headLength, headWidth, out PointF leftView, out PointF rightView, out PointF lineEndView))
             {
+                if (borderWidth > 0f && borderColor.A > 0)
+                {
+                    PointF[] expandedHeadView;
+                    if (!TryBuildExpandedArrowHeadTriangle(
+                            endView,
+                            leftView,
+                            rightView,
+                            Math.Max(borderWidth, 0.5f),
+                            out expandedHeadView))
+                    {
+                        expandedHeadView = new[] { endView, leftView, rightView };
+                    }
+                    PointF borderLineEndPdf = ConvertPointToPdfCoordinates(lineEndView, pageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                    PointF[] expandedHeadPdf = expandedHeadView
+                        .Select(point => ConvertPointToPdfCoordinates(point, pageNumber, rotation, includeBaseRotation: !baseRotationBaked))
+                        .ToArray();
+
+                    pdfCanvas.SetLineWidth(thickness + (borderWidth * 2f));
+                    pdfCanvas.SetStrokeColor(borderDeviceColor);
+                    pdfCanvas.SetFillColor(borderDeviceColor);
+                    pdfCanvas.MoveTo(startPdf.X, startPdf.Y);
+                    pdfCanvas.LineTo(borderLineEndPdf.X, borderLineEndPdf.Y);
+                    pdfCanvas.Stroke();
+
+                    pdfCanvas.MoveTo(expandedHeadPdf[0].X, expandedHeadPdf[0].Y);
+                    pdfCanvas.LineTo(expandedHeadPdf[1].X, expandedHeadPdf[1].Y);
+                    pdfCanvas.LineTo(expandedHeadPdf[2].X, expandedHeadPdf[2].Y);
+                    pdfCanvas.Fill();
+
+                    pdfCanvas.SetLineWidth(thickness);
+                    pdfCanvas.SetStrokeColor(deviceColor);
+                    pdfCanvas.SetFillColor(deviceColor);
+                }
+
                 PointF lineEndPdf = ConvertPointToPdfCoordinates(lineEndView, pageNumber, rotation, includeBaseRotation: !baseRotationBaked);
                 PointF leftPdf = ConvertPointToPdfCoordinates(leftView, pageNumber, rotation, includeBaseRotation: !baseRotationBaked);
                 PointF rightPdf = ConvertPointToPdfCoordinates(rightView, pageNumber, rotation, includeBaseRotation: !baseRotationBaked);
@@ -22690,9 +22908,11 @@ namespace AnonPDF
             System.Drawing.Color baseColor = (isSelectedArrow && !multiSelectionActive)
                 ? System.Drawing.Color.Red
                 : GetArrowColor(arrowObject);
+            System.Drawing.Color borderColor = GetArrowBorderColor(arrowObject);
             PointF startScreen = GetArrowScreenPoint(arrowObject.Start);
             PointF endScreen = GetArrowScreenPoint(arrowObject.End);
             float thicknessPx = Math.Max(1f, arrowObject.Thickness * scaleFactor);
+            float borderWidthPx = Math.Max(0f, arrowObject.BorderWidth * scaleFactor);
             float headLengthPx = Math.Max(4f, arrowObject.HeadLength * scaleFactor);
             float headWidthPx = Math.Max(4f, arrowObject.HeadWidth * scaleFactor);
 
@@ -22702,6 +22922,32 @@ namespace AnonPDF
                 graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 if (TryBuildArrowHead(startScreen, endScreen, headLengthPx, headWidthPx, out PointF leftPoint, out PointF rightPoint, out PointF lineEndPoint))
                 {
+                    if (borderWidthPx > 0f && borderColor.A > 0)
+                    {
+                        PointF[] expandedHeadPoints;
+                        if (!TryBuildExpandedArrowHeadTriangle(
+                                endScreen,
+                                leftPoint,
+                                rightPoint,
+                                Math.Max(borderWidthPx, 0.75f),
+                                out expandedHeadPoints))
+                        {
+                            expandedHeadPoints = new[] { endScreen, leftPoint, rightPoint };
+                        }
+                        using (var borderPen = new Pen(borderColor, thicknessPx + (borderWidthPx * 2f)))
+                        {
+                            borderPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                            borderPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                            borderPen.LineJoin = System.Drawing.Drawing2D.LineJoin.Round;
+                            graphics.DrawLine(borderPen, startScreen, lineEndPoint);
+                        }
+
+                        using (var borderBrush = new SolidBrush(borderColor))
+                        {
+                            graphics.FillPolygon(borderBrush, expandedHeadPoints);
+                        }
+                    }
+
                     using (var pen = new Pen(baseColor, thicknessPx))
                     {
                         pen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
@@ -22793,13 +23039,33 @@ namespace AnonPDF
                 out _,
                 out _);
             System.Drawing.Color annotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
+            System.Drawing.Color annotationBorderColor = GetAnnotationBorderColor(annotation);
             bool isRich = IsRichTextMode(annotation);
+            float annotationBorderWidth = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth);
+            float annotationFrameMargin = NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
+            float framePaddingX = (annotationBorderWidth + annotationFrameMargin) * scaleFactor * 72f / graphics.DpiX;
+            float framePaddingY = (annotationBorderWidth + annotationFrameMargin) * scaleFactor * 72f / graphics.DpiY;
 
-            if (!isRich && hasTextFrame && annotationBackgroundColor.A > 0)
+            if (hasTextFrame && annotationBackgroundColor.A > 0)
             {
                 using (SolidBrush backgroundBrush = new SolidBrush(annotationBackgroundColor))
                 {
                     graphics.FillPolygon(backgroundBrush, textFrameCorners);
+                }
+            }
+
+            void DrawAnnotationBorder()
+            {
+                if (!hasTextFrame || annotationBorderWidth <= 0f || annotationBorderColor.A <= 0)
+                {
+                    return;
+                }
+
+                using (Pen borderPen = new Pen(annotationBorderColor, Math.Max(1f, annotationBorderWidth * scaleFactor)))
+                {
+                    borderPen.Alignment = PenAlignment.Inset;
+                    borderPen.LineJoin = LineJoin.Miter;
+                    graphics.DrawPolygon(borderPen, textFrameCorners);
                 }
             }
 
@@ -22848,37 +23114,22 @@ namespace AnonPDF
 
             float dpiCorrection = 72f / graphics.DpiY;
             int annotationRotation = NormalizeRotation(annotation.AnnotationRotation);
-            float layoutWidth;
-            float layoutHeight;
-            if (isRich)
-            {
-                SizeF richBaseSize = GetRichAnnotationSize(
-                    annotation.AnnotationText,
-                    annotation.AnnotationRichText,
-                    annotation.AnnotationFont,
-                    0);
-                layoutWidth = richBaseSize.Width * scaleFactor * 72f / graphics.DpiX;
-                layoutHeight = richBaseSize.Height * scaleFactor * 72f / graphics.DpiY;
-            }
-            else
-            {
-                SizeF baseSize = GetAnnotationSize(annotation.AnnotationText, annotation.AnnotationFont, 0);
-                layoutWidth = baseSize.Width * scaleFactor * 72f / graphics.DpiX;
-                layoutHeight = baseSize.Height * scaleFactor * 72f / graphics.DpiY;
-            }
+            SizeF contentSize = GetAnnotationContentSize(annotation);
+            float contentWidth = contentSize.Width * scaleFactor * 72f / graphics.DpiX;
+            float contentHeight = contentSize.Height * scaleFactor * 72f / graphics.DpiY;
+            float layoutWidth = contentWidth + (2f * framePaddingX);
+            float layoutHeight = contentHeight + (2f * framePaddingY);
 
             if (isRich)
             {
-                int bitmapWidth = Math.Max(1, (int)Math.Ceiling(layoutWidth));
-                int bitmapHeight = Math.Max(1, (int)Math.Ceiling(layoutHeight));
-                bitmapWidth = Math.Max(1, (int)Math.Ceiling(layoutWidth * (graphics.DpiX / 72f)));
-                bitmapHeight = Math.Max(1, (int)Math.Ceiling(layoutHeight * (graphics.DpiY / 72f)));
+                int bitmapWidth = Math.Max(1, (int)Math.Ceiling(contentWidth * (graphics.DpiX / 72f)));
+                int bitmapHeight = Math.Max(1, (int)Math.Ceiling(contentHeight * (graphics.DpiY / 72f)));
                 float richAlignmentOffset = GetRichAlignmentOffset(graphics.DpiX, annotation.AnnotationAlignment);
                 using (Bitmap richBitmap = RenderRichTextToBitmap(
                     annotation,
                     bitmapWidth,
                     bitmapHeight,
-                    annotationBackgroundColor,
+                    System.Drawing.Color.Transparent,
                     Math.Max(0.1f, scaleFactor)))
                 {
                     float rotationRadians = (float)(annotationRotation * Math.PI / 180.0);
@@ -22892,10 +23143,11 @@ namespace AnonPDF
                     graphics.Transform = new System.Drawing.Drawing2D.Matrix(
                         rotCos, rotSin, -rotSin, rotCos,
                         rect.X + offsetX, rect.Y + offsetY);
-                    graphics.DrawImage(richBitmap, new RectangleF(-richAlignmentOffset, 0f, layoutWidth, layoutHeight));
+                    graphics.DrawImage(richBitmap, new RectangleF(framePaddingX - richAlignmentOffset, framePaddingY, contentWidth, contentHeight));
                     graphics.Restore(state);
                 }
 
+                DrawAnnotationBorder();
                 DrawTextFrameOverlay();
 
                 if (multiSelectionActive && isSelectedAnnotation)
@@ -22918,7 +23170,7 @@ namespace AnonPDF
                     float offsetX = rotationOffset.X;
                     float offsetY = rotationOffset.Y;
 
-                    RectangleF layoutRect = new RectangleF(0, 0, layoutWidth, layoutHeight);
+                    RectangleF layoutRect = new RectangleF(framePaddingX, framePaddingY, contentWidth, contentHeight);
                     var state = graphics.Save();
                     graphics.Transform = new System.Drawing.Drawing2D.Matrix(
                         rotCos, rotSin, -rotSin, rotCos,
@@ -22934,6 +23186,7 @@ namespace AnonPDF
                 }
             }
 
+            DrawAnnotationBorder();
             DrawTextFrameOverlay();
 
             if (multiSelectionActive && isSelectedAnnotation)
@@ -25156,6 +25409,7 @@ namespace AnonPDF
                         }
 
                         arrowObject.Thickness = NormalizeArrowThickness(arrowObject.Thickness);
+                        arrowObject.BorderWidth = NormalizeArrowBorderWidth(arrowObject.BorderWidth);
                         arrowObject.HeadLength = NormalizeArrowHeadLength(arrowObject.HeadLength);
                         arrowObject.HeadWidth = NormalizeArrowHeadWidth(arrowObject.HeadWidth);
                         ConstrainArrowToPage(arrowObject);
@@ -26024,6 +26278,9 @@ namespace AnonPDF
                    AreSameRectangle(left.AnnotationBounds, right.AnnotationBounds) &&
                    left.AnnotationColor.ToArgb() == right.AnnotationColor.ToArgb() &&
                    left.AnnotationBackgroundColorArgb == right.AnnotationBackgroundColorArgb &&
+                   left.AnnotationBorderColorArgb == right.AnnotationBorderColorArgb &&
+                   AreSameFloat(left.AnnotationBorderWidth, right.AnnotationBorderWidth) &&
+                   AreSameFloat(left.AnnotationFrameMargin, right.AnnotationFrameMargin) &&
                    string.Equals(left.AnnotationContentMode, right.AnnotationContentMode, StringComparison.OrdinalIgnoreCase) &&
                    string.Equals(left.AnnotationRichText, right.AnnotationRichText, StringComparison.Ordinal) &&
                    left.AnnotationAlignment == right.AnnotationAlignment &&
@@ -26060,6 +26317,8 @@ namespace AnonPDF
                    AreSamePoint(left.End, right.End) &&
                    left.LineColorArgb == right.LineColorArgb &&
                    AreSameFloat(left.Thickness, right.Thickness) &&
+                   left.BorderColorArgb == right.BorderColorArgb &&
+                   AreSameFloat(left.BorderWidth, right.BorderWidth) &&
                    AreSameFloat(left.HeadLength, right.HeadLength) &&
                    AreSameFloat(left.HeadWidth, right.HeadWidth) &&
                    left.IsLocked == right.IsLocked;
@@ -27609,6 +27868,8 @@ namespace AnonPDF
                 End = end,
                 LineColorArgb = activeArrowDialogDefaults.ArrowColor.ToArgb(),
                 Thickness = NormalizeArrowThickness(activeArrowDialogDefaults.ThicknessValue),
+                BorderColorArgb = activeArrowDialogDefaults.BorderColor.ToArgb(),
+                BorderWidth = NormalizeArrowBorderWidth(activeArrowDialogDefaults.BorderWidthValue),
                 HeadLength = NormalizeArrowHeadLength(activeArrowDialogDefaults.HeadLengthValue),
                 HeadWidth = NormalizeArrowHeadWidth(activeArrowDialogDefaults.HeadWidthValue),
                 IsLocked = activeArrowDialogDefaults.IsLocked,
@@ -27659,10 +27920,21 @@ namespace AnonPDF
                 return;
             }
 
+            int originalLineColorArgb = arrowObject.LineColorArgb;
+            float originalThickness = NormalizeArrowThickness(arrowObject.Thickness);
+            int originalBorderColorArgb = arrowObject.BorderColorArgb;
+            float originalBorderWidth = NormalizeArrowBorderWidth(arrowObject.BorderWidth);
+            float originalHeadLength = NormalizeArrowHeadLength(arrowObject.HeadLength);
+            float originalHeadWidth = NormalizeArrowHeadWidth(arrowObject.HeadWidth);
+            bool originalIsLocked = arrowObject.IsLocked;
+            DateTime originalUpdatedAtUtc = arrowObject.UpdatedAtUtc;
+
             using (var dlg = new EditArrowDialog())
             {
                 dlg.ArrowColor = GetArrowColor(arrowObject);
                 dlg.ThicknessValue = NormalizeArrowThickness(arrowObject.Thickness);
+                dlg.BorderColor = GetArrowBorderColor(arrowObject);
+                dlg.BorderWidthValue = NormalizeArrowBorderWidth(arrowObject.BorderWidth);
                 dlg.HeadLengthValue = NormalizeArrowHeadLength(arrowObject.HeadLength);
                 dlg.HeadWidthValue = NormalizeArrowHeadWidth(arrowObject.HeadWidth);
                 dlg.IsLocked = arrowObject.IsLocked;
@@ -27674,6 +27946,15 @@ namespace AnonPDF
 
                 if (dlg.ShowDialog(this) != DialogResult.OK)
                 {
+                    arrowObject.LineColorArgb = originalLineColorArgb;
+                    arrowObject.Thickness = originalThickness;
+                    arrowObject.BorderColorArgb = originalBorderColorArgb;
+                    arrowObject.BorderWidth = originalBorderWidth;
+                    arrowObject.HeadLength = originalHeadLength;
+                    arrowObject.HeadWidth = originalHeadWidth;
+                    arrowObject.IsLocked = originalIsLocked;
+                    arrowObject.UpdatedAtUtc = originalUpdatedAtUtc;
+                    pdfViewer.Invalidate();
                     return;
                 }
 
@@ -27691,6 +27972,8 @@ namespace AnonPDF
 
             dialog.ArrowColor = defaults.ArrowColor;
             dialog.ThicknessValue = defaults.ThicknessValue;
+            dialog.BorderColor = defaults.BorderColor;
+            dialog.BorderWidthValue = defaults.BorderWidthValue;
             dialog.HeadLengthValue = defaults.HeadLengthValue;
             dialog.HeadWidthValue = defaults.HeadWidthValue;
             dialog.IsLocked = defaults.IsLocked;
@@ -27707,6 +27990,8 @@ namespace AnonPDF
             {
                 ArrowColor = dialog.ArrowColor,
                 ThicknessValue = NormalizeArrowThickness(dialog.ThicknessValue),
+                BorderColor = dialog.BorderColor,
+                BorderWidthValue = NormalizeArrowBorderWidth(dialog.BorderWidthValue),
                 HeadLengthValue = NormalizeArrowHeadLength(dialog.HeadLengthValue),
                 HeadWidthValue = NormalizeArrowHeadWidth(dialog.HeadWidthValue),
                 IsLocked = dialog.IsLocked
@@ -27722,6 +28007,8 @@ namespace AnonPDF
 
             int newColorArgb = dlg.ArrowColor.ToArgb();
             float newThickness = NormalizeArrowThickness(dlg.ThicknessValue);
+            int newBorderColorArgb = dlg.BorderColor.ToArgb();
+            float newBorderWidth = NormalizeArrowBorderWidth(dlg.BorderWidthValue);
             float newHeadLength = NormalizeArrowHeadLength(dlg.HeadLengthValue);
             float newHeadWidth = NormalizeArrowHeadWidth(dlg.HeadWidthValue);
             bool newIsLocked = dlg.IsLocked;
@@ -27729,6 +28016,8 @@ namespace AnonPDF
             bool changed =
                 arrowObject.LineColorArgb != newColorArgb ||
                 !AreSameFloat(NormalizeArrowThickness(arrowObject.Thickness), newThickness) ||
+                arrowObject.BorderColorArgb != newBorderColorArgb ||
+                !AreSameFloat(NormalizeArrowBorderWidth(arrowObject.BorderWidth), newBorderWidth) ||
                 !AreSameFloat(NormalizeArrowHeadLength(arrowObject.HeadLength), newHeadLength) ||
                 !AreSameFloat(NormalizeArrowHeadWidth(arrowObject.HeadWidth), newHeadWidth) ||
                 arrowObject.IsLocked != newIsLocked;
@@ -27740,6 +28029,8 @@ namespace AnonPDF
 
             arrowObject.LineColorArgb = newColorArgb;
             arrowObject.Thickness = newThickness;
+            arrowObject.BorderColorArgb = newBorderColorArgb;
+            arrowObject.BorderWidth = newBorderWidth;
             arrowObject.HeadLength = newHeadLength;
             arrowObject.HeadWidth = newHeadWidth;
             arrowObject.IsLocked = newIsLocked;
@@ -28116,6 +28407,16 @@ namespace AnonPDF
             return Math.Max(4f, Math.Min(120f, value));
         }
 
+        private static float NormalizeArrowBorderWidth(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return DefaultArrowBorderWidth;
+            }
+
+            return Math.Max(0f, Math.Min(24f, value));
+        }
+
         private static System.Drawing.Color GetArrowColor(ArrowObject arrowObject)
         {
             if (arrowObject == null)
@@ -28130,6 +28431,23 @@ namespace AnonPDF
             catch
             {
                 return System.Drawing.Color.Red;
+            }
+        }
+
+        private System.Drawing.Color GetArrowBorderColor(ArrowObject arrowObject)
+        {
+            if (arrowObject == null)
+            {
+                return DefaultArrowBorderColor;
+            }
+
+            try
+            {
+                return System.Drawing.Color.FromArgb(arrowObject.BorderColorArgb);
+            }
+            catch
+            {
+                return DefaultArrowBorderColor;
             }
         }
 
@@ -29373,6 +29691,9 @@ namespace AnonPDF
                     AnnotationFont = CloneFontSafe(sourceAnnotation.AnnotationFont),
                     AnnotationColor = sourceAnnotation.AnnotationColor,
                     AnnotationBackgroundColorArgb = sourceAnnotation.AnnotationBackgroundColorArgb,
+                    AnnotationBorderColorArgb = sourceAnnotation.AnnotationBorderColorArgb,
+                    AnnotationBorderWidth = sourceAnnotation.AnnotationBorderWidth,
+                    AnnotationFrameMargin = sourceAnnotation.AnnotationFrameMargin,
                     AnnotationContentMode = sourceAnnotation.AnnotationContentMode,
                     AnnotationRichText = sourceAnnotation.AnnotationRichText,
                     AnnotationAlignment = sourceAnnotation.AnnotationAlignment,
@@ -29486,6 +29807,8 @@ namespace AnonPDF
                     End = sourceArrow.End,
                     LineColorArgb = sourceArrow.LineColorArgb,
                     Thickness = NormalizeArrowThickness(sourceArrow.Thickness),
+                    BorderColorArgb = sourceArrow.BorderColorArgb,
+                    BorderWidth = NormalizeArrowBorderWidth(sourceArrow.BorderWidth),
                     HeadLength = NormalizeArrowHeadLength(sourceArrow.HeadLength),
                     HeadWidth = NormalizeArrowHeadWidth(sourceArrow.HeadWidth),
                     IsLocked = sourceArrow.IsLocked,
@@ -29911,7 +30234,8 @@ namespace AnonPDF
 
             PointF startScreen = GetArrowScreenPoint(arrowObject.Start);
             PointF endScreen = GetArrowScreenPoint(arrowObject.End);
-            float tolerance = Math.Max(ArrowLineSelectionTolerance, NormalizeArrowThickness(arrowObject.Thickness) * scaleFactor * 0.6f + 3f);
+            float effectiveThickness = NormalizeArrowThickness(arrowObject.Thickness) + (2f * NormalizeArrowBorderWidth(arrowObject.BorderWidth));
+            float tolerance = Math.Max(ArrowLineSelectionTolerance, effectiveThickness * scaleFactor * 0.6f + 3f);
             float distance = DistancePointToSegment(location, startScreen, endScreen);
             return distance <= tolerance;
         }
@@ -30361,6 +30685,95 @@ namespace AnonPDF
             lineEndPoint = new PointF(
                 endPoint.X - (ux * actualHeadLength * 0.85f),
                 endPoint.Y - (uy * actualHeadLength * 0.85f));
+            return true;
+        }
+
+        private static bool TryBuildExpandedArrowHeadTriangle(PointF tip, PointF left, PointF right, float offset, out PointF[] expandedTriangle)
+        {
+            expandedTriangle = null;
+            if (offset <= 0f)
+            {
+                expandedTriangle = new[] { tip, left, right };
+                return true;
+            }
+
+            PointF[] polygon = { tip, left, right };
+            float signedArea = 0f;
+            for (int i = 0; i < polygon.Length; i++)
+            {
+                PointF current = polygon[i];
+                PointF next = polygon[(i + 1) % polygon.Length];
+                signedArea += (current.X * next.Y) - (next.X * current.Y);
+            }
+
+            if (Math.Abs(signedArea) <= 0.001f)
+            {
+                return false;
+            }
+
+            bool isCounterClockwise = signedArea > 0f;
+            PointF[] linePoints = new PointF[polygon.Length];
+            PointF[] lineDirections = new PointF[polygon.Length];
+
+            for (int i = 0; i < polygon.Length; i++)
+            {
+                PointF a = polygon[i];
+                PointF b = polygon[(i + 1) % polygon.Length];
+                float dx = b.X - a.X;
+                float dy = b.Y - a.Y;
+                float edgeLength = (float)Math.Sqrt((dx * dx) + (dy * dy));
+                if (edgeLength <= 0.001f)
+                {
+                    return false;
+                }
+
+                float nx = isCounterClockwise ? (dy / edgeLength) : (-dy / edgeLength);
+                float ny = isCounterClockwise ? (-dx / edgeLength) : (dx / edgeLength);
+                linePoints[i] = new PointF(a.X + (nx * offset), a.Y + (ny * offset));
+                lineDirections[i] = new PointF(dx, dy);
+            }
+
+            expandedTriangle = new PointF[polygon.Length];
+            for (int i = 0; i < polygon.Length; i++)
+            {
+                int previous = (i - 1 + polygon.Length) % polygon.Length;
+                PointF intersection;
+                if (!TryIntersectInfiniteLines(
+                        linePoints[previous],
+                        lineDirections[previous],
+                        linePoints[i],
+                        lineDirections[i],
+                        out intersection))
+                {
+                    return false;
+                }
+
+                expandedTriangle[i] = intersection;
+            }
+
+            return true;
+        }
+
+        private static bool TryIntersectInfiniteLines(
+            PointF p,
+            PointF r,
+            PointF q,
+            PointF s,
+            out PointF intersection)
+        {
+            intersection = PointF.Empty;
+            float denominator = (r.X * s.Y) - (r.Y * s.X);
+            if (Math.Abs(denominator) <= 0.0001f)
+            {
+                return false;
+            }
+
+            float qpx = q.X - p.X;
+            float qpy = q.Y - p.Y;
+            float t = ((qpx * s.Y) - (qpy * s.X)) / denominator;
+            intersection = new PointF(
+                p.X + (t * r.X),
+                p.Y + (t * r.Y));
             return true;
         }
 
@@ -31210,24 +31623,10 @@ namespace AnonPDF
 
             float dpiCorrection = 72f / dpiY;
             int rotation = NormalizeRotation(annotation.AnnotationRotation);
-            float layoutWidth;
-            float layoutHeight;
-            if (IsRichTextMode(annotation))
-            {
-                SizeF richBaseSize = GetRichAnnotationSize(
-                    annotation.AnnotationText,
-                    annotation.AnnotationRichText,
-                    annotation.AnnotationFont,
-                    0);
-                layoutWidth = richBaseSize.Width * scaleFactor * 72f / dpiX;
-                layoutHeight = richBaseSize.Height * scaleFactor * dpiCorrection;
-            }
-            else
-            {
-                SizeF baseSize = GetAnnotationSize(annotation.AnnotationText, annotation.AnnotationFont, 0);
-                layoutWidth = baseSize.Width * scaleFactor * 72f / dpiX;
-                layoutHeight = baseSize.Height * scaleFactor * dpiCorrection;
-            }
+            SizeF contentSize = GetAnnotationContentSize(annotation);
+            float padding = GetAnnotationFramePadding(annotation);
+            float layoutWidth = Math.Max(1f, (contentSize.Width + (2f * padding)) * scaleFactor * 72f / dpiX);
+            float layoutHeight = Math.Max(1f, (contentSize.Height + (2f * padding)) * scaleFactor * dpiCorrection);
             if (layoutWidth <= 0f || layoutHeight <= 0f)
             {
                 return false;
@@ -31570,6 +31969,8 @@ namespace AnonPDF
                 End = end,
                 LineColorArgb = source.LineColorArgb,
                 Thickness = NormalizeArrowThickness(source.Thickness),
+                BorderColorArgb = source.BorderColorArgb,
+                BorderWidth = NormalizeArrowBorderWidth(source.BorderWidth),
                 HeadLength = NormalizeArrowHeadLength(source.HeadLength),
                 HeadWidth = NormalizeArrowHeadWidth(source.HeadWidth),
                 IsLocked = source.IsLocked,
@@ -36174,6 +36575,12 @@ namespace AnonPDF
 
         public int AnnotationBackgroundColorArgb { get; set; }
 
+        public int AnnotationBorderColorArgb { get; set; }
+
+        public float AnnotationBorderWidth { get; set; }
+
+        public float AnnotationFrameMargin { get; set; }
+
         public string AnnotationContentMode { get; set; }
 
         public string AnnotationRichText { get; set; }
@@ -36201,6 +36608,9 @@ namespace AnonPDF
             AnnotationFont = new Font("Arial", 12);
             AnnotationColor = System.Drawing.Color.Black;
             AnnotationBackgroundColorArgb = System.Drawing.Color.Transparent.ToArgb();
+            AnnotationBorderColorArgb = System.Drawing.Color.Black.ToArgb();
+            AnnotationBorderWidth = 0f;
+            AnnotationFrameMargin = 0f;
             AnnotationContentMode = "plain";
             AnnotationRichText = null;
             AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Left; // Default left alignment
@@ -36222,6 +36632,9 @@ namespace AnonPDF
             AnnotationFont = font;
             AnnotationColor = color;
             AnnotationBackgroundColorArgb = System.Drawing.Color.Transparent.ToArgb();
+            AnnotationBorderColorArgb = System.Drawing.Color.Black.ToArgb();
+            AnnotationBorderWidth = 0f;
+            AnnotationFrameMargin = 0f;
             AnnotationContentMode = "plain";
             AnnotationRichText = null;
             AnnotationAlignment = alignment;
@@ -36278,6 +36691,12 @@ namespace AnonPDF
         private Label lblBackgroundColor;
         private Button btnBackgroundColor;
         private CheckBox chkNoBackgroundColor;
+        private Label lblBorderColor;
+        private Button btnBorderColor;
+        private Label lblBorderWidth;
+        private NumericUpDown nudBorderWidth;
+        private Label lblFrameMargin;
+        private NumericUpDown nudFrameMargin;
         private Label lblFontDisplay;
         private GroupBox groupBoxAlignment;
         private RadioButton rbLeft;
@@ -36299,6 +36718,9 @@ namespace AnonPDF
         public Font AnnotationFont { get; set; }
         public System.Drawing.Color AnnotationColor { get; set; }
         public System.Drawing.Color AnnotationBackgroundColor { get; set; }
+        public System.Drawing.Color AnnotationBorderColor { get; set; }
+        public float AnnotationBorderWidth { get; set; }
+        public float AnnotationFrameMargin { get; set; }
         public bool IsRichTextMode { get; set; }
         public string AnnotationRichText { get; set; }
         public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
@@ -36315,6 +36737,7 @@ namespace AnonPDF
             if (AnnotationFont == null) AnnotationFont = new Font("Arial", 12);
             if (AnnotationColor == System.Drawing.Color.Empty) AnnotationColor = System.Drawing.Color.Black;
             if (AnnotationBackgroundColor == System.Drawing.Color.Empty) AnnotationBackgroundColor = System.Drawing.Color.Transparent;
+            if (AnnotationBorderColor == System.Drawing.Color.Empty) AnnotationBorderColor = System.Drawing.Color.Black;
             if (AnnotationRichText == null) AnnotationRichText = string.Empty;
             if (AnnotationBackgroundColor.A > 0)
             {
@@ -36330,7 +36753,7 @@ namespace AnonPDF
             this.Text = Resources.EditText_Title;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
-            this.ClientSize = new Size(420, 560);
+            this.ClientSize = new Size(420, 650);
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
@@ -36473,11 +36896,60 @@ namespace AnonPDF
             };
             chkNoBackgroundColor.CheckedChanged += NoBackgroundColorCheckedChanged;
 
+            lblBorderColor = new Label
+            {
+                Text = GetResourceText("EditText_LabelBorderColor"),
+                AutoSize = true,
+                Location = new Point(10, 305)
+            };
+
+            btnBorderColor = new Button
+            {
+                Text = GetChooseColorButtonText(),
+                Location = new Point(145, 298),
+                Size = new Size(120, 30)
+            };
+            btnBorderColor.Click += BtnBorderColor_Click;
+
+            lblBorderWidth = new Label
+            {
+                Text = GetResourceText("EditText_LabelBorderWidth"),
+                AutoSize = true,
+                Location = new Point(10, 339)
+            };
+            nudBorderWidth = new NumericUpDown
+            {
+                Location = new Point(145, 336),
+                Size = new Size(80, 22),
+                DecimalPlaces = 1,
+                Minimum = 0,
+                Maximum = 24,
+                Increment = 0.5m
+            };
+            nudBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
+
+            lblFrameMargin = new Label
+            {
+                Text = GetResourceText("EditText_LabelFrameMargin"),
+                AutoSize = true,
+                Location = new Point(235, 339)
+            };
+            nudFrameMargin = new NumericUpDown
+            {
+                Location = new Point(330, 336),
+                Size = new Size(80, 22),
+                DecimalPlaces = 1,
+                Minimum = 0,
+                Maximum = 120,
+                Increment = 1m
+            };
+            nudFrameMargin.ValueChanged += (_, __) => TryApplyChanges();
+
             // GroupBox for alignment selection
             groupBoxAlignment = new GroupBox
             {
                 Text = Resources.EditText_GroupAlignment,
-                Location = new Point(10, 304),
+                Location = new Point(10, 374),
                 Size = new Size(400, 50)
             };
 
@@ -36518,7 +36990,7 @@ namespace AnonPDF
             groupBoxRotation = new GroupBox
             {
                 Text = Resources.EditText_GroupRotation,
-                Location = new Point(10, 364),
+                Location = new Point(10, 434),
                 Size = new Size(400, 55)
             };
 
@@ -36573,7 +37045,7 @@ namespace AnonPDF
             groupBoxSymbols = new GroupBox
             {
                 Text = Resources.EditText_GroupSymbols,
-                Location = new Point(10, 434),
+                Location = new Point(10, 504),
                 Size = new Size(400, 65)
             };
 
@@ -36617,7 +37089,7 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(240, 510),
+                Location = new Point(240, 600),
                 Size = new Size(80, 30),
                 DialogResult = DialogResult.OK
             };
@@ -36626,7 +37098,7 @@ namespace AnonPDF
             btnRestoreDefaults = new Button
             {
                 Text = GetResourceText("UI_Button_RestoreSettings"),
-                Location = new Point(90, 510),
+                Location = new Point(90, 600),
                 Size = new Size(140, 30)
             };
             btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
@@ -36634,7 +37106,7 @@ namespace AnonPDF
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(330, 510),
+                Location = new Point(330, 600),
                 Size = new Size(80, 30),
                 DialogResult = DialogResult.Cancel
             };
@@ -36651,6 +37123,12 @@ namespace AnonPDF
             this.Controls.Add(lblBackgroundColor);
             this.Controls.Add(btnBackgroundColor);
             this.Controls.Add(chkNoBackgroundColor);
+            this.Controls.Add(lblBorderColor);
+            this.Controls.Add(btnBorderColor);
+            this.Controls.Add(lblBorderWidth);
+            this.Controls.Add(nudBorderWidth);
+            this.Controls.Add(lblFrameMargin);
+            this.Controls.Add(nudFrameMargin);
             this.Controls.Add(groupBoxAlignment);
             this.Controls.Add(groupBoxRotation);
             this.Controls.Add(groupBoxSymbols);
@@ -36713,6 +37191,8 @@ namespace AnonPDF
             }
 
             nudRotation.Value = NormalizeAngle(AnnotationRotation);
+            nudBorderWidth.Value = (decimal)NormalizeAnnotationBorderWidth(AnnotationBorderWidth);
+            nudFrameMargin.Value = (decimal)NormalizeAnnotationFrameMargin(AnnotationFrameMargin);
             if (chkNoBackgroundColor != null)
             {
                 chkNoBackgroundColor.Checked = AnnotationBackgroundColor.A <= 0;
@@ -36793,6 +37273,17 @@ namespace AnonPDF
                 btnBackgroundColor.Text = GetChooseColorButtonText();
                 btnBackgroundColor.UseVisualStyleBackColor = false;
                 btnBackgroundColor.Enabled = chkNoBackgroundColor == null || !chkNoBackgroundColor.Checked;
+            }
+
+            if (btnBorderColor != null)
+            {
+                System.Drawing.Color previewColor = AnnotationBorderColor.A > 0
+                    ? AnnotationBorderColor
+                    : System.Drawing.Color.White;
+                btnBorderColor.BackColor = previewColor;
+                btnBorderColor.ForeColor = GetContrastingTextColor(previewColor);
+                btnBorderColor.Text = GetChooseColorButtonText();
+                btnBorderColor.UseVisualStyleBackColor = false;
             }
         }
 
@@ -37025,6 +37516,22 @@ namespace AnonPDF
             TryApplyChanges();
         }
 
+        private void BtnBorderColor_Click(object sender, EventArgs e)
+        {
+            using (ColorDialog colorDialog = new ColorDialog())
+            {
+                colorDialog.Color = AnnotationBorderColor.A > 0
+                    ? AnnotationBorderColor
+                    : System.Drawing.Color.Black;
+                if (colorDialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    AnnotationBorderColor = colorDialog.Color;
+                    UpdateColorControls();
+                    TryApplyChanges();
+                }
+            }
+        }
+
         private void RichModeCheckedChanged(object sender, EventArgs e)
         {
             SetRichMode(chkRichTextMode.Checked, updateState: true);
@@ -37075,6 +37582,8 @@ namespace AnonPDF
             }
             AnnotationText = txtText.Text.Trim();
             AnnotationRichText = IsRichTextMode ? txtText.Rtf : null;
+            AnnotationBorderWidth = NormalizeAnnotationBorderWidth((float)nudBorderWidth.Value);
+            AnnotationFrameMargin = NormalizeAnnotationFrameMargin((float)nudFrameMargin.Value);
         }
 
         private static int NormalizeAngle(int rotation)
@@ -37083,6 +37592,26 @@ namespace AnonPDF
             if (rotation < 0)
                 rotation += 360;
             return rotation;
+        }
+
+        private static float NormalizeAnnotationBorderWidth(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return 0f;
+            }
+
+            return Math.Max(0f, Math.Min(24f, value));
+        }
+
+        private static float NormalizeAnnotationFrameMargin(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return 0f;
+            }
+
+            return Math.Max(0f, Math.Min(120f, value));
         }
 
         private void SymbolButton_Click(object sender, EventArgs e)
@@ -37102,6 +37631,8 @@ namespace AnonPDF
                 return;
             AnnotationText = txtText.Text;
             AnnotationRichText = IsRichTextMode ? txtText.Rtf : null;
+            AnnotationBorderWidth = NormalizeAnnotationBorderWidth((float)nudBorderWidth.Value);
+            AnnotationFrameMargin = NormalizeAnnotationFrameMargin((float)nudFrameMargin.Value);
             ApplyChanges?.Invoke();
         }
 
@@ -37827,7 +38358,9 @@ namespace AnonPDF
     public class EditArrowDialog : Form
     {
         private Button btnColor;
+        private Button btnBorderColor;
         private NumericUpDown nudThickness;
+        private NumericUpDown nudBorderWidth;
         private NumericUpDown nudHeadLength;
         private NumericUpDown nudHeadWidth;
         private CheckBox chkLocked;
@@ -37838,6 +38371,8 @@ namespace AnonPDF
 
         public System.Drawing.Color ArrowColor { get; set; } = System.Drawing.Color.Red;
         public float ThicknessValue { get; set; } = 3f;
+        public System.Drawing.Color BorderColor { get; set; } = System.Drawing.Color.Black;
+        public float BorderWidthValue { get; set; } = 0f;
         public float HeadLengthValue { get; set; } = 18f;
         public float HeadWidthValue { get; set; } = 12f;
         public bool IsLocked { get; set; }
@@ -37855,7 +38390,7 @@ namespace AnonPDF
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             Width = 360;
-            Height = 280;
+            Height = 350;
             MaximizeBox = false;
             MinimizeBox = false;
 
@@ -37875,10 +38410,26 @@ namespace AnonPDF
             };
             nudThickness.ValueChanged += (_, __) => TryApplyChanges();
 
-            Label lblHeadLength = new Label { Text = "Dlugosc grotu:", Location = new Point(16, 100), AutoSize = true };
+            Label lblBorderColor = new Label { Text = "Kolor ramki:", Location = new Point(16, 100), AutoSize = true };
+            btnBorderColor = new Button { Location = new Point(170, 94), Size = new Size(160, 28), Text = "Wybierz kolor" };
+            btnBorderColor.Click += BtnBorderColor_Click;
+
+            Label lblBorderWidth = new Label { Text = "Grubosc ramki:", Location = new Point(16, 136), AutoSize = true };
+            nudBorderWidth = new NumericUpDown
+            {
+                Location = new Point(170, 132),
+                Size = new Size(160, 22),
+                Minimum = 0,
+                Maximum = 24,
+                DecimalPlaces = 1,
+                Increment = 0.5m
+            };
+            nudBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
+
+            Label lblHeadLength = new Label { Text = "Dlugosc grotu:", Location = new Point(16, 172), AutoSize = true };
             nudHeadLength = new NumericUpDown
             {
-                Location = new Point(170, 96),
+                Location = new Point(170, 168),
                 Size = new Size(160, 22),
                 Minimum = 4,
                 Maximum = 120,
@@ -37887,10 +38438,10 @@ namespace AnonPDF
             };
             nudHeadLength.ValueChanged += (_, __) => TryApplyChanges();
 
-            Label lblHeadWidth = new Label { Text = "Szerokosc grotu:", Location = new Point(16, 136), AutoSize = true };
+            Label lblHeadWidth = new Label { Text = "Szerokosc grotu:", Location = new Point(16, 208), AutoSize = true };
             nudHeadWidth = new NumericUpDown
             {
-                Location = new Point(170, 132),
+                Location = new Point(170, 204),
                 Size = new Size(160, 22),
                 Minimum = 4,
                 Maximum = 120,
@@ -37902,7 +38453,7 @@ namespace AnonPDF
             chkLocked = new CheckBox
             {
                 Text = "Zablokuj obiekt",
-                Location = new Point(16, 168),
+                Location = new Point(16, 240),
                 AutoSize = true
             };
             chkLocked.CheckedChanged += (_, __) => TryApplyChanges();
@@ -37910,7 +38461,7 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(166, 202),
+                Location = new Point(166, 262),
                 Size = new Size(80, 30),
                 DialogResult = DialogResult.OK
             };
@@ -37919,7 +38470,7 @@ namespace AnonPDF
             btnRestoreDefaults = new Button
             {
                 Text = Resources.ResourceManager.GetString("UI_Button_RestoreSettings", Resources.Culture ?? CultureInfo.CurrentUICulture) ?? "UI_Button_RestoreSettings",
-                Location = new Point(16, 202),
+                Location = new Point(16, 262),
                 Size = new Size(140, 30)
             };
             btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
@@ -37927,7 +38478,7 @@ namespace AnonPDF
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(252, 202),
+                Location = new Point(252, 262),
                 Size = new Size(80, 30),
                 DialogResult = DialogResult.Cancel
             };
@@ -37936,6 +38487,10 @@ namespace AnonPDF
             Controls.Add(btnColor);
             Controls.Add(lblThickness);
             Controls.Add(nudThickness);
+            Controls.Add(lblBorderColor);
+            Controls.Add(btnBorderColor);
+            Controls.Add(lblBorderWidth);
+            Controls.Add(nudBorderWidth);
             Controls.Add(lblHeadLength);
             Controls.Add(nudHeadLength);
             Controls.Add(lblHeadWidth);
@@ -37956,7 +38511,9 @@ namespace AnonPDF
             try
             {
                 btnColor.BackColor = ArrowColor;
+                btnBorderColor.BackColor = BorderColor;
                 nudThickness.Value = ClampValue((decimal)ThicknessValue, nudThickness.Minimum, nudThickness.Maximum);
+                nudBorderWidth.Value = ClampValue((decimal)BorderWidthValue, nudBorderWidth.Minimum, nudBorderWidth.Maximum);
                 nudHeadLength.Value = ClampValue((decimal)HeadLengthValue, nudHeadLength.Minimum, nudHeadLength.Maximum);
                 nudHeadWidth.Value = ClampValue((decimal)HeadWidthValue, nudHeadWidth.Minimum, nudHeadWidth.Maximum);
                 chkLocked.Checked = IsLocked;
@@ -37995,6 +38552,20 @@ namespace AnonPDF
             }
         }
 
+        private void BtnBorderColor_Click(object sender, EventArgs e)
+        {
+            using (var colorDialog = new ColorDialog())
+            {
+                colorDialog.Color = BorderColor;
+                if (colorDialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    BorderColor = colorDialog.Color;
+                    btnBorderColor.BackColor = BorderColor;
+                    TryApplyChanges();
+                }
+            }
+        }
+
         private void BtnOK_Click(object sender, EventArgs e)
         {
             SyncPropertiesFromControls();
@@ -38012,7 +38583,9 @@ namespace AnonPDF
             try
             {
                 btnColor.BackColor = ArrowColor;
+                btnBorderColor.BackColor = BorderColor;
                 nudThickness.Value = ClampValue((decimal)ThicknessValue, nudThickness.Minimum, nudThickness.Maximum);
+                nudBorderWidth.Value = ClampValue((decimal)BorderWidthValue, nudBorderWidth.Minimum, nudBorderWidth.Maximum);
                 nudHeadLength.Value = ClampValue((decimal)HeadLengthValue, nudHeadLength.Minimum, nudHeadLength.Maximum);
                 nudHeadWidth.Value = ClampValue((decimal)HeadWidthValue, nudHeadWidth.Minimum, nudHeadWidth.Maximum);
                 chkLocked.Checked = IsLocked;
@@ -38027,6 +38600,7 @@ namespace AnonPDF
         private void SyncPropertiesFromControls()
         {
             ThicknessValue = (float)nudThickness.Value;
+            BorderWidthValue = (float)nudBorderWidth.Value;
             HeadLengthValue = (float)nudHeadLength.Value;
             HeadWidthValue = (float)nudHeadWidth.Value;
             IsLocked = chkLocked.Checked;
@@ -38950,6 +39524,8 @@ namespace AnonPDF
         public PointF End { get; set; }
         public int LineColorArgb { get; set; } = System.Drawing.Color.Red.ToArgb();
         public float Thickness { get; set; } = 3f;
+        public int BorderColorArgb { get; set; } = System.Drawing.Color.Black.ToArgb();
+        public float BorderWidth { get; set; } = 0f;
         public float HeadLength { get; set; } = 18f;
         public float HeadWidth { get; set; } = 12f;
         public bool IsLocked { get; set; }

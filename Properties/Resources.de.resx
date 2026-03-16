@@ -1754,6 +1754,18 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
     <value>Querstrich</value>
   </data>
   <data name="UI_Button_RestoreSettings" xml:space="preserve">
+
     <value>Einstellungen wiederherstellen</value>
+
+  </data>
+
+  <data name="EditText_LabelBorderColor" xml:space="preserve">
+    <value>Rahmenfarbe</value>
+  </data>
+  <data name="EditText_LabelBorderWidth" xml:space="preserve">
+    <value>Rahmenst&#228;rke</value>
+  </data>
+  <data name="EditText_LabelFrameMargin" xml:space="preserve">
+    <value>Rahmenabstand</value>
   </data>
 </root>
