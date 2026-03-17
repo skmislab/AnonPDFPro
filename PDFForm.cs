@@ -130,9 +130,11 @@ namespace AnonPDF
         private bool suppressUndoRedoCapture;
         private bool isMarkerCtrlBoxMode;
         private bool isMoving;
+        private bool isScalingTextAnnotation;
         private bool isRotatingTextAnnotation;
         private bool textRotationInteractionChanged;
         private TextAnnotation annotationToMove = null;
+        private TextAnnotation annotationToScale = null;
         private TextAnnotation annotationToRotate = null;
         private TextAnnotation selectedTextAnnotation = null;
         private int textRotationStartValue;
@@ -260,11 +262,21 @@ namespace AnonPDF
         private RasterObject rasterObjectToResize;
         private ArrowObject arrowObjectToMove;
         private ArrowObject arrowObjectToAdjust;
+        private ArrowObject arrowObjectToScale;
         private VectorShapeObject vectorShapeToMove;
         private VectorShapeObject vectorShapeToAdjust;
         private VectorShapeObject vectorShapeToRotate;
+        private VectorShapeObject vectorShapeToScale;
         private PointF textMoveMouseOffset;
         private RectangleF textMoveStartBounds = RectangleF.Empty;
+        private RectangleF textScaleStartBounds = RectangleF.Empty;
+        private RectangleF textScaleStartScreenBounds = RectangleF.Empty;
+        private float textScaleStartFontSize;
+        private FontStyle textScaleStartFontStyle = FontStyle.Regular;
+        private FontFamily textScaleStartFontFamily;
+        private GraphicsUnit textScaleStartFontUnit = GraphicsUnit.Point;
+        private float textScaleStartBorderWidth;
+        private float textScaleStartFrameMargin;
         private RectangleF textRotationStartBounds = RectangleF.Empty;
         private PointF rasterMoveMouseOffset;
         private RectangleF rasterMoveStartBounds = RectangleF.Empty;
@@ -272,8 +284,19 @@ namespace AnonPDF
         private PointF arrowMoveStartMouseDoc;
         private PointF arrowMoveInitialStart;
         private PointF arrowMoveInitialEnd;
+        private RectangleF arrowScaleStartScreenBounds = RectangleF.Empty;
+        private float arrowScaleStartThickness;
+        private float arrowScaleStartBorderWidth;
+        private float arrowScaleStartHeadLength;
+        private float arrowScaleStartHeadWidth;
         private PointF vectorMoveStartMouseDoc;
         private List<PointF> vectorMoveInitialPoints = new List<PointF>();
+        private RectangleF vectorScaleStartScreenBounds = RectangleF.Empty;
+        private float vectorScaleStartStrokeWidth;
+        private float vectorScaleStartStartEndingPrimarySize;
+        private float vectorScaleStartStartEndingSecondarySize;
+        private float vectorScaleStartEndEndingPrimarySize;
+        private float vectorScaleStartEndEndingSecondarySize;
         private readonly HashSet<TextAnnotation> selectedTextAnnotations = new HashSet<TextAnnotation>();
         private readonly HashSet<string> selectedRasterObjectIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> selectedArrowObjectIds = new HashSet<string>(StringComparer.Ordinal);
@@ -311,9 +334,13 @@ namespace AnonPDF
         private bool vectorShapeDraftHoverActive;
         private List<ObjectLayerEntry> objectLayerOrder = new List<ObjectLayerEntry>();
         private bool isMovingObjectGroup;
+        private bool isScalingObjectGroup;
         private bool groupMoveChanged;
+        private bool groupScaleChanged;
         private PointF groupMoveStartMouseDoc;
         private RectangleF groupMoveInitialBounds = RectangleF.Empty;
+        private RectangleF groupScaleStartScreenBounds = RectangleF.Empty;
+        private ObjectScaleHandleCorner activeGroupScaleHandleCorner;
         private float groupMoveMinDx;
         private float groupMoveMaxDx;
         private float groupMoveMinDy;
@@ -329,9 +356,11 @@ namespace AnonPDF
         private bool isResizingRasterObject;
         private bool isMovingArrowObject;
         private bool isAdjustingArrowHandle;
+        private bool isScalingArrowObject;
         private bool isMovingVectorShape;
         private bool isAdjustingVectorHandle;
         private bool isRotatingVectorShape;
+        private bool isScalingVectorShape;
         private bool rasterMouseActionInProgress;
         private bool arrowMouseActionInProgress;
         private bool vectorMouseActionInProgress;
@@ -358,6 +387,7 @@ namespace AnonPDF
         private float vectorRotationStartAngle;
         private List<PointF> vectorRotateInitialPoints = new List<PointF>();
         private PointF vectorRotateCenterDoc = PointF.Empty;
+        private ObjectScaleHandleCorner activeObjectScaleHandleCorner;
 
         private enum RasterResizeHandleType
         {
@@ -370,6 +400,14 @@ namespace AnonPDF
             Bottom,
             BottomLeft,
             Left
+        }
+
+        private enum ObjectScaleHandleCorner
+        {
+            TopLeft,
+            TopRight,
+            BottomRight,
+            BottomLeft
         }
 
         private enum ArrowHandleType
@@ -426,6 +464,21 @@ namespace AnonPDF
             public PointF Start { get; set; }
             public PointF End { get; set; }
             public List<PointF> Points { get; set; }
+            public float TextFontSize { get; set; }
+            public FontFamily TextFontFamily { get; set; }
+            public FontStyle TextFontStyle { get; set; }
+            public GraphicsUnit TextFontUnit { get; set; }
+            public float TextBorderWidth { get; set; }
+            public float TextFrameMargin { get; set; }
+            public float ArrowThickness { get; set; }
+            public float ArrowBorderWidth { get; set; }
+            public float ArrowHeadLength { get; set; }
+            public float ArrowHeadWidth { get; set; }
+            public float VectorStrokeWidth { get; set; }
+            public float VectorStartEndingPrimarySize { get; set; }
+            public float VectorStartEndingSecondarySize { get; set; }
+            public float VectorEndEndingPrimarySize { get; set; }
+            public float VectorEndEndingSecondarySize { get; set; }
         }
 
         private sealed class UndoCaptureContext
@@ -505,6 +558,10 @@ namespace AnonPDF
             public VectorFillPatternKind FillPattern { get; set; }
             public VectorLineEndingKind StartEnding { get; set; }
             public VectorLineEndingKind EndEnding { get; set; }
+            public float StartEndingPrimarySize { get; set; }
+            public float StartEndingSecondarySize { get; set; }
+            public float EndEndingPrimarySize { get; set; }
+            public float EndEndingSecondarySize { get; set; }
 
             public static VectorShapeDefaults CreateDefault()
             {
@@ -519,7 +576,11 @@ namespace AnonPDF
                     StrokeKind = VectorShapeStrokeKind.Solid,
                     FillPattern = VectorFillPatternKind.Solid,
                     StartEnding = VectorLineEndingKind.None,
-                    EndEnding = VectorLineEndingKind.None
+                    EndEnding = VectorLineEndingKind.None,
+                    StartEndingPrimarySize = 0f,
+                    StartEndingSecondarySize = 0f,
+                    EndEndingPrimarySize = 0f,
+                    EndEndingSecondarySize = 0f
                 };
             }
 
@@ -536,7 +597,11 @@ namespace AnonPDF
                     StrokeKind = StrokeKind,
                     FillPattern = FillPattern,
                     StartEnding = StartEnding,
-                    EndEnding = EndEnding
+                    EndEnding = EndEnding,
+                    StartEndingPrimarySize = StartEndingPrimarySize,
+                    StartEndingSecondarySize = StartEndingSecondarySize,
+                    EndEndingPrimarySize = EndEndingPrimarySize,
+                    EndEndingSecondarySize = EndEndingSecondarySize
                 };
             }
         }
@@ -2355,7 +2420,8 @@ namespace AnonPDF
                 selectedVectorShape = null;
             }
 
-            if (annotationToRotate != null && !IsLayerVisible(annotationToRotate.LayerId))
+            if ((annotationToRotate != null && !IsLayerVisible(annotationToRotate.LayerId)) ||
+                (annotationToScale != null && !IsLayerVisible(annotationToScale.LayerId)))
             {
                 ResetTextRotationInteractionState();
             }
@@ -2374,14 +2440,16 @@ namespace AnonPDF
             }
 
             if ((arrowObjectToMove != null && !IsLayerVisible(arrowObjectToMove.LayerId)) ||
-                (arrowObjectToAdjust != null && !IsLayerVisible(arrowObjectToAdjust.LayerId)))
+                (arrowObjectToAdjust != null && !IsLayerVisible(arrowObjectToAdjust.LayerId)) ||
+                (arrowObjectToScale != null && !IsLayerVisible(arrowObjectToScale.LayerId)))
             {
                 ResetArrowInteractionState();
             }
 
             if ((vectorShapeToMove != null && !IsLayerVisible(vectorShapeToMove.LayerId)) ||
                 (vectorShapeToAdjust != null && !IsLayerVisible(vectorShapeToAdjust.LayerId)) ||
-                (vectorShapeToRotate != null && !IsLayerVisible(vectorShapeToRotate.LayerId)))
+                (vectorShapeToRotate != null && !IsLayerVisible(vectorShapeToRotate.LayerId)) ||
+                (vectorShapeToScale != null && !IsLayerVisible(vectorShapeToScale.LayerId)))
             {
                 ResetVectorInteractionState();
             }
@@ -4712,6 +4780,10 @@ namespace AnonPDF
                             FillPattern = vectorShapeObject.FillPattern,
                             StartLineEnding = vectorShapeObject.StartLineEnding,
                             EndLineEnding = vectorShapeObject.EndLineEnding,
+                            StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorShapeObject.StartLineEndingPrimarySize),
+                            StartLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorShapeObject.StartLineEndingSecondarySize),
+                            EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorShapeObject.EndLineEndingPrimarySize),
+                            EndLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorShapeObject.EndLineEndingSecondarySize),
                             IsLocked = vectorShapeObject.IsLocked
                         }
                     });
@@ -5185,6 +5257,10 @@ namespace AnonPDF
                 ["FillPattern"] = vectorShape.FillPattern,
                 ["StartLineEnding"] = vectorShape.StartLineEnding,
                 ["EndLineEnding"] = vectorShape.EndLineEnding,
+                ["StartLineEndingPrimarySize"] = vectorShape.StartLineEndingPrimarySize,
+                ["StartLineEndingSecondarySize"] = vectorShape.StartLineEndingSecondarySize,
+                ["EndLineEndingPrimarySize"] = vectorShape.EndLineEndingPrimarySize,
+                ["EndLineEndingSecondarySize"] = vectorShape.EndLineEndingSecondarySize,
                 ["IsLocked"] = vectorShape.IsLocked
             };
         }
@@ -5211,6 +5287,10 @@ namespace AnonPDF
                 FillPattern = vectorJson.Value<string>("FillPattern") ?? "solid",
                 StartLineEnding = vectorJson.Value<string>("StartLineEnding") ?? "None",
                 EndLineEnding = vectorJson.Value<string>("EndLineEnding") ?? "None",
+                StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorJson.Value<float?>("StartLineEndingPrimarySize") ?? 0f),
+                StartLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorJson.Value<float?>("StartLineEndingSecondarySize") ?? 0f),
+                EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorJson.Value<float?>("EndLineEndingPrimarySize") ?? 0f),
+                EndLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorJson.Value<float?>("EndLineEndingSecondarySize") ?? 0f),
                 IsLocked = vectorJson.Value<bool?>("IsLocked") ?? false
             };
         }
@@ -5406,10 +5486,26 @@ namespace AnonPDF
             var targetPageSize = GetPageSizeWithOffset(currentPage);
             float sourcePageWidth = snapshot.SourcePageWidth > 0f ? snapshot.SourcePageWidth : targetPageSize.Width;
             float sourcePageHeight = snapshot.SourcePageHeight > 0f ? snapshot.SourcePageHeight : targetPageSize.Height;
+            float sourceBoundsWidth = Math.Max(1f, snapshot.SourceBounds.Width);
+            float sourceBoundsHeight = Math.Max(1f, snapshot.SourceBounds.Height);
+            const float pasteMarginDoc = 4f;
+            float availableWidth = Math.Max(1f, targetPageSize.Width - (pasteMarginDoc * 2f));
+            float availableHeight = Math.Max(1f, targetPageSize.Height - (pasteMarginDoc * 2f));
+            float pasteScale = 1f;
+            if (sourceBoundsWidth > availableWidth || sourceBoundsHeight > availableHeight)
+            {
+                pasteScale = Math.Min(availableWidth / sourceBoundsWidth, availableHeight / sourceBoundsHeight);
+                pasteScale = Math.Max(0.05f, Math.Min(1f, pasteScale));
+            }
+
+            float scaledBoundsWidth = sourceBoundsWidth * pasteScale;
+            float scaledBoundsHeight = sourceBoundsHeight * pasteScale;
             float relativeBaseX = sourcePageWidth > 0f ? snapshot.SourceBounds.X / sourcePageWidth : 0f;
             float relativeBaseY = sourcePageHeight > 0f ? snapshot.SourceBounds.Y / sourcePageHeight : 0f;
             float baseX = targetPageSize.Width * relativeBaseX;
             float baseY = targetPageSize.Height * relativeBaseY;
+            baseX = Math.Max(pasteMarginDoc, Math.Min(targetPageSize.Width - pasteMarginDoc - scaledBoundsWidth, baseX));
+            baseY = Math.Max(pasteMarginDoc, Math.Min(targetPageSize.Height - pasteMarginDoc - scaledBoundsHeight, baseY));
             DateTime now = DateTime.UtcNow;
             string targetLayerId = GetResolvedActiveLayerId();
 
@@ -5417,6 +5513,7 @@ namespace AnonPDF
             var pastedRasterObjects = new List<RasterObject>();
             var pastedArrowObjects = new List<ArrowObject>();
             var pastedVectorShapes = new List<VectorShapeObject>();
+            var pastedObjectsInSourceOrder = new List<object>();
 
             foreach (ObjectClipboardItem item in snapshot.Items)
             {
@@ -5435,10 +5532,10 @@ namespace AnonPDF
                         }
 
                         RectangleF bounds = new RectangleF(
-                            baseX + item.Bounds.X,
-                            baseY + item.Bounds.Y,
-                            item.Bounds.Width,
-                            item.Bounds.Height);
+                            baseX + (item.Bounds.X * pasteScale),
+                            baseY + (item.Bounds.Y * pasteScale),
+                            item.Bounds.Width * pasteScale,
+                            item.Bounds.Height * pasteScale);
                         bounds = ConstrainAnnotationBoundsToViewer(bounds);
                         var textCopy = new TextAnnotation
                         {
@@ -5459,9 +5556,20 @@ namespace AnonPDF
                             AnnotationBounds = bounds,
                             AnnotationIsLocked = item.Text.AnnotationIsLocked
                         };
+                        if (textCopy.AnnotationFont != null && Math.Abs(pasteScale - 1f) > 0.0001f)
+                        {
+                            textCopy.AnnotationFont = new Font(
+                                textCopy.AnnotationFont.FontFamily,
+                                Math.Max(4f, textCopy.AnnotationFont.Size * pasteScale),
+                                textCopy.AnnotationFont.Style,
+                                textCopy.AnnotationFont.Unit);
+                        }
+                        textCopy.AnnotationBorderWidth = Math.Max(0f, textCopy.AnnotationBorderWidth * pasteScale);
+                        textCopy.AnnotationFrameMargin = Math.Max(0f, textCopy.AnnotationFrameMargin * pasteScale);
                         StampTextAnnotationCreated(textCopy);
                         textAnnotations.Add(textCopy);
                         pastedTextAnnotations.Add(textCopy);
+                        pastedObjectsInSourceOrder.Add(textCopy);
                         break;
                     }
                     case ObjectClipboardItemType.Raster:
@@ -5478,18 +5586,18 @@ namespace AnonPDF
                             float centerX = pageSize.Width / 2f;
                             float centerY = pageSize.Height / 2f;
                             bounds = new RectangleF(
-                                centerX - (item.Bounds.Width / 2f),
-                                centerY - (item.Bounds.Height / 2f),
-                                item.Bounds.Width,
-                                item.Bounds.Height);
+                                centerX - ((item.Bounds.Width * pasteScale) / 2f),
+                                centerY - ((item.Bounds.Height * pasteScale) / 2f),
+                                item.Bounds.Width * pasteScale,
+                                item.Bounds.Height * pasteScale);
                         }
                         else
                         {
                             bounds = new RectangleF(
-                                baseX + item.Bounds.X,
-                                baseY + item.Bounds.Y,
-                                item.Bounds.Width,
-                                item.Bounds.Height);
+                                baseX + (item.Bounds.X * pasteScale),
+                                baseY + (item.Bounds.Y * pasteScale),
+                                item.Bounds.Width * pasteScale,
+                                item.Bounds.Height * pasteScale);
                         }
 
                         var rasterCopy = new RasterObject
@@ -5515,6 +5623,7 @@ namespace AnonPDF
                         rasterCopy.InitialBounds = rasterCopy.Bounds;
                         rasterObjects.Add(rasterCopy);
                         pastedRasterObjects.Add(rasterCopy);
+                        pastedObjectsInSourceOrder.Add(rasterCopy);
                         break;
                     }
                     case ObjectClipboardItemType.Arrow:
@@ -5529,14 +5638,14 @@ namespace AnonPDF
                             Id = Guid.NewGuid().ToString("N"),
                             PageNumber = currentPage,
                             LayerId = targetLayerId,
-                            Start = new PointF(baseX + item.Arrow.Start.X, baseY + item.Arrow.Start.Y),
-                            End = new PointF(baseX + item.Arrow.End.X, baseY + item.Arrow.End.Y),
+                            Start = new PointF(baseX + (item.Arrow.Start.X * pasteScale), baseY + (item.Arrow.Start.Y * pasteScale)),
+                            End = new PointF(baseX + (item.Arrow.End.X * pasteScale), baseY + (item.Arrow.End.Y * pasteScale)),
                             LineColorArgb = item.Arrow.LineColorArgb,
-                            Thickness = NormalizeArrowThickness(item.Arrow.Thickness),
+                            Thickness = NormalizeArrowThickness(item.Arrow.Thickness * pasteScale),
                             BorderColorArgb = item.Arrow.BorderColorArgb,
-                            BorderWidth = NormalizeArrowBorderWidth(item.Arrow.BorderWidth),
-                            HeadLength = NormalizeArrowHeadLength(item.Arrow.HeadLength),
-                            HeadWidth = NormalizeArrowHeadWidth(item.Arrow.HeadWidth),
+                            BorderWidth = NormalizeArrowBorderWidth(item.Arrow.BorderWidth * pasteScale),
+                            HeadLength = NormalizeArrowHeadLength(item.Arrow.HeadLength * pasteScale),
+                            HeadWidth = NormalizeArrowHeadWidth(item.Arrow.HeadWidth * pasteScale),
                             IsLocked = item.Arrow.IsLocked,
                             CreatedAtUtc = now,
                             UpdatedAtUtc = now
@@ -5544,6 +5653,7 @@ namespace AnonPDF
                         ConstrainArrowToPage(arrowCopy);
                         arrowObjects.Add(arrowCopy);
                         pastedArrowObjects.Add(arrowCopy);
+                        pastedObjectsInSourceOrder.Add(arrowCopy);
                         break;
                     }
                     case ObjectClipboardItemType.VectorShape:
@@ -5560,10 +5670,10 @@ namespace AnonPDF
                             LayerId = targetLayerId,
                             ShapeType = item.VectorShape.ShapeType,
                             Points = (item.VectorShape.Points ?? new List<PointF>())
-                                .Select(point => new PointF(baseX + point.X, baseY + point.Y))
+                                .Select(point => new PointF(baseX + (point.X * pasteScale), baseY + (point.Y * pasteScale)))
                                 .ToList(),
                             StrokeColorArgb = item.VectorShape.StrokeColorArgb,
-                            StrokeWidth = NormalizeVectorStrokeWidth(item.VectorShape.StrokeWidth),
+                            StrokeWidth = NormalizeVectorStrokeWidth(item.VectorShape.StrokeWidth * pasteScale),
                             FillColorArgb = item.VectorShape.FillColorArgb,
                             FillPatternColorArgb = item.VectorShape.FillPatternColorArgb,
                             FillOpacity = NormalizeVectorFillOpacity(item.VectorShape.FillOpacity),
@@ -5571,6 +5681,10 @@ namespace AnonPDF
                             FillPattern = item.VectorShape.FillPattern,
                             StartLineEnding = item.VectorShape.StartLineEnding,
                             EndLineEnding = item.VectorShape.EndLineEnding,
+                            StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(item.VectorShape.StartLineEndingPrimarySize * pasteScale),
+                            StartLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(item.VectorShape.StartLineEndingSecondarySize),
+                            EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(item.VectorShape.EndLineEndingPrimarySize * pasteScale),
+                            EndLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(item.VectorShape.EndLineEndingSecondarySize),
                             IsLocked = item.VectorShape.IsLocked,
                             CreatedAtUtc = now,
                             UpdatedAtUtc = now
@@ -5579,6 +5693,7 @@ namespace AnonPDF
                         ConstrainVectorShapeToPage(vectorCopy);
                         vectorShapes.Add(vectorCopy);
                         pastedVectorShapes.Add(vectorCopy);
+                        pastedObjectsInSourceOrder.Add(vectorCopy);
                         break;
                     }
                 }
@@ -5591,21 +5706,24 @@ namespace AnonPDF
             }
 
             EnsureObjectLayerOrder();
-            foreach (TextAnnotation textAnnotation in pastedTextAnnotations)
+            foreach (object pastedObject in pastedObjectsInSourceOrder)
             {
-                BringTextAnnotationToFront(textAnnotation);
-            }
-            foreach (RasterObject rasterObject in pastedRasterObjects)
-            {
-                BringRasterObjectToFront(rasterObject);
-            }
-            foreach (ArrowObject arrowObject in pastedArrowObjects)
-            {
-                BringArrowObjectToFront(arrowObject);
-            }
-            foreach (VectorShapeObject vectorShapeObject in pastedVectorShapes)
-            {
-                BringVectorShapeToFront(vectorShapeObject);
+                if (pastedObject is TextAnnotation textAnnotation)
+                {
+                    BringTextAnnotationToFront(textAnnotation);
+                }
+                else if (pastedObject is RasterObject rasterObject)
+                {
+                    BringRasterObjectToFront(rasterObject);
+                }
+                else if (pastedObject is ArrowObject arrowObject)
+                {
+                    BringArrowObjectToFront(arrowObject);
+                }
+                else if (pastedObject is VectorShapeObject vectorShapeObject)
+                {
+                    BringVectorShapeToFront(vectorShapeObject);
+                }
             }
 
             ClearGroupSelection();
@@ -5732,10 +5850,13 @@ namespace AnonPDF
         private void ResetGroupMoveState()
         {
             isMovingObjectGroup = false;
+            isScalingObjectGroup = false;
             groupMoveChanged = false;
+            groupScaleChanged = false;
             groupMoveEntries.Clear();
             groupMoveStartMouseDoc = PointF.Empty;
             groupMoveInitialBounds = RectangleF.Empty;
+            groupScaleStartScreenBounds = RectangleF.Empty;
             groupMoveMinDx = 0f;
             groupMoveMaxDx = 0f;
             groupMoveMinDy = 0f;
@@ -6249,6 +6370,363 @@ namespace AnonPDF
             isMovingObjectGroup = true;
             groupMoveChanged = false;
             this.Cursor = Cursors.SizeAll;
+            return true;
+        }
+
+        private bool CanInteractWithCurrentGroupSelection()
+        {
+            if (GetGroupSelectionCount() < 2)
+            {
+                return false;
+            }
+
+            bool hasLockedSelection =
+                selectedTextAnnotations.Any(t => t != null && t.PageNumber == currentPage && IsTextAnnotationEffectivelyLocked(t)) ||
+                selectedRasterObjectIds.Any(id => rasterObjects.Any(r => r != null && r.PageNumber == currentPage && r.Id == id && IsRasterObjectEffectivelyLocked(r))) ||
+                selectedArrowObjectIds.Any(id => arrowObjects.Any(a => a != null && a.PageNumber == currentPage && a.Id == id && IsArrowObjectEffectivelyLocked(a))) ||
+                selectedVectorShapeIds.Any(id => vectorShapes.Any(v => v != null && v.PageNumber == currentPage && v.Id == id && IsVectorShapeEffectivelyLocked(v)));
+            return !hasLockedSelection;
+        }
+
+        private bool TryGetCurrentGroupSelectionScreenBounds(float dpiX, float dpiY, out RectangleF bounds)
+        {
+            bounds = RectangleF.Empty;
+            if (GetGroupSelectionCount() < 2)
+            {
+                return false;
+            }
+
+            float minX = float.MaxValue;
+            float minY = float.MaxValue;
+            float maxX = float.MinValue;
+            float maxY = float.MinValue;
+
+            void includeBounds(RectangleF rect)
+            {
+                if (rect.Width <= 0f || rect.Height <= 0f)
+                {
+                    return;
+                }
+
+                minX = Math.Min(minX, rect.Left);
+                minY = Math.Min(minY, rect.Top);
+                maxX = Math.Max(maxX, rect.Right);
+                maxY = Math.Max(maxY, rect.Bottom);
+            }
+
+            foreach (TextAnnotation text in selectedTextAnnotations.Where(t => t != null && t.PageNumber == currentPage && IsLayerVisible(t.LayerId)))
+            {
+                if (TryGetAnnotationTextFrameGeometry(text, dpiX, dpiY, out _, out RectangleF textBounds, out _, out _))
+                {
+                    includeBounds(textBounds);
+                }
+            }
+
+            foreach (string rasterId in selectedRasterObjectIds)
+            {
+                RasterObject raster = rasterObjects.FirstOrDefault(r => r != null && r.PageNumber == currentPage && r.Id == rasterId && IsLayerVisible(r.LayerId));
+                if (raster != null)
+                {
+                    includeBounds(GetRasterObjectScreenFrameBounds(raster));
+                }
+            }
+
+            foreach (string arrowId in selectedArrowObjectIds)
+            {
+                ArrowObject arrow = arrowObjects.FirstOrDefault(a => a != null && a.PageNumber == currentPage && a.Id == arrowId && IsLayerVisible(a.LayerId));
+                if (arrow != null && TryGetArrowScreenBounds(arrow, out RectangleF arrowBounds))
+                {
+                    includeBounds(arrowBounds);
+                }
+            }
+
+            foreach (string vectorId in selectedVectorShapeIds)
+            {
+                VectorShapeObject vector = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == currentPage && v.Id == vectorId && IsLayerVisible(v.LayerId));
+                if (vector != null && TryGetVectorShapeScreenBounds(vector, out RectangleF vectorBounds))
+                {
+                    includeBounds(vectorBounds);
+                }
+            }
+
+            if (minX == float.MaxValue || minY == float.MaxValue || maxX == float.MinValue || maxY == float.MinValue)
+            {
+                return false;
+            }
+
+            bounds = RectangleF.FromLTRB(minX, minY, maxX, maxY);
+            return bounds.Width > 0f && bounds.Height > 0f;
+        }
+
+        private bool TryUpdateGroupHoverCursor(Point location, float dpiX, float dpiY)
+        {
+            if (!CanInteractWithCurrentGroupSelection())
+            {
+                return false;
+            }
+
+            if (!TryGetCurrentGroupSelectionScreenBounds(dpiX, dpiY, out RectangleF bounds))
+            {
+                return false;
+            }
+
+            if (TryGetObjectScaleHandleAtPoint(bounds, location, out ObjectScaleHandleCorner handleCorner))
+            {
+                this.Cursor = GetCursorForObjectScaleHandle(handleCorner);
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryBuildCurrentGroupSelectionEntries(float dpiX, float dpiY)
+        {
+            groupMoveEntries.Clear();
+            float minX = float.MaxValue;
+            float minY = float.MaxValue;
+            float maxX = float.MinValue;
+            float maxY = float.MinValue;
+
+            foreach (var text in selectedTextAnnotations.Where(t => t != null && t.PageNumber == currentPage && !IsTextAnnotationEffectivelyLocked(t)))
+            {
+                RectangleF bounds = text.AnnotationBounds;
+                groupMoveEntries.Add(new GroupMoveEntry
+                {
+                    Type = GroupMoveObjectType.Text,
+                    Text = text,
+                    Bounds = bounds,
+                    TextFontFamily = text.AnnotationFont?.FontFamily,
+                    TextFontStyle = text.AnnotationFont?.Style ?? FontStyle.Regular,
+                    TextFontUnit = text.AnnotationFont?.Unit ?? GraphicsUnit.Point,
+                    TextFontSize = text.AnnotationFont?.Size ?? 12f,
+                    TextBorderWidth = text.AnnotationBorderWidth,
+                    TextFrameMargin = text.AnnotationFrameMargin
+                });
+
+                minX = Math.Min(minX, bounds.Left);
+                minY = Math.Min(minY, bounds.Top);
+                maxX = Math.Max(maxX, bounds.Right);
+                maxY = Math.Max(maxY, bounds.Bottom);
+            }
+
+            foreach (var rasterId in selectedRasterObjectIds)
+            {
+                RasterObject raster = rasterObjects.FirstOrDefault(r => r != null && r.PageNumber == currentPage && r.Id == rasterId && !IsRasterObjectEffectivelyLocked(r));
+                if (raster == null)
+                {
+                    continue;
+                }
+
+                RectangleF bounds = raster.Bounds;
+                groupMoveEntries.Add(new GroupMoveEntry
+                {
+                    Type = GroupMoveObjectType.Raster,
+                    Raster = raster,
+                    Bounds = bounds
+                });
+
+                minX = Math.Min(minX, bounds.Left);
+                minY = Math.Min(minY, bounds.Top);
+                maxX = Math.Max(maxX, bounds.Right);
+                maxY = Math.Max(maxY, bounds.Bottom);
+            }
+
+            foreach (var arrowId in selectedArrowObjectIds)
+            {
+                ArrowObject arrow = arrowObjects.FirstOrDefault(a => a != null && a.PageNumber == currentPage && a.Id == arrowId && !IsArrowObjectEffectivelyLocked(a));
+                if (arrow == null)
+                {
+                    continue;
+                }
+
+                groupMoveEntries.Add(new GroupMoveEntry
+                {
+                    Type = GroupMoveObjectType.Arrow,
+                    Arrow = arrow,
+                    Start = arrow.Start,
+                    End = arrow.End,
+                    ArrowThickness = arrow.Thickness,
+                    ArrowBorderWidth = arrow.BorderWidth,
+                    ArrowHeadLength = arrow.HeadLength,
+                    ArrowHeadWidth = arrow.HeadWidth
+                });
+
+                float arrowMinX = Math.Min(arrow.Start.X, arrow.End.X);
+                float arrowMaxX = Math.Max(arrow.Start.X, arrow.End.X);
+                float arrowMinY = Math.Min(arrow.Start.Y, arrow.End.Y);
+                float arrowMaxY = Math.Max(arrow.Start.Y, arrow.End.Y);
+                minX = Math.Min(minX, arrowMinX);
+                minY = Math.Min(minY, arrowMinY);
+                maxX = Math.Max(maxX, arrowMaxX);
+                maxY = Math.Max(maxY, arrowMaxY);
+            }
+
+            foreach (var vectorId in selectedVectorShapeIds)
+            {
+                VectorShapeObject vector = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == currentPage && v.Id == vectorId && !IsVectorShapeEffectivelyLocked(v));
+                if (vector == null)
+                {
+                    continue;
+                }
+
+                RectangleF bounds = GetVectorShapeBounds(vector.Points);
+                if (bounds.IsEmpty)
+                {
+                    continue;
+                }
+
+                groupMoveEntries.Add(new GroupMoveEntry
+                {
+                    Type = GroupMoveObjectType.VectorShape,
+                    VectorShape = vector,
+                    Points = (vector.Points ?? new List<PointF>()).Select(p => p).ToList(),
+                    Bounds = bounds,
+                    VectorStrokeWidth = vector.StrokeWidth,
+                    VectorStartEndingPrimarySize = vector.StartLineEndingPrimarySize,
+                    VectorStartEndingSecondarySize = vector.StartLineEndingSecondarySize,
+                    VectorEndEndingPrimarySize = vector.EndLineEndingPrimarySize,
+                    VectorEndEndingSecondarySize = vector.EndLineEndingSecondarySize
+                });
+
+                minX = Math.Min(minX, bounds.Left);
+                minY = Math.Min(minY, bounds.Top);
+                maxX = Math.Max(maxX, bounds.Right);
+                maxY = Math.Max(maxY, bounds.Bottom);
+            }
+
+            if (groupMoveEntries.Count == 0 || minX == float.MaxValue || minY == float.MaxValue)
+            {
+                return false;
+            }
+
+            groupMoveInitialBounds = RectangleF.FromLTRB(minX, minY, maxX, maxY);
+            return true;
+        }
+
+        private bool TryBeginGroupScale(Point location, float dpiX, float dpiY)
+        {
+            if (!CanInteractWithCurrentGroupSelection())
+            {
+                return false;
+            }
+
+            if (!TryGetCurrentGroupSelectionScreenBounds(dpiX, dpiY, out RectangleF screenBounds))
+            {
+                return false;
+            }
+
+            if (!TryGetObjectScaleHandleAtPoint(screenBounds, location, out ObjectScaleHandleCorner handleCorner))
+            {
+                return false;
+            }
+
+            if (!EnsureCurrentPageEditable(true))
+            {
+                return true;
+            }
+
+            if (!TryBuildCurrentGroupSelectionEntries(dpiX, dpiY))
+            {
+                return true;
+            }
+
+            BeginUndoCapture("Scale object group");
+            isScalingObjectGroup = true;
+            groupScaleChanged = false;
+            activeGroupScaleHandleCorner = handleCorner;
+            groupScaleStartScreenBounds = screenBounds;
+            this.Cursor = GetCursorForObjectScaleHandle(handleCorner);
+            return true;
+        }
+
+        private static RectangleF ScaleRectangleFromScreenBounds(RectangleF initialDocBounds, RectangleF initialScreenBounds, RectangleF newScreenBounds, float scaleFactor)
+        {
+            PointF topLeft = ScalePointFromScreenBounds(new PointF(initialDocBounds.Left, initialDocBounds.Top), initialScreenBounds, newScreenBounds, scaleFactor);
+            PointF bottomRight = ScalePointFromScreenBounds(new PointF(initialDocBounds.Right, initialDocBounds.Bottom), initialScreenBounds, newScreenBounds, scaleFactor);
+            return RectangleF.FromLTRB(
+                Math.Min(topLeft.X, bottomRight.X),
+                Math.Min(topLeft.Y, bottomRight.Y),
+                Math.Max(topLeft.X, bottomRight.X),
+                Math.Max(topLeft.Y, bottomRight.Y));
+        }
+
+        private bool TryApplyGroupScaleFromMouse(Point location)
+        {
+            if (!isScalingObjectGroup || groupMoveEntries.Count == 0 || groupScaleStartScreenBounds.IsEmpty)
+            {
+                return false;
+            }
+
+            bool preserveAspectRatio = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+            bool scaleFromCenter = (Control.ModifierKeys & Keys.Alt) == Keys.Alt;
+            RectangleF newScreenBounds = BuildScaledBoundsFromAnchor(groupScaleStartScreenBounds, activeGroupScaleHandleCorner, location, preserveAspectRatio, scaleFromCenter);
+            float scaleX = newScreenBounds.Width / Math.Max(1f, groupScaleStartScreenBounds.Width);
+            float scaleY = newScreenBounds.Height / Math.Max(1f, groupScaleStartScreenBounds.Height);
+            float uniformScale = GetUniformScaleFactor(scaleX, scaleY);
+
+            foreach (GroupMoveEntry entry in groupMoveEntries)
+            {
+                if (entry == null)
+                {
+                    continue;
+                }
+
+                switch (entry.Type)
+                {
+                    case GroupMoveObjectType.Text:
+                        if (entry.Text != null)
+                        {
+                            entry.Text.AnnotationBounds = ScaleRectangleFromScreenBounds(entry.Bounds, groupScaleStartScreenBounds, newScreenBounds, scaleFactor);
+                            FontFamily fontFamily = entry.TextFontFamily ?? entry.Text.AnnotationFont?.FontFamily ?? FontFamily.GenericSansSerif;
+                            entry.Text.AnnotationFont = new Font(fontFamily, Math.Max(4f, entry.TextFontSize * uniformScale), entry.TextFontStyle, entry.TextFontUnit);
+                            entry.Text.AnnotationBorderWidth = Math.Max(0f, entry.TextBorderWidth * uniformScale);
+                            entry.Text.AnnotationFrameMargin = Math.Max(0f, entry.TextFrameMargin * uniformScale);
+                            TouchTextAnnotation(entry.Text);
+                        }
+                        break;
+                    case GroupMoveObjectType.Raster:
+                        if (entry.Raster != null)
+                        {
+                            entry.Raster.Bounds = ScaleRectangleFromScreenBounds(entry.Bounds, groupScaleStartScreenBounds, newScreenBounds, scaleFactor);
+                            ConstrainRasterObjectToPage(entry.Raster);
+                            entry.Raster.UpdatedAtUtc = DateTime.UtcNow;
+                        }
+                        break;
+                    case GroupMoveObjectType.Arrow:
+                        if (entry.Arrow != null)
+                        {
+                            entry.Arrow.Start = ScalePointFromScreenBounds(entry.Start, groupScaleStartScreenBounds, newScreenBounds, scaleFactor);
+                            entry.Arrow.End = ScalePointFromScreenBounds(entry.End, groupScaleStartScreenBounds, newScreenBounds, scaleFactor);
+                            entry.Arrow.Thickness = NormalizeArrowThickness(entry.ArrowThickness * uniformScale);
+                            entry.Arrow.BorderWidth = NormalizeArrowBorderWidth(entry.ArrowBorderWidth * uniformScale);
+                            entry.Arrow.HeadLength = NormalizeArrowHeadLength(entry.ArrowHeadLength * uniformScale);
+                            entry.Arrow.HeadWidth = NormalizeArrowHeadWidth(entry.ArrowHeadWidth * uniformScale);
+                            ConstrainArrowToPage(entry.Arrow);
+                            entry.Arrow.UpdatedAtUtc = DateTime.UtcNow;
+                        }
+                        break;
+                    case GroupMoveObjectType.VectorShape:
+                        if (entry.VectorShape != null && entry.Points != null && entry.Points.Count > 0)
+                        {
+                            entry.VectorShape.Points = entry.Points
+                                .Select(point => ScalePointFromScreenBounds(point, groupScaleStartScreenBounds, newScreenBounds, scaleFactor))
+                                .ToList();
+                            entry.VectorShape.StrokeWidth = NormalizeVectorStrokeWidth(entry.VectorStrokeWidth * uniformScale);
+                            entry.VectorShape.StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(entry.VectorStartEndingPrimarySize * uniformScale);
+                            entry.VectorShape.StartLineEndingSecondarySize = entry.VectorStartEndingSecondarySize;
+                            entry.VectorShape.EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(entry.VectorEndEndingPrimarySize * uniformScale);
+                            entry.VectorShape.EndLineEndingSecondarySize = entry.VectorEndEndingSecondarySize;
+                            NormalizeVectorShape(entry.VectorShape);
+                            ConstrainVectorShapeToPage(entry.VectorShape);
+                            entry.VectorShape.UpdatedAtUtc = DateTime.UtcNow;
+                        }
+                        break;
+                }
+            }
+
+            groupScaleChanged = true;
+            this.Cursor = GetCursorForObjectScaleHandle(activeGroupScaleHandleCorner);
+            pdfViewer.Invalidate();
             return true;
         }
 
@@ -7983,6 +8461,10 @@ namespace AnonPDF
                 FillPattern = source.FillPattern,
                 StartLineEnding = source.StartLineEnding,
                 EndLineEnding = source.EndLineEnding,
+                StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(source.StartLineEndingPrimarySize),
+                StartLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(source.StartLineEndingSecondarySize),
+                EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(source.EndLineEndingPrimarySize),
+                EndLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(source.EndLineEndingSecondarySize),
                 IsLocked = source.IsLocked,
                 CreatedAtUtc = DateTime.UtcNow,
                 UpdatedAtUtc = DateTime.UtcNow,
@@ -17720,7 +18202,8 @@ namespace AnonPDF
         private bool TryPromptShapeDefaults(
             out VectorShapeDefaults selectedDefaults,
             VectorShapeDefaults initialDefaults = null,
-            bool lockShapeType = false)
+            bool lockShapeType = false,
+            Action<VectorShapeDefaults> previewChanges = null)
         {
             selectedDefaults = null;
             VectorShapeDefaults sourceDefaults = initialDefaults ?? activeVectorShapeDefaults;
@@ -17737,7 +18220,7 @@ namespace AnonPDF
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
                 prompt.Width = 620;
-                prompt.Height = 380;
+                prompt.Height = 430;
                 prompt.BackColor = theme.SectionBackColor;
                 prompt.ForeColor = theme.TextPrimaryColor;
 
@@ -17761,6 +18244,8 @@ namespace AnonPDF
                     Padding = new Padding(0)
                 };
                 Action refreshVectorStyleControls = null;
+                Func<VectorShapeDefaults> buildShapeDefaultsFromControls = null;
+                Action notifyShapePreviewChanged = null;
 
                 string ignoredShapeIconFamily;
                 bool useMaterialIcons = TryGetShapeIconFontFamily(out ignoredShapeIconFamily);
@@ -17819,6 +18304,7 @@ namespace AnonPDF
                         selectedShape = shapeType;
                         refreshShapeButtons?.Invoke();
                         refreshVectorStyleControls?.Invoke();
+                        notifyShapePreviewChanged?.Invoke();
                     };
 
                     shapeButtons[shapeType] = button;
@@ -17844,6 +18330,7 @@ namespace AnonPDF
                         if (dlg.ShowDialog(this) == DialogResult.OK)
                         {
                             buttonStrokeColor.BackColor = dlg.Color;
+                            notifyShapePreviewChanged?.Invoke();
                         }
                     }
                 };
@@ -17867,6 +18354,11 @@ namespace AnonPDF
                     Maximum = 24,
                     Increment = 0.5m,
                     Value = (decimal)NormalizeVectorStrokeWidth(working.StrokeWidth)
+                };
+                numericStrokeWidth.ValueChanged += (_, __) =>
+                {
+                    refreshVectorStyleControls?.Invoke();
+                    notifyShapePreviewChanged?.Invoke();
                 };
 
                 var labelStrokeStyle = new Label { Left = 482, Top = 120, Width = 60, Text = LocalizedText("Vector_Dialog_StrokeStyle") };
@@ -17921,6 +18413,7 @@ namespace AnonPDF
                         if (dlg.ShowDialog(this) == DialogResult.OK)
                         {
                             buttonFillColor.BackColor = dlg.Color;
+                            notifyShapePreviewChanged?.Invoke();
                         }
                     }
                 };
@@ -17996,12 +18489,27 @@ namespace AnonPDF
                         if (dlg.ShowDialog(this) == DialogResult.OK)
                         {
                             buttonFillPatternColor.BackColor = dlg.Color;
+                            notifyShapePreviewChanged?.Invoke();
                         }
                     }
                 };
-                checkNoStrokeColor.CheckedChanged += (_, __) => refreshVectorStyleControls?.Invoke();
-                checkNoFillColor.CheckedChanged += (_, __) => refreshVectorStyleControls?.Invoke();
-                comboFillPattern.SelectedIndexChanged += (_, __) => refreshVectorStyleControls?.Invoke();
+                checkNoStrokeColor.CheckedChanged += (_, __) =>
+                {
+                    refreshVectorStyleControls?.Invoke();
+                    notifyShapePreviewChanged?.Invoke();
+                };
+                checkNoFillColor.CheckedChanged += (_, __) =>
+                {
+                    refreshVectorStyleControls?.Invoke();
+                    notifyShapePreviewChanged?.Invoke();
+                };
+                comboFillPattern.SelectedIndexChanged += (_, __) =>
+                {
+                    refreshVectorStyleControls?.Invoke();
+                    notifyShapePreviewChanged?.Invoke();
+                };
+                numericFillOpacity.ValueChanged += (_, __) => notifyShapePreviewChanged?.Invoke();
+                comboStrokeStyle.SelectedIndexChanged += (_, __) => notifyShapePreviewChanged?.Invoke();
                 var labelStartEnding = new Label { Left = 12, Top = 248, Width = 120, Text = LocalizedText("Vector_Dialog_LineStartEnding") };
                 var comboStartEnding = new ComboBox
                 {
@@ -18023,6 +18531,291 @@ namespace AnonPDF
                 };
                 AddVectorLineEndingItems(comboEndEnding);
                 comboEndEnding.SelectedIndex = GetVectorLineEndingComboIndex(working.EndEnding);
+
+                var labelStartEndingPrimary = new Label { Left = 12, Top = 278, Width = 120 };
+                var numericStartEndingPrimary = new NumericUpDown
+                {
+                    Left = 140,
+                    Top = 274,
+                    Width = 70,
+                    DecimalPlaces = 1,
+                    Minimum = 0,
+                    Maximum = 240,
+                    Increment = 1
+                };
+                var labelStartEndingSecondary = new Label { Left = 12, Top = 308, Width = 120 };
+                var numericStartEndingSecondary = new NumericUpDown
+                {
+                    Left = 140,
+                    Top = 304,
+                    Width = 70,
+                    DecimalPlaces = 1,
+                    Minimum = 0,
+                    Maximum = 179,
+                    Increment = 1
+                };
+                var labelEndEndingPrimary = new Label { Left = 300, Top = 278, Width = 110 };
+                var numericEndEndingPrimary = new NumericUpDown
+                {
+                    Left = 412,
+                    Top = 274,
+                    Width = 70,
+                    DecimalPlaces = 1,
+                    Minimum = 0,
+                    Maximum = 240,
+                    Increment = 1
+                };
+                var labelEndEndingSecondary = new Label { Left = 300, Top = 308, Width = 110 };
+                var numericEndEndingSecondary = new NumericUpDown
+                {
+                    Left = 412,
+                    Top = 304,
+                    Width = 70,
+                    DecimalPlaces = 1,
+                    Minimum = 0,
+                    Maximum = 179,
+                    Increment = 1
+                };
+
+                bool suppressLineEndingSizeControlEvents = false;
+                bool startPrimarySizeCustomized = working.StartEndingPrimarySize > 0f;
+                bool startSecondarySizeCustomized = working.StartEndingSecondarySize > 0f;
+                bool endPrimarySizeCustomized = working.EndEndingPrimarySize > 0f;
+                bool endSecondarySizeCustomized = working.EndEndingSecondarySize > 0f;
+
+                VectorLineEndingKind GetSelectedStartEndingKind()
+                {
+                    return ParseVectorLineEndingKind(GetSelectedVectorLineEndingValue(comboStartEnding));
+                }
+
+                VectorLineEndingKind GetSelectedEndEndingKind()
+                {
+                    return ParseVectorLineEndingKind(GetSelectedVectorLineEndingValue(comboEndEnding));
+                }
+
+                void UpdateLineEndingSizeControls()
+                {
+                    if (suppressLineEndingSizeControlEvents)
+                    {
+                        return;
+                    }
+
+                    suppressLineEndingSizeControlEvents = true;
+                    try
+                    {
+                        float strokeWidth = NormalizeVectorStrokeWidth((float)numericStrokeWidth.Value);
+                        VectorLineEndingKind startKind = GetSelectedStartEndingKind();
+                        VectorLineEndingKind endKind = GetSelectedEndEndingKind();
+
+                        string startPrimaryKey = GetVectorLineEndingPrimaryLabelKey(startKind);
+                        string startSecondaryKey = GetVectorLineEndingSecondaryLabelKey(startKind);
+                        string endPrimaryKey = GetVectorLineEndingPrimaryLabelKey(endKind);
+                        string endSecondaryKey = GetVectorLineEndingSecondaryLabelKey(endKind);
+
+                        bool startPrimaryEnabled = VectorLineEndingSupportsPrimarySize(startKind);
+                        bool startSecondaryEnabled = VectorLineEndingSupportsSecondarySize(startKind);
+                        bool endPrimaryEnabled = VectorLineEndingSupportsPrimarySize(endKind);
+                        bool endSecondaryEnabled = VectorLineEndingSupportsSecondarySize(endKind);
+
+                        labelStartEndingPrimary.Text = startPrimaryEnabled ? LocalizedText(startPrimaryKey) : string.Empty;
+                        labelStartEndingSecondary.Text = startSecondaryEnabled ? LocalizedText(startSecondaryKey) : string.Empty;
+                        labelEndEndingPrimary.Text = endPrimaryEnabled ? LocalizedText(endPrimaryKey) : string.Empty;
+                        labelEndEndingSecondary.Text = endSecondaryEnabled ? LocalizedText(endSecondaryKey) : string.Empty;
+
+                        decimal startPrimaryValue = (decimal)GetVectorLineEndingEffectivePrimarySize(startKind, strokeWidth, startPrimarySizeCustomized ? working.StartEndingPrimarySize : 0f);
+                        decimal startSecondaryValue = (decimal)GetVectorLineEndingEffectiveSecondarySize(startKind, strokeWidth, startPrimarySizeCustomized ? working.StartEndingPrimarySize : 0f, startSecondarySizeCustomized ? working.StartEndingSecondarySize : 0f);
+                        decimal endPrimaryValue = (decimal)GetVectorLineEndingEffectivePrimarySize(endKind, strokeWidth, endPrimarySizeCustomized ? working.EndEndingPrimarySize : 0f);
+                        decimal endSecondaryValue = (decimal)GetVectorLineEndingEffectiveSecondarySize(endKind, strokeWidth, endPrimarySizeCustomized ? working.EndEndingPrimarySize : 0f, endSecondarySizeCustomized ? working.EndEndingSecondarySize : 0f);
+
+                        numericStartEndingPrimary.Value = Math.Min(numericStartEndingPrimary.Maximum, Math.Max(numericStartEndingPrimary.Minimum, startPrimaryValue));
+                        numericStartEndingSecondary.Value = Math.Min(numericStartEndingSecondary.Maximum, Math.Max(numericStartEndingSecondary.Minimum, startSecondaryValue));
+                        numericEndEndingPrimary.Value = Math.Min(numericEndEndingPrimary.Maximum, Math.Max(numericEndEndingPrimary.Minimum, endPrimaryValue));
+                        numericEndEndingSecondary.Value = Math.Min(numericEndEndingSecondary.Maximum, Math.Max(numericEndEndingSecondary.Minimum, endSecondaryValue));
+
+                        bool supportsLineEndings = selectedShape == VectorShapeType.Polyline;
+                        bool hasStroke = !checkNoStrokeColor.Checked;
+                        labelStartEndingPrimary.Enabled = supportsLineEndings && hasStroke && startPrimaryEnabled;
+                        numericStartEndingPrimary.Enabled = supportsLineEndings && hasStroke && startPrimaryEnabled;
+                        labelStartEndingSecondary.Enabled = supportsLineEndings && hasStroke && startSecondaryEnabled;
+                        numericStartEndingSecondary.Enabled = supportsLineEndings && hasStroke && startSecondaryEnabled;
+                        labelEndEndingPrimary.Enabled = supportsLineEndings && hasStroke && endPrimaryEnabled;
+                        numericEndEndingPrimary.Enabled = supportsLineEndings && hasStroke && endPrimaryEnabled;
+                        labelEndEndingSecondary.Enabled = supportsLineEndings && hasStroke && endSecondaryEnabled;
+                        numericEndEndingSecondary.Enabled = supportsLineEndings && hasStroke && endSecondaryEnabled;
+                    }
+                    finally
+                    {
+                        suppressLineEndingSizeControlEvents = false;
+                    }
+                }
+
+                buildShapeDefaultsFromControls = () =>
+                {
+                    var result = working.Clone();
+                    result.ShapeType = selectedShape;
+                    System.Drawing.Color selectedStroke = buttonStrokeColor.BackColor;
+                    result.StrokeColorArgb = checkNoStrokeColor.Checked
+                        ? System.Drawing.Color.FromArgb(0, selectedStroke.R, selectedStroke.G, selectedStroke.B).ToArgb()
+                        : System.Drawing.Color.FromArgb(255, selectedStroke.R, selectedStroke.G, selectedStroke.B).ToArgb();
+                    result.StrokeWidth = NormalizeVectorStrokeWidth((float)numericStrokeWidth.Value);
+
+                    System.Drawing.Color selectedFill = buttonFillColor.BackColor;
+                    bool supportsFillForShape = ShapeTypeSupportsFill(selectedShape);
+                    bool noFill = !supportsFillForShape || checkNoFillColor.Checked;
+                    result.FillColorArgb = noFill
+                        ? System.Drawing.Color.FromArgb(0, selectedFill.R, selectedFill.G, selectedFill.B).ToArgb()
+                        : System.Drawing.Color.FromArgb(255, selectedFill.R, selectedFill.G, selectedFill.B).ToArgb();
+                    result.FillOpacity = NormalizeVectorFillOpacity((float)(numericFillOpacity.Value / 100m));
+
+                    switch (comboFillPattern.SelectedIndex)
+                    {
+                        case 1:
+                            result.FillPattern = VectorFillPatternKind.Diagonal;
+                            break;
+                        case 2:
+                            result.FillPattern = VectorFillPatternKind.Cross;
+                            break;
+                        case 3:
+                            result.FillPattern = VectorFillPatternKind.Dot;
+                            break;
+                        default:
+                            result.FillPattern = VectorFillPatternKind.Solid;
+                            break;
+                    }
+
+                    System.Drawing.Color selectedPatternColor = buttonFillPatternColor.BackColor;
+                    bool hasPatternColor = !noFill && comboFillPattern.SelectedIndex > 0;
+                    result.FillPatternColorArgb = hasPatternColor
+                        ? System.Drawing.Color.FromArgb(255, selectedPatternColor.R, selectedPatternColor.G, selectedPatternColor.B).ToArgb()
+                        : System.Drawing.Color.FromArgb(0, selectedPatternColor.R, selectedPatternColor.G, selectedPatternColor.B).ToArgb();
+
+                    switch (comboStrokeStyle.SelectedIndex)
+                    {
+                        case 1:
+                            result.StrokeKind = VectorShapeStrokeKind.Dash;
+                            break;
+                        case 2:
+                            result.StrokeKind = VectorShapeStrokeKind.Dot;
+                            break;
+                        case 3:
+                            result.StrokeKind = VectorShapeStrokeKind.DashDot;
+                            break;
+                        case 4:
+                            result.StrokeKind = VectorShapeStrokeKind.DashDotDot;
+                            break;
+                        default:
+                            result.StrokeKind = VectorShapeStrokeKind.Solid;
+                            break;
+                    }
+
+                    result.StartEnding = ParseVectorLineEndingKind(GetSelectedVectorLineEndingValue(comboStartEnding));
+                    result.EndEnding = ParseVectorLineEndingKind(GetSelectedVectorLineEndingValue(comboEndEnding));
+                    result.StartEndingPrimarySize = startPrimarySizeCustomized ? NormalizeVectorLineEndingPrimarySize((float)numericStartEndingPrimary.Value) : 0f;
+                    result.StartEndingSecondarySize = startSecondarySizeCustomized ? NormalizeVectorLineEndingSecondarySize((float)numericStartEndingSecondary.Value) : 0f;
+                    result.EndEndingPrimarySize = endPrimarySizeCustomized ? NormalizeVectorLineEndingPrimarySize((float)numericEndEndingPrimary.Value) : 0f;
+                    result.EndEndingSecondarySize = endSecondarySizeCustomized ? NormalizeVectorLineEndingSecondarySize((float)numericEndEndingSecondary.Value) : 0f;
+
+                    if (!VectorLineEndingSupportsPrimarySize(result.StartEnding))
+                    {
+                        result.StartEndingPrimarySize = 0f;
+                    }
+                    if (!VectorLineEndingSupportsSecondarySize(result.StartEnding))
+                    {
+                        result.StartEndingSecondarySize = 0f;
+                    }
+                    if (!VectorLineEndingSupportsPrimarySize(result.EndEnding))
+                    {
+                        result.EndEndingPrimarySize = 0f;
+                    }
+                    if (!VectorLineEndingSupportsSecondarySize(result.EndEnding))
+                    {
+                        result.EndEndingSecondarySize = 0f;
+                    }
+                    if (selectedShape != VectorShapeType.Polyline || checkNoStrokeColor.Checked)
+                    {
+                        result.StartEnding = VectorLineEndingKind.None;
+                        result.EndEnding = VectorLineEndingKind.None;
+                        result.StartEndingPrimarySize = 0f;
+                        result.StartEndingSecondarySize = 0f;
+                        result.EndEndingPrimarySize = 0f;
+                        result.EndEndingSecondarySize = 0f;
+                    }
+
+                    return result;
+                };
+
+                notifyShapePreviewChanged = () =>
+                {
+                    if (previewChanges == null || buildShapeDefaultsFromControls == null)
+                    {
+                        return;
+                    }
+
+                    previewChanges(buildShapeDefaultsFromControls());
+                };
+
+                numericStartEndingPrimary.ValueChanged += (_, __) =>
+                {
+                    if (suppressLineEndingSizeControlEvents)
+                    {
+                        return;
+                    }
+
+                    startPrimarySizeCustomized = numericStartEndingPrimary.Value > 0m;
+                    working.StartEndingPrimarySize = startPrimarySizeCustomized ? NormalizeVectorLineEndingPrimarySize((float)numericStartEndingPrimary.Value) : 0f;
+                    UpdateLineEndingSizeControls();
+                    notifyShapePreviewChanged?.Invoke();
+                };
+                numericStartEndingSecondary.ValueChanged += (_, __) =>
+                {
+                    if (suppressLineEndingSizeControlEvents)
+                    {
+                        return;
+                    }
+
+                    startSecondarySizeCustomized = numericStartEndingSecondary.Value > 0m;
+                    working.StartEndingSecondarySize = startSecondarySizeCustomized ? NormalizeVectorLineEndingSecondarySize((float)numericStartEndingSecondary.Value) : 0f;
+                    UpdateLineEndingSizeControls();
+                    notifyShapePreviewChanged?.Invoke();
+                };
+                numericEndEndingPrimary.ValueChanged += (_, __) =>
+                {
+                    if (suppressLineEndingSizeControlEvents)
+                    {
+                        return;
+                    }
+
+                    endPrimarySizeCustomized = numericEndEndingPrimary.Value > 0m;
+                    working.EndEndingPrimarySize = endPrimarySizeCustomized ? NormalizeVectorLineEndingPrimarySize((float)numericEndEndingPrimary.Value) : 0f;
+                    UpdateLineEndingSizeControls();
+                    notifyShapePreviewChanged?.Invoke();
+                };
+                numericEndEndingSecondary.ValueChanged += (_, __) =>
+                {
+                    if (suppressLineEndingSizeControlEvents)
+                    {
+                        return;
+                    }
+
+                    endSecondarySizeCustomized = numericEndEndingSecondary.Value > 0m;
+                    working.EndEndingSecondarySize = endSecondarySizeCustomized ? NormalizeVectorLineEndingSecondarySize((float)numericEndEndingSecondary.Value) : 0f;
+                    UpdateLineEndingSizeControls();
+                    notifyShapePreviewChanged?.Invoke();
+                };
+                comboStartEnding.SelectedIndexChanged += (_, __) =>
+                {
+                    startPrimarySizeCustomized = working.StartEndingPrimarySize > 0f;
+                    startSecondarySizeCustomized = working.StartEndingSecondarySize > 0f;
+                    UpdateLineEndingSizeControls();
+                    notifyShapePreviewChanged?.Invoke();
+                };
+                comboEndEnding.SelectedIndexChanged += (_, __) =>
+                {
+                    endPrimarySizeCustomized = working.EndEndingPrimarySize > 0f;
+                    endSecondarySizeCustomized = working.EndEndingSecondarySize > 0f;
+                    UpdateLineEndingSizeControls();
+                    notifyShapePreviewChanged?.Invoke();
+                };
 
                 refreshVectorStyleControls = () =>
                 {
@@ -18051,6 +18844,7 @@ namespace AnonPDF
                     comboStartEnding.Enabled = supportsLineEndings && hasStroke;
                     labelEndEnding.Enabled = supportsLineEndings && hasStroke;
                     comboEndEnding.Enabled = supportsLineEndings && hasStroke;
+                    UpdateLineEndingSizeControls();
                 };
 
                 refreshShapeButtons = () =>
@@ -18099,6 +18893,14 @@ namespace AnonPDF
                     buttonFillPatternColor.BackColor = System.Drawing.Color.FromArgb(patternColor.R, patternColor.G, patternColor.B);
                     comboStartEnding.SelectedIndex = GetVectorLineEndingComboIndex(defaults.StartEnding);
                     comboEndEnding.SelectedIndex = GetVectorLineEndingComboIndex(defaults.EndEnding);
+                    working.StartEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(defaults.StartEndingPrimarySize);
+                    working.StartEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(defaults.StartEndingSecondarySize);
+                    working.EndEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(defaults.EndEndingPrimarySize);
+                    working.EndEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(defaults.EndEndingSecondarySize);
+                    startPrimarySizeCustomized = working.StartEndingPrimarySize > 0f;
+                    startSecondarySizeCustomized = working.StartEndingSecondarySize > 0f;
+                    endPrimarySizeCustomized = working.EndEndingPrimarySize > 0f;
+                    endSecondarySizeCustomized = working.EndEndingSecondarySize > 0f;
                     refreshShapeButtons?.Invoke();
                     refreshVectorStyleControls?.Invoke();
                 };
@@ -18106,17 +18908,18 @@ namespace AnonPDF
                 var buttonRestoreDefaults = new Button
                 {
                     Left = 212,
-                    Top = 292,
+                    Top = 338,
                     Width = 140,
                     Text = GetRestoreSettingsButtonText()
                 };
                 buttonRestoreDefaults.Click += (_, __) =>
                 {
                     applyDefaultsToControls(VectorShapeDefaults.CreateDefault());
+                    notifyShapePreviewChanged?.Invoke();
                 };
 
-                var buttonOk = new Button { Left = 364, Top = 292, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
-                var buttonCancel = new Button { Left = 486, Top = 292, Width = 110, Text = GetCancelButtonText(), DialogResult = DialogResult.Cancel };
+                var buttonOk = new Button { Left = 364, Top = 338, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
+                var buttonCancel = new Button { Left = 486, Top = 338, Width = 110, Text = GetCancelButtonText(), DialogResult = DialogResult.Cancel };
 
                 prompt.Controls.Add(labelShapes);
                 prompt.Controls.Add(shapesPanel);
@@ -18140,6 +18943,14 @@ namespace AnonPDF
                 prompt.Controls.Add(comboStartEnding);
                 prompt.Controls.Add(labelEndEnding);
                 prompt.Controls.Add(comboEndEnding);
+                prompt.Controls.Add(labelStartEndingPrimary);
+                prompt.Controls.Add(numericStartEndingPrimary);
+                prompt.Controls.Add(labelStartEndingSecondary);
+                prompt.Controls.Add(numericStartEndingSecondary);
+                prompt.Controls.Add(labelEndEndingPrimary);
+                prompt.Controls.Add(numericEndEndingPrimary);
+                prompt.Controls.Add(labelEndEndingSecondary);
+                prompt.Controls.Add(numericEndEndingSecondary);
                 prompt.Controls.Add(buttonRestoreDefaults);
                 prompt.Controls.Add(buttonOk);
                 prompt.Controls.Add(buttonCancel);
@@ -18173,67 +18984,9 @@ namespace AnonPDF
                 {
                     return false;
                 }
-
-                working.ShapeType = selectedShape;
-                bool supportsFillForShape = ShapeTypeSupportsFill(selectedShape);
-                System.Drawing.Color selectedStroke = buttonStrokeColor.BackColor;
-                working.StrokeColorArgb = checkNoStrokeColor.Checked
-                    ? System.Drawing.Color.FromArgb(0, selectedStroke.R, selectedStroke.G, selectedStroke.B).ToArgb()
-                    : System.Drawing.Color.FromArgb(255, selectedStroke.R, selectedStroke.G, selectedStroke.B).ToArgb();
-                working.StrokeWidth = NormalizeVectorStrokeWidth((float)numericStrokeWidth.Value);
-                System.Drawing.Color selectedFill = buttonFillColor.BackColor;
-                bool noFill = !supportsFillForShape || checkNoFillColor.Checked;
-                working.FillColorArgb = noFill
-                    ? System.Drawing.Color.FromArgb(0, selectedFill.R, selectedFill.G, selectedFill.B).ToArgb()
-                    : System.Drawing.Color.FromArgb(255, selectedFill.R, selectedFill.G, selectedFill.B).ToArgb();
-                working.FillOpacity = NormalizeVectorFillOpacity((float)(numericFillOpacity.Value / 100m));
-                switch (comboFillPattern.SelectedIndex)
-                {
-                    case 1:
-                        working.FillPattern = VectorFillPatternKind.Diagonal;
-                        break;
-                    case 2:
-                        working.FillPattern = VectorFillPatternKind.Cross;
-                        break;
-                    case 3:
-                        working.FillPattern = VectorFillPatternKind.Dot;
-                        break;
-                    default:
-                        working.FillPattern = VectorFillPatternKind.Solid;
-                        break;
-                }
-                System.Drawing.Color selectedPatternColor = buttonFillPatternColor.BackColor;
-                bool hasPatternColor = !noFill && comboFillPattern.SelectedIndex > 0;
-                working.FillPatternColorArgb = hasPatternColor
-                    ? System.Drawing.Color.FromArgb(255, selectedPatternColor.R, selectedPatternColor.G, selectedPatternColor.B).ToArgb()
-                    : System.Drawing.Color.FromArgb(0, selectedPatternColor.R, selectedPatternColor.G, selectedPatternColor.B).ToArgb();
-                switch (comboStrokeStyle.SelectedIndex)
-                {
-                    case 1:
-                        working.StrokeKind = VectorShapeStrokeKind.Dash;
-                        break;
-                    case 2:
-                        working.StrokeKind = VectorShapeStrokeKind.Dot;
-                        break;
-                    case 3:
-                        working.StrokeKind = VectorShapeStrokeKind.DashDot;
-                        break;
-                    case 4:
-                        working.StrokeKind = VectorShapeStrokeKind.DashDotDot;
-                        break;
-                    default:
-                        working.StrokeKind = VectorShapeStrokeKind.Solid;
-                        break;
-                }
-                working.StartEnding = ParseVectorLineEndingKind(GetSelectedVectorLineEndingValue(comboStartEnding));
-                working.EndEnding = ParseVectorLineEndingKind(GetSelectedVectorLineEndingValue(comboEndEnding));
-                if (selectedShape != VectorShapeType.Polyline || checkNoStrokeColor.Checked)
-                {
-                    working.StartEnding = VectorLineEndingKind.None;
-                    working.EndEnding = VectorLineEndingKind.None;
-                }
-
-                selectedDefaults = working;
+                selectedDefaults = buildShapeDefaultsFromControls != null
+                    ? buildShapeDefaultsFromControls()
+                    : working.Clone();
                 return true;
             }
         }
@@ -18317,6 +19070,10 @@ namespace AnonPDF
                 FillPattern = activeVectorShapeDefaults.FillPattern.ToString(),
                 StartLineEnding = activeVectorShapeDefaults.StartEnding.ToString(),
                 EndLineEnding = activeVectorShapeDefaults.EndEnding.ToString(),
+                StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(activeVectorShapeDefaults.StartEndingPrimarySize),
+                StartLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(activeVectorShapeDefaults.StartEndingSecondarySize),
+                EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(activeVectorShapeDefaults.EndEndingPrimarySize),
+                EndLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(activeVectorShapeDefaults.EndEndingSecondarySize),
                 CreatedAtUtc = DateTime.UtcNow,
                 UpdatedAtUtc = DateTime.UtcNow
             };
@@ -18626,6 +19383,19 @@ namespace AnonPDF
                 }
                 else if (GetGroupSelectionCount() > 0)
                 {
+                    if (TryBeginGroupScale(e.Location, dpiX, dpiY))
+                    {
+                        ResetRasterInteractionState();
+                        ResetArrowInteractionState();
+                        ResetVectorInteractionState();
+                        isDrawing = false;
+                        isMoving = false;
+                        annotationToMove = null;
+                        textMoveMouseOffset = PointF.Empty;
+                        pdfViewer.Invalidate();
+                        return;
+                    }
+
                     if (TryBeginGroupMove(e.Location, dpiX, dpiY))
                     {
                         ResetRasterInteractionState();
@@ -18644,6 +19414,23 @@ namespace AnonPDF
                 }
 
                 if (TryHandleTextRotationMouseDown(e.Location, dpiX, dpiY))
+                {
+                    selectedArrowObject = null;
+                    ResetArrowInteractionState();
+                    ClearArrowIconClickState();
+                    selectedVectorShape = null;
+                    ResetVectorInteractionState();
+                    selectedRasterObject = null;
+                    ResetRasterInteractionState();
+                    isDrawing = false;
+                    isMoving = false;
+                    annotationToMove = null;
+                    textMoveMouseOffset = PointF.Empty;
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
+                if (TryHandleTextScaleMouseDown(e.Location, dpiX, dpiY))
                 {
                     selectedArrowObject = null;
                     ResetArrowInteractionState();
@@ -18956,6 +19743,12 @@ namespace AnonPDF
                 return;
             }
 
+            if (isScalingObjectGroup)
+            {
+                TryApplyGroupScaleFromMouse(e.Location);
+                return;
+            }
+
             if (isMovingObjectGroup)
             {
                 PointF mouseDoc = new PointF(e.X / scaleFactor, e.Y / scaleFactor);
@@ -19079,6 +19872,12 @@ namespace AnonPDF
                 return;
             }
 
+            if (isScalingTextAnnotation && annotationToScale != null)
+            {
+                TryApplyTextScaleFromMouse(e.Location);
+                return;
+            }
+
             if (isAdjustingArrowHandle && arrowObjectToAdjust != null && arrowHandleType != ArrowHandleType.None)
             {
                 PointF mousePoint = new PointF(e.X / scaleFactor, e.Y / scaleFactor);
@@ -19101,6 +19900,12 @@ namespace AnonPDF
                 arrowInteractionChanged = true;
                 this.Cursor = GetArrowHandleCursor(arrowObjectToAdjust, arrowHandleType);
                 pdfViewer.Invalidate();
+                return;
+            }
+
+            if (isScalingArrowObject && arrowObjectToScale != null)
+            {
+                TryApplyArrowScaleFromMouse(e.Location);
                 return;
             }
 
@@ -19374,6 +20179,12 @@ namespace AnonPDF
                 return;
             }
 
+            if (isScalingVectorShape && vectorShapeToScale != null)
+            {
+                TryApplyVectorScaleFromMouse(e.Location);
+                return;
+            }
+
             if (isMovingVectorShape && vectorShapeToMove != null)
             {
                 PointF mouseDoc = new PointF(e.X / scaleFactor, e.Y / scaleFactor);
@@ -19492,7 +20303,8 @@ namespace AnonPDF
                         ? Cursors.SizeNWSE
                         : Cursors.SizeAll;
                 }
-                else if (!TryUpdateTextHoverCursor(e.Location, dpiX, dpiY) &&
+                else if (!TryUpdateGroupHoverCursor(e.Location, dpiX, dpiY) &&
+                    !TryUpdateTextHoverCursor(e.Location, dpiX, dpiY) &&
                     !TryUpdateVectorHoverCursor(e.Location) &&
                     !TryUpdateArrowHoverCursor(e.Location) &&
                     !TryUpdateRasterHoverCursor(e.Location))
@@ -19713,6 +20525,21 @@ namespace AnonPDF
                     return;
                 }
 
+                if (isScalingObjectGroup)
+                {
+                    bool changed = groupScaleChanged;
+                    ResetGroupMoveState();
+                    this.Cursor = Cursors.Default;
+                    if (changed)
+                    {
+                        projectWasChangedAfterLastSave = true;
+                        saveProjectButton.Enabled = true;
+                        saveProjectMenuItem.Enabled = true;
+                    }
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
                 if (arrowMouseActionInProgress)
                 {
                     bool changed = arrowInteractionChanged;
@@ -19759,6 +20586,21 @@ namespace AnonPDF
                 }
 
                 if (isRotatingTextAnnotation)
+                {
+                    bool changed = textRotationInteractionChanged;
+                    ResetTextRotationInteractionState();
+                    this.Cursor = Cursors.Default;
+                    if (changed)
+                    {
+                        projectWasChangedAfterLastSave = true;
+                        saveProjectButton.Enabled = true;
+                        saveProjectMenuItem.Enabled = true;
+                    }
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
+                if (isScalingTextAnnotation)
                 {
                     bool changed = textRotationInteractionChanged;
                     ResetTextRotationInteractionState();
@@ -20256,7 +21098,8 @@ namespace AnonPDF
             float defaultNoteWidthDoc = 50f;
             float nextAutoYDoc = marginDoc;
 
-            float fontSize = Math.Max(6.5f, Math.Min(8.5f, this.Font.SizeInPoints * 0.72f));
+            float commentFontScale = Math.Max(0.25f, scaleFactor);
+            float fontSize = Math.Max(6.5f * commentFontScale, Math.Min(8.5f * commentFontScale, this.Font.SizeInPoints * 0.72f * commentFontScale));
             using (Font noteFont = new Font(this.Font.FontFamily, fontSize, FontStyle.Regular))
             {
                 for (int i = 0; i < comments.Count; i++)
@@ -21859,7 +22702,11 @@ namespace AnonPDF
                             pdfPoints.ToArray(),
                             ParseVectorLineEndingKind(vectorShape.StartLineEnding),
                             ParseVectorLineEndingKind(vectorShape.EndLineEnding),
-                            strokeWidth).ToList()
+                            strokeWidth,
+                            vectorShape.StartLineEndingPrimarySize,
+                            vectorShape.StartLineEndingSecondarySize,
+                            vectorShape.EndLineEndingPrimarySize,
+                            vectorShape.EndLineEndingSecondarySize).ToList()
                         : pdfPoints.ToList();
                     pdfCanvas.MoveTo(strokePdfPoints[0].X, strokePdfPoints[0].Y);
                     for (int i = 1; i < strokePdfPoints.Count; i++)
@@ -21875,7 +22722,11 @@ namespace AnonPDF
                             ParseVectorLineEndingKind(vectorShape.StartLineEnding),
                             ParseVectorLineEndingKind(vectorShape.EndLineEnding),
                             strokeWidth,
-                            strokeColor);
+                            strokeColor,
+                            vectorShape.StartLineEndingPrimarySize,
+                            vectorShape.StartLineEndingSecondarySize,
+                            vectorShape.EndLineEndingPrimarySize,
+                            vectorShape.EndLineEndingSecondarySize);
                     }
                 }
 
@@ -21917,15 +22768,19 @@ namespace AnonPDF
             VectorLineEndingKind startEnding,
             VectorLineEndingKind endEnding,
             float strokeWidth,
-            System.Drawing.Color strokeColor)
+            System.Drawing.Color strokeColor,
+            float startPrimarySize,
+            float startSecondarySize,
+            float endPrimarySize,
+            float endSecondarySize)
         {
             if (pdfCanvas == null || points == null || points.Count < 2)
             {
                 return;
             }
 
-            DrawSingleVectorLineEndingToPdf(pdfCanvas, points[0], points[1], startEnding, strokeWidth, strokeColor);
-            DrawSingleVectorLineEndingToPdf(pdfCanvas, points[points.Count - 1], points[points.Count - 2], endEnding, strokeWidth, strokeColor);
+            DrawSingleVectorLineEndingToPdf(pdfCanvas, points[0], points[1], startEnding, strokeWidth, strokeColor, startPrimarySize, startSecondarySize);
+            DrawSingleVectorLineEndingToPdf(pdfCanvas, points[points.Count - 1], points[points.Count - 2], endEnding, strokeWidth, strokeColor, endPrimarySize, endSecondarySize);
         }
 
         private static void DrawSingleVectorLineEndingToPdf(
@@ -21934,7 +22789,9 @@ namespace AnonPDF
             PointF towardPoint,
             VectorLineEndingKind ending,
             float strokeWidth,
-            System.Drawing.Color strokeColor)
+            System.Drawing.Color strokeColor,
+            float primarySize,
+            float secondarySize)
         {
             if (pdfCanvas == null || ending == VectorLineEndingKind.None)
             {
@@ -21953,7 +22810,7 @@ namespace AnonPDF
             float uy = dy / length;
             float px = -uy;
             float py = ux;
-            GetVectorLineEndingMetrics(ending, strokeWidth, out float markerLength, out float markerWidth, out float radius);
+            GetVectorLineEndingMetrics(ending, strokeWidth, primarySize, secondarySize, out float markerLength, out float markerWidth, out float radius);
             pdfCanvas.SetLineDash(0);
             pdfCanvas.SetStrokeColor(new DeviceRgb(strokeColor.R, strokeColor.G, strokeColor.B));
             pdfCanvas.SetFillColor(new DeviceRgb(strokeColor.R, strokeColor.G, strokeColor.B));
@@ -23184,7 +24041,15 @@ namespace AnonPDF
                     if (drawStroke)
                     {
                         PointF[] strokePoints = shapeType == VectorShapeType.Polyline
-                            ? GetPolylineStrokePointsWithEndings(points, startEnding, endEnding, pen.Width)
+                            ? GetPolylineStrokePointsWithEndings(
+                                points,
+                                startEnding,
+                                endEnding,
+                                pen.Width,
+                                vectorShape.StartLineEndingPrimarySize,
+                                vectorShape.StartLineEndingSecondarySize,
+                                vectorShape.EndLineEndingPrimarySize,
+                                vectorShape.EndLineEndingSecondarySize)
                             : points;
                         graphics.DrawLines(pen, strokePoints);
                         if (shapeType == VectorShapeType.Polyline)
@@ -23195,7 +24060,11 @@ namespace AnonPDF
                                 startEnding,
                                 endEnding,
                                 strokeRenderColor,
-                                pen.Width);
+                                pen.Width,
+                                vectorShape.StartLineEndingPrimarySize,
+                                vectorShape.StartLineEndingSecondarySize,
+                                vectorShape.EndLineEndingPrimarySize,
+                                vectorShape.EndLineEndingSecondarySize);
                         }
                     }
                 }
@@ -23732,7 +24601,8 @@ namespace AnonPDF
 
             float connectorThickness = Math.Max(2.6f, scaleFactor * 1.6f);
             float borderThickness = Math.Max(1.2f, scaleFactor * 0.7f);
-            float fontSize = Math.Max(6.5f, Math.Min(8.5f, this.Font.SizeInPoints * 0.72f));
+            float commentFontScale = Math.Max(0.25f, scaleFactor);
+            float fontSize = Math.Max(6.5f * commentFontScale, Math.Min(8.5f * commentFontScale, this.Font.SizeInPoints * 0.72f * commentFontScale));
             using (Font noteFont = new Font(this.Font.FontFamily, fontSize, FontStyle.Regular))
             {
                 var noteRectsDoc = BuildCommentNoteRectanglesDoc(currentPage, graphics);
@@ -23806,15 +24676,19 @@ namespace AnonPDF
             VectorLineEndingKind startEnding,
             VectorLineEndingKind endEnding,
             System.Drawing.Color strokeColor,
-            float strokeWidthPx)
+            float strokeWidthPx,
+            float startPrimarySize,
+            float startSecondarySize,
+            float endPrimarySize,
+            float endSecondarySize)
         {
             if (graphics == null || points == null || points.Length < 2)
             {
                 return;
             }
 
-            DrawSingleVectorLineEndingOnPreview(graphics, points[0], points[1], startEnding, strokeColor, strokeWidthPx);
-            DrawSingleVectorLineEndingOnPreview(graphics, points[points.Length - 1], points[points.Length - 2], endEnding, strokeColor, strokeWidthPx);
+            DrawSingleVectorLineEndingOnPreview(graphics, points[0], points[1], startEnding, strokeColor, strokeWidthPx, startPrimarySize, startSecondarySize);
+            DrawSingleVectorLineEndingOnPreview(graphics, points[points.Length - 1], points[points.Length - 2], endEnding, strokeColor, strokeWidthPx, endPrimarySize, endSecondarySize);
         }
 
         private void DrawSingleVectorLineEndingOnPreview(
@@ -23823,7 +24697,9 @@ namespace AnonPDF
             PointF towardPoint,
             VectorLineEndingKind ending,
             System.Drawing.Color strokeColor,
-            float strokeWidthPx)
+            float strokeWidthPx,
+            float primarySize,
+            float secondarySize)
         {
             if (graphics == null || ending == VectorLineEndingKind.None)
             {
@@ -23841,7 +24717,7 @@ namespace AnonPDF
             float uy = direction.Y / length;
             float px = -uy;
             float py = ux;
-            GetVectorLineEndingMetrics(ending, strokeWidthPx, out float markerLength, out float markerWidth, out float radius);
+            GetVectorLineEndingMetrics(ending, strokeWidthPx, primarySize, secondarySize, out float markerLength, out float markerWidth, out float radius);
 
             using (var pen = new Pen(strokeColor, Math.Max(1f, strokeWidthPx)))
             using (var brush = new SolidBrush(strokeColor))
@@ -23899,7 +24775,11 @@ namespace AnonPDF
             PointF[] points,
             VectorLineEndingKind startEnding,
             VectorLineEndingKind endEnding,
-            float strokeWidth)
+            float strokeWidth,
+            float startPrimarySize,
+            float startSecondarySize,
+            float endPrimarySize,
+            float endSecondarySize)
         {
             if (points == null || points.Length < 2)
             {
@@ -23907,8 +24787,8 @@ namespace AnonPDF
             }
 
             PointF[] adjusted = points.Select(point => new PointF(point.X, point.Y)).ToArray();
-            float startInset = GetVectorLineEndingInset(startEnding, strokeWidth);
-            float endInset = GetVectorLineEndingInset(endEnding, strokeWidth);
+            float startInset = GetVectorLineEndingInset(startEnding, strokeWidth, startPrimarySize, startSecondarySize);
+            float endInset = GetVectorLineEndingInset(endEnding, strokeWidth, endPrimarySize, endSecondarySize);
 
             if (startInset > 0f)
             {
@@ -23939,9 +24819,9 @@ namespace AnonPDF
             return new PointF(start.X + (ux * appliedDistance), start.Y + (uy * appliedDistance));
         }
 
-        private static float GetVectorLineEndingInset(VectorLineEndingKind ending, float strokeWidth)
+        private static float GetVectorLineEndingInset(VectorLineEndingKind ending, float strokeWidth, float primarySize, float secondarySize)
         {
-            GetVectorLineEndingMetrics(ending, strokeWidth, out float markerLength, out _, out float radius);
+            GetVectorLineEndingMetrics(ending, strokeWidth, primarySize, secondarySize, out float markerLength, out _, out float radius);
             float width = Math.Max(1f, strokeWidth);
             switch (ending)
             {
@@ -23961,7 +24841,7 @@ namespace AnonPDF
             }
         }
 
-        private static void GetVectorLineEndingMetrics(
+        private static void GetVectorLineEndingDefaultMetrics(
             VectorLineEndingKind ending,
             float strokeWidth,
             out float markerLength,
@@ -23993,6 +24873,67 @@ namespace AnonPDF
                     break;
                 case VectorLineEndingKind.Bar:
                     radius = Math.Max(4f, width * 0.95f);
+                    break;
+            }
+        }
+
+        private static float GetAngleFromMarkerDimensions(float markerLength, float markerWidth)
+        {
+            if (markerLength <= 0.01f || markerWidth <= 0.01f)
+            {
+                return 45f;
+            }
+
+            return (float)(Math.Atan(markerWidth / (2f * markerLength)) * 2d * 180d / Math.PI);
+        }
+
+        private static float GetMarkerWidthFromAngle(float markerLength, float angleDegrees)
+        {
+            double halfAngleRadians = Math.Max(1d, Math.Min(89d, angleDegrees)) * Math.PI / 360d;
+            return (float)(2d * markerLength * Math.Tan(halfAngleRadians));
+        }
+
+        private static void GetVectorLineEndingMetrics(
+            VectorLineEndingKind ending,
+            float strokeWidth,
+            float primarySize,
+            float secondarySize,
+            out float markerLength,
+            out float markerWidth,
+            out float radius)
+        {
+            GetVectorLineEndingDefaultMetrics(ending, strokeWidth, out float defaultLength, out float defaultWidth, out float defaultRadius);
+
+            markerLength = defaultLength;
+            markerWidth = defaultWidth;
+            radius = defaultRadius;
+
+            switch (ending)
+            {
+                case VectorLineEndingKind.Arrow:
+                case VectorLineEndingKind.OpenArrow:
+                case VectorLineEndingKind.DoubleOpenArrow:
+                    markerLength = primarySize > 0f ? NormalizeVectorLineEndingPrimarySize(primarySize) : defaultLength;
+                    float defaultAngle = GetAngleFromMarkerDimensions(defaultLength, defaultWidth);
+                    float angle = secondarySize > 0f
+                        ? NormalizeVectorLineEndingSecondarySize(secondarySize)
+                        : defaultAngle;
+                    markerWidth = GetMarkerWidthFromAngle(markerLength, angle);
+                    break;
+                case VectorLineEndingKind.Circle:
+                case VectorLineEndingKind.FilledCircle:
+                    {
+                        float defaultDiameter = defaultRadius * 2f;
+                        float diameter = primarySize > 0f ? NormalizeVectorLineEndingPrimarySize(primarySize) : defaultDiameter;
+                        radius = diameter / 2f;
+                    }
+                    break;
+                case VectorLineEndingKind.Bar:
+                    {
+                        float defaultBarLength = defaultRadius * 2f;
+                        float barLength = primarySize > 0f ? NormalizeVectorLineEndingPrimarySize(primarySize) : defaultBarLength;
+                        radius = barLength / 2f;
+                    }
                     break;
             }
         }
@@ -24485,6 +25426,10 @@ namespace AnonPDF
                 DrawSelectedRasterOverlayOnTop(e.Graphics);
                 DrawSelectedArrowOverlayOnTop(e.Graphics);
                 DrawSelectedVectorOverlayOnTop(e.Graphics);
+            }
+            else
+            {
+                DrawSelectedGroupOverlayOnTop(e.Graphics);
             }
 
             if (IsCurrentPageMarkedForDeletion())
@@ -26857,6 +27802,10 @@ namespace AnonPDF
                 !string.Equals(left.FillPattern, right.FillPattern, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(left.StartLineEnding, right.StartLineEnding, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(left.EndLineEnding, right.EndLineEnding, StringComparison.OrdinalIgnoreCase) ||
+                !AreSameFloat(NormalizeVectorLineEndingPrimarySize(left.StartLineEndingPrimarySize), NormalizeVectorLineEndingPrimarySize(right.StartLineEndingPrimarySize)) ||
+                !AreSameFloat(NormalizeVectorLineEndingSecondarySize(left.StartLineEndingSecondarySize), NormalizeVectorLineEndingSecondarySize(right.StartLineEndingSecondarySize)) ||
+                !AreSameFloat(NormalizeVectorLineEndingPrimarySize(left.EndLineEndingPrimarySize), NormalizeVectorLineEndingPrimarySize(right.EndLineEndingPrimarySize)) ||
+                !AreSameFloat(NormalizeVectorLineEndingSecondarySize(left.EndLineEndingSecondarySize), NormalizeVectorLineEndingSecondarySize(right.EndLineEndingSecondarySize)) ||
                 left.IsLocked != right.IsLocked)
             {
                 return false;
@@ -27723,7 +28672,7 @@ namespace AnonPDF
         {
             bool cancelled = false;
 
-            if (isMovingObjectGroup)
+            if (isMovingObjectGroup || isScalingObjectGroup)
             {
                 foreach (GroupMoveEntry entry in groupMoveEntries)
                 {
@@ -27738,6 +28687,11 @@ namespace AnonPDF
                             if (entry.Text != null)
                             {
                                 entry.Text.AnnotationBounds = entry.Bounds;
+                                FontFamily fontFamily = entry.TextFontFamily ?? entry.Text.AnnotationFont?.FontFamily ?? FontFamily.GenericSansSerif;
+                                entry.Text.AnnotationFont = new Font(fontFamily, Math.Max(4f, entry.TextFontSize), entry.TextFontStyle, entry.TextFontUnit);
+                                entry.Text.AnnotationBorderWidth = Math.Max(0f, entry.TextBorderWidth);
+                                entry.Text.AnnotationFrameMargin = Math.Max(0f, entry.TextFrameMargin);
+                                TouchTextAnnotation(entry.Text);
                             }
                             break;
                         case GroupMoveObjectType.Raster:
@@ -27751,18 +28705,29 @@ namespace AnonPDF
                             {
                                 entry.Arrow.Start = entry.Start;
                                 entry.Arrow.End = entry.End;
+                                entry.Arrow.Thickness = NormalizeArrowThickness(entry.ArrowThickness);
+                                entry.Arrow.BorderWidth = NormalizeArrowBorderWidth(entry.ArrowBorderWidth);
+                                entry.Arrow.HeadLength = NormalizeArrowHeadLength(entry.ArrowHeadLength);
+                                entry.Arrow.HeadWidth = NormalizeArrowHeadWidth(entry.ArrowHeadWidth);
                             }
                             break;
                         case GroupMoveObjectType.VectorShape:
                             if (entry.VectorShape != null && entry.Points != null)
                             {
                                 entry.VectorShape.Points = entry.Points.Select(point => new PointF(point.X, point.Y)).ToList();
+                                entry.VectorShape.StrokeWidth = NormalizeVectorStrokeWidth(entry.VectorStrokeWidth);
+                                entry.VectorShape.StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(entry.VectorStartEndingPrimarySize);
+                                entry.VectorShape.StartLineEndingSecondarySize = entry.VectorStartEndingSecondarySize;
+                                entry.VectorShape.EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(entry.VectorEndEndingPrimarySize);
+                                entry.VectorShape.EndLineEndingSecondarySize = entry.VectorEndEndingSecondarySize;
+                                NormalizeVectorShape(entry.VectorShape);
                             }
                             break;
                     }
                 }
 
                 groupMoveChanged = false;
+                groupScaleChanged = false;
                 ResetGroupMoveState();
                 this.Cursor = Cursors.Default;
                 cancelled = true;
@@ -27797,10 +28762,26 @@ namespace AnonPDF
                 cancelled = true;
             }
 
-            if (isRotatingTextAnnotation && annotationToRotate != null)
+            if ((isRotatingTextAnnotation && annotationToRotate != null) ||
+                (isScalingTextAnnotation && annotationToScale != null))
             {
-                annotationToRotate.AnnotationRotation = NormalizeRotation(textRotationStartValue);
-                if (!textRotationStartBounds.IsEmpty)
+                TextAnnotation textToRestore = annotationToRotate ?? annotationToScale;
+                if (isRotatingTextAnnotation && annotationToRotate != null)
+                {
+                    annotationToRotate.AnnotationRotation = NormalizeRotation(textRotationStartValue);
+                }
+
+                if (textToRestore != null && !textScaleStartBounds.IsEmpty)
+                {
+                    textToRestore.AnnotationBounds = textScaleStartBounds;
+                    FontFamily fontFamily = textScaleStartFontFamily ?? textToRestore.AnnotationFont?.FontFamily ?? FontFamily.GenericSansSerif;
+                    textToRestore.AnnotationFont = new Font(fontFamily, Math.Max(4f, textScaleStartFontSize), textScaleStartFontStyle, textScaleStartFontUnit);
+                    textToRestore.AnnotationBorderWidth = Math.Max(0f, textScaleStartBorderWidth);
+                    textToRestore.AnnotationFrameMargin = Math.Max(0f, textScaleStartFrameMargin);
+                    TouchTextAnnotation(textToRestore);
+                }
+
+                if (isRotatingTextAnnotation && !textRotationStartBounds.IsEmpty && annotationToRotate != null)
                 {
                     annotationToRotate.AnnotationBounds = textRotationStartBounds;
                 }
@@ -27826,13 +28807,17 @@ namespace AnonPDF
                 cancelled = true;
             }
 
-            if (arrowMouseActionInProgress || isMovingArrowObject || isAdjustingArrowHandle)
+            if (arrowMouseActionInProgress || isMovingArrowObject || isAdjustingArrowHandle || isScalingArrowObject)
             {
-                ArrowObject arrowToRestore = arrowObjectToMove ?? arrowObjectToAdjust;
+                ArrowObject arrowToRestore = arrowObjectToMove ?? arrowObjectToAdjust ?? arrowObjectToScale;
                 if (arrowToRestore != null)
                 {
                     arrowToRestore.Start = arrowMoveInitialStart;
                     arrowToRestore.End = arrowMoveInitialEnd;
+                    arrowToRestore.Thickness = NormalizeArrowThickness(arrowScaleStartThickness > 0f ? arrowScaleStartThickness : arrowToRestore.Thickness);
+                    arrowToRestore.BorderWidth = NormalizeArrowBorderWidth(arrowScaleStartBorderWidth >= 0f ? arrowScaleStartBorderWidth : arrowToRestore.BorderWidth);
+                    arrowToRestore.HeadLength = NormalizeArrowHeadLength(arrowScaleStartHeadLength > 0f ? arrowScaleStartHeadLength : arrowToRestore.HeadLength);
+                    arrowToRestore.HeadWidth = NormalizeArrowHeadWidth(arrowScaleStartHeadWidth > 0f ? arrowScaleStartHeadWidth : arrowToRestore.HeadWidth);
                 }
 
                 arrowInteractionChanged = false;
@@ -27867,7 +28852,7 @@ namespace AnonPDF
                 cancelled = true;
             }
 
-            if (vectorMouseActionInProgress || isMovingVectorShape || isAdjustingVectorHandle || isRotatingVectorShape)
+            if (vectorMouseActionInProgress || isMovingVectorShape || isAdjustingVectorHandle || isRotatingVectorShape || isScalingVectorShape)
             {
                 if (isMovingVectorShape && vectorShapeToMove != null && vectorMoveInitialPoints != null && vectorMoveInitialPoints.Count > 0)
                 {
@@ -27882,6 +28867,17 @@ namespace AnonPDF
                 if (isRotatingVectorShape && vectorShapeToRotate != null && vectorRotateInitialPoints != null && vectorRotateInitialPoints.Count > 0)
                 {
                     vectorShapeToRotate.Points = vectorRotateInitialPoints.Select(point => new PointF(point.X, point.Y)).ToList();
+                }
+
+                if (isScalingVectorShape && vectorShapeToScale != null && vectorMoveInitialPoints != null && vectorMoveInitialPoints.Count > 0)
+                {
+                    vectorShapeToScale.Points = vectorMoveInitialPoints.Select(point => new PointF(point.X, point.Y)).ToList();
+                    vectorShapeToScale.StrokeWidth = NormalizeVectorStrokeWidth(vectorScaleStartStrokeWidth > 0f ? vectorScaleStartStrokeWidth : vectorShapeToScale.StrokeWidth);
+                    vectorShapeToScale.StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorScaleStartStartEndingPrimarySize);
+                    vectorShapeToScale.StartLineEndingSecondarySize = vectorScaleStartStartEndingSecondarySize;
+                    vectorShapeToScale.EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorScaleStartEndEndingPrimarySize);
+                    vectorShapeToScale.EndLineEndingSecondarySize = vectorScaleStartEndEndingSecondarySize;
+                    NormalizeVectorShape(vectorShapeToScale);
                 }
 
                 vectorInteractionChanged = false;
@@ -28579,6 +29575,22 @@ namespace AnonPDF
                 return;
             }
 
+            string originalShapeType = vectorShape.ShapeType;
+            int originalStrokeColorArgb = vectorShape.StrokeColorArgb;
+            float originalStrokeWidth = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth);
+            int originalFillColorArgb = vectorShape.FillColorArgb;
+            int originalFillPatternColorArgb = vectorShape.FillPatternColorArgb;
+            float originalFillOpacity = NormalizeVectorFillOpacity(vectorShape.FillOpacity);
+            string originalStrokeStyle = vectorShape.StrokeStyle;
+            string originalFillPattern = vectorShape.FillPattern;
+            string originalStartLineEnding = vectorShape.StartLineEnding;
+            string originalEndLineEnding = vectorShape.EndLineEnding;
+            float originalStartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorShape.StartLineEndingPrimarySize);
+            float originalStartLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorShape.StartLineEndingSecondarySize);
+            float originalEndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorShape.EndLineEndingPrimarySize);
+            float originalEndLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorShape.EndLineEndingSecondarySize);
+            DateTime originalUpdatedAtUtc = vectorShape.UpdatedAtUtc;
+
             var initialDefaults = new VectorShapeDefaults
             {
                 ShapeType = ParseVectorShapeType(vectorShape.ShapeType),
@@ -28590,11 +29602,37 @@ namespace AnonPDF
                 StrokeKind = ParseVectorStrokeKind(vectorShape.StrokeStyle),
                 FillPattern = ParseVectorFillPattern(vectorShape.FillPattern),
                 StartEnding = ParseVectorLineEndingKind(vectorShape.StartLineEnding),
-                EndEnding = ParseVectorLineEndingKind(vectorShape.EndLineEnding)
+                EndEnding = ParseVectorLineEndingKind(vectorShape.EndLineEnding),
+                StartEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorShape.StartLineEndingPrimarySize),
+                StartEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorShape.StartLineEndingSecondarySize),
+                EndEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorShape.EndLineEndingPrimarySize),
+                EndEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorShape.EndLineEndingSecondarySize)
             };
 
-            if (!TryPromptShapeDefaults(out VectorShapeDefaults selectedDefaults, initialDefaults, lockShapeType: true))
+            if (!TryPromptShapeDefaults(
+                out VectorShapeDefaults selectedDefaults,
+                initialDefaults,
+                lockShapeType: true,
+                previewChanges: previewDefaults => ApplyVectorShapeDefaults(vectorShape, previewDefaults, markProjectChanged: false)))
             {
+                vectorShape.ShapeType = originalShapeType;
+                vectorShape.StrokeColorArgb = originalStrokeColorArgb;
+                vectorShape.StrokeWidth = originalStrokeWidth;
+                vectorShape.FillColorArgb = originalFillColorArgb;
+                vectorShape.FillPatternColorArgb = originalFillPatternColorArgb;
+                vectorShape.FillOpacity = originalFillOpacity;
+                vectorShape.StrokeStyle = originalStrokeStyle;
+                vectorShape.FillPattern = originalFillPattern;
+                vectorShape.StartLineEnding = originalStartLineEnding;
+                vectorShape.EndLineEnding = originalEndLineEnding;
+                vectorShape.StartLineEndingPrimarySize = originalStartLineEndingPrimarySize;
+                vectorShape.StartLineEndingSecondarySize = originalStartLineEndingSecondarySize;
+                vectorShape.EndLineEndingPrimarySize = originalEndLineEndingPrimarySize;
+                vectorShape.EndLineEndingSecondarySize = originalEndLineEndingSecondarySize;
+                vectorShape.UpdatedAtUtc = originalUpdatedAtUtc;
+                NormalizeVectorShape(vectorShape);
+                ConstrainVectorShapeToPage(vectorShape);
+                pdfViewer.Invalidate();
                 return;
             }
 
@@ -28604,39 +29642,61 @@ namespace AnonPDF
             }
 
             bool changed =
-                !string.Equals(vectorShape.ShapeType ?? string.Empty, selectedDefaults.ShapeType.ToString(), StringComparison.OrdinalIgnoreCase) ||
-                vectorShape.StrokeColorArgb != selectedDefaults.StrokeColorArgb ||
-                !AreSameFloat(NormalizeVectorStrokeWidth(vectorShape.StrokeWidth), NormalizeVectorStrokeWidth(selectedDefaults.StrokeWidth)) ||
-                vectorShape.FillColorArgb != selectedDefaults.FillColorArgb ||
-                vectorShape.FillPatternColorArgb != selectedDefaults.FillPatternColorArgb ||
-                !AreSameFloat(NormalizeVectorFillOpacity(vectorShape.FillOpacity), NormalizeVectorFillOpacity(selectedDefaults.FillOpacity)) ||
-                !string.Equals(vectorShape.StrokeStyle ?? string.Empty, selectedDefaults.StrokeKind.ToString(), StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(vectorShape.FillPattern ?? string.Empty, selectedDefaults.FillPattern.ToString(), StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(vectorShape.StartLineEnding ?? string.Empty, selectedDefaults.StartEnding.ToString(), StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(vectorShape.EndLineEnding ?? string.Empty, selectedDefaults.EndEnding.ToString(), StringComparison.OrdinalIgnoreCase);
+                !string.Equals(originalShapeType ?? string.Empty, selectedDefaults.ShapeType.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                originalStrokeColorArgb != selectedDefaults.StrokeColorArgb ||
+                !AreSameFloat(originalStrokeWidth, NormalizeVectorStrokeWidth(selectedDefaults.StrokeWidth)) ||
+                originalFillColorArgb != selectedDefaults.FillColorArgb ||
+                originalFillPatternColorArgb != selectedDefaults.FillPatternColorArgb ||
+                !AreSameFloat(originalFillOpacity, NormalizeVectorFillOpacity(selectedDefaults.FillOpacity)) ||
+                !string.Equals(originalStrokeStyle ?? string.Empty, selectedDefaults.StrokeKind.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(originalFillPattern ?? string.Empty, selectedDefaults.FillPattern.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(originalStartLineEnding ?? string.Empty, selectedDefaults.StartEnding.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(originalEndLineEnding ?? string.Empty, selectedDefaults.EndEnding.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                !AreSameFloat(originalStartLineEndingPrimarySize, NormalizeVectorLineEndingPrimarySize(selectedDefaults.StartEndingPrimarySize)) ||
+                !AreSameFloat(originalStartLineEndingSecondarySize, NormalizeVectorLineEndingSecondarySize(selectedDefaults.StartEndingSecondarySize)) ||
+                !AreSameFloat(originalEndLineEndingPrimarySize, NormalizeVectorLineEndingPrimarySize(selectedDefaults.EndEndingPrimarySize)) ||
+                !AreSameFloat(originalEndLineEndingSecondarySize, NormalizeVectorLineEndingSecondarySize(selectedDefaults.EndEndingSecondarySize));
 
             if (!changed)
             {
                 return;
             }
-
-            vectorShape.ShapeType = selectedDefaults.ShapeType.ToString();
-            vectorShape.StrokeColorArgb = selectedDefaults.StrokeColorArgb;
-            vectorShape.StrokeWidth = NormalizeVectorStrokeWidth(selectedDefaults.StrokeWidth);
-            vectorShape.FillColorArgb = selectedDefaults.FillColorArgb;
-            vectorShape.FillPatternColorArgb = selectedDefaults.FillPatternColorArgb;
-            vectorShape.FillOpacity = NormalizeVectorFillOpacity(selectedDefaults.FillOpacity);
-            vectorShape.StrokeStyle = selectedDefaults.StrokeKind.ToString();
-            vectorShape.FillPattern = selectedDefaults.FillPattern.ToString();
-            vectorShape.StartLineEnding = selectedDefaults.StartEnding.ToString();
-            vectorShape.EndLineEnding = selectedDefaults.EndEnding.ToString();
             activeVectorShapeDefaults = selectedDefaults.Clone();
+            ApplyVectorShapeDefaults(vectorShape, selectedDefaults, markProjectChanged: true);
+        }
+
+        private void ApplyVectorShapeDefaults(VectorShapeObject vectorShape, VectorShapeDefaults defaults, bool markProjectChanged)
+        {
+            if (vectorShape == null || defaults == null)
+            {
+                return;
+            }
+
+            vectorShape.ShapeType = defaults.ShapeType.ToString();
+            vectorShape.StrokeColorArgb = defaults.StrokeColorArgb;
+            vectorShape.StrokeWidth = NormalizeVectorStrokeWidth(defaults.StrokeWidth);
+            vectorShape.FillColorArgb = defaults.FillColorArgb;
+            vectorShape.FillPatternColorArgb = defaults.FillPatternColorArgb;
+            vectorShape.FillOpacity = NormalizeVectorFillOpacity(defaults.FillOpacity);
+            vectorShape.StrokeStyle = defaults.StrokeKind.ToString();
+            vectorShape.FillPattern = defaults.FillPattern.ToString();
+            vectorShape.StartLineEnding = defaults.StartEnding.ToString();
+            vectorShape.EndLineEnding = defaults.EndEnding.ToString();
+            vectorShape.StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(defaults.StartEndingPrimarySize);
+            vectorShape.StartLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(defaults.StartEndingSecondarySize);
+            vectorShape.EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(defaults.EndEndingPrimarySize);
+            vectorShape.EndLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(defaults.EndEndingSecondarySize);
             NormalizeVectorShape(vectorShape);
             ConstrainVectorShapeToPage(vectorShape);
             vectorShape.UpdatedAtUtc = DateTime.UtcNow;
-            projectWasChangedAfterLastSave = true;
-            saveProjectButton.Enabled = true;
-            saveProjectMenuItem.Enabled = true;
+
+            if (markProjectChanged)
+            {
+                projectWasChangedAfterLastSave = true;
+                saveProjectButton.Enabled = true;
+                saveProjectMenuItem.Enabled = true;
+            }
+
             pdfViewer.Invalidate();
         }
 
@@ -28849,42 +29909,59 @@ namespace AnonPDF
 
         private void ResetTextRotationInteractionState()
         {
-            if (isRotatingTextAnnotation)
+            if (isRotatingTextAnnotation || isScalingTextAnnotation)
             {
                 this.Cursor = Cursors.Default;
             }
 
+            isScalingTextAnnotation = false;
             isRotatingTextAnnotation = false;
             textRotationInteractionChanged = false;
+            annotationToScale = null;
             annotationToRotate = null;
             textRotationStartValue = 0;
             textRotationStartAngle = 0f;
             textRotationStartCenterDoc = PointF.Empty;
             textRotationStartBounds = RectangleF.Empty;
+            textScaleStartBounds = RectangleF.Empty;
+            textScaleStartScreenBounds = RectangleF.Empty;
+            textScaleStartFontFamily = null;
+            textScaleStartFontSize = 0f;
+            textScaleStartFontStyle = FontStyle.Regular;
+            textScaleStartFontUnit = GraphicsUnit.Point;
+            textScaleStartBorderWidth = 0f;
+            textScaleStartFrameMargin = 0f;
         }
 
         private void ResetArrowInteractionState()
         {
-            if (isMovingArrowObject || isAdjustingArrowHandle)
+            if (isMovingArrowObject || isAdjustingArrowHandle || isScalingArrowObject)
             {
                 this.Cursor = Cursors.Default;
             }
 
             arrowObjectToMove = null;
             arrowObjectToAdjust = null;
+            arrowObjectToScale = null;
             isMovingArrowObject = false;
             isAdjustingArrowHandle = false;
+            isScalingArrowObject = false;
             arrowHandleType = ArrowHandleType.None;
             arrowMouseActionInProgress = false;
             arrowInteractionChanged = false;
             arrowMoveStartMouseDoc = PointF.Empty;
             arrowMoveInitialStart = PointF.Empty;
             arrowMoveInitialEnd = PointF.Empty;
+            arrowScaleStartScreenBounds = RectangleF.Empty;
+            arrowScaleStartThickness = 0f;
+            arrowScaleStartBorderWidth = 0f;
+            arrowScaleStartHeadLength = 0f;
+            arrowScaleStartHeadWidth = 0f;
         }
 
         private void ResetVectorInteractionState()
         {
-            if (isMovingVectorShape || isAdjustingVectorHandle || isRotatingVectorShape)
+            if (isMovingVectorShape || isAdjustingVectorHandle || isRotatingVectorShape || isScalingVectorShape)
             {
                 this.Cursor = Cursors.Default;
             }
@@ -28892,9 +29969,11 @@ namespace AnonPDF
             vectorShapeToMove = null;
             vectorShapeToAdjust = null;
             vectorShapeToRotate = null;
+            vectorShapeToScale = null;
             isMovingVectorShape = false;
             isAdjustingVectorHandle = false;
             isRotatingVectorShape = false;
+            isScalingVectorShape = false;
             vectorMouseActionInProgress = false;
             vectorInteractionChanged = false;
             vectorHandlePointIndex = -1;
@@ -28903,6 +29982,12 @@ namespace AnonPDF
             vectorRotateInitialPoints.Clear();
             vectorRotateCenterDoc = PointF.Empty;
             vectorRotationStartAngle = 0f;
+            vectorScaleStartScreenBounds = RectangleF.Empty;
+            vectorScaleStartStrokeWidth = 0f;
+            vectorScaleStartStartEndingPrimarySize = 0f;
+            vectorScaleStartStartEndingSecondarySize = 0f;
+            vectorScaleStartEndEndingPrimarySize = 0f;
+            vectorScaleStartEndEndingSecondarySize = 0f;
         }
 
         private static float NormalizeArrowThickness(float value)
@@ -28984,6 +30069,26 @@ namespace AnonPDF
             }
 
             return Math.Max(0.5f, Math.Min(24f, value));
+        }
+
+        private static float NormalizeVectorLineEndingPrimarySize(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return 0f;
+            }
+
+            return Math.Max(0f, Math.Min(240f, value));
+        }
+
+        private static float NormalizeVectorLineEndingSecondarySize(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return 0f;
+            }
+
+            return Math.Max(0f, Math.Min(179f, value));
         }
 
         private static float NormalizeVectorFillOpacity(float value)
@@ -29078,6 +30183,80 @@ namespace AnonPDF
             VectorLineEndingOption[] options = GetVectorLineEndingOptions().ToArray();
             int index = Array.FindIndex(options, option => option.Kind == kind);
             return index >= 0 ? index : 0;
+        }
+
+        private static string GetVectorLineEndingPrimaryLabelKey(VectorLineEndingKind kind)
+        {
+            switch (kind)
+            {
+                case VectorLineEndingKind.Arrow:
+                case VectorLineEndingKind.OpenArrow:
+                case VectorLineEndingKind.DoubleOpenArrow:
+                    return "Vector_Dialog_LineEndingLength";
+                case VectorLineEndingKind.Circle:
+                case VectorLineEndingKind.FilledCircle:
+                    return "Vector_Dialog_LineEndingDiameter";
+                case VectorLineEndingKind.Bar:
+                    return "Vector_Dialog_LineEndingBarLength";
+                default:
+                    return string.Empty;
+            }
+        }
+
+        private static string GetVectorLineEndingSecondaryLabelKey(VectorLineEndingKind kind)
+        {
+            switch (kind)
+            {
+                case VectorLineEndingKind.Arrow:
+                case VectorLineEndingKind.OpenArrow:
+                case VectorLineEndingKind.DoubleOpenArrow:
+                    return "Vector_Dialog_LineEndingAngle";
+                default:
+                    return string.Empty;
+            }
+        }
+
+        private static bool VectorLineEndingSupportsPrimarySize(VectorLineEndingKind kind)
+        {
+            return kind != VectorLineEndingKind.None;
+        }
+
+        private static bool VectorLineEndingSupportsSecondarySize(VectorLineEndingKind kind)
+        {
+            return !string.IsNullOrEmpty(GetVectorLineEndingSecondaryLabelKey(kind));
+        }
+
+        private static float GetVectorLineEndingEffectivePrimarySize(VectorLineEndingKind kind, float strokeWidth, float storedPrimarySize)
+        {
+            GetVectorLineEndingMetrics(kind, strokeWidth, storedPrimarySize, 0f, out float markerLength, out _, out float radius);
+            switch (kind)
+            {
+                case VectorLineEndingKind.Arrow:
+                case VectorLineEndingKind.OpenArrow:
+                case VectorLineEndingKind.DoubleOpenArrow:
+                    return markerLength;
+                case VectorLineEndingKind.Circle:
+                case VectorLineEndingKind.FilledCircle:
+                case VectorLineEndingKind.Bar:
+                    return radius * 2f;
+                default:
+                    return 0f;
+            }
+        }
+
+        private static float GetVectorLineEndingEffectiveSecondarySize(VectorLineEndingKind kind, float strokeWidth, float storedPrimarySize, float storedSecondarySize)
+        {
+            if (!VectorLineEndingSupportsSecondarySize(kind))
+            {
+                return 0f;
+            }
+
+            GetVectorLineEndingDefaultMetrics(kind, strokeWidth, out float defaultLength, out float defaultWidth, out _);
+            float markerLength = storedPrimarySize > 0f ? NormalizeVectorLineEndingPrimarySize(storedPrimarySize) : defaultLength;
+            float markerWidth = storedSecondarySize > 0f
+                ? GetMarkerWidthFromAngle(markerLength, NormalizeVectorLineEndingSecondarySize(storedSecondarySize))
+                : defaultWidth;
+            return GetAngleFromMarkerDimensions(markerLength, markerWidth);
         }
 
         private static string GetSelectedVectorLineEndingValue(ComboBox comboBox)
@@ -29510,6 +30689,26 @@ namespace AnonPDF
             vectorShape.StrokeStyle = ParseVectorStrokeKind(vectorShape.StrokeStyle).ToString();
             vectorShape.StartLineEnding = ParseVectorLineEndingKind(vectorShape.StartLineEnding).ToString();
             vectorShape.EndLineEnding = ParseVectorLineEndingKind(vectorShape.EndLineEnding).ToString();
+            vectorShape.StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorShape.StartLineEndingPrimarySize);
+            vectorShape.StartLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorShape.StartLineEndingSecondarySize);
+            vectorShape.EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorShape.EndLineEndingPrimarySize);
+            vectorShape.EndLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(vectorShape.EndLineEndingSecondarySize);
+            if (!VectorLineEndingSupportsPrimarySize(ParseVectorLineEndingKind(vectorShape.StartLineEnding)))
+            {
+                vectorShape.StartLineEndingPrimarySize = 0f;
+            }
+            if (!VectorLineEndingSupportsSecondarySize(ParseVectorLineEndingKind(vectorShape.StartLineEnding)))
+            {
+                vectorShape.StartLineEndingSecondarySize = 0f;
+            }
+            if (!VectorLineEndingSupportsPrimarySize(ParseVectorLineEndingKind(vectorShape.EndLineEnding)))
+            {
+                vectorShape.EndLineEndingPrimarySize = 0f;
+            }
+            if (!VectorLineEndingSupportsSecondarySize(ParseVectorLineEndingKind(vectorShape.EndLineEnding)))
+            {
+                vectorShape.EndLineEndingSecondarySize = 0f;
+            }
             vectorShape.FillPattern = ParseVectorFillPattern(vectorShape.FillPattern).ToString();
             System.Drawing.Color patternColor = System.Drawing.Color.FromArgb(vectorShape.FillPatternColorArgb);
             vectorShape.FillPatternColorArgb = System.Drawing.Color.FromArgb(patternColor.A, patternColor.R, patternColor.G, patternColor.B).ToArgb();
@@ -29520,6 +30719,16 @@ namespace AnonPDF
             if (parsedType == VectorShapeType.Arc && vectorShape.Points.Count > 3)
             {
                 vectorShape.Points = vectorShape.Points.Take(3).ToList();
+            }
+
+            if (parsedType != VectorShapeType.Polyline || !HasVisibleVectorColor(vectorShape.StrokeColorArgb))
+            {
+                vectorShape.StartLineEnding = VectorLineEndingKind.None.ToString();
+                vectorShape.EndLineEnding = VectorLineEndingKind.None.ToString();
+                vectorShape.StartLineEndingPrimarySize = 0f;
+                vectorShape.StartLineEndingSecondarySize = 0f;
+                vectorShape.EndLineEndingPrimarySize = 0f;
+                vectorShape.EndLineEndingSecondarySize = 0f;
             }
 
             if (!ShapeTypeSupportsFill(parsedType))
@@ -29540,6 +30749,12 @@ namespace AnonPDF
         {
             handleRects = null;
             if (vectorShape == null || vectorShape.PageNumber != currentPage || vectorShape.Points == null || vectorShape.Points.Count == 0)
+            {
+                return false;
+            }
+
+            VectorShapeType shapeType = ParseVectorShapeType(vectorShape.ShapeType);
+            if (!SupportsVectorNodeEditing(shapeType))
             {
                 return false;
             }
@@ -29602,7 +30817,9 @@ namespace AnonPDF
 
         private static bool SupportsVectorNodeEditing(VectorShapeType shapeType)
         {
-            return shapeType == VectorShapeType.Polyline || shapeType == VectorShapeType.Region;
+            return shapeType == VectorShapeType.Polyline ||
+                   shapeType == VectorShapeType.Region ||
+                   shapeType == VectorShapeType.Arc;
         }
 
         private static int GetMinNodeCountForVectorShape(VectorShapeType shapeType)
@@ -30391,15 +31608,19 @@ namespace AnonPDF
                     StrokeColorArgb = sourceShape.StrokeColorArgb,
                     StrokeWidth = sourceShape.StrokeWidth,
                     FillColorArgb = sourceShape.FillColorArgb,
-                    FillPatternColorArgb = sourceShape.FillPatternColorArgb,
-                    FillOpacity = sourceShape.FillOpacity,
-                    StrokeStyle = sourceShape.StrokeStyle,
-                    FillPattern = sourceShape.FillPattern,
-                    StartLineEnding = sourceShape.StartLineEnding,
-                    EndLineEnding = sourceShape.EndLineEnding,
-                    IsLocked = sourceShape.IsLocked,
-                    CreatedAtUtc = now,
-                    UpdatedAtUtc = now,
+                FillPatternColorArgb = sourceShape.FillPatternColorArgb,
+                FillOpacity = sourceShape.FillOpacity,
+                StrokeStyle = sourceShape.StrokeStyle,
+                FillPattern = sourceShape.FillPattern,
+                StartLineEnding = sourceShape.StartLineEnding,
+                EndLineEnding = sourceShape.EndLineEnding,
+                StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(sourceShape.StartLineEndingPrimarySize),
+                StartLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(sourceShape.StartLineEndingSecondarySize),
+                EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(sourceShape.EndLineEndingPrimarySize),
+                EndLineEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(sourceShape.EndLineEndingSecondarySize),
+                IsLocked = sourceShape.IsLocked,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
                     DuplicateGroupId = duplicateGroupId
                 };
 
@@ -30830,6 +32051,14 @@ namespace AnonPDF
             }
 
             if (!IsVectorShapeEffectivelyLocked(selectedVectorShape) &&
+                TryGetVectorShapeScreenBounds(selectedVectorShape, out RectangleF vectorBounds) &&
+                TryGetObjectScaleHandleAtPoint(vectorBounds, location, out ObjectScaleHandleCorner scaleHandleCorner))
+            {
+                this.Cursor = GetCursorForObjectScaleHandle(scaleHandleCorner);
+                return true;
+            }
+
+            if (!IsVectorShapeEffectivelyLocked(selectedVectorShape) &&
                 TryGetVectorRotationHandleRect(selectedVectorShape, out RectangleF rotationHandleRect, out _) &&
                 rotationHandleRect.Contains(location))
             {
@@ -30856,6 +32085,14 @@ namespace AnonPDF
             if (!IsArrowObjectEffectivelyLocked(selectedArrowObject) && TryGetArrowHandleAtPoint(selectedArrowObject, location, out ArrowHandleType handleType))
             {
                 this.Cursor = GetArrowHandleCursor(selectedArrowObject, handleType);
+                return true;
+            }
+
+            if (!IsArrowObjectEffectivelyLocked(selectedArrowObject) &&
+                TryGetArrowScreenBounds(selectedArrowObject, out RectangleF arrowBounds) &&
+                TryGetObjectScaleHandleAtPoint(arrowBounds, location, out ObjectScaleHandleCorner scaleHandleCorner))
+            {
+                this.Cursor = GetCursorForObjectScaleHandle(scaleHandleCorner);
                 return true;
             }
 
@@ -30886,6 +32123,32 @@ namespace AnonPDF
                     vectorInteractionChanged = false;
                     vectorMoveInitialPoints = (selectedVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
                     this.Cursor = GetVectorHandleCursor(selectedVectorShape, selectedHandleIndex);
+                    return true;
+                }
+
+                if (TryGetVectorShapeScreenBounds(selectedVectorShape, out RectangleF selectedVectorBounds) &&
+                    TryGetObjectScaleHandleAtPoint(selectedVectorBounds, location, out ObjectScaleHandleCorner selectedScaleHandle))
+                {
+                    BeginUndoCapture("Scale shape");
+                    vectorShapeToMove = null;
+                    vectorShapeToAdjust = null;
+                    vectorShapeToRotate = null;
+                    vectorShapeToScale = selectedVectorShape;
+                    isMovingVectorShape = false;
+                    isAdjustingVectorHandle = false;
+                    isRotatingVectorShape = false;
+                    isScalingVectorShape = true;
+                    activeObjectScaleHandleCorner = selectedScaleHandle;
+                    vectorMouseActionInProgress = true;
+                    vectorInteractionChanged = false;
+                    vectorMoveInitialPoints = (selectedVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
+                    vectorScaleStartScreenBounds = selectedVectorBounds;
+                    vectorScaleStartStrokeWidth = NormalizeVectorStrokeWidth(selectedVectorShape.StrokeWidth);
+                    vectorScaleStartStartEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(selectedVectorShape.StartLineEndingPrimarySize);
+                    vectorScaleStartStartEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(selectedVectorShape.StartLineEndingSecondarySize);
+                    vectorScaleStartEndEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(selectedVectorShape.EndLineEndingPrimarySize);
+                    vectorScaleStartEndEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(selectedVectorShape.EndLineEndingSecondarySize);
+                    this.Cursor = GetCursorForObjectScaleHandle(selectedScaleHandle);
                     return true;
                 }
 
@@ -30958,6 +32221,32 @@ namespace AnonPDF
                 return true;
             }
 
+            if (TryGetVectorShapeScreenBounds(hitVectorShape, out RectangleF hitVectorBounds) &&
+                TryGetObjectScaleHandleAtPoint(hitVectorBounds, location, out ObjectScaleHandleCorner hitScaleHandle))
+            {
+                BeginUndoCapture("Scale shape");
+                vectorShapeToMove = null;
+                vectorShapeToAdjust = null;
+                vectorShapeToRotate = null;
+                vectorShapeToScale = hitVectorShape;
+                isMovingVectorShape = false;
+                isAdjustingVectorHandle = false;
+                isRotatingVectorShape = false;
+                isScalingVectorShape = true;
+                activeObjectScaleHandleCorner = hitScaleHandle;
+                vectorMouseActionInProgress = true;
+                vectorInteractionChanged = false;
+                vectorMoveInitialPoints = (hitVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
+                vectorScaleStartScreenBounds = hitVectorBounds;
+                vectorScaleStartStrokeWidth = NormalizeVectorStrokeWidth(hitVectorShape.StrokeWidth);
+                vectorScaleStartStartEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(hitVectorShape.StartLineEndingPrimarySize);
+                vectorScaleStartStartEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(hitVectorShape.StartLineEndingSecondarySize);
+                vectorScaleStartEndEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(hitVectorShape.EndLineEndingPrimarySize);
+                vectorScaleStartEndEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(hitVectorShape.EndLineEndingSecondarySize);
+                this.Cursor = GetCursorForObjectScaleHandle(hitScaleHandle);
+                return true;
+            }
+
             if (TryGetVectorRotationHandleRect(hitVectorShape, out RectangleF hitRotationHandleRect, out _) && hitRotationHandleRect.Contains(location))
             {
                 BeginUndoCapture("Rotate shape");
@@ -31010,6 +32299,29 @@ namespace AnonPDF
                     this.Cursor = GetArrowHandleCursor(selectedArrowObject, selectedHandle);
                     return true;
                 }
+
+                if (TryGetArrowScreenBounds(selectedArrowObject, out RectangleF selectedArrowBounds) &&
+                    TryGetObjectScaleHandleAtPoint(selectedArrowBounds, location, out ObjectScaleHandleCorner selectedScaleHandle))
+                {
+                    BeginUndoCapture("Scale arrow");
+                    arrowObjectToScale = selectedArrowObject;
+                    isScalingArrowObject = true;
+                    isAdjustingArrowHandle = false;
+                    isMovingArrowObject = false;
+                    arrowMouseActionInProgress = true;
+                    arrowHandleType = ArrowHandleType.None;
+                    arrowMoveInitialStart = selectedArrowObject.Start;
+                    arrowMoveInitialEnd = selectedArrowObject.End;
+                    arrowScaleStartScreenBounds = selectedArrowBounds;
+                    arrowScaleStartThickness = NormalizeArrowThickness(selectedArrowObject.Thickness);
+                    arrowScaleStartBorderWidth = NormalizeArrowBorderWidth(selectedArrowObject.BorderWidth);
+                    arrowScaleStartHeadLength = NormalizeArrowHeadLength(selectedArrowObject.HeadLength);
+                    arrowScaleStartHeadWidth = NormalizeArrowHeadWidth(selectedArrowObject.HeadWidth);
+                    arrowInteractionChanged = false;
+                    activeObjectScaleHandleCorner = selectedScaleHandle;
+                    this.Cursor = GetCursorForObjectScaleHandle(selectedScaleHandle);
+                    return true;
+                }
             }
 
             ArrowObject hitArrow = arrowObjects
@@ -31044,6 +32356,29 @@ namespace AnonPDF
                 arrowMoveInitialEnd = hitArrow.End;
                 arrowInteractionChanged = false;
                 this.Cursor = GetArrowHandleCursor(hitArrow, handleType);
+                return true;
+            }
+
+            if (TryGetArrowScreenBounds(hitArrow, out RectangleF hitArrowBounds) &&
+                TryGetObjectScaleHandleAtPoint(hitArrowBounds, location, out ObjectScaleHandleCorner hitScaleHandle))
+            {
+                BeginUndoCapture("Scale arrow");
+                arrowObjectToScale = hitArrow;
+                isScalingArrowObject = true;
+                isAdjustingArrowHandle = false;
+                isMovingArrowObject = false;
+                arrowMouseActionInProgress = true;
+                arrowHandleType = ArrowHandleType.None;
+                arrowMoveInitialStart = hitArrow.Start;
+                arrowMoveInitialEnd = hitArrow.End;
+                arrowScaleStartScreenBounds = hitArrowBounds;
+                arrowScaleStartThickness = NormalizeArrowThickness(hitArrow.Thickness);
+                arrowScaleStartBorderWidth = NormalizeArrowBorderWidth(hitArrow.BorderWidth);
+                arrowScaleStartHeadLength = NormalizeArrowHeadLength(hitArrow.HeadLength);
+                arrowScaleStartHeadWidth = NormalizeArrowHeadWidth(hitArrow.HeadWidth);
+                arrowInteractionChanged = false;
+                activeObjectScaleHandleCorner = hitScaleHandle;
+                this.Cursor = GetCursorForObjectScaleHandle(hitScaleHandle);
                 return true;
             }
 
@@ -31419,6 +32754,36 @@ namespace AnonPDF
             return true;
         }
 
+        private bool TryGetArrowScreenBounds(ArrowObject arrowObject, out RectangleF bounds)
+        {
+            bounds = RectangleF.Empty;
+            if (arrowObject == null || arrowObject.PageNumber != currentPage)
+            {
+                return false;
+            }
+
+            PointF startScreen = GetArrowScreenPoint(arrowObject.Start);
+            PointF endScreen = GetArrowScreenPoint(arrowObject.End);
+            var points = new List<PointF> { startScreen, endScreen };
+
+            float headLengthPx = Math.Max(4f, NormalizeArrowHeadLength(arrowObject.HeadLength) * scaleFactor);
+            float headWidthPx = Math.Max(4f, NormalizeArrowHeadWidth(arrowObject.HeadWidth) * scaleFactor);
+            if (TryBuildArrowHead(startScreen, endScreen, headLengthPx, headWidthPx, out PointF leftPoint, out PointF rightPoint, out PointF lineEndPoint))
+            {
+                points.Add(leftPoint);
+                points.Add(rightPoint);
+                points.Add(lineEndPoint);
+            }
+
+            float inflate = Math.Max(4f, ((NormalizeArrowThickness(arrowObject.Thickness) + (NormalizeArrowBorderWidth(arrowObject.BorderWidth) * 2f)) * scaleFactor) + 2f);
+            float minX = points.Min(p => p.X) - inflate;
+            float maxX = points.Max(p => p.X) + inflate;
+            float minY = points.Min(p => p.Y) - inflate;
+            float maxY = points.Max(p => p.Y) + inflate;
+            bounds = new RectangleF(minX, minY, Math.Max(1f, maxX - minX), Math.Max(1f, maxY - minY));
+            return true;
+        }
+
         private bool TryGetVectorRotationHandleRect(VectorShapeObject vectorShape, out RectangleF handleRect, out PointF connectorPoint)
         {
             handleRect = RectangleF.Empty;
@@ -31540,6 +32905,144 @@ namespace AnonPDF
         private static RectangleF BuildHandleRect(PointF center, float size)
         {
             return new RectangleF(center.X - (size / 2f), center.Y - (size / 2f), size, size);
+        }
+
+        private static bool TryGetObjectScaleHandleRects(RectangleF bounds, out Dictionary<ObjectScaleHandleCorner, RectangleF> handles)
+        {
+            handles = null;
+            if (bounds.Width <= 0.0001f || bounds.Height <= 0.0001f)
+            {
+                return false;
+            }
+
+            handles = new Dictionary<ObjectScaleHandleCorner, RectangleF>
+            {
+                [ObjectScaleHandleCorner.TopLeft] = BuildHandleRect(new PointF(bounds.Left, bounds.Top), RasterResizeHandleSize),
+                [ObjectScaleHandleCorner.TopRight] = BuildHandleRect(new PointF(bounds.Right, bounds.Top), RasterResizeHandleSize),
+                [ObjectScaleHandleCorner.BottomRight] = BuildHandleRect(new PointF(bounds.Right, bounds.Bottom), RasterResizeHandleSize),
+                [ObjectScaleHandleCorner.BottomLeft] = BuildHandleRect(new PointF(bounds.Left, bounds.Bottom), RasterResizeHandleSize)
+            };
+
+            return true;
+        }
+
+        private static void DrawObjectScaleHandleRects(Graphics graphics, RectangleF bounds)
+        {
+            if (graphics == null || !TryGetObjectScaleHandleRects(bounds, out Dictionary<ObjectScaleHandleCorner, RectangleF> handles))
+            {
+                return;
+            }
+
+            using (var handleBrush = new SolidBrush(System.Drawing.Color.White))
+            using (var handlePen = new Pen(System.Drawing.Color.DodgerBlue, 1.5f))
+            {
+                foreach (RectangleF rect in handles.Values)
+                {
+                    graphics.FillRectangle(handleBrush, rect);
+                    graphics.DrawRectangle(handlePen, rect.X, rect.Y, rect.Width, rect.Height);
+                }
+            }
+        }
+
+        private static Cursor GetCursorForObjectScaleHandle(ObjectScaleHandleCorner handleCorner)
+        {
+            switch (handleCorner)
+            {
+                case ObjectScaleHandleCorner.TopLeft:
+                case ObjectScaleHandleCorner.BottomRight:
+                    return Cursors.SizeNWSE;
+                case ObjectScaleHandleCorner.TopRight:
+                case ObjectScaleHandleCorner.BottomLeft:
+                    return Cursors.SizeNESW;
+                default:
+                    return Cursors.Default;
+            }
+        }
+
+        private static bool TryGetObjectScaleHandleAtPoint(RectangleF bounds, Point location, out ObjectScaleHandleCorner handleCorner)
+        {
+            handleCorner = ObjectScaleHandleCorner.TopLeft;
+            if (!TryGetObjectScaleHandleRects(bounds, out Dictionary<ObjectScaleHandleCorner, RectangleF> handles))
+            {
+                return false;
+            }
+
+            foreach (var entry in handles)
+            {
+                if (entry.Value.Contains(location))
+                {
+                    handleCorner = entry.Key;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static PointF GetObjectScaleAnchorPoint(RectangleF bounds, ObjectScaleHandleCorner handleCorner)
+        {
+            switch (handleCorner)
+            {
+                case ObjectScaleHandleCorner.TopLeft:
+                    return new PointF(bounds.Right, bounds.Bottom);
+                case ObjectScaleHandleCorner.TopRight:
+                    return new PointF(bounds.Left, bounds.Bottom);
+                case ObjectScaleHandleCorner.BottomRight:
+                    return new PointF(bounds.Left, bounds.Top);
+                case ObjectScaleHandleCorner.BottomLeft:
+                    return new PointF(bounds.Right, bounds.Top);
+                default:
+                    return new PointF(bounds.Left, bounds.Top);
+            }
+        }
+
+        private static RectangleF BuildScaledBoundsFromAnchor(RectangleF initialBounds, ObjectScaleHandleCorner handleCorner, Point currentLocation, bool preserveAspectRatio, bool scaleFromCenter)
+        {
+            if (scaleFromCenter)
+            {
+                PointF center = new PointF(
+                    initialBounds.Left + (initialBounds.Width / 2f),
+                    initialBounds.Top + (initialBounds.Height / 2f));
+                float halfWidth = Math.Max(4f, Math.Abs(currentLocation.X - center.X));
+                float halfHeight = Math.Max(4f, Math.Abs(currentLocation.Y - center.Y));
+
+                if (preserveAspectRatio && initialBounds.Width > 0.001f && initialBounds.Height > 0.001f)
+                {
+                    float scale = Math.Max((halfWidth * 2f) / initialBounds.Width, (halfHeight * 2f) / initialBounds.Height);
+                    scale = Math.Max(8f / Math.Max(initialBounds.Width, initialBounds.Height), scale);
+                    halfWidth = Math.Max(4f, (initialBounds.Width * scale) / 2f);
+                    halfHeight = Math.Max(4f, (initialBounds.Height * scale) / 2f);
+                }
+
+                return RectangleF.FromLTRB(
+                    center.X - halfWidth,
+                    center.Y - halfHeight,
+                    center.X + halfWidth,
+                    center.Y + halfHeight);
+            }
+
+            PointF anchor = GetObjectScaleAnchorPoint(initialBounds, handleCorner);
+            float dx = currentLocation.X - anchor.X;
+            float dy = currentLocation.Y - anchor.Y;
+            float width = Math.Max(8f, Math.Abs(dx));
+            float height = Math.Max(8f, Math.Abs(dy));
+
+            if (preserveAspectRatio && initialBounds.Width > 0.001f && initialBounds.Height > 0.001f)
+            {
+                float scale = Math.Max(width / initialBounds.Width, height / initialBounds.Height);
+                scale = Math.Max(8f / Math.Max(initialBounds.Width, initialBounds.Height), scale);
+                width = Math.Max(8f, initialBounds.Width * scale);
+                height = Math.Max(8f, initialBounds.Height * scale);
+            }
+
+            float left = dx >= 0f ? anchor.X : anchor.X - width;
+            float top = dy >= 0f ? anchor.Y : anchor.Y - height;
+            return new RectangleF(left, top, width, height);
+        }
+
+        private static float GetUniformScaleFactor(float scaleX, float scaleY)
+        {
+            return Math.Max(0.05f, (Math.Abs(scaleX) + Math.Abs(scaleY)) * 0.5f);
         }
 
         private static bool HasPositiveSize(RectangleF rect)
@@ -31933,14 +33436,17 @@ namespace AnonPDF
 
             PointF startScreen = GetArrowScreenPoint(selectedArrowObject.Start);
             PointF endScreen = GetArrowScreenPoint(selectedArrowObject.End);
-            float minX = Math.Min(startScreen.X, endScreen.X);
-            float maxX = Math.Max(startScreen.X, endScreen.X);
-            float minY = Math.Min(startScreen.Y, endScreen.Y);
-            float maxY = Math.Max(startScreen.Y, endScreen.Y);
-            RectangleF arrowFrame = new RectangleF(minX, minY, Math.Max(1f, maxX - minX), Math.Max(1f, maxY - minY));
-            using (var framePen = new Pen(System.Drawing.Color.Green, 1f))
+            if (TryGetArrowScreenBounds(selectedArrowObject, out RectangleF arrowFrame))
             {
-                graphics.DrawRectangle(framePen, arrowFrame.X, arrowFrame.Y, arrowFrame.Width, arrowFrame.Height);
+                using (var framePen = new Pen(System.Drawing.Color.Green, 1f))
+                {
+                    graphics.DrawRectangle(framePen, arrowFrame.X, arrowFrame.Y, arrowFrame.Width, arrowFrame.Height);
+                }
+
+                if (!IsArrowObjectEffectivelyLocked(selectedArrowObject))
+                {
+                    DrawObjectScaleHandleRects(graphics, arrowFrame);
+                }
             }
 
             RectangleF startHandle = BuildHandleRect(startScreen, RasterResizeHandleSize);
@@ -31981,6 +33487,11 @@ namespace AnonPDF
                 using (var framePen = new Pen(System.Drawing.Color.Green, 1f))
                 {
                     graphics.DrawRectangle(framePen, frameBounds.X, frameBounds.Y, frameBounds.Width, frameBounds.Height);
+                }
+
+                if (!IsVectorShapeEffectivelyLocked(selectedVectorShape))
+                {
+                    DrawObjectScaleHandleRects(graphics, frameBounds);
                 }
             }
 
@@ -32073,6 +33584,11 @@ namespace AnonPDF
                 {
                     graphics.DrawRectangle(boundPen, textFrameBounds.X, textFrameBounds.Y, textFrameBounds.Width, textFrameBounds.Height);
                 }
+
+                if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation))
+                {
+                    DrawObjectScaleHandleRects(graphics, textFrameBounds);
+                }
             }
 
             if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation) &&
@@ -32103,6 +33619,25 @@ namespace AnonPDF
                 DrawIconButton(graphics, annotationIconRects[IconType.Duplicate], "\uE8C8");
                 DrawIconButton(graphics, annotationIconRects[IconType.Order], "\u2630");
                 DrawIconButton(graphics, annotationIconRects[IconType.Delete], "\uE74D");
+            }
+        }
+
+        private void DrawSelectedGroupOverlayOnTop(Graphics graphics)
+        {
+            if (graphics == null || GetGroupSelectionCount() < 2)
+            {
+                return;
+            }
+
+            if (!TryGetCurrentGroupSelectionScreenBounds(graphics.DpiX, graphics.DpiY, out RectangleF bounds))
+            {
+                return;
+            }
+
+            DrawGroupSelectionOutline(graphics, bounds);
+            if (CanInteractWithCurrentGroupSelection())
+            {
+                DrawObjectScaleHandleRects(graphics, bounds);
             }
         }
 
@@ -32282,11 +33817,35 @@ namespace AnonPDF
             return true;
         }
 
+        private bool TryGetTextScaleHandleAtPoint(TextAnnotation annotation, Point location, float dpiX, float dpiY, out ObjectScaleHandleCorner handleCorner, out RectangleF bounds)
+        {
+            handleCorner = ObjectScaleHandleCorner.TopLeft;
+            bounds = RectangleF.Empty;
+            if (annotation == null || annotation.PageNumber != currentPage)
+            {
+                return false;
+            }
+
+            if (!TryGetAnnotationTextFrameGeometry(annotation, dpiX, dpiY, out _, out bounds, out _, out _))
+            {
+                return false;
+            }
+
+            return TryGetObjectScaleHandleAtPoint(bounds, location, out handleCorner);
+        }
+
         private bool TryUpdateTextHoverCursor(Point location, float dpiX, float dpiY)
         {
             if (selectedTextAnnotation == null || selectedTextAnnotation.PageNumber != currentPage)
             {
                 return false;
+            }
+
+            if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation) &&
+                TryGetTextScaleHandleAtPoint(selectedTextAnnotation, location, dpiX, dpiY, out ObjectScaleHandleCorner scaleHandleCorner, out _))
+            {
+                this.Cursor = GetCursorForObjectScaleHandle(scaleHandleCorner);
+                return true;
             }
 
             if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation) &&
@@ -32345,6 +33904,196 @@ namespace AnonPDF
             }
             textRotationStartAngle = GetAngleDegrees(center, location);
             this.Cursor = Cursors.Hand;
+            return true;
+        }
+
+        private bool TryHandleTextScaleMouseDown(Point location, float dpiX, float dpiY)
+        {
+            if (selectedTextAnnotation == null ||
+                selectedTextAnnotation.PageNumber != currentPage ||
+                IsTextAnnotationEffectivelyLocked(selectedTextAnnotation))
+            {
+                return false;
+            }
+
+            if (!TryGetTextScaleHandleAtPoint(selectedTextAnnotation, location, dpiX, dpiY, out ObjectScaleHandleCorner handleCorner, out RectangleF screenBounds))
+            {
+                return false;
+            }
+
+            BeginUndoCapture("Scale text");
+            annotationToScale = selectedTextAnnotation;
+            isScalingTextAnnotation = true;
+            activeObjectScaleHandleCorner = handleCorner;
+            textScaleStartScreenBounds = screenBounds;
+            textScaleStartBounds = selectedTextAnnotation.AnnotationBounds;
+            textScaleStartFontFamily = selectedTextAnnotation.AnnotationFont?.FontFamily;
+            textScaleStartFontStyle = selectedTextAnnotation.AnnotationFont?.Style ?? FontStyle.Regular;
+            textScaleStartFontUnit = selectedTextAnnotation.AnnotationFont?.Unit ?? GraphicsUnit.Point;
+            textScaleStartFontSize = selectedTextAnnotation.AnnotationFont?.Size ?? 12f;
+            textScaleStartBorderWidth = selectedTextAnnotation.AnnotationBorderWidth;
+            textScaleStartFrameMargin = selectedTextAnnotation.AnnotationFrameMargin;
+            this.Cursor = GetCursorForObjectScaleHandle(handleCorner);
+            return true;
+        }
+
+        private bool TryApplyTextScaleFromMouse(Point location)
+        {
+            if (!isScalingTextAnnotation || annotationToScale == null || textScaleStartScreenBounds.IsEmpty || textScaleStartBounds.IsEmpty)
+            {
+                return false;
+            }
+
+            bool preserveAspectRatio = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+            bool scaleFromCenter = (Control.ModifierKeys & Keys.Alt) == Keys.Alt;
+            RectangleF newScreenBounds = BuildScaledBoundsFromAnchor(textScaleStartScreenBounds, activeObjectScaleHandleCorner, location, preserveAspectRatio, scaleFromCenter);
+            float scaleX = newScreenBounds.Width / Math.Max(1f, textScaleStartScreenBounds.Width);
+            float scaleY = newScreenBounds.Height / Math.Max(1f, textScaleStartScreenBounds.Height);
+            float uniformScale = GetUniformScaleFactor(scaleX, scaleY);
+
+            float newWidth = Math.Max(1f, textScaleStartBounds.Width * scaleX);
+            float newHeight = Math.Max(1f, textScaleStartBounds.Height * scaleY);
+            float right = textScaleStartBounds.Right;
+            float bottom = textScaleStartBounds.Bottom;
+
+            float newX = textScaleStartBounds.X;
+            float newY = textScaleStartBounds.Y;
+            switch (activeObjectScaleHandleCorner)
+            {
+                case ObjectScaleHandleCorner.TopLeft:
+                    newX = right - newWidth;
+                    newY = bottom - newHeight;
+                    break;
+                case ObjectScaleHandleCorner.TopRight:
+                    newY = bottom - newHeight;
+                    break;
+                case ObjectScaleHandleCorner.BottomRight:
+                    break;
+                case ObjectScaleHandleCorner.BottomLeft:
+                    newX = right - newWidth;
+                    break;
+            }
+
+            annotationToScale.AnnotationBounds = new RectangleF(newX, newY, newWidth, newHeight);
+            Font baseFont = annotationToScale.AnnotationFont ?? new Font("Arial", 12f, textScaleStartFontStyle, textScaleStartFontUnit);
+            float scaledFontSize = Math.Max(4f, textScaleStartFontSize * uniformScale);
+            annotationToScale.AnnotationFont = new Font(baseFont.FontFamily, scaledFontSize, textScaleStartFontStyle, textScaleStartFontUnit);
+            annotationToScale.AnnotationBorderWidth = Math.Max(0f, textScaleStartBorderWidth * uniformScale);
+            annotationToScale.AnnotationFrameMargin = Math.Max(0f, textScaleStartFrameMargin * uniformScale);
+            TouchTextAnnotation(annotationToScale);
+            textRotationInteractionChanged =
+                textRotationInteractionChanged ||
+                !AreSameFloat(textScaleStartBounds.X, annotationToScale.AnnotationBounds.X) ||
+                !AreSameFloat(textScaleStartBounds.Y, annotationToScale.AnnotationBounds.Y) ||
+                !AreSameFloat(textScaleStartBounds.Width, annotationToScale.AnnotationBounds.Width) ||
+                !AreSameFloat(textScaleStartBounds.Height, annotationToScale.AnnotationBounds.Height);
+            this.Cursor = GetCursorForObjectScaleHandle(activeObjectScaleHandleCorner);
+            pdfViewer.Invalidate();
+            return true;
+        }
+
+        private static PointF ScalePointFromScreenBounds(PointF initialDocPoint, RectangleF initialScreenBounds, RectangleF newScreenBounds, float scaleFactor)
+        {
+            float initialScreenX = initialDocPoint.X * scaleFactor;
+            float initialScreenY = initialDocPoint.Y * scaleFactor;
+            float relativeX = initialScreenBounds.Width <= 0.0001f ? 0.5f : (initialScreenX - initialScreenBounds.Left) / initialScreenBounds.Width;
+            float relativeY = initialScreenBounds.Height <= 0.0001f ? 0.5f : (initialScreenY - initialScreenBounds.Top) / initialScreenBounds.Height;
+            float newScreenX = newScreenBounds.Left + (relativeX * newScreenBounds.Width);
+            float newScreenY = newScreenBounds.Top + (relativeY * newScreenBounds.Height);
+            return new PointF(newScreenX / scaleFactor, newScreenY / scaleFactor);
+        }
+
+        private bool TryApplyArrowScaleFromMouse(Point location)
+        {
+            if (!isScalingArrowObject || arrowObjectToScale == null || arrowScaleStartScreenBounds.IsEmpty)
+            {
+                return false;
+            }
+
+            bool preserveAspectRatio = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+            bool scaleFromCenter = (Control.ModifierKeys & Keys.Alt) == Keys.Alt;
+            RectangleF newScreenBounds = BuildScaledBoundsFromAnchor(arrowScaleStartScreenBounds, activeObjectScaleHandleCorner, location, preserveAspectRatio, scaleFromCenter);
+            float scaleX = newScreenBounds.Width / Math.Max(1f, arrowScaleStartScreenBounds.Width);
+            float scaleY = newScreenBounds.Height / Math.Max(1f, arrowScaleStartScreenBounds.Height);
+            float uniformScale = GetUniformScaleFactor(scaleX, scaleY);
+
+            arrowObjectToScale.Start = ScalePointFromScreenBounds(arrowMoveInitialStart, arrowScaleStartScreenBounds, newScreenBounds, scaleFactor);
+            arrowObjectToScale.End = ScalePointFromScreenBounds(arrowMoveInitialEnd, arrowScaleStartScreenBounds, newScreenBounds, scaleFactor);
+            arrowObjectToScale.Thickness = NormalizeArrowThickness(arrowScaleStartThickness * uniformScale);
+            arrowObjectToScale.BorderWidth = NormalizeArrowBorderWidth(arrowScaleStartBorderWidth * uniformScale);
+            arrowObjectToScale.HeadLength = NormalizeArrowHeadLength(arrowScaleStartHeadLength * uniformScale);
+            arrowObjectToScale.HeadWidth = NormalizeArrowHeadWidth(arrowScaleStartHeadWidth * uniformScale);
+            ConstrainArrowToPage(arrowObjectToScale);
+            arrowObjectToScale.UpdatedAtUtc = DateTime.UtcNow;
+            arrowInteractionChanged =
+                arrowInteractionChanged ||
+                !AreSamePoint(arrowMoveInitialStart, arrowObjectToScale.Start) ||
+                !AreSamePoint(arrowMoveInitialEnd, arrowObjectToScale.End) ||
+                !AreSameFloat(arrowScaleStartThickness, arrowObjectToScale.Thickness) ||
+                !AreSameFloat(arrowScaleStartBorderWidth, arrowObjectToScale.BorderWidth) ||
+                !AreSameFloat(arrowScaleStartHeadLength, arrowObjectToScale.HeadLength) ||
+                !AreSameFloat(arrowScaleStartHeadWidth, arrowObjectToScale.HeadWidth);
+            this.Cursor = GetCursorForObjectScaleHandle(activeObjectScaleHandleCorner);
+            pdfViewer.Invalidate();
+            return true;
+        }
+
+        private bool TryApplyVectorScaleFromMouse(Point location)
+        {
+            if (!isScalingVectorShape || vectorShapeToScale == null || vectorScaleStartScreenBounds.IsEmpty || vectorMoveInitialPoints == null || vectorMoveInitialPoints.Count == 0)
+            {
+                return false;
+            }
+
+            bool preserveAspectRatio = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
+            bool scaleFromCenter = (Control.ModifierKeys & Keys.Alt) == Keys.Alt;
+            RectangleF newScreenBounds = BuildScaledBoundsFromAnchor(vectorScaleStartScreenBounds, activeObjectScaleHandleCorner, location, preserveAspectRatio, scaleFromCenter);
+            float scaleX = newScreenBounds.Width / Math.Max(1f, vectorScaleStartScreenBounds.Width);
+            float scaleY = newScreenBounds.Height / Math.Max(1f, vectorScaleStartScreenBounds.Height);
+            float uniformScale = GetUniformScaleFactor(scaleX, scaleY);
+
+            vectorShapeToScale.Points = vectorMoveInitialPoints
+                .Select(point => ScalePointFromScreenBounds(point, vectorScaleStartScreenBounds, newScreenBounds, scaleFactor))
+                .ToList();
+            vectorShapeToScale.StrokeWidth = NormalizeVectorStrokeWidth(vectorScaleStartStrokeWidth * uniformScale);
+            vectorShapeToScale.StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorScaleStartStartEndingPrimarySize * uniformScale);
+            vectorShapeToScale.EndLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorScaleStartEndEndingPrimarySize * uniformScale);
+            if (vectorScaleStartStartEndingPrimarySize <= 0f)
+            {
+                vectorShapeToScale.StartLineEndingPrimarySize = 0f;
+            }
+            if (vectorScaleStartEndEndingPrimarySize <= 0f)
+            {
+                vectorShapeToScale.EndLineEndingPrimarySize = 0f;
+            }
+            vectorShapeToScale.StartLineEndingSecondarySize = vectorScaleStartStartEndingSecondarySize;
+            vectorShapeToScale.EndLineEndingSecondarySize = vectorScaleStartEndEndingSecondarySize;
+            NormalizeVectorShape(vectorShapeToScale);
+            ConstrainVectorShapeToPage(vectorShapeToScale);
+            vectorShapeToScale.UpdatedAtUtc = DateTime.UtcNow;
+            bool pointsChanged = vectorMoveInitialPoints.Count != (vectorShapeToScale.Points?.Count ?? 0);
+            if (!pointsChanged && vectorShapeToScale.Points != null)
+            {
+                for (int i = 0; i < vectorMoveInitialPoints.Count; i++)
+                {
+                    if (!AreSamePoint(vectorMoveInitialPoints[i], vectorShapeToScale.Points[i]))
+                    {
+                        pointsChanged = true;
+                        break;
+                    }
+                }
+            }
+
+            vectorInteractionChanged =
+                vectorInteractionChanged ||
+                !AreSameFloat(vectorScaleStartStrokeWidth, vectorShapeToScale.StrokeWidth) ||
+                !AreSameFloat(vectorScaleStartStartEndingPrimarySize, vectorShapeToScale.StartLineEndingPrimarySize) ||
+                !AreSameFloat(vectorScaleStartStartEndingSecondarySize, vectorShapeToScale.StartLineEndingSecondarySize) ||
+                !AreSameFloat(vectorScaleStartEndEndingPrimarySize, vectorShapeToScale.EndLineEndingPrimarySize) ||
+                !AreSameFloat(vectorScaleStartEndEndingSecondarySize, vectorShapeToScale.EndLineEndingSecondarySize) ||
+                pointsChanged;
+            this.Cursor = GetCursorForObjectScaleHandle(activeObjectScaleHandleCorner);
+            pdfViewer.Invalidate();
             return true;
         }
 
@@ -34844,6 +36593,11 @@ namespace AnonPDF
                 {
                     return true;
                 }
+            }
+
+            if (TryUpdateGroupHoverCursor(location, dpiX, dpiY))
+            {
+                return true;
             }
 
             float docX = location.X / scaleFactor;
@@ -40081,6 +41835,10 @@ namespace AnonPDF
         public string FillPattern { get; set; } = "solid";
         public string StartLineEnding { get; set; } = "None";
         public string EndLineEnding { get; set; } = "None";
+        public float StartLineEndingPrimarySize { get; set; }
+        public float StartLineEndingSecondarySize { get; set; }
+        public float EndLineEndingPrimarySize { get; set; }
+        public float EndLineEndingSecondarySize { get; set; }
         public bool IsLocked { get; set; }
         public string DuplicateGroupId { get; set; }
         public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
