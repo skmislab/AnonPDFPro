@@ -200,21 +200,27 @@ Podczas zamykania aplikacja może zapytać, czy zapisać zmiany w projekcie ("Za
 
 Obiekty możesz dodawać z menu `Narzędzia` lub skrótami:
 
-- `CTRL + A` - dodaj strzałkę.
+- `CTRL + SHIFT + A` - dodaj strzałkę.
 - `CTRL + F` - dodaj kształt.
 - `CTRL + G` - dodaj obraz.
 - `CTRL + K` - dodaj komentarz.
+- `CTRL + A` - zaznacz wszystkie widoczne obiekty na aktywnej warstwie bieżącej strony.
 
 Podczas pracy z obiektami dostępne są także:
 
 - `CTRL + C` - kopiuj aktywny obiekt lub grupę aktywnych obiektów.
-- `CTRL + V` - wklej obiekt ze schowka. Wklejony obiekt trafia na aktywną warstwę i zachowuje oryginalne położenie.
+- `CTRL + V` - wklej obiekt ze schowka. Wklejony obiekt trafia na aktywną warstwę, zachowuje kolejność nakładania ze źródła i może zostać automatycznie przeskalowany, jeśli strona docelowa jest mniejsza.
+- Kopiowanie i wklejanie obiektów działa również między dwoma uruchomionymi instancjami aplikacji.
 - `DELETE` - usuń aktywny obiekt lub grupę aktywnych obiektów.
 
 Modyfikatory podczas pracy z obiektami:
 
 - `ALT` podczas tworzenia kształtów wymusza proporcje: prostokąt -> kwadrat, elipsa -> okrąg, trójkąt -> równoboczny.
 - `ALT` podczas zmiany rozmiaru obrazu działa symetrycznie względem środka obiektu.
+- Napisy, strzałki i kształty można skalować narożnymi uchwytami.
+- `SHIFT` podczas skalowania zachowuje proporcje obiektu.
+- `ALT` podczas skalowania skaluje obiekt względem środka.
+- `SHIFT + ALT` podczas skalowania zachowuje proporcje i pozostawia środek obiektu w tym samym miejscu.
 
 ## 6.10 Powielanie zaznaczeń i obiektów
 
@@ -239,9 +245,10 @@ Aplikacja obsługuje warstwy robocze dla zaznaczeń anonimizacyjnych i obiektów
 - Zakładka `Warstwy` w prawym panelu pozwala szybko zmieniać aktywną warstwę, widoczność i blokadę.
 - `Narzędzia -> Warstwy` lub skrót `CTRL + L` otwierają pełne okno zarządzania warstwami.
 - Nowe zaznaczenia i nowe obiekty powstają na aktualnie aktywnej warstwie.
+- Wklejane obiekty trafiają na aktywną warstwę, z zachowaniem kolejności nakładania ze źródła.
 - Warstwa `Robocza` jest zawsze najwyżej i nie trafia do finalnego PDF.
 - Ukryte warstwy nie biorą udziału w interakcji na podglądzie.
-- Zablokowane warstwy blokują przesuwanie, edycję i usuwanie obiektów.
+- Zablokowane warstwy blokują przesuwanie, edycję, skalowanie i usuwanie obiektów.
 - Import projektu zachowuje przypisanie obiektów do warstw.
 
 # 7. Najczęstsze problemy i wskazówki
@@ -283,4 +290,6 @@ W ostatnich wersjach dodano m.in.:
 - Zapamiętywanie i odtwarzanie pozycji przewijania w prawych panelach (`Lista stron` i `Miniatury`) po wznowieniu pracy z projektem.
 - Obsługę warstw roboczych z własną widocznością, blokadą i aktywną warstwą.
 - Rozszerzone menu kontekstowe dla zaznaczeń i obiektów (m.in. kopiowanie, wycinanie, powielanie, usuwanie kopii).
+- Skalowanie pojedynczych obiektów i grup obiektów narożnymi uchwytami (`SHIFT` - proporcje, `ALT` - od środka).
+- Kopiowanie i wklejanie obiektów przez schowek systemowy także między dwoma instancjami aplikacji, z zachowaniem kolejności nakładania.
 - Funkcje `Cofnij` (`CTRL+Z`) i `Ponów` (`CTRL+Y`).

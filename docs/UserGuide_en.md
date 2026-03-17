@@ -202,21 +202,27 @@ When closing, the application may ask you to confirm exiting, especially if you 
 
 You can add objects from the `Tools` menu or by using shortcuts:
 
-- `CTRL + A` - add an arrow.
+- `CTRL + SHIFT + A` - add an arrow.
 - `CTRL + F` - add a shape.
 - `CTRL + G` - add an image.
 - `CTRL + K` - add a comment.
+- `CTRL + A` - select all visible objects on the active layer of the current page.
 
 When working with objects, you can also use:
 
 - `CTRL + C` - copy the active object or active object group.
-- `CTRL + V` - paste an object from the clipboard. The pasted object is created on the active layer and keeps its original position.
+- `CTRL + V` - paste an object from the clipboard. The pasted object is created on the active layer, keeps the original stacking order, and can be scaled down automatically if the target page is smaller.
+- Object copy and paste also works between two running instances of the application.
 - `DELETE` - remove the active object or active object group.
 
 Modifiers while editing objects:
 
 - `ALT` while creating shapes forces proportions: rectangle -> square, ellipse -> circle, triangle -> equilateral.
 - `ALT` while resizing an image works symmetrically relative to the object center.
+- Texts, arrows, and vector shapes can be scaled using corner handles.
+- `SHIFT` while scaling preserves object proportions.
+- `ALT` while scaling resizes relative to the object center.
+- `SHIFT + ALT` while scaling preserves proportions and keeps the object center fixed.
 
 ## 6.10 Duplicating selections and objects
 
@@ -241,10 +247,10 @@ The application supports working layers for redaction selections and objects.
 - The `Layers` tab in the right panel lets you quickly change the active layer, visibility, and lock state.
 - `Tools -> Layers` opens the full layer management window.
 - New selections and new objects are created on the currently active layer.
-- Pasting an object from the clipboard creates a copy on the active layer and keeps the original position.
+- Pasted objects are created on the active layer and keep the source stacking order.
 - The `Work` layer is always on top and is not exported to the final PDF.
 - Hidden layers cannot be interacted with in the preview.
-- Locked layers block moving, editing, and deleting objects.
+- Locked layers block moving, editing, scaling, and deleting objects.
 - Project import keeps object-to-layer assignments.
 
 # 7. Common Issues and Tips
@@ -286,4 +292,6 @@ Recent versions include:
 - Remembering and restoring scroll positions in right panels (`Page List` and `Thumbnails`) when resuming a project.
 - Working layers with separate visibility, lock state, and active layer selection.
 - Extended context menus for selections and objects (copy, cut, duplicate, remove duplicated copies).
+- Corner-handle scaling for single objects and object groups (`SHIFT` - proportional, `ALT` - from center).
+- Object copy and paste through the system clipboard, including between two running application instances, with preserved stacking order.
 - `Undo` (`CTRL+Z`) and `Redo` (`CTRL+Y`).

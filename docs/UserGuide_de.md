@@ -177,7 +177,7 @@ Beim Beenden fragt die Anwendung bei ungespeicherten Änderungen nach einer Best
 
 Objekte können über das Menü `Werkzeuge` oder mit Tastenkürzeln hinzugefügt werden:
 
-> \- `CTRL + A` - Pfeil hinzufügen.
+> \- `CTRL + SHIFT + A` - Pfeil hinzufügen.
 
 > \- `CTRL + F` - Form hinzufügen.
 
@@ -185,11 +185,15 @@ Objekte können über das Menü `Werkzeuge` oder mit Tastenkürzeln hinzugefügt
 
 > \- `CTRL + K` - Kommentar hinzufügen.
 
+> \- `CTRL + A` - alle sichtbaren Objekte auf der aktiven Ebene der aktuellen Seite auswählen.
+
 Für die Arbeit mit Objekten stehen außerdem zur Verfügung:
 
 > \- `CTRL + C` - aktives Objekt oder aktive Objektgruppe kopieren.
 
-> \- `CTRL + V` - Objekt aus der Zwischenablage einfügen. Das eingefügte Objekt wird auf der aktiven Ebene erstellt und behält seine ursprüngliche Position bei.
+> \- `CTRL + V` - Objekt aus der Zwischenablage einfügen. Das eingefügte Objekt wird auf der aktiven Ebene erstellt, behält die ursprüngliche Stapelreihenfolge und wird bei Bedarf automatisch verkleinert, wenn die Zielseite kleiner ist.
+
+> \- Das Kopieren und Einfügen von Objekten funktioniert auch zwischen zwei gleichzeitig gestarteten Instanzen der Anwendung.
 
 > \- `DELETE` - aktives Objekt oder aktive Objektgruppe löschen.
 
@@ -198,6 +202,14 @@ Modifikatoren bei der Objektbearbeitung:
 > \- `ALT` beim Erstellen von Formen erzwingt feste Proportionen: Rechteck -> Quadrat, Ellipse -> Kreis, Dreieck -> gleichseitig.
 
 > \- `ALT` beim Ändern der Bildgröße arbeitet symmetrisch zum Mittelpunkt des Objekts.
+
+> \- Texte, Pfeile und Vektorformen können mit Eckgriffen skaliert werden.
+
+> \- `SHIFT` beim Skalieren erhält die Proportionen des Objekts.
+
+> \- `ALT` beim Skalieren skaliert relativ zum Mittelpunkt des Objekts.
+
+> \- `SHIFT + ALT` beim Skalieren erhält die Proportionen und hält den Mittelpunkt des Objekts an derselben Position.
 
 ## 6.10 Markierungen und Objekte duplizieren
 
@@ -224,10 +236,10 @@ Die Anwendung unterstützt Arbeitsebenen für Markierungen und Objekte.
 - Im Tab `Ebenen` im rechten Panel können aktive Ebene, Sichtbarkeit und Sperre schnell geändert werden.
 - `Werkzeuge -> Ebenen` öffnet das vollständige Ebenenfenster.
 - Neue Markierungen und neue Objekte werden auf der aktuell aktiven Ebene erstellt.
-- Das Einfügen eines Objekts aus der Zwischenablage erstellt eine Kopie auf der aktiven Ebene und behält die ursprüngliche Position bei.
+- Eingefügte Objekte werden auf der aktiven Ebene erstellt und behalten die Stapelreihenfolge der Quelle.
 - Die Ebene `Robocza` liegt immer ganz oben und wird nicht in das finale PDF exportiert.
 - Mit ausgeblendeten Ebenen kann in der Vorschau nicht interagiert werden.
-- Gesperrte Ebenen blockieren Verschieben, Bearbeiten und Löschen von Objekten.
+- Gesperrte Ebenen blockieren Verschieben, Bearbeiten, Skalieren und Löschen von Objekten.
 - Beim Projektimport bleiben die Zuordnungen von Objekten zu Ebenen erhalten.
 
 # 7. Häufige Probleme und Hinweise
@@ -267,4 +279,6 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Speicherung und Wiederherstellung der Scroll-Positionen in den rechten Panels (`Seitenliste` und `Miniaturen`) beim Fortsetzen eines Projekts.
 - Unterstützung für Arbeitsebenen mit eigener Sichtbarkeit, Sperre und aktiver Ebene.
 - Erweiterte Kontextmenüs für Markierungen und Objekte (Kopieren, Ausschneiden, Duplizieren, duplizierte Kopien löschen).
+- Skalierung einzelner Objekte und Objektgruppen über Eckgriffe (`SHIFT` - proportional, `ALT` - vom Mittelpunkt).
+- Kopieren und Einfügen von Objekten über die Systemzwischenablage, auch zwischen zwei laufenden Instanzen der Anwendung, mit erhaltener Stapelreihenfolge.
 - `Rückgängig` (`CTRL+Z`) und `Wiederholen` (`CTRL+Y`).

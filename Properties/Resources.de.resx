@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <root>
   <resheader name="resmimetype">
     <value>text/microsoft-resx</value>
@@ -1727,10 +1727,22 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
     <value>Standard</value>
   </data>
   <data name="Vector_Dialog_LineStartEnding" xml:space="preserve">
-    <value>Linienanfang</value>
+    <value>Linienanfang:</value>
   </data>
   <data name="Vector_Dialog_LineEndEnding" xml:space="preserve">
-    <value>Linienende</value>
+    <value>Linienende:</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingLength" xml:space="preserve">
+    <value>Länge</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingAngle" xml:space="preserve">
+    <value>Winkel</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingDiameter" xml:space="preserve">
+    <value>Durchmesser</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingBarLength" xml:space="preserve">
+    <value>Strichlänge</value>
   </data>
   <data name="Vector_LineEnding_None" xml:space="preserve">
     <value>Keine</value>
@@ -1760,12 +1772,24 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   </data>
 
   <data name="EditText_LabelBorderColor" xml:space="preserve">
-    <value>Rahmenfarbe</value>
+    <value>Rahmenfarbe:</value>
   </data>
   <data name="EditText_LabelBorderWidth" xml:space="preserve">
-    <value>Rahmenst&#228;rke</value>
+    <value>Rahmenst&#228;rke:</value>
   </data>
   <data name="EditText_LabelFrameMargin" xml:space="preserve">
-    <value>Rahmenabstand</value>
+    <value>Rahmenabstand:</value>
+  </data>
+  <data name="EditText_CheckLeaderArrow" xml:space="preserve">
+    <value>Pfeil</value>
+  </data>
+  <data name="EditText_LabelLeaderHeadLength" xml:space="preserve">
+    <value>Spitzenl&#228;nge:</value>
+  </data>
+  <data name="EditText_LabelLeaderHeadWidth" xml:space="preserve">
+    <value>Spitzenbreite:</value>
+  </data>
+  <data name="EditText_LabelLeaderLineWidth" xml:space="preserve">
+    <value>Liniendicke des Pfeils:</value>
   </data>
 </root>

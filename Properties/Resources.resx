@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <root xmlns:ns1="urn:schemas-microsoft-com:xml-msdata" xmlns:xs="http://www.w3.org/2001/XMLSchema">
   
   <xs:schema id="root">
@@ -1774,10 +1774,22 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
     <value>Domyślna</value>
   </data>
   <data name="Vector_Dialog_LineStartEnding" xml:space="preserve">
-    <value>Początek linii</value>
+    <value>Pocz&#261;tek linii:</value>
   </data>
   <data name="Vector_Dialog_LineEndEnding" xml:space="preserve">
-    <value>Koniec linii</value>
+    <value>Koniec linii:</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingLength" xml:space="preserve">
+    <value>Długość</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingAngle" xml:space="preserve">
+    <value>Kąt</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingDiameter" xml:space="preserve">
+    <value>Średnica</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingBarLength" xml:space="preserve">
+    <value>Długość kreski</value>
   </data>
   <data name="Vector_LineEnding_None" xml:space="preserve">
     <value>Brak</value>
@@ -1802,17 +1814,29 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   </data>
   <data name="UI_Button_RestoreSettings" xml:space="preserve">
 
-    <value>Przywr&#243;&#263; ustawienia</value>
+    <value>Przywróć ustawienia</value>
 
   </data>
 
   <data name="EditText_LabelBorderColor" xml:space="preserve">
-    <value>Kolor ramki</value>
+    <value>Kolor ramki:</value>
   </data>
   <data name="EditText_LabelBorderWidth" xml:space="preserve">
-    <value>Grubo&#347;&#263; ramki</value>
+    <value>Grubo&#347;&#263; ramki:</value>
   </data>
   <data name="EditText_LabelFrameMargin" xml:space="preserve">
-    <value>Margines ramki</value>
+    <value>Margines ramki:</value>
+  </data>
+  <data name="EditText_CheckLeaderArrow" xml:space="preserve">
+    <value>Strzałka</value>
+  </data>
+  <data name="EditText_LabelLeaderHeadLength" xml:space="preserve">
+    <value>D&#322;ugo&#347;&#263; grotu:</value>
+  </data>
+  <data name="EditText_LabelLeaderHeadWidth" xml:space="preserve">
+    <value>Szeroko&#347;&#263; grotu:</value>
+  </data>
+  <data name="EditText_LabelLeaderLineWidth" xml:space="preserve">
+    <value>Grubo&#347;&#263; linii strza&#322;ki:</value>
   </data>
 </root>

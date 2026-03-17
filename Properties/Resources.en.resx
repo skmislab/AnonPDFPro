@@ -1,4 +1,4 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <root xmlns:ns1="urn:schemas-microsoft-com:xml-msdata" xmlns:xs="http://www.w3.org/2001/XMLSchema">
   
   <xs:schema id="root">
@@ -1774,10 +1774,22 @@ Close the application and run the installer now?</value>
     <value>Default</value>
   </data>
   <data name="Vector_Dialog_LineStartEnding" xml:space="preserve">
-    <value>Line start</value>
+    <value>Line start:</value>
   </data>
   <data name="Vector_Dialog_LineEndEnding" xml:space="preserve">
-    <value>Line end</value>
+    <value>Line end:</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingLength" xml:space="preserve">
+    <value>Length</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingAngle" xml:space="preserve">
+    <value>Angle</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingDiameter" xml:space="preserve">
+    <value>Diameter</value>
+  </data>
+  <data name="Vector_Dialog_LineEndingBarLength" xml:space="preserve">
+    <value>Bar length</value>
   </data>
   <data name="Vector_LineEnding_None" xml:space="preserve">
     <value>None</value>
@@ -1807,12 +1819,24 @@ Close the application and run the installer now?</value>
   </data>
 
   <data name="EditText_LabelBorderColor" xml:space="preserve">
-    <value>Border color</value>
+    <value>Border color:</value>
   </data>
   <data name="EditText_LabelBorderWidth" xml:space="preserve">
-    <value>Border width</value>
+    <value>Border width:</value>
   </data>
   <data name="EditText_LabelFrameMargin" xml:space="preserve">
-    <value>Frame margin</value>
+    <value>Frame margin:</value>
+  </data>
+  <data name="EditText_CheckLeaderArrow" xml:space="preserve">
+    <value>Arrow</value>
+  </data>
+  <data name="EditText_LabelLeaderHeadLength" xml:space="preserve">
+    <value>Head length:</value>
+  </data>
+  <data name="EditText_LabelLeaderHeadWidth" xml:space="preserve">
+    <value>Head width:</value>
+  </data>
+  <data name="EditText_LabelLeaderLineWidth" xml:space="preserve">
+    <value>Arrow line width:</value>
   </data>
 </root>
