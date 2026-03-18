@@ -107,6 +107,9 @@ namespace AnonPDF
         private const int RasterDownsamplePhotoTargetDpi = 150;
         private const string ShapeIconFontFileName = "materialdesignicons-subset.ttf";
         private const string ShapeIconFontLegacyFileName = "materialdesignicons-webfont.ttf";
+        private const int LayersHeaderActiveIconCodePoint = 0xF043E;
+        private const int LayersHeaderVisibleIconCodePoint = 0xF06D0;
+        private const int LayersHeaderLockedIconCodePoint = 0xF0341;
         private const string RasterSourceClipboard = "Clipboard";
         private const string RasterSourceFile = "File";
         private static readonly System.Drawing.Color DefaultCommentHighlightColor = System.Drawing.Color.FromArgb(255, 235, 59);
@@ -2757,6 +2760,9 @@ namespace AnonPDF
             private string lockedHeaderToolTip;
             private string currentToolTipText;
             private UiThemePalette theme;
+            private Image headerActiveImage;
+            private Image headerVisibleImage;
+            private Image headerLockedImage;
 
             public LayerPanelControl()
             {
@@ -2822,6 +2828,18 @@ namespace AnonPDF
 
             public event EventHandler<LayerPanelCellEventArgs> CellClick;
             public event EventHandler<LayerPanelCellEventArgs> CellDoubleClick;
+
+            public void SetHeaderIcons(Image activeImage, Image visibleImage, Image lockedImage)
+            {
+                headerActiveImage?.Dispose();
+                headerVisibleImage?.Dispose();
+                headerLockedImage?.Dispose();
+
+                headerActiveImage = activeImage;
+                headerVisibleImage = visibleImage;
+                headerLockedImage = lockedImage;
+                Invalidate();
+            }
 
             public void SetRows(IEnumerable<LayerPanelDisplayRow> newRows)
             {
@@ -2975,6 +2993,19 @@ namespace AnonPDF
                 e.Graphics.Clip = oldClip;
             }
 
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    headerActiveImage?.Dispose();
+                    headerVisibleImage?.Dispose();
+                    headerLockedImage?.Dispose();
+                    headerToolTip?.Dispose();
+                }
+
+                base.Dispose(disposing);
+            }
+
             private void DrawHeader(Graphics graphics, int contentWidth, UiThemePalette currentTheme)
             {
                 Rectangle headerBounds = new Rectangle(0, 0, contentWidth, HeaderHeight);
@@ -2986,18 +3017,56 @@ namespace AnonPDF
                     graphics.DrawLine(borderPen, 0, HeaderHeight - 1, contentWidth, HeaderHeight - 1);
                 }
 
-                DrawHeaderCellText(graphics, GetColumnBounds(0, contentWidth), "\u25C9", currentTheme);
-                DrawHeaderCellText(graphics, GetColumnBounds(1, contentWidth), "\U0001F441", currentTheme);
-                DrawHeaderCellText(graphics, GetColumnBounds(2, contentWidth), "\U0001F512", currentTheme);
+                DrawHeaderCellIcon(graphics, GetColumnBounds(0, contentWidth), headerActiveImage, "\u25C9", currentTheme);
+                DrawHeaderCellIcon(graphics, GetColumnBounds(1, contentWidth), headerVisibleImage, "\U0001F441", currentTheme);
+                DrawHeaderCellIcon(graphics, GetColumnBounds(2, contentWidth), headerLockedImage, "\U0001F512", currentTheme);
                 DrawHeaderCellText(graphics, GetColumnBounds(3, contentWidth), HeaderNameText ?? string.Empty, currentTheme, alignLeft: true);
             }
 
-            private void DrawHeaderCellText(Graphics graphics, Rectangle bounds, string text, UiThemePalette currentTheme, bool alignLeft = false)
+            private void DrawHeaderCellText(Graphics graphics, Rectangle bounds, string text, UiThemePalette currentTheme, bool alignLeft = false, bool iconLike = false, string iconFontFamilyName = null)
             {
                 TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis;
                 flags |= alignLeft ? TextFormatFlags.Left : TextFormatFlags.HorizontalCenter;
                 Rectangle drawBounds = alignLeft ? Rectangle.Inflate(bounds, -TextPadding, 0) : bounds;
-                TextRenderer.DrawText(graphics, text ?? string.Empty, Font, drawBounds, currentTheme.TextPrimaryColor, flags);
+                Font drawFont = Font;
+                if (iconLike)
+                {
+                    try
+                    {
+                        drawFont = !string.IsNullOrWhiteSpace(iconFontFamilyName)
+                            ? new Font(iconFontFamilyName, Font.Size + 2.0f, FontStyle.Regular, GraphicsUnit.Point)
+                            : new Font(Font.FontFamily, Font.Size + 2.0f, FontStyle.Regular, GraphicsUnit.Point);
+                    }
+                    catch
+                    {
+                        drawFont = new Font(Font.FontFamily, Font.Size + 2.0f, FontStyle.Regular, GraphicsUnit.Point);
+                    }
+                }
+
+                try
+                {
+                    TextRenderer.DrawText(graphics, text ?? string.Empty, drawFont, drawBounds, currentTheme.TextPrimaryColor, flags);
+                }
+                finally
+                {
+                    if (iconLike && drawFont != null && !ReferenceEquals(drawFont, Font))
+                    {
+                        drawFont.Dispose();
+                    }
+                }
+            }
+
+            private void DrawHeaderCellIcon(Graphics graphics, Rectangle bounds, Image image, string fallbackText, UiThemePalette currentTheme)
+            {
+                if (image != null)
+                {
+                    int x = bounds.Left + ((bounds.Width - image.Width) / 2);
+                    int y = bounds.Top + ((bounds.Height - image.Height) / 2);
+                    graphics.DrawImage(image, x, y, image.Width, image.Height);
+                    return;
+                }
+
+                DrawHeaderCellText(graphics, bounds, fallbackText, currentTheme, alignLeft: false, iconLike: true);
             }
 
             private void DrawRow(Graphics graphics, LayerPanelDisplayRow row, int rowIndex, int contentWidth, int scrollOffset, UiThemePalette currentTheme)
@@ -3289,6 +3358,13 @@ namespace AnonPDF
             layersPanelView.Theme = theme;
             layersPanelView.BackColor = theme.SectionBackColor;
             layersPanelView.ForeColor = theme.TextPrimaryColor;
+            Bitmap activeHeaderBitmap = null;
+            Bitmap visibleHeaderBitmap = null;
+            Bitmap lockedHeaderBitmap = null;
+            TryCreateMaterialIconBitmap(LayersHeaderActiveIconCodePoint, 16, theme.TextPrimaryColor, out activeHeaderBitmap);
+            TryCreateMaterialIconBitmap(LayersHeaderVisibleIconCodePoint, 16, theme.TextPrimaryColor, out visibleHeaderBitmap);
+            TryCreateMaterialIconBitmap(LayersHeaderLockedIconCodePoint, 16, theme.TextPrimaryColor, out lockedHeaderBitmap);
+            layersPanelView.SetHeaderIcons(activeHeaderBitmap, visibleHeaderBitmap, lockedHeaderBitmap);
             layersPanelView.Invalidate();
         }
 
@@ -19422,6 +19498,17 @@ namespace AnonPDF
                 return false;
             }
 
+            return TryCreateMaterialIconBitmap(codePoint.Value, pixelSize, System.Drawing.Color.Black, out bitmap);
+        }
+
+        private bool TryCreateMaterialIconBitmap(int codePoint, int pixelSize, System.Drawing.Color color, out Bitmap bitmap)
+        {
+            bitmap = null;
+            if (pixelSize < 8)
+            {
+                pixelSize = 8;
+            }
+
             if (!TryGetShapeIconFontFamily(out _))
             {
                 return false;
@@ -19435,7 +19522,7 @@ namespace AnonPDF
             try
             {
                 var glyphTypeface = new MediaGlyphTypeface(new Uri(shapeIconPrivateFontPath, UriKind.Absolute));
-                if (!glyphTypeface.CharacterToGlyphMap.TryGetValue(codePoint.Value, out ushort glyphIndex))
+                if (!glyphTypeface.CharacterToGlyphMap.TryGetValue(codePoint, out ushort glyphIndex))
                 {
                     return false;
                 }
@@ -19466,7 +19553,9 @@ namespace AnonPDF
                 var visual = new MediaDrawingVisual();
                 using (System.Windows.Media.DrawingContext dc = visual.RenderOpen())
                 {
-                    dc.DrawGlyphRun(MediaBrushes.Black, glyphRun);
+                    var mediaBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(color.A, color.R, color.G, color.B));
+                    mediaBrush.Freeze();
+                    dc.DrawGlyphRun(mediaBrush, glyphRun);
                 }
 
                 var renderTarget = new MediaRenderTargetBitmap(width, height, 96, 96, MediaPixelFormats.Pbgra32);
