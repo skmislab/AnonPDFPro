@@ -14,9 +14,6 @@ namespace AnonPDF
         private readonly BindingList<LayerRowModel> layerRows;
         private readonly Dictionary<string, int> layerUsageCounts;
         private readonly DataGridView layersGridView;
-        private readonly Color checkBoxBorderColor;
-        private readonly Color checkBoxAccentColor;
-        private readonly Color checkBoxBackColor;
         private readonly Button addButton;
         private readonly Button deleteButton;
         private readonly Button moveUpButton;
@@ -34,9 +31,6 @@ namespace AnonPDF
             Color checkBoxAccentColor,
             Color checkBoxBackColor)
         {
-            this.checkBoxBorderColor = checkBoxBorderColor;
-            this.checkBoxAccentColor = checkBoxAccentColor;
-            this.checkBoxBackColor = checkBoxBackColor;
             layerUsageCounts = new Dictionary<string, int>(usageCounts ?? new Dictionary<string, int>(), StringComparer.OrdinalIgnoreCase);
             layerRows = new BindingList<LayerRowModel>(
                 (layers ?? Enumerable.Empty<LayerDefinition>())
@@ -76,7 +70,6 @@ namespace AnonPDF
             layersGridView.CellValueChanged += LayersGridView_CellValueChanged;
             layersGridView.CellDoubleClick += LayersGridView_CellDoubleClick;
             layersGridView.CellContentClick += LayersGridView_CellContentClick;
-            layersGridView.CellPainting += LayersGridView_CellPainting;
             layersGridView.SelectionChanged += (_, __) => UpdateButtonState();
 
             layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
@@ -675,153 +668,6 @@ namespace AnonPDF
             RaisePreviewChanged();
         }
 
-        private void LayersGridView_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
-        {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0 || layersGridView == null)
-            {
-                return;
-            }
-
-            string columnName = layersGridView.Columns[e.ColumnIndex].Name;
-            bool isCheckboxColumn =
-                string.Equals(columnName, "DialogLayersActiveColumn", StringComparison.Ordinal) ||
-                string.Equals(columnName, "DialogLayersVisibleColumn", StringComparison.Ordinal) ||
-                string.Equals(columnName, "DialogLayersLockedColumn", StringComparison.Ordinal) ||
-                string.Equals(columnName, "DialogLayersExportColumn", StringComparison.Ordinal);
-            if (!isCheckboxColumn)
-            {
-                return;
-            }
-
-            if (!(layersGridView.Rows[e.RowIndex].DataBoundItem is LayerRowModel row))
-            {
-                return;
-            }
-
-            if (string.Equals(columnName, "DialogLayersExportColumn", StringComparison.Ordinal) &&
-                string.Equals(row.Id, PDFForm.WorkLayerId, StringComparison.OrdinalIgnoreCase))
-            {
-                e.PaintBackground(e.CellBounds, true);
-                e.Handled = true;
-                return;
-            }
-
-            e.PaintBackground(e.CellBounds, true);
-            DrawThemedGridCheckBox(
-                e.Graphics,
-                e.CellBounds,
-                e.Value,
-                checkBoxBorderColor,
-                checkBoxAccentColor,
-                checkBoxBackColor,
-                e.CellStyle?.Font ?? layersGridView.Font);
-            e.Handled = true;
-        }
-
-        private static void DrawThemedGridCheckBox(Graphics graphics, Rectangle bounds, object value, Color borderBaseColor, Color accentColor, Color boxBackColor, Font font)
-        {
-            if (graphics == null)
-            {
-                return;
-            }
-
-            CheckState checkState = CheckState.Unchecked;
-            switch (value)
-            {
-                case CheckState stateValue:
-                    checkState = stateValue;
-                    break;
-                case bool boolValue:
-                    checkState = boolValue ? CheckState.Checked : CheckState.Unchecked;
-                    break;
-            }
-
-            int side = Math.Max(13, Math.Min(18, (font?.Height ?? SystemFonts.DefaultFont.Height) - 1));
-            var glyphRect = new Rectangle(
-                bounds.Left + (bounds.Width - side) / 2,
-                bounds.Top + (bounds.Height - side) / 2,
-                side,
-                side);
-
-            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-
-            Color borderColor = DarkenColor(borderBaseColor, 0.18f);
-
-            using (var backBrush = new SolidBrush(boxBackColor))
-            using (var borderPen = new Pen(borderColor, 1f))
-            {
-                graphics.FillRectangle(backBrush, glyphRect);
-                graphics.DrawRectangle(borderPen, glyphRect.X, glyphRect.Y, glyphRect.Width - 1, glyphRect.Height - 1);
-            }
-
-            if (checkState == CheckState.Indeterminate)
-            {
-                Rectangle indeterminateRect = Rectangle.Inflate(glyphRect, -3, -3);
-                using (var accentBrush = new SolidBrush(accentColor))
-                {
-                    graphics.FillRectangle(accentBrush, indeterminateRect);
-                }
-                Color minusColor = GetContrastColor(accentColor);
-                using (var minusPen = new Pen(minusColor, 2f))
-                {
-                    minusPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
-                    minusPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
-                    int y = glyphRect.Top + glyphRect.Height / 2;
-                    int x1 = glyphRect.Left + (int)(glyphRect.Width * 0.24f);
-                    int x2 = glyphRect.Right - (int)(glyphRect.Width * 0.24f) - 1;
-                    graphics.DrawLine(minusPen, x1, y, x2, y);
-                }
-                return;
-            }
-
-            if (checkState != CheckState.Checked)
-            {
-                return;
-            }
-
-            Rectangle fillRect = Rectangle.Inflate(glyphRect, -2, -2);
-            using (var accentBrush = new SolidBrush(accentColor))
-            {
-                graphics.FillRectangle(accentBrush, fillRect);
-            }
-
-            Color checkColor = GetContrastColor(accentColor);
-            using (var checkPen = new Pen(checkColor, 2f))
-            {
-                checkPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
-                checkPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
-
-                int x1 = glyphRect.Left + (int)(glyphRect.Width * 0.24f);
-                int y1 = glyphRect.Top + (int)(glyphRect.Height * 0.55f);
-                int x2 = glyphRect.Left + (int)(glyphRect.Width * 0.44f);
-                int y2 = glyphRect.Top + (int)(glyphRect.Height * 0.74f);
-                int x3 = glyphRect.Left + (int)(glyphRect.Width * 0.76f);
-                int y3 = glyphRect.Top + (int)(glyphRect.Height * 0.30f);
-
-                graphics.DrawLines(checkPen, new[]
-                {
-                    new Point(x1, y1),
-                    new Point(x2, y2),
-                    new Point(x3, y3)
-                });
-            }
-        }
-
-        private static Color GetContrastColor(Color color)
-        {
-            double luminance = ((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B)) / 255d;
-            return luminance > 0.55 ? Color.Black : Color.White;
-        }
-
-        private static Color DarkenColor(Color color, float amount)
-        {
-            amount = Math.Max(0f, Math.Min(1f, amount));
-            int r = (int)Math.Round(color.R * (1f - amount));
-            int g = (int)Math.Round(color.G * (1f - amount));
-            int b = (int)Math.Round(color.B * (1f - amount));
-            return Color.FromArgb(color.A, Math.Max(0, r), Math.Max(0, g), Math.Max(0, b));
-        }
-
         private sealed class LayerRowModel : INotifyPropertyChanged
         {
             private string name = string.Empty;
@@ -954,5 +800,6 @@ namespace AnonPDF
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
             }
         }
+
     }
 }

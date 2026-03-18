@@ -318,8 +318,7 @@ namespace AnonPDF
         private DateTime objectSelectionCycleTimestampUtc = DateTime.MinValue;
         private int objectSelectionCycleIndex = -1;
         private List<string> objectSelectionCycleKeys = new List<string>();
-        private DataGridView layersGridView;
-        private bool suppressLayersGridEvents;
+        private LayerPanelControl layersPanelView;
         private List<LayerDefinition> pendingLayerPanelApplyLayers;
         private string pendingLayerPanelApplyActiveLayerId;
         private Timer layerPanelApplyTimer;
@@ -1396,6 +1395,7 @@ namespace AnonPDF
             thumbnailsListView.SizeChanged += (_, __) => ApplyThumbnailIconSpacing();
 
             ApplyRightPanelTabSelectionFromSettings();
+            UpdateRightPanelTabContentVisibility();
 
             filterComboBox.SelectedIndex = 0;            
             filterComboBox.DrawMode = DrawMode.OwnerDrawFixed;
@@ -1952,91 +1952,33 @@ namespace AnonPDF
 
         private void InitializeLayersTab()
         {
-            if (layersTabPlaceholderPanel == null || layersGridView != null)
+            if (layersTabPlaceholderPanel == null || layersPanelView != null)
             {
                 return;
             }
 
-            layersGridView = new DataGridView
+            layersPanelView = new LayerPanelControl
             {
-                AllowUserToAddRows = false,
-                AllowUserToDeleteRows = false,
-                AllowUserToResizeColumns = false,
-                AllowUserToResizeRows = false,
-                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
-                BackgroundColor = System.Drawing.SystemColors.Window,
-                BorderStyle = BorderStyle.None,
-                CellBorderStyle = DataGridViewCellBorderStyle.SingleHorizontal,
-                ClipboardCopyMode = DataGridViewClipboardCopyMode.Disable,
-                ColumnHeadersBorderStyle = DataGridViewHeaderBorderStyle.Single,
                 Dock = DockStyle.Fill,
-                EditMode = DataGridViewEditMode.EditOnEnter,
-                EnableHeadersVisualStyles = false,
-                MultiSelect = false,
-                ReadOnly = false,
-                RowHeadersVisible = false,
-                RowTemplate = { Height = 24 },
-                ScrollBars = ScrollBars.Vertical,
-                SelectionMode = DataGridViewSelectionMode.CellSelect,
                 Cursor = Cursors.Default
             };
-
-            var activeColumn = new DataGridViewCheckBoxColumn
-            {
-                Name = "LayersActiveColumn",
-                Width = 28,
-                MinimumWidth = 28,
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
-                HeaderText = "\u25C9",
-                ToolTipText = LocalizedText("Layers_Tab_Header_Active_Tooltip")
-            };
-            var visibleColumn = new DataGridViewCheckBoxColumn
-            {
-                Name = "LayersVisibleColumn",
-                Width = 28,
-                MinimumWidth = 28,
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
-                ThreeState = true,
-                HeaderText = "\U0001F441",
-                ToolTipText = LocalizedText("Layers_Tab_Header_Visible_Tooltip")
-            };
-            var lockedColumn = new DataGridViewCheckBoxColumn
-            {
-                Name = "LayersLockedColumn",
-                Width = 28,
-                MinimumWidth = 28,
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
-                ThreeState = true,
-                HeaderText = "\U0001F512",
-                ToolTipText = LocalizedText("Layers_Tab_Header_Locked_Tooltip")
-            };
-            var nameColumn = new DataGridViewTextBoxColumn
-            {
-                Name = "LayersNameColumn",
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                HeaderText = LocalizedText("Layers_Tab_Header_Name"),
-                ReadOnly = true,
-                SortMode = DataGridViewColumnSortMode.NotSortable
-            };
-
-            layersGridView.Columns.Add(activeColumn);
-            layersGridView.Columns.Add(visibleColumn);
-            layersGridView.Columns.Add(lockedColumn);
-            layersGridView.Columns.Add(nameColumn);
-
-            layersGridView.CurrentCellDirtyStateChanged += LayersGridView_CurrentCellDirtyStateChanged;
-            layersGridView.CellContentClick += LayersGridView_CellContentClick;
-            layersGridView.CellValueChanged += LayersGridView_CellValueChanged;
-            layersGridView.CellDoubleClick += LayersGridView_CellDoubleClick;
-            layersGridView.CellPainting += LayersGridView_CellPainting;
-            layersGridView.MouseEnter += LayersInteractionSurface_MouseEnter;
-            layersGridView.MouseMove += LayersInteractionSurface_MouseMove;
+            layersPanelView.CellClick += LayersPanelView_CellClick;
+            layersPanelView.CellDoubleClick += LayersPanelView_CellDoubleClick;
+            layersPanelView.MouseEnter += LayersInteractionSurface_MouseEnter;
+            layersPanelView.MouseMove += LayersInteractionSurface_MouseMove;
 
             layersTabPlaceholderPanel.Controls.Clear();
             layersTabPlaceholderPanel.Cursor = Cursors.Default;
             layersTabPlaceholderPanel.MouseEnter += LayersInteractionSurface_MouseEnter;
             layersTabPlaceholderPanel.MouseMove += LayersInteractionSurface_MouseMove;
-            layersTabPlaceholderPanel.Controls.Add(layersGridView);
+            layersTabPlaceholderPanel.Resize += (_, __) =>
+            {
+                layersTabPlaceholderPanel.Invalidate(true);
+                layersPanelView?.Invalidate(true);
+            };
+            layersTabPlaceholderPanel.Controls.Add(layersPanelView);
+            ApplyLayersTabLocalization();
+            ApplyThemeToLayersGrid(CurrentTheme);
             RefreshLayersTab();
         }
 
@@ -2153,6 +2095,18 @@ namespace AnonPDF
             public LayerPanelRowKind Kind { get; set; }
             public string LayerId { get; set; }
             public string GroupName { get; set; }
+        }
+
+        private sealed class LayerPanelDisplayRow
+        {
+            public LayerPanelRowTag Tag { get; set; }
+            public bool ShowActive { get; set; }
+            public bool Active { get; set; }
+            public CheckState VisibleState { get; set; }
+            public CheckState LockedState { get; set; }
+            public string Name { get; set; }
+            public bool BoldName { get; set; }
+            public int NameIndent { get; set; }
         }
 
         private enum LayerGroupVisibilityState
@@ -2404,220 +2358,87 @@ namespace AnonPDF
 
         private void RefreshLayersTab()
         {
-            if (layersGridView == null)
+            if (layersPanelView == null)
             {
                 return;
             }
 
             string sourceActiveLayerId = GetLayerPanelSourceActiveLayerId();
             LogDebug($"LayerPanel refresh pending={(pendingLayerPanelApplyLayers != null ? 1 : 0)} active={sourceActiveLayerId}");
-
-            suppressLayersGridEvents = true;
-            try
+            IEnumerable<LayerDefinition> sourceLayers = GetLayerPanelSourceLayers();
+            List<LayerPanelDisplayRow> rows = new List<LayerPanelDisplayRow>();
+            foreach (object entry in BuildLayerPanelEntries())
             {
-                layersGridView.Rows.Clear();
-                foreach (object entry in BuildLayerPanelEntries())
+                if (entry is LayerPanelGroupEntry group)
                 {
-                    if (entry is LayerPanelGroupEntry group)
+                    LayerGroupVisibilityState visibleState = GetLayerGroupVisibilityState(group.GroupName, sourceLayers);
+                    LayerGroupVisibilityState lockedState = GetLayerGroupLockedState(group.GroupName, sourceLayers);
+                    rows.Add(new LayerPanelDisplayRow
                     {
-                        IEnumerable<LayerDefinition> sourceLayers = GetLayerPanelSourceLayers();
-                        LayerGroupVisibilityState visibleState = GetLayerGroupVisibilityState(group.GroupName, sourceLayers);
-                        LayerGroupVisibilityState lockedState = GetLayerGroupLockedState(group.GroupName, sourceLayers);
-                        object visibleValue = visibleState == LayerGroupVisibilityState.Mixed
-                            ? CheckState.Indeterminate
-                            : (object)(visibleState == LayerGroupVisibilityState.AllVisible);
-                        object lockedValue = lockedState == LayerGroupVisibilityState.Mixed
-                            ? CheckState.Indeterminate
-                            : (object)(lockedState == LayerGroupVisibilityState.AllVisible);
-                        int groupRowIndex = layersGridView.Rows.Add(
-                            null,
-                            visibleValue,
-                            lockedValue,
-                            group.GroupName);
-                        DataGridViewRow groupRow = layersGridView.Rows[groupRowIndex];
-                        groupRow.Tag = new LayerPanelRowTag
+                        Tag = new LayerPanelRowTag
                         {
                             Kind = LayerPanelRowKind.Group,
                             GroupName = group.GroupName
-                        };
-                        groupRow.Cells[0].Style.NullValue = string.Empty;
-                        groupRow.Cells[0].ReadOnly = true;
-                        if (groupRow.Cells[1] is DataGridViewCheckBoxCell groupVisibleCell)
-                        {
-                            groupVisibleCell.ThreeState = true;
-                        }
-                        if (groupRow.Cells[2] is DataGridViewCheckBoxCell groupLockedCell)
-                        {
-                            groupLockedCell.ThreeState = true;
-                        }
-                        groupRow.Cells[1].ReadOnly = true;
-                        groupRow.Cells[2].ReadOnly = true;
-                        groupRow.DefaultCellStyle.BackColor = CurrentTheme.PanelBackColor;
-                        groupRow.DefaultCellStyle.SelectionBackColor = CurrentTheme.PanelBackColor;
-                        groupRow.DefaultCellStyle.SelectionForeColor = CurrentTheme.TextPrimaryColor;
-                        continue;
-                    }
+                        },
+                        ShowActive = false,
+                        Active = false,
+                        VisibleState = visibleState == LayerGroupVisibilityState.Mixed
+                            ? CheckState.Indeterminate
+                            : (visibleState == LayerGroupVisibilityState.AllVisible ? CheckState.Checked : CheckState.Unchecked),
+                        LockedState = lockedState == LayerGroupVisibilityState.Mixed
+                            ? CheckState.Indeterminate
+                            : (lockedState == LayerGroupVisibilityState.AllVisible ? CheckState.Checked : CheckState.Unchecked),
+                        Name = group.GroupName,
+                        BoldName = true,
+                        NameIndent = 0
+                    });
+                    continue;
+                }
 
-                    LayerDefinition layer = entry as LayerDefinition;
-                    if (layer == null)
-                    {
-                        continue;
-                    }
+                LayerDefinition layer = entry as LayerDefinition;
+                if (layer == null)
+                {
+                    continue;
+                }
 
-                    int rowIndex = layersGridView.Rows.Add(
-                        string.Equals(NormalizeLayerIdValue(sourceActiveLayerId), NormalizeLayerIdValue(layer.Id), StringComparison.OrdinalIgnoreCase),
-                        layer.IsVisible,
-                        layer.IsLocked,
-                        string.IsNullOrWhiteSpace(NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase)))
-                            ? layer.Name
-                            : "   " + layer.Name);
-                    DataGridViewRow row = layersGridView.Rows[rowIndex];
-                    row.Tag = new LayerPanelRowTag
+                bool inGroup = !string.IsNullOrWhiteSpace(NormalizeLayerGroupName(
+                    layer.GroupName,
+                    string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase)));
+                rows.Add(new LayerPanelDisplayRow
+                {
+                    Tag = new LayerPanelRowTag
                     {
                         Kind = LayerPanelRowKind.Layer,
                         LayerId = NormalizeLayerIdValue(layer.Id),
                         GroupName = NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase))
-                    };
-                    if (row.Cells[0] is DataGridViewCheckBoxCell activeCell)
-                    {
-                        activeCell.ThreeState = false;
-                    }
-                    if (row.Cells[1] is DataGridViewCheckBoxCell visibleCell)
-                    {
-                        visibleCell.ThreeState = false;
-                    }
-                    if (row.Cells[2] is DataGridViewCheckBoxCell lockedCell)
-                    {
-                        lockedCell.ThreeState = false;
-                    }
-                }
+                    },
+                    ShowActive = true,
+                    Active = string.Equals(NormalizeLayerIdValue(sourceActiveLayerId), NormalizeLayerIdValue(layer.Id), StringComparison.OrdinalIgnoreCase),
+                    VisibleState = layer.IsVisible ? CheckState.Checked : CheckState.Unchecked,
+                    LockedState = layer.IsLocked ? CheckState.Checked : CheckState.Unchecked,
+                    Name = layer.Name,
+                    BoldName = false,
+                    NameIndent = inGroup ? 14 : 0
+                });
+            }
 
-                layersGridView.ClearSelection();
-                layersGridView.CurrentCell = null;
-            }
-            finally
-            {
-                suppressLayersGridEvents = false;
-            }
+            layersPanelView.SetRows(rows);
         }
 
-        private void LayersGridView_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        private void LayersPanelView_CellDoubleClick(object sender, LayerPanelCellEventArgs e)
         {
-            if (layersGridView?.IsCurrentCellDirty == true)
-            {
-                layersGridView.CommitEdit(DataGridViewDataErrorContexts.Commit);
-            }
-        }
-
-        private void LayersGridView_CellContentClick(object sender, DataGridViewCellEventArgs e)
-        {
-            if (suppressLayersGridEvents || layersGridView == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            if (layersPanelView == null || e == null)
             {
                 return;
             }
 
-            if (!(layersGridView.Rows[e.RowIndex].Tag is LayerPanelRowTag rowTag))
+            if (!string.Equals(e.ColumnName, "LayersNameColumn", StringComparison.Ordinal))
             {
                 return;
             }
 
-            string columnName = layersGridView.Columns[e.ColumnIndex].Name;
-            List<LayerDefinition> sourceLayers = GetLayerPanelSourceLayers()
-                .Select(layer => layer?.Clone())
-                .Where(layer => layer != null)
-                .ToList();
-            string sourceActiveLayerId = GetLayerPanelSourceActiveLayerId();
-            LogDebug($"LayerPanel click row={(rowTag.Kind == LayerPanelRowKind.Group ? "group" : "layer")} col={columnName} group={rowTag.GroupName ?? "-"} layer={rowTag.LayerId ?? "-"} pending={(pendingLayerPanelApplyLayers != null ? 1 : 0)}");
-            if (rowTag.Kind == LayerPanelRowKind.Group)
-            {
-                bool changed = false;
-                if (string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal))
-                {
-                    bool nextVisible = GetLayerGroupVisibilityState(rowTag.GroupName, sourceLayers) != LayerGroupVisibilityState.AllVisible;
-                    changed = SetLayerGroupVisibility(sourceLayers, rowTag.GroupName, nextVisible);
-                }
-                else if (string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
-                {
-                    bool nextLocked = GetLayerGroupLockedState(rowTag.GroupName, sourceLayers) != LayerGroupVisibilityState.AllVisible;
-                    changed = SetLayerGroupLocked(sourceLayers, rowTag.GroupName, nextLocked);
-                }
-
-                if (!changed)
-                {
-                    RefreshLayersTab();
-                    return;
-                }
-
-                QueueLayerPanelApply(sourceLayers, sourceActiveLayerId);
-                return;
-            }
-
-            if (!string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal) &&
-                !string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal) &&
-                !string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            LayerDefinition targetLayer = sourceLayers.FirstOrDefault(layer =>
-                string.Equals(NormalizeLayerIdValue(layer.Id), NormalizeLayerIdValue(rowTag.LayerId), StringComparison.OrdinalIgnoreCase));
-            if (targetLayer == null)
-            {
-                RefreshLayersTab();
-                return;
-            }
-
-            string nextActiveLayerId = sourceActiveLayerId;
-            bool layerChanged = false;
-            if (string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal))
-            {
-                if (!string.Equals(NormalizeLayerIdValue(sourceActiveLayerId), NormalizeLayerIdValue(targetLayer.Id), StringComparison.OrdinalIgnoreCase))
-                {
-                    nextActiveLayerId = targetLayer.Id;
-                    layerChanged = true;
-                }
-            }
-            else if (string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal))
-            {
-                targetLayer.IsVisible = !targetLayer.IsVisible;
-                layerChanged = true;
-            }
-            else if (string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
-            {
-                targetLayer.IsLocked = !targetLayer.IsLocked;
-                layerChanged = true;
-            }
-
-            if (!layerChanged)
-            {
-                RefreshLayersTab();
-                return;
-            }
-
-            QueueLayerPanelApply(sourceLayers, nextActiveLayerId);
-        }
-
-        private void LayersGridView_CellValueChanged(object sender, DataGridViewCellEventArgs e)
-        {
-            if (suppressLayersGridEvents || layersGridView == null || e.RowIndex < 0 || e.ColumnIndex < 0)
-            {
-                return;
-            }
-        }
-
-        private void LayersGridView_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
-        {
-            if (layersGridView == null || e.RowIndex < 0 || e.ColumnIndex < 0)
-            {
-                return;
-            }
-
-            if (!string.Equals(layersGridView.Columns[e.ColumnIndex].Name, "LayersNameColumn", StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            if (!(layersGridView.Rows[e.RowIndex].Tag is LayerPanelRowTag rowTag))
+            LayerPanelRowTag rowTag = e.RowTag;
+            if (rowTag == null)
             {
                 return;
             }
@@ -2695,6 +2516,95 @@ namespace AnonPDF
             }
         }
 
+        private void LayersPanelView_CellClick(object sender, LayerPanelCellEventArgs e)
+        {
+            if (layersPanelView == null || e == null)
+            {
+                return;
+            }
+
+            LayerPanelRowTag rowTag = e.RowTag;
+            if (rowTag == null)
+            {
+                return;
+            }
+
+            string columnName = e.ColumnName;
+            List<LayerDefinition> sourceLayers = GetLayerPanelSourceLayers()
+                .Select(layer => layer?.Clone())
+                .Where(layer => layer != null)
+                .ToList();
+            string sourceActiveLayerId = GetLayerPanelSourceActiveLayerId();
+            LogDebug($"LayerPanel click row={(rowTag.Kind == LayerPanelRowKind.Group ? "group" : "layer")} col={columnName} group={rowTag.GroupName ?? "-"} layer={rowTag.LayerId ?? "-"} pending={(pendingLayerPanelApplyLayers != null ? 1 : 0)}");
+            if (rowTag.Kind == LayerPanelRowKind.Group)
+            {
+                bool changed = false;
+                if (string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal))
+                {
+                    bool nextVisible = GetLayerGroupVisibilityState(rowTag.GroupName, sourceLayers) != LayerGroupVisibilityState.AllVisible;
+                    changed = SetLayerGroupVisibility(sourceLayers, rowTag.GroupName, nextVisible);
+                }
+                else if (string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
+                {
+                    bool nextLocked = GetLayerGroupLockedState(rowTag.GroupName, sourceLayers) != LayerGroupVisibilityState.AllVisible;
+                    changed = SetLayerGroupLocked(sourceLayers, rowTag.GroupName, nextLocked);
+                }
+
+                if (!changed)
+                {
+                    RefreshLayersTab();
+                    return;
+                }
+
+                QueueLayerPanelApply(sourceLayers, sourceActiveLayerId);
+                return;
+            }
+
+            if (!string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal) &&
+                !string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal) &&
+                !string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            LayerDefinition targetLayer = sourceLayers.FirstOrDefault(layer =>
+                string.Equals(NormalizeLayerIdValue(layer.Id), NormalizeLayerIdValue(rowTag.LayerId), StringComparison.OrdinalIgnoreCase));
+            if (targetLayer == null)
+            {
+                RefreshLayersTab();
+                return;
+            }
+
+            string nextActiveLayerId = sourceActiveLayerId;
+            bool layerChanged = false;
+            if (string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal))
+            {
+                if (!string.Equals(NormalizeLayerIdValue(sourceActiveLayerId), NormalizeLayerIdValue(targetLayer.Id), StringComparison.OrdinalIgnoreCase))
+                {
+                    nextActiveLayerId = targetLayer.Id;
+                    layerChanged = true;
+                }
+            }
+            else if (string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal))
+            {
+                targetLayer.IsVisible = !targetLayer.IsVisible;
+                layerChanged = true;
+            }
+            else if (string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
+            {
+                targetLayer.IsLocked = !targetLayer.IsLocked;
+                layerChanged = true;
+            }
+
+            if (!layerChanged)
+            {
+                RefreshLayersTab();
+                return;
+            }
+
+            QueueLayerPanelApply(sourceLayers, nextActiveLayerId);
+        }
+
         private bool PromptForLayerNameFromMainForm(string initialValue, out string layerName)
         {
             return PromptForLayerValueFromMainForm(
@@ -2702,40 +2612,6 @@ namespace AnonPDF
                 LocalizedText("Dialog_Layers_Rename_Label"),
                 initialValue,
                 out layerName);
-        }
-
-        private void LayersGridView_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
-        {
-            if (e.RowIndex < 0 || e.ColumnIndex < 0 || layersGridView == null)
-            {
-                return;
-            }
-
-            string columnName = layersGridView.Columns[e.ColumnIndex].Name;
-            bool isCheckboxColumn =
-                string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal) ||
-                string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal) ||
-                string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal);
-            if (!isCheckboxColumn)
-            {
-                return;
-            }
-
-            if (!(layersGridView.Rows[e.RowIndex].Tag is LayerPanelRowTag rowTag))
-            {
-                return;
-            }
-
-            if (rowTag.Kind == LayerPanelRowKind.Group && string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal))
-            {
-                e.PaintBackground(e.CellBounds, true);
-                e.Handled = true;
-                return;
-            }
-
-            e.PaintBackground(e.CellBounds, true);
-            DrawThemedGridCheckBox(e.Graphics, e.CellBounds, e.State, e.Value, CurrentTheme, e.CellStyle?.Font ?? layersGridView.Font);
-            e.Handled = true;
         }
 
         private static void DrawThemedGridCheckBox(Graphics graphics, Rectangle bounds, DataGridViewElementStates state, object value, UiThemePalette theme, Font font)
@@ -2846,6 +2722,475 @@ namespace AnonPDF
             return System.Drawing.Color.FromArgb(color.A, Math.Max(0, r), Math.Max(0, g), Math.Max(0, b));
         }
 
+        private static System.Drawing.Color BlendLayerPanelColor(System.Drawing.Color primary, System.Drawing.Color secondary, float primaryWeight)
+        {
+            primaryWeight = Math.Max(0f, Math.Min(1f, primaryWeight));
+            float secondaryWeight = 1f - primaryWeight;
+            int a = (int)Math.Round((primary.A * primaryWeight) + (secondary.A * secondaryWeight));
+            int r = (int)Math.Round((primary.R * primaryWeight) + (secondary.R * secondaryWeight));
+            int g = (int)Math.Round((primary.G * primaryWeight) + (secondary.G * secondaryWeight));
+            int b = (int)Math.Round((primary.B * primaryWeight) + (secondary.B * secondaryWeight));
+            return System.Drawing.Color.FromArgb(
+                Math.Max(0, Math.Min(255, a)),
+                Math.Max(0, Math.Min(255, r)),
+                Math.Max(0, Math.Min(255, g)),
+                Math.Max(0, Math.Min(255, b)));
+        }
+
+        private sealed class LayerPanelCellEventArgs : EventArgs
+        {
+            public LayerPanelRowTag RowTag { get; set; }
+            public string ColumnName { get; set; }
+        }
+
+        private sealed class LayerPanelControl : Control
+        {
+            private const int HeaderHeight = 24;
+            private const int RowHeight = 24;
+            private const int CheckColumnWidth = 28;
+            private const int TextPadding = 6;
+            private readonly VScrollBar verticalScrollBar;
+            private readonly ToolTip headerToolTip;
+            private List<LayerPanelDisplayRow> rows = new List<LayerPanelDisplayRow>();
+            private string activeHeaderToolTip;
+            private string visibleHeaderToolTip;
+            private string lockedHeaderToolTip;
+            private string currentToolTipText;
+            private UiThemePalette theme;
+
+            public LayerPanelControl()
+            {
+                DoubleBuffered = true;
+                ResizeRedraw = true;
+                SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+                UpdateStyles();
+
+                verticalScrollBar = new VScrollBar
+                {
+                    Dock = DockStyle.Right,
+                    Visible = false,
+                    SmallChange = RowHeight,
+                    LargeChange = RowHeight * 4
+                };
+                verticalScrollBar.Scroll += (_, __) => Invalidate();
+                Controls.Add(verticalScrollBar);
+
+                headerToolTip = new ToolTip();
+            }
+
+            public UiThemePalette Theme
+            {
+                get => theme;
+                set
+                {
+                    theme = value;
+                    Invalidate();
+                }
+            }
+
+            public string HeaderNameText { get; set; } = string.Empty;
+
+            public string ActiveHeaderToolTip
+            {
+                get => activeHeaderToolTip;
+                set
+                {
+                    activeHeaderToolTip = value;
+                    headerToolTip.SetToolTip(this, string.Empty);
+                }
+            }
+
+            public string VisibleHeaderToolTip
+            {
+                get => visibleHeaderToolTip;
+                set
+                {
+                    visibleHeaderToolTip = value;
+                    headerToolTip.SetToolTip(this, string.Empty);
+                }
+            }
+
+            public string LockedHeaderToolTip
+            {
+                get => lockedHeaderToolTip;
+                set
+                {
+                    lockedHeaderToolTip = value;
+                    headerToolTip.SetToolTip(this, string.Empty);
+                }
+            }
+
+            public event EventHandler<LayerPanelCellEventArgs> CellClick;
+            public event EventHandler<LayerPanelCellEventArgs> CellDoubleClick;
+
+            public void SetRows(IEnumerable<LayerPanelDisplayRow> newRows)
+            {
+                rows = (newRows ?? Enumerable.Empty<LayerPanelDisplayRow>()).ToList();
+                UpdateScrollBar();
+                Invalidate();
+            }
+
+            protected override void OnResize(EventArgs e)
+            {
+                base.OnResize(e);
+                UpdateScrollBar();
+            }
+
+            protected override void OnMouseWheel(MouseEventArgs e)
+            {
+                if (verticalScrollBar.Visible)
+                {
+                    int deltaRows = Math.Max(1, SystemInformation.MouseWheelScrollLines);
+                    int step = RowHeight * deltaRows;
+                    int nextValue = verticalScrollBar.Value - (e.Delta > 0 ? step : -step);
+                    verticalScrollBar.Value = Math.Max(verticalScrollBar.Minimum, Math.Min(GetScrollMaximumValue(), nextValue));
+                    Invalidate();
+                }
+
+                base.OnMouseWheel(e);
+            }
+
+            protected override void OnMouseMove(MouseEventArgs e)
+            {
+                base.OnMouseMove(e);
+
+                string tooltipText = null;
+                LayerPanelHitInfo hit = HitTest(e.Location);
+                if (hit.IsHeader)
+                {
+                    if (string.Equals(hit.ColumnName, "LayersActiveColumn", StringComparison.Ordinal))
+                    {
+                        tooltipText = ActiveHeaderToolTip;
+                    }
+                    else if (string.Equals(hit.ColumnName, "LayersVisibleColumn", StringComparison.Ordinal))
+                    {
+                        tooltipText = VisibleHeaderToolTip;
+                    }
+                    else if (string.Equals(hit.ColumnName, "LayersLockedColumn", StringComparison.Ordinal))
+                    {
+                        tooltipText = LockedHeaderToolTip;
+                    }
+                }
+
+                if (!string.Equals(currentToolTipText, tooltipText, StringComparison.Ordinal))
+                {
+                    currentToolTipText = tooltipText ?? string.Empty;
+                    headerToolTip.SetToolTip(this, currentToolTipText);
+                }
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                currentToolTipText = string.Empty;
+                headerToolTip.SetToolTip(this, string.Empty);
+                base.OnMouseLeave(e);
+            }
+
+            protected override void OnMouseClick(MouseEventArgs e)
+            {
+                base.OnMouseClick(e);
+
+                if (e.Button != MouseButtons.Left)
+                {
+                    return;
+                }
+
+                LayerPanelHitInfo hit = HitTest(e.Location);
+                if (hit.Row == null || string.IsNullOrWhiteSpace(hit.ColumnName))
+                {
+                    return;
+                }
+
+                if (!string.Equals(hit.ColumnName, "LayersActiveColumn", StringComparison.Ordinal) &&
+                    !string.Equals(hit.ColumnName, "LayersVisibleColumn", StringComparison.Ordinal) &&
+                    !string.Equals(hit.ColumnName, "LayersLockedColumn", StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                CellClick?.Invoke(this, new LayerPanelCellEventArgs
+                {
+                    RowTag = hit.Row.Tag,
+                    ColumnName = hit.ColumnName
+                });
+            }
+
+            protected override void OnMouseDoubleClick(MouseEventArgs e)
+            {
+                base.OnMouseDoubleClick(e);
+
+                if (e.Button != MouseButtons.Left)
+                {
+                    return;
+                }
+
+                LayerPanelHitInfo hit = HitTest(e.Location);
+                if (hit.Row == null || !string.Equals(hit.ColumnName, "LayersNameColumn", StringComparison.Ordinal))
+                {
+                    return;
+                }
+
+                CellDoubleClick?.Invoke(this, new LayerPanelCellEventArgs
+                {
+                    RowTag = hit.Row.Tag,
+                    ColumnName = hit.ColumnName
+                });
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                base.OnPaint(e);
+
+                UiThemePalette currentTheme = Theme;
+                if (currentTheme == null)
+                {
+                    return;
+                }
+
+                e.Graphics.Clear(currentTheme.SectionBackColor);
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+                int contentWidth = GetContentWidth();
+                if (contentWidth <= 0)
+                {
+                    return;
+                }
+
+                DrawHeader(e.Graphics, contentWidth, currentTheme);
+
+                Rectangle bodyClip = new Rectangle(0, HeaderHeight, contentWidth, Math.Max(0, Height - HeaderHeight));
+                Region oldClip = e.Graphics.Clip;
+                e.Graphics.SetClip(bodyClip);
+
+                int scrollOffset = verticalScrollBar.Visible ? verticalScrollBar.Value : 0;
+                int startIndex = Math.Max(0, scrollOffset / RowHeight);
+                int visibleRowCount = Math.Max(1, (bodyClip.Height + RowHeight - 1) / RowHeight + 1);
+                int endIndex = Math.Min(rows.Count - 1, startIndex + visibleRowCount);
+
+                for (int i = startIndex; i <= endIndex; i++)
+                {
+                    DrawRow(e.Graphics, rows[i], i, contentWidth, scrollOffset, currentTheme);
+                }
+
+                e.Graphics.Clip = oldClip;
+            }
+
+            private void DrawHeader(Graphics graphics, int contentWidth, UiThemePalette currentTheme)
+            {
+                Rectangle headerBounds = new Rectangle(0, 0, contentWidth, HeaderHeight);
+                using (var backBrush = new SolidBrush(currentTheme.SectionBackColor))
+                using (var borderPen = new Pen(currentTheme.BorderColor, 1f))
+                {
+                    graphics.FillRectangle(backBrush, headerBounds);
+                    graphics.DrawRectangle(borderPen, 0, 0, contentWidth - 1, HeaderHeight - 1);
+                    graphics.DrawLine(borderPen, 0, HeaderHeight - 1, contentWidth, HeaderHeight - 1);
+                }
+
+                DrawHeaderCellText(graphics, GetColumnBounds(0, contentWidth), "\u25C9", currentTheme);
+                DrawHeaderCellText(graphics, GetColumnBounds(1, contentWidth), "\U0001F441", currentTheme);
+                DrawHeaderCellText(graphics, GetColumnBounds(2, contentWidth), "\U0001F512", currentTheme);
+                DrawHeaderCellText(graphics, GetColumnBounds(3, contentWidth), HeaderNameText ?? string.Empty, currentTheme, alignLeft: true);
+            }
+
+            private void DrawHeaderCellText(Graphics graphics, Rectangle bounds, string text, UiThemePalette currentTheme, bool alignLeft = false)
+            {
+                TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis;
+                flags |= alignLeft ? TextFormatFlags.Left : TextFormatFlags.HorizontalCenter;
+                Rectangle drawBounds = alignLeft ? Rectangle.Inflate(bounds, -TextPadding, 0) : bounds;
+                TextRenderer.DrawText(graphics, text ?? string.Empty, Font, drawBounds, currentTheme.TextPrimaryColor, flags);
+            }
+
+            private void DrawRow(Graphics graphics, LayerPanelDisplayRow row, int rowIndex, int contentWidth, int scrollOffset, UiThemePalette currentTheme)
+            {
+                int y = HeaderHeight + (rowIndex * RowHeight) - scrollOffset;
+                Rectangle rowBounds = new Rectangle(0, y, contentWidth, RowHeight);
+                if (rowBounds.Bottom < HeaderHeight || rowBounds.Top > Height)
+                {
+                    return;
+                }
+
+                bool isGroupRow = row?.Tag?.Kind == LayerPanelRowKind.Group;
+                System.Drawing.Color rowBackColor = isGroupRow
+                    ? BlendLayerPanelColor(currentTheme.SectionBackColor, currentTheme.PanelBackColor, 0.55f)
+                    : currentTheme.SectionBackColor;
+
+                using (var backBrush = new SolidBrush(rowBackColor))
+                using (var borderPen = new Pen(currentTheme.BorderColor, 1f))
+                {
+                    graphics.FillRectangle(backBrush, rowBounds);
+                    graphics.DrawLine(borderPen, rowBounds.Left, rowBounds.Bottom - 1, rowBounds.Right, rowBounds.Bottom - 1);
+                }
+
+                DrawVerticalSeparators(graphics, contentWidth, y, currentTheme);
+
+                if (row.ShowActive)
+                {
+                    DrawThemedGridCheckBox(graphics, GetCellBounds(0, y, contentWidth), DataGridViewElementStates.None, row.Active, currentTheme, Font);
+                }
+
+                DrawThemedGridCheckBox(graphics, GetCellBounds(1, y, contentWidth), DataGridViewElementStates.None, row.VisibleState, currentTheme, Font);
+                DrawThemedGridCheckBox(graphics, GetCellBounds(2, y, contentWidth), DataGridViewElementStates.None, row.LockedState, currentTheme, Font);
+
+                Rectangle textBounds = GetCellBounds(3, y, contentWidth);
+                textBounds = new Rectangle(textBounds.Left + TextPadding + row.NameIndent, textBounds.Top, Math.Max(0, textBounds.Width - TextPadding - row.NameIndent), textBounds.Height);
+                Font rowFont = row.BoldName ? new Font(Font, FontStyle.Bold) : Font;
+                try
+                {
+                    TextRenderer.DrawText(
+                        graphics,
+                        row.Name ?? string.Empty,
+                        rowFont,
+                        textBounds,
+                        currentTheme.TextPrimaryColor,
+                        TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                }
+                finally
+                {
+                    if (row.BoldName && rowFont != null && !ReferenceEquals(rowFont, Font))
+                    {
+                        rowFont.Dispose();
+                    }
+                }
+            }
+
+            private void DrawVerticalSeparators(Graphics graphics, int contentWidth, int y, UiThemePalette currentTheme)
+            {
+                using (var borderPen = new Pen(currentTheme.BorderColor, 1f))
+                {
+                    Rectangle col0 = GetColumnBounds(0, contentWidth);
+                    Rectangle col1 = GetColumnBounds(1, contentWidth);
+                    Rectangle col2 = GetColumnBounds(2, contentWidth);
+                    graphics.DrawLine(borderPen, col0.Right - 1, y, col0.Right - 1, y + RowHeight - 1);
+                    graphics.DrawLine(borderPen, col1.Right - 1, y, col1.Right - 1, y + RowHeight - 1);
+                    graphics.DrawLine(borderPen, col2.Right - 1, y, col2.Right - 1, y + RowHeight - 1);
+                }
+            }
+
+            private LayerPanelHitInfo HitTest(Point location)
+            {
+                int contentWidth = GetContentWidth();
+                if (contentWidth <= 0 || location.X < 0 || location.X >= contentWidth || location.Y < 0)
+                {
+                    return LayerPanelHitInfo.None;
+                }
+
+                string columnName = GetColumnNameAt(location.X, contentWidth);
+                if (string.IsNullOrWhiteSpace(columnName))
+                {
+                    return LayerPanelHitInfo.None;
+                }
+
+                if (location.Y < HeaderHeight)
+                {
+                    return new LayerPanelHitInfo
+                    {
+                        IsHeader = true,
+                        ColumnName = columnName
+                    };
+                }
+
+                int rowIndex = ((location.Y - HeaderHeight) + (verticalScrollBar.Visible ? verticalScrollBar.Value : 0)) / RowHeight;
+                if (rowIndex < 0 || rowIndex >= rows.Count)
+                {
+                    return LayerPanelHitInfo.None;
+                }
+
+                return new LayerPanelHitInfo
+                {
+                    Row = rows[rowIndex],
+                    RowIndex = rowIndex,
+                    ColumnName = columnName
+                };
+            }
+
+            private string GetColumnNameAt(int x, int contentWidth)
+            {
+                if (GetColumnBounds(0, contentWidth).Contains(x, HeaderHeight / 2))
+                {
+                    return "LayersActiveColumn";
+                }
+
+                if (GetColumnBounds(1, contentWidth).Contains(x, HeaderHeight / 2))
+                {
+                    return "LayersVisibleColumn";
+                }
+
+                if (GetColumnBounds(2, contentWidth).Contains(x, HeaderHeight / 2))
+                {
+                    return "LayersLockedColumn";
+                }
+
+                if (GetColumnBounds(3, contentWidth).Contains(x, HeaderHeight / 2))
+                {
+                    return "LayersNameColumn";
+                }
+
+                return null;
+            }
+
+            private Rectangle GetCellBounds(int columnIndex, int rowTop, int contentWidth)
+            {
+                Rectangle column = GetColumnBounds(columnIndex, contentWidth);
+                return new Rectangle(column.Left, rowTop, column.Width, RowHeight);
+            }
+
+            private Rectangle GetColumnBounds(int columnIndex, int contentWidth)
+            {
+                int nameColumnLeft = CheckColumnWidth * 3;
+                int nameColumnWidth = Math.Max(20, contentWidth - nameColumnLeft);
+                switch (columnIndex)
+                {
+                    case 0:
+                        return new Rectangle(0, 0, CheckColumnWidth, HeaderHeight);
+                    case 1:
+                        return new Rectangle(CheckColumnWidth, 0, CheckColumnWidth, HeaderHeight);
+                    case 2:
+                        return new Rectangle(CheckColumnWidth * 2, 0, CheckColumnWidth, HeaderHeight);
+                    default:
+                        return new Rectangle(nameColumnLeft, 0, nameColumnWidth, HeaderHeight);
+                }
+            }
+
+            private int GetContentWidth()
+            {
+                return Math.Max(0, ClientSize.Width - (verticalScrollBar.Visible ? verticalScrollBar.Width : 0));
+            }
+
+            private void UpdateScrollBar()
+            {
+                int viewportHeight = Math.Max(0, ClientSize.Height - HeaderHeight);
+                int contentHeight = rows.Count * RowHeight;
+                bool shouldShow = contentHeight > viewportHeight && viewportHeight > 0;
+                verticalScrollBar.Visible = shouldShow;
+                if (!shouldShow)
+                {
+                    verticalScrollBar.Value = 0;
+                    return;
+                }
+
+                verticalScrollBar.Minimum = 0;
+                verticalScrollBar.LargeChange = Math.Max(RowHeight, viewportHeight);
+                verticalScrollBar.SmallChange = RowHeight;
+                verticalScrollBar.Maximum = Math.Max(0, contentHeight - 1);
+                verticalScrollBar.Value = Math.Max(0, Math.Min(GetScrollMaximumValue(), verticalScrollBar.Value));
+            }
+
+            private int GetScrollMaximumValue()
+            {
+                return Math.Max(verticalScrollBar.Minimum, verticalScrollBar.Maximum - verticalScrollBar.LargeChange + 1);
+            }
+
+            private sealed class LayerPanelHitInfo
+            {
+                public static readonly LayerPanelHitInfo None = new LayerPanelHitInfo();
+                public bool IsHeader { get; set; }
+                public LayerPanelDisplayRow Row { get; set; }
+                public int RowIndex { get; set; }
+                public string ColumnName { get; set; }
+            }
+        }
+
+
         private bool PromptForLayerGroupNameFromMainForm(string initialValue, out string groupName)
         {
             return PromptForLayerValueFromMainForm(
@@ -2922,59 +3267,29 @@ namespace AnonPDF
 
         private void ApplyLayersTabLocalization()
         {
-            if (layersGridView == null)
+            if (layersPanelView == null)
             {
                 return;
             }
 
-            if (layersGridView.Columns.Contains("LayersActiveColumn"))
-            {
-                layersGridView.Columns["LayersActiveColumn"].ToolTipText = LocalizedText("Layers_Tab_Header_Active_Tooltip");
-            }
-
-            if (layersGridView.Columns.Contains("LayersVisibleColumn"))
-            {
-                layersGridView.Columns["LayersVisibleColumn"].ToolTipText = LocalizedText("Layers_Tab_Header_Visible_Tooltip");
-            }
-
-            if (layersGridView.Columns.Contains("LayersLockedColumn"))
-            {
-                layersGridView.Columns["LayersLockedColumn"].ToolTipText = LocalizedText("Layers_Tab_Header_Locked_Tooltip");
-            }
-
-            if (layersGridView.Columns.Contains("LayersNameColumn"))
-            {
-                layersGridView.Columns["LayersNameColumn"].HeaderText = LocalizedText("Layers_Tab_Header_Name");
-            }
+            layersPanelView.HeaderNameText = LocalizedText("Layers_Tab_Header_Name");
+            layersPanelView.ActiveHeaderToolTip = LocalizedText("Layers_Tab_Header_Active_Tooltip");
+            layersPanelView.VisibleHeaderToolTip = LocalizedText("Layers_Tab_Header_Visible_Tooltip");
+            layersPanelView.LockedHeaderToolTip = LocalizedText("Layers_Tab_Header_Locked_Tooltip");
+            layersPanelView.Invalidate();
         }
 
         private void ApplyThemeToLayersGrid(UiThemePalette theme)
         {
-            if (layersGridView == null || theme == null)
+            if (layersPanelView == null || theme == null)
             {
                 return;
             }
 
-            layersGridView.BackgroundColor = theme.SectionBackColor;
-            layersGridView.GridColor = theme.BorderColor;
-            layersGridView.BorderStyle = BorderStyle.None;
-            layersGridView.DefaultCellStyle.BackColor = theme.SectionBackColor;
-            layersGridView.DefaultCellStyle.ForeColor = theme.TextPrimaryColor;
-            layersGridView.DefaultCellStyle.SelectionBackColor = theme.SectionBackColor;
-            layersGridView.DefaultCellStyle.SelectionForeColor = theme.TextPrimaryColor;
-            layersGridView.ColumnHeadersDefaultCellStyle.BackColor = theme.SectionBackColor;
-            layersGridView.ColumnHeadersDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
-            layersGridView.ColumnHeadersDefaultCellStyle.SelectionBackColor = theme.SectionBackColor;
-            layersGridView.ColumnHeadersDefaultCellStyle.SelectionForeColor = theme.TextPrimaryColor;
-            layersGridView.RowHeadersDefaultCellStyle.BackColor = theme.SectionBackColor;
-            layersGridView.RowHeadersDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
-            layersGridView.RowsDefaultCellStyle.BackColor = theme.SectionBackColor;
-            layersGridView.RowsDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
-            layersGridView.RowsDefaultCellStyle.SelectionBackColor = theme.SectionBackColor;
-            layersGridView.RowsDefaultCellStyle.SelectionForeColor = theme.TextPrimaryColor;
-            layersGridView.AlternatingRowsDefaultCellStyle.BackColor = theme.SectionBackColor;
-            layersGridView.AlternatingRowsDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
-            layersGridView.EnableHeadersVisualStyles = false;
+            layersPanelView.Theme = theme;
+            layersPanelView.BackColor = theme.SectionBackColor;
+            layersPanelView.ForeColor = theme.TextPrimaryColor;
+            layersPanelView.Invalidate();
         }
 
         private void PruneInvisibleLayerInteractionState()
@@ -11428,6 +11743,7 @@ namespace AnonPDF
             layersTabPage.ForeColor = theme.TextPrimaryColor;
             layersTabPlaceholderPanel.BackColor = theme.SectionBackColor;
             ApplyThemeToLayersGrid(theme);
+            RefreshLayersTab();
             tableLayoutPanel1.BackColor = theme.SectionBackColor;
 
             ApplyThemeToControls(mainAppSplitContainer.Panel1.Controls, theme);
@@ -27221,6 +27537,7 @@ namespace AnonPDF
             }
 
             SaveRightPanelTabSelectionUserSetting();
+            UpdateRightPanelTabContentVisibility();
 
             if (IsThumbnailsTabSelected())
             {
@@ -27235,6 +27552,45 @@ namespace AnonPDF
                 if (pagesTabControl.SelectedTab == pagesListTabPage)
                 {
                     SyncPagesListSelectionToCurrentPage(ensureVisible: true);
+                }
+            }
+        }
+
+        private void UpdateRightPanelTabContentVisibility()
+        {
+            if (pagesTabControl == null)
+            {
+                return;
+            }
+
+            bool pagesVisible = pagesTabControl.SelectedTab == pagesListTabPage;
+            bool thumbnailsVisible = pagesTabControl.SelectedTab == thumbnailsTabPage;
+            bool layersVisible = pagesTabControl.SelectedTab == layersTabPage;
+
+            if (pagesListView != null)
+            {
+                pagesListView.Visible = pagesVisible;
+                if (pagesVisible)
+                {
+                    pagesListView.Invalidate();
+                }
+            }
+
+            if (thumbnailsListView != null)
+            {
+                thumbnailsListView.Visible = thumbnailsVisible;
+                if (thumbnailsVisible)
+                {
+                    thumbnailsListView.Invalidate();
+                }
+            }
+
+            if (layersTabPlaceholderPanel != null)
+            {
+                layersTabPlaceholderPanel.Visible = layersVisible;
+                if (layersVisible)
+                {
+                    layersTabPlaceholderPanel.Invalidate(true);
                 }
             }
         }
@@ -44297,6 +44653,17 @@ namespace AnonPDF
                 format = "TextLocation_ToStringFormat";
             }
             return string.Format(format, PageNumber, Rect);
+        }
+    }
+
+    public class ThemedDataGridView : DataGridView
+    {
+        public ThemedDataGridView()
+        {
+            DoubleBuffered = true;
+            ResizeRedraw = true;
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            UpdateStyles();
         }
     }
 
