@@ -14,6 +14,9 @@ namespace AnonPDF
         private readonly BindingList<LayerRowModel> layerRows;
         private readonly Dictionary<string, int> layerUsageCounts;
         private readonly DataGridView layersGridView;
+        private readonly Color checkBoxBorderColor;
+        private readonly Color checkBoxAccentColor;
+        private readonly Color checkBoxBackColor;
         private readonly Button addButton;
         private readonly Button deleteButton;
         private readonly Button moveUpButton;
@@ -26,8 +29,14 @@ namespace AnonPDF
         internal LayerManagementDialog(
             IEnumerable<LayerDefinition> layers,
             string activeLayerId,
-            IDictionary<string, int> usageCounts)
+            IDictionary<string, int> usageCounts,
+            Color checkBoxBorderColor,
+            Color checkBoxAccentColor,
+            Color checkBoxBackColor)
         {
+            this.checkBoxBorderColor = checkBoxBorderColor;
+            this.checkBoxAccentColor = checkBoxAccentColor;
+            this.checkBoxBackColor = checkBoxBackColor;
             layerUsageCounts = new Dictionary<string, int>(usageCounts ?? new Dictionary<string, int>(), StringComparer.OrdinalIgnoreCase);
             layerRows = new BindingList<LayerRowModel>(
                 (layers ?? Enumerable.Empty<LayerDefinition>())
@@ -67,10 +76,12 @@ namespace AnonPDF
             layersGridView.CellValueChanged += LayersGridView_CellValueChanged;
             layersGridView.CellDoubleClick += LayersGridView_CellDoubleClick;
             layersGridView.CellContentClick += LayersGridView_CellContentClick;
+            layersGridView.CellPainting += LayersGridView_CellPainting;
             layersGridView.SelectionChanged += (_, __) => UpdateButtonState();
 
             layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
             {
+                Name = "DialogLayersActiveColumn",
                 DataPropertyName = nameof(LayerRowModel.IsActive),
                 HeaderText = Tr("Dialog_Layers_Column_Active"),
                 Width = 56,
@@ -78,14 +89,27 @@ namespace AnonPDF
             });
             layersGridView.Columns.Add(new DataGridViewTextBoxColumn
             {
+                Name = "DialogLayersNameColumn",
                 DataPropertyName = nameof(LayerRowModel.Name),
                 HeaderText = Tr("Dialog_Layers_Column_Name"),
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                MinimumWidth = 180,
+                FillWeight = 45f,
+                MinimumWidth = 160,
+                SortMode = DataGridViewColumnSortMode.NotSortable
+            });
+            layersGridView.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                Name = "DialogLayersGroupColumn",
+                DataPropertyName = nameof(LayerRowModel.GroupName),
+                HeaderText = Tr("Dialog_Layers_Column_Group"),
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
+                FillWeight = 35f,
+                MinimumWidth = 140,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
             layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
             {
+                Name = "DialogLayersVisibleColumn",
                 DataPropertyName = nameof(LayerRowModel.IsVisible),
                 HeaderText = Tr("Dialog_Layers_Column_Visible"),
                 Width = 76,
@@ -93,6 +117,7 @@ namespace AnonPDF
             });
             layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
             {
+                Name = "DialogLayersLockedColumn",
                 DataPropertyName = nameof(LayerRowModel.IsLocked),
                 HeaderText = Tr("Dialog_Layers_Column_Locked"),
                 Width = 82,
@@ -100,6 +125,7 @@ namespace AnonPDF
             });
             layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
             {
+                Name = "DialogLayersExportColumn",
                 DataPropertyName = nameof(LayerRowModel.ExportEnabled),
                 HeaderText = Tr("Dialog_Layers_Column_Export"),
                 Width = 82,
@@ -107,6 +133,7 @@ namespace AnonPDF
             });
             layersGridView.Columns.Add(new DataGridViewTextBoxColumn
             {
+                Name = "DialogLayersUsageColumn",
                 DataPropertyName = nameof(LayerRowModel.UsageCount),
                 HeaderText = Tr("Dialog_Layers_Column_ObjectCount"),
                 Width = 72,
@@ -295,6 +322,7 @@ namespace AnonPDF
             {
                 Id = Guid.NewGuid().ToString("N"),
                 Name = GenerateNewLayerName(),
+                GroupName = string.Empty,
                 IsVisible = true,
                 IsLocked = false,
                 ExportEnabled = true,
@@ -429,6 +457,7 @@ namespace AnonPDF
             foreach (LayerRowModel row in layerRows)
             {
                 row.Name = (row.Name ?? string.Empty).Trim();
+                row.GroupName = (row.GroupName ?? string.Empty).Trim();
                 if (string.IsNullOrWhiteSpace(row.Name))
                 {
                     row.Name = string.Equals(row.Id, PDFForm.WorkLayerId, StringComparison.OrdinalIgnoreCase)
@@ -473,7 +502,9 @@ namespace AnonPDF
             }
 
             DataGridViewColumn column = layersGridView.Columns[e.ColumnIndex];
-            if (!string.Equals(column.DataPropertyName, nameof(LayerRowModel.Name), StringComparison.Ordinal))
+            bool isNameColumn = string.Equals(column.DataPropertyName, nameof(LayerRowModel.Name), StringComparison.Ordinal);
+            bool isGroupColumn = string.Equals(column.DataPropertyName, nameof(LayerRowModel.GroupName), StringComparison.Ordinal);
+            if (!isNameColumn && !isGroupColumn)
             {
                 return;
             }
@@ -484,17 +515,23 @@ namespace AnonPDF
                 return;
             }
 
-            if (PromptForLayerName(row.Name, out string updatedName))
+            if (isNameColumn && PromptForValue(Tr("Dialog_Layers_Rename_Title"), Tr("Dialog_Layers_Rename_Label"), row.Name, out string updatedName))
             {
                 row.Name = updatedName;
                 layersGridView.Refresh();
                 RaisePreviewChanged();
             }
+            else if (isGroupColumn && PromptForValue(Tr("Dialog_Layers_Group_Title"), Tr("Dialog_Layers_Group_Label"), row.GroupName, out string updatedGroupName))
+            {
+                row.GroupName = updatedGroupName;
+                layersGridView.Refresh();
+                RaisePreviewChanged();
+            }
         }
 
-        private bool PromptForLayerName(string initialValue, out string layerName)
+        private bool PromptForValue(string title, string labelText, string initialValue, out string value)
         {
-            layerName = initialValue ?? string.Empty;
+            value = initialValue ?? string.Empty;
 
             using (Form prompt = new Form())
             using (TextBox inputTextBox = new TextBox())
@@ -502,7 +539,7 @@ namespace AnonPDF
             using (Button okButton = new Button())
             using (Button cancelButton = new Button())
             {
-                prompt.Text = Tr("Dialog_Layers_Rename_Title");
+                prompt.Text = title;
                 prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
                 prompt.MinimizeBox = false;
@@ -513,12 +550,12 @@ namespace AnonPDF
                 label.AutoSize = true;
                 label.Left = 12;
                 label.Top = 14;
-                label.Text = Tr("Dialog_Layers_Rename_Label");
+                label.Text = labelText;
 
                 inputTextBox.Left = 12;
                 inputTextBox.Top = 38;
                 inputTextBox.Width = 396;
-                inputTextBox.Text = layerName;
+                inputTextBox.Text = value;
 
                 okButton.Text = Tr("Dialog_Button_Save");
                 okButton.Width = 100;
@@ -552,7 +589,7 @@ namespace AnonPDF
                     return false;
                 }
 
-                layerName = (inputTextBox.Text ?? string.Empty).Trim();
+                value = (inputTextBox.Text ?? string.Empty).Trim();
                 return true;
             }
         }
@@ -638,9 +675,157 @@ namespace AnonPDF
             RaisePreviewChanged();
         }
 
+        private void LayersGridView_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || layersGridView == null)
+            {
+                return;
+            }
+
+            string columnName = layersGridView.Columns[e.ColumnIndex].Name;
+            bool isCheckboxColumn =
+                string.Equals(columnName, "DialogLayersActiveColumn", StringComparison.Ordinal) ||
+                string.Equals(columnName, "DialogLayersVisibleColumn", StringComparison.Ordinal) ||
+                string.Equals(columnName, "DialogLayersLockedColumn", StringComparison.Ordinal) ||
+                string.Equals(columnName, "DialogLayersExportColumn", StringComparison.Ordinal);
+            if (!isCheckboxColumn)
+            {
+                return;
+            }
+
+            if (!(layersGridView.Rows[e.RowIndex].DataBoundItem is LayerRowModel row))
+            {
+                return;
+            }
+
+            if (string.Equals(columnName, "DialogLayersExportColumn", StringComparison.Ordinal) &&
+                string.Equals(row.Id, PDFForm.WorkLayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                e.PaintBackground(e.CellBounds, true);
+                e.Handled = true;
+                return;
+            }
+
+            e.PaintBackground(e.CellBounds, true);
+            DrawThemedGridCheckBox(
+                e.Graphics,
+                e.CellBounds,
+                e.Value,
+                checkBoxBorderColor,
+                checkBoxAccentColor,
+                checkBoxBackColor,
+                e.CellStyle?.Font ?? layersGridView.Font);
+            e.Handled = true;
+        }
+
+        private static void DrawThemedGridCheckBox(Graphics graphics, Rectangle bounds, object value, Color borderBaseColor, Color accentColor, Color boxBackColor, Font font)
+        {
+            if (graphics == null)
+            {
+                return;
+            }
+
+            CheckState checkState = CheckState.Unchecked;
+            switch (value)
+            {
+                case CheckState stateValue:
+                    checkState = stateValue;
+                    break;
+                case bool boolValue:
+                    checkState = boolValue ? CheckState.Checked : CheckState.Unchecked;
+                    break;
+            }
+
+            int side = Math.Max(13, Math.Min(18, (font?.Height ?? SystemFonts.DefaultFont.Height) - 1));
+            var glyphRect = new Rectangle(
+                bounds.Left + (bounds.Width - side) / 2,
+                bounds.Top + (bounds.Height - side) / 2,
+                side,
+                side);
+
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+            Color borderColor = DarkenColor(borderBaseColor, 0.18f);
+
+            using (var backBrush = new SolidBrush(boxBackColor))
+            using (var borderPen = new Pen(borderColor, 1f))
+            {
+                graphics.FillRectangle(backBrush, glyphRect);
+                graphics.DrawRectangle(borderPen, glyphRect.X, glyphRect.Y, glyphRect.Width - 1, glyphRect.Height - 1);
+            }
+
+            if (checkState == CheckState.Indeterminate)
+            {
+                Rectangle indeterminateRect = Rectangle.Inflate(glyphRect, -3, -3);
+                using (var accentBrush = new SolidBrush(accentColor))
+                {
+                    graphics.FillRectangle(accentBrush, indeterminateRect);
+                }
+                Color minusColor = GetContrastColor(accentColor);
+                using (var minusPen = new Pen(minusColor, 2f))
+                {
+                    minusPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                    minusPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                    int y = glyphRect.Top + glyphRect.Height / 2;
+                    int x1 = glyphRect.Left + (int)(glyphRect.Width * 0.24f);
+                    int x2 = glyphRect.Right - (int)(glyphRect.Width * 0.24f) - 1;
+                    graphics.DrawLine(minusPen, x1, y, x2, y);
+                }
+                return;
+            }
+
+            if (checkState != CheckState.Checked)
+            {
+                return;
+            }
+
+            Rectangle fillRect = Rectangle.Inflate(glyphRect, -2, -2);
+            using (var accentBrush = new SolidBrush(accentColor))
+            {
+                graphics.FillRectangle(accentBrush, fillRect);
+            }
+
+            Color checkColor = GetContrastColor(accentColor);
+            using (var checkPen = new Pen(checkColor, 2f))
+            {
+                checkPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                checkPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+
+                int x1 = glyphRect.Left + (int)(glyphRect.Width * 0.24f);
+                int y1 = glyphRect.Top + (int)(glyphRect.Height * 0.55f);
+                int x2 = glyphRect.Left + (int)(glyphRect.Width * 0.44f);
+                int y2 = glyphRect.Top + (int)(glyphRect.Height * 0.74f);
+                int x3 = glyphRect.Left + (int)(glyphRect.Width * 0.76f);
+                int y3 = glyphRect.Top + (int)(glyphRect.Height * 0.30f);
+
+                graphics.DrawLines(checkPen, new[]
+                {
+                    new Point(x1, y1),
+                    new Point(x2, y2),
+                    new Point(x3, y3)
+                });
+            }
+        }
+
+        private static Color GetContrastColor(Color color)
+        {
+            double luminance = ((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B)) / 255d;
+            return luminance > 0.55 ? Color.Black : Color.White;
+        }
+
+        private static Color DarkenColor(Color color, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            int r = (int)Math.Round(color.R * (1f - amount));
+            int g = (int)Math.Round(color.G * (1f - amount));
+            int b = (int)Math.Round(color.B * (1f - amount));
+            return Color.FromArgb(color.A, Math.Max(0, r), Math.Max(0, g), Math.Max(0, b));
+        }
+
         private sealed class LayerRowModel : INotifyPropertyChanged
         {
             private string name = string.Empty;
+            private string groupName = string.Empty;
             private bool isActive;
             private bool isVisible = true;
             private bool isLocked;
@@ -657,6 +842,20 @@ namespace AnonPDF
                     {
                         name = value;
                         OnPropertyChanged(nameof(Name));
+                    }
+                }
+            }
+
+            public string GroupName
+            {
+                get => groupName;
+                set
+                {
+                    string normalized = (value ?? string.Empty).Trim();
+                    if (!string.Equals(groupName, normalized, StringComparison.Ordinal))
+                    {
+                        groupName = normalized;
+                        OnPropertyChanged(nameof(GroupName));
                     }
                 }
             }
@@ -723,6 +922,7 @@ namespace AnonPDF
                 {
                     Id = PDFForm.NormalizeLayerIdForExternalUse(layer?.Id),
                     Name = layer?.Name ?? string.Empty,
+                    GroupName = layer?.GroupName ?? string.Empty,
                     IsActive = isActive,
                     IsVisible = layer == null || layer.IsVisible,
                     IsLocked = layer != null && layer.IsLocked,
@@ -738,6 +938,7 @@ namespace AnonPDF
                 {
                     Id = PDFForm.NormalizeLayerIdForExternalUse(Id),
                     Name = (Name ?? string.Empty).Trim(),
+                    GroupName = (GroupName ?? string.Empty).Trim(),
                     Order = order,
                     IsVisible = IsVisible,
                     IsLocked = IsLocked,

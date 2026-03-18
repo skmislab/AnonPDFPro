@@ -239,15 +239,20 @@ Für duplizierte Objekte gibt es zusätzlich:
 
 ## 6.11 Ebenen
 
-Die Anwendung unterstützt Arbeitsebenen für Markierungen und Objekte.
+Die Anwendung unterst?tzt Arbeitsebenen f?r Markierungen und Objekte.
 
-- Im Tab `Ebenen` im rechten Panel können aktive Ebene, Sichtbarkeit und Sperre schnell geändert werden.
-- `Werkzeuge -> Ebenen` öffnet das vollständige Ebenenfenster.
+- Im Tab `Ebenen` im rechten Panel k?nnen aktive Ebene, Sichtbarkeit und Sperre schnell ge?ndert werden.
+- Ebenen k?nnen zus?tzlich ?ber einen gemeinsamen Gruppennamen gruppiert werden.
+- Mit der Gruppen-Checkbox lassen sich Sichtbarkeit oder Sperre f?r alle Ebenen der Gruppe mit einem Klick ?ndern.
+- Haben Ebenen einer Gruppe unterschiedliche Zust?nde, zeigt die Gruppen-Checkbox einen gemischten Zustand an.
+- Ein Doppelklick auf den Gruppennamen im Tab `Ebenen` erm?glicht das Umbenennen der Gruppe.
+- `Werkzeuge -> Ebenen` ?ffnet das vollst?ndige Ebenenfenster.
+- Im Ebenendialog kann eine Ebene ?ber die Spalte `Gruppe` einer Gruppe zugeordnet werden.
 - Neue Markierungen und neue Objekte werden auf der aktuell aktiven Ebene erstellt.
-- Eingefügte Objekte werden auf der aktiven Ebene erstellt und behalten die Stapelreihenfolge der Quelle.
+- Eingef?gte Objekte werden auf der aktiven Ebene erstellt und behalten die Stapelreihenfolge der Quelle.
 - Die Ebene `Robocza` liegt immer ganz oben und wird nicht in das finale PDF exportiert.
 - Mit ausgeblendeten Ebenen kann in der Vorschau nicht interagiert werden.
-- Gesperrte Ebenen blockieren Verschieben, Bearbeiten, Skalieren und Löschen von Objekten.
+- Gesperrte Ebenen blockieren Verschieben, Bearbeiten, Skalieren und L?schen von Objekten.
 - Beim Projektimport bleiben die Zuordnungen von Objekten zu Ebenen erhalten.
 
 # 7. Häufige Probleme und Hinweise

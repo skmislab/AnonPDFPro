@@ -253,7 +253,12 @@ For duplicated objects, an additional option is available:
 The application supports working layers for redaction selections and objects.
 
 - The `Layers` tab in the right panel lets you quickly change the active layer, visibility, and lock state.
+- Layers can also be grouped by a shared group name.
+- A group checkbox lets you change visibility or lock state for all layers in that group with one click.
+- If layers in a group have different states, the group checkbox shows a mixed state.
+- Double-clicking a group name in the `Layers` tab lets you rename that group.
 - `Tools -> Layers` opens the full layer management window.
+- In the layer management window you can assign a layer to a group using the `Group` column.
 - New selections and new objects are created on the currently active layer.
 - Pasted objects are created on the active layer and keep the source stacking order.
 - The `Work` layer is always on top and is not exported to the final PDF.
@@ -299,6 +304,7 @@ Recent versions include:
 - Remembering right panel width between application launches.
 - Remembering and restoring scroll positions in right panels (`Page List` and `Thumbnails`) when resuming a project.
 - Working layers with separate visibility, lock state, and active layer selection.
+- Grouping layers by a shared name, with quick visibility and lock toggles for the whole group.
 - Extended context menus for selections and objects (copy, cut, duplicate, remove duplicated copies).
 - Corner-handle scaling for single objects and object groups (`SHIFT` - proportional, `ALT` - from center).
 - The `Arrow` option in the text dialog, with adjustable arrow line width, head length, and head width.

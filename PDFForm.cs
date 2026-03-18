@@ -320,6 +320,9 @@ namespace AnonPDF
         private List<string> objectSelectionCycleKeys = new List<string>();
         private DataGridView layersGridView;
         private bool suppressLayersGridEvents;
+        private List<LayerDefinition> pendingLayerPanelApplyLayers;
+        private string pendingLayerPanelApplyActiveLayerId;
+        private Timer layerPanelApplyTimer;
         private ObjectClipboardSnapshot objectClipboardSnapshot;
         private int objectClipboardPasteCount;
         private bool preferObjectClipboardPaste;
@@ -1929,7 +1932,10 @@ namespace AnonPDF
             using (var dialog = new LayerManagementDialog(
                 documentLayers.Select(layer => layer.Clone()).ToList(),
                 activeLayerId,
-                BuildLayerUsageCounts()))
+                BuildLayerUsageCounts(),
+                CurrentTheme.BorderColor,
+                CurrentTheme.SelectionBackColor,
+                CurrentTheme.SectionBackColor))
             {
                 dialog.PreviewChanged += (previewLayers, previewActiveLayerId) =>
                     ApplyLayerConfiguration(previewLayers, previewActiveLayerId, markProjectChanged: false);
@@ -1990,6 +1996,7 @@ namespace AnonPDF
                 Width = 28,
                 MinimumWidth = 28,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                ThreeState = true,
                 HeaderText = "\U0001F441",
                 ToolTipText = LocalizedText("Layers_Tab_Header_Visible_Tooltip")
             };
@@ -1999,6 +2006,7 @@ namespace AnonPDF
                 Width = 28,
                 MinimumWidth = 28,
                 AutoSizeMode = DataGridViewAutoSizeColumnMode.None,
+                ThreeState = true,
                 HeaderText = "\U0001F512",
                 ToolTipText = LocalizedText("Layers_Tab_Header_Locked_Tooltip")
             };
@@ -2017,8 +2025,10 @@ namespace AnonPDF
             layersGridView.Columns.Add(nameColumn);
 
             layersGridView.CurrentCellDirtyStateChanged += LayersGridView_CurrentCellDirtyStateChanged;
+            layersGridView.CellContentClick += LayersGridView_CellContentClick;
             layersGridView.CellValueChanged += LayersGridView_CellValueChanged;
             layersGridView.CellDoubleClick += LayersGridView_CellDoubleClick;
+            layersGridView.CellPainting += LayersGridView_CellPainting;
             layersGridView.MouseEnter += LayersInteractionSurface_MouseEnter;
             layersGridView.MouseMove += LayersInteractionSurface_MouseMove;
 
@@ -2065,11 +2075,11 @@ namespace AnonPDF
             EnsureObjectLayerAssignments();
             PruneInvisibleLayerInteractionState();
             delayCommentAndSelectionOverlayUntilPreviewReady = previewNeedsRefresh;
+            RefreshLayersTab();
             if (previewNeedsRefresh)
             {
                 ShowRedactPreview();
             }
-            RefreshLayersTab();
             pagesListView?.Invalidate();
             thumbnailsListView?.Invalidate();
             pdfViewer?.Invalidate();
@@ -2079,6 +2089,84 @@ namespace AnonPDF
                 projectWasChangedAfterLastSave = true;
                 SyncProjectChangedFlagWithStateSignature();
             }
+        }
+
+        private void QueueLayerPanelApply(IEnumerable<LayerDefinition> layers, string nextActiveLayerId)
+        {
+            pendingLayerPanelApplyLayers = (layers ?? Enumerable.Empty<LayerDefinition>())
+                .Select(layer => layer?.Clone())
+                .Where(layer => layer != null)
+                .ToList();
+            pendingLayerPanelApplyActiveLayerId = NormalizeLayerIdValue(nextActiveLayerId);
+            LogDebug($"LayerPanel queue active={pendingLayerPanelApplyActiveLayerId} pendingCount={pendingLayerPanelApplyLayers.Count}");
+            RefreshLayersTab();
+
+            if (layerPanelApplyTimer == null)
+            {
+                layerPanelApplyTimer = new Timer
+                {
+                    Interval = 160
+                };
+                layerPanelApplyTimer.Tick += (_, __) =>
+                {
+                    layerPanelApplyTimer.Stop();
+                    List<LayerDefinition> layersToApply = pendingLayerPanelApplyLayers;
+                    string activeLayerToApply = pendingLayerPanelApplyActiveLayerId;
+
+                    if (layersToApply == null)
+                    {
+                        return;
+                    }
+
+                    LogDebug($"LayerPanel apply active={activeLayerToApply} pendingCount={layersToApply.Count}");
+                    ApplyLayerConfiguration(layersToApply, activeLayerToApply, markProjectChanged: true);
+                    pendingLayerPanelApplyLayers = null;
+                    pendingLayerPanelApplyActiveLayerId = null;
+                    RefreshLayersTab();
+                };
+            }
+
+            layerPanelApplyTimer.Stop();
+            layerPanelApplyTimer.Start();
+        }
+
+        private IEnumerable<LayerDefinition> GetLayerPanelSourceLayers()
+        {
+            return pendingLayerPanelApplyLayers ?? documentLayers;
+        }
+
+        private string GetLayerPanelSourceActiveLayerId()
+        {
+            return string.IsNullOrWhiteSpace(pendingLayerPanelApplyActiveLayerId)
+                ? activeLayerId
+                : pendingLayerPanelApplyActiveLayerId;
+        }
+
+        private enum LayerPanelRowKind
+        {
+            Group,
+            Layer
+        }
+
+        private sealed class LayerPanelRowTag
+        {
+            public LayerPanelRowKind Kind { get; set; }
+            public string LayerId { get; set; }
+            public string GroupName { get; set; }
+        }
+
+        private enum LayerGroupVisibilityState
+        {
+            NoneVisible,
+            AllVisible,
+            Mixed
+        }
+
+        private sealed class LayerPanelGroupEntry
+        {
+            public string GroupName { get; set; }
+            public int Order { get; set; }
+            public List<LayerDefinition> Layers { get; } = new List<LayerDefinition>();
         }
 
         private static bool HasLayerVisibilityChanged(IEnumerable<LayerDefinition> previousLayers, IEnumerable<LayerDefinition> nextLayers)
@@ -2147,6 +2235,173 @@ namespace AnonPDF
                        changedLayerIds.Contains(NormalizeLayerIdValue(comment.LayerId)));
         }
 
+        private static string NormalizeLayerGroupName(string groupName, bool forceNone = false)
+        {
+            if (forceNone)
+            {
+                return null;
+            }
+
+            string normalized = (groupName ?? string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+        }
+
+        private LayerGroupVisibilityState GetLayerGroupVisibilityState(string groupName, IEnumerable<LayerDefinition> sourceLayers = null)
+        {
+            string normalizedGroupName = NormalizeLayerGroupName(groupName);
+            if (string.IsNullOrWhiteSpace(normalizedGroupName))
+            {
+                return LayerGroupVisibilityState.NoneVisible;
+            }
+
+            List<LayerDefinition> groupedLayers = (sourceLayers ?? documentLayers)
+                .Where(layer => string.Equals(NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase)), normalizedGroupName, StringComparison.CurrentCultureIgnoreCase))
+                .ToList();
+            if (groupedLayers.Count == 0)
+            {
+                return LayerGroupVisibilityState.NoneVisible;
+            }
+
+            if (groupedLayers.All(layer => layer.IsVisible))
+            {
+                LogDebug($"LayerPanel groupVisible group={normalizedGroupName} state=all values=[{string.Join(",", groupedLayers.Select(layer => layer.IsVisible ? "1" : "0"))}]");
+                return LayerGroupVisibilityState.AllVisible;
+            }
+
+            if (groupedLayers.All(layer => !layer.IsVisible))
+            {
+                LogDebug($"LayerPanel groupVisible group={normalizedGroupName} state=none values=[{string.Join(",", groupedLayers.Select(layer => layer.IsVisible ? "1" : "0"))}]");
+                return LayerGroupVisibilityState.NoneVisible;
+            }
+
+            LogDebug($"LayerPanel groupVisible group={normalizedGroupName} state=mixed values=[{string.Join(",", groupedLayers.Select(layer => layer.IsVisible ? "1" : "0"))}]");
+            return LayerGroupVisibilityState.Mixed;
+        }
+
+        private LayerGroupVisibilityState GetLayerGroupLockedState(string groupName, IEnumerable<LayerDefinition> sourceLayers = null)
+        {
+            string normalizedGroupName = NormalizeLayerGroupName(groupName);
+            if (string.IsNullOrWhiteSpace(normalizedGroupName))
+            {
+                return LayerGroupVisibilityState.NoneVisible;
+            }
+
+            List<LayerDefinition> groupedLayers = (sourceLayers ?? documentLayers)
+                .Where(layer => string.Equals(NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase)), normalizedGroupName, StringComparison.CurrentCultureIgnoreCase))
+                .ToList();
+            if (groupedLayers.Count == 0)
+            {
+                return LayerGroupVisibilityState.NoneVisible;
+            }
+
+            if (groupedLayers.All(layer => layer.IsLocked))
+            {
+                return LayerGroupVisibilityState.AllVisible;
+            }
+
+            if (groupedLayers.All(layer => !layer.IsLocked))
+            {
+                return LayerGroupVisibilityState.NoneVisible;
+            }
+
+            return LayerGroupVisibilityState.Mixed;
+        }
+
+        private bool SetLayerGroupVisibility(List<LayerDefinition> layers, string groupName, bool visible)
+        {
+            string normalizedGroupName = NormalizeLayerGroupName(groupName);
+            if (string.IsNullOrWhiteSpace(normalizedGroupName))
+            {
+                return false;
+            }
+
+            bool changed = false;
+            foreach (LayerDefinition layer in layers.Where(layer =>
+                         string.Equals(NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase)), normalizedGroupName, StringComparison.CurrentCultureIgnoreCase)))
+            {
+                if (layer.IsVisible != visible)
+                {
+                    layer.IsVisible = visible;
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        private bool SetLayerGroupLocked(List<LayerDefinition> layers, string groupName, bool locked)
+        {
+            string normalizedGroupName = NormalizeLayerGroupName(groupName);
+            if (string.IsNullOrWhiteSpace(normalizedGroupName))
+            {
+                return false;
+            }
+
+            bool changed = false;
+            foreach (LayerDefinition layer in layers.Where(layer =>
+                         string.Equals(NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase)), normalizedGroupName, StringComparison.CurrentCultureIgnoreCase)))
+            {
+                if (layer.IsLocked != locked)
+                {
+                    layer.IsLocked = locked;
+                    changed = true;
+                }
+            }
+
+            return changed;
+        }
+
+        private List<object> BuildLayerPanelEntries()
+        {
+            var orderedLayers = GetLayerPanelSourceLayers()
+                .OrderBy(layer => layer.Order)
+                .ToList();
+            var entries = new List<object>();
+            var groupedEntries = orderedLayers
+                .Where(layer => !string.IsNullOrWhiteSpace(NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase))))
+                .GroupBy(layer => NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase)), StringComparer.CurrentCultureIgnoreCase)
+                .Select(group =>
+                {
+                    var entry = new LayerPanelGroupEntry
+                    {
+                        GroupName = group.Key,
+                        Order = group.Min(layer => layer.Order)
+                    };
+                    entry.Layers.AddRange(group.OrderBy(layer => layer.Order));
+                    return entry;
+                })
+                .OrderBy(entry => entry.Order)
+                .ToList();
+            var groupedNames = new HashSet<string>(groupedEntries.Select(entry => entry.GroupName), StringComparer.CurrentCultureIgnoreCase);
+
+            foreach (LayerDefinition layer in orderedLayers)
+            {
+                string normalizedGroupName = NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase));
+                if (string.IsNullOrWhiteSpace(normalizedGroupName))
+                {
+                    entries.Add(layer);
+                    continue;
+                }
+
+                if (!groupedNames.Remove(normalizedGroupName))
+                {
+                    continue;
+                }
+
+                LayerPanelGroupEntry groupEntry = groupedEntries.FirstOrDefault(entry =>
+                    string.Equals(entry.GroupName, normalizedGroupName, StringComparison.CurrentCultureIgnoreCase));
+                if (groupEntry == null)
+                {
+                    continue;
+                }
+
+                entries.Add(groupEntry);
+                entries.AddRange(groupEntry.Layers);
+            }
+
+            return entries;
+        }
+
         private void RefreshLayersTab()
         {
             if (layersGridView == null)
@@ -2154,19 +2409,87 @@ namespace AnonPDF
                 return;
             }
 
+            string sourceActiveLayerId = GetLayerPanelSourceActiveLayerId();
+            LogDebug($"LayerPanel refresh pending={(pendingLayerPanelApplyLayers != null ? 1 : 0)} active={sourceActiveLayerId}");
+
             suppressLayersGridEvents = true;
             try
             {
                 layersGridView.Rows.Clear();
-                foreach (LayerDefinition layer in documentLayers.OrderBy(layer => layer.Order))
+                foreach (object entry in BuildLayerPanelEntries())
                 {
+                    if (entry is LayerPanelGroupEntry group)
+                    {
+                        IEnumerable<LayerDefinition> sourceLayers = GetLayerPanelSourceLayers();
+                        LayerGroupVisibilityState visibleState = GetLayerGroupVisibilityState(group.GroupName, sourceLayers);
+                        LayerGroupVisibilityState lockedState = GetLayerGroupLockedState(group.GroupName, sourceLayers);
+                        object visibleValue = visibleState == LayerGroupVisibilityState.Mixed
+                            ? CheckState.Indeterminate
+                            : (object)(visibleState == LayerGroupVisibilityState.AllVisible);
+                        object lockedValue = lockedState == LayerGroupVisibilityState.Mixed
+                            ? CheckState.Indeterminate
+                            : (object)(lockedState == LayerGroupVisibilityState.AllVisible);
+                        int groupRowIndex = layersGridView.Rows.Add(
+                            null,
+                            visibleValue,
+                            lockedValue,
+                            group.GroupName);
+                        DataGridViewRow groupRow = layersGridView.Rows[groupRowIndex];
+                        groupRow.Tag = new LayerPanelRowTag
+                        {
+                            Kind = LayerPanelRowKind.Group,
+                            GroupName = group.GroupName
+                        };
+                        groupRow.Cells[0].Style.NullValue = string.Empty;
+                        groupRow.Cells[0].ReadOnly = true;
+                        if (groupRow.Cells[1] is DataGridViewCheckBoxCell groupVisibleCell)
+                        {
+                            groupVisibleCell.ThreeState = true;
+                        }
+                        if (groupRow.Cells[2] is DataGridViewCheckBoxCell groupLockedCell)
+                        {
+                            groupLockedCell.ThreeState = true;
+                        }
+                        groupRow.Cells[1].ReadOnly = true;
+                        groupRow.Cells[2].ReadOnly = true;
+                        groupRow.DefaultCellStyle.BackColor = CurrentTheme.PanelBackColor;
+                        groupRow.DefaultCellStyle.SelectionBackColor = CurrentTheme.PanelBackColor;
+                        groupRow.DefaultCellStyle.SelectionForeColor = CurrentTheme.TextPrimaryColor;
+                        continue;
+                    }
+
+                    LayerDefinition layer = entry as LayerDefinition;
+                    if (layer == null)
+                    {
+                        continue;
+                    }
+
                     int rowIndex = layersGridView.Rows.Add(
-                        string.Equals(NormalizeLayerIdValue(activeLayerId), NormalizeLayerIdValue(layer.Id), StringComparison.OrdinalIgnoreCase),
+                        string.Equals(NormalizeLayerIdValue(sourceActiveLayerId), NormalizeLayerIdValue(layer.Id), StringComparison.OrdinalIgnoreCase),
                         layer.IsVisible,
                         layer.IsLocked,
-                        layer.Name);
+                        string.IsNullOrWhiteSpace(NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase)))
+                            ? layer.Name
+                            : "   " + layer.Name);
                     DataGridViewRow row = layersGridView.Rows[rowIndex];
-                    row.Tag = NormalizeLayerIdValue(layer.Id);
+                    row.Tag = new LayerPanelRowTag
+                    {
+                        Kind = LayerPanelRowKind.Layer,
+                        LayerId = NormalizeLayerIdValue(layer.Id),
+                        GroupName = NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase))
+                    };
+                    if (row.Cells[0] is DataGridViewCheckBoxCell activeCell)
+                    {
+                        activeCell.ThreeState = false;
+                    }
+                    if (row.Cells[1] is DataGridViewCheckBoxCell visibleCell)
+                    {
+                        visibleCell.ThreeState = false;
+                    }
+                    if (row.Cells[2] is DataGridViewCheckBoxCell lockedCell)
+                    {
+                        lockedCell.ThreeState = false;
+                    }
                 }
 
                 layersGridView.ClearSelection();
@@ -2186,73 +2509,100 @@ namespace AnonPDF
             }
         }
 
-        private void LayersGridView_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        private void LayersGridView_CellContentClick(object sender, DataGridViewCellEventArgs e)
         {
             if (suppressLayersGridEvents || layersGridView == null || e.RowIndex < 0 || e.ColumnIndex < 0)
             {
                 return;
             }
 
-            DataGridViewRow row = layersGridView.Rows[e.RowIndex];
-            string layerId = row.Tag as string;
-            if (string.IsNullOrWhiteSpace(layerId))
+            if (!(layersGridView.Rows[e.RowIndex].Tag is LayerPanelRowTag rowTag))
             {
                 return;
             }
 
-            List<LayerDefinition> updatedLayers = documentLayers.Select(layer => layer.Clone()).ToList();
-            LayerDefinition targetLayer = updatedLayers.FirstOrDefault(layer =>
-                string.Equals(NormalizeLayerIdValue(layer.Id), NormalizeLayerIdValue(layerId), StringComparison.OrdinalIgnoreCase));
+            string columnName = layersGridView.Columns[e.ColumnIndex].Name;
+            List<LayerDefinition> sourceLayers = GetLayerPanelSourceLayers()
+                .Select(layer => layer?.Clone())
+                .Where(layer => layer != null)
+                .ToList();
+            string sourceActiveLayerId = GetLayerPanelSourceActiveLayerId();
+            LogDebug($"LayerPanel click row={(rowTag.Kind == LayerPanelRowKind.Group ? "group" : "layer")} col={columnName} group={rowTag.GroupName ?? "-"} layer={rowTag.LayerId ?? "-"} pending={(pendingLayerPanelApplyLayers != null ? 1 : 0)}");
+            if (rowTag.Kind == LayerPanelRowKind.Group)
+            {
+                bool changed = false;
+                if (string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal))
+                {
+                    bool nextVisible = GetLayerGroupVisibilityState(rowTag.GroupName, sourceLayers) != LayerGroupVisibilityState.AllVisible;
+                    changed = SetLayerGroupVisibility(sourceLayers, rowTag.GroupName, nextVisible);
+                }
+                else if (string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
+                {
+                    bool nextLocked = GetLayerGroupLockedState(rowTag.GroupName, sourceLayers) != LayerGroupVisibilityState.AllVisible;
+                    changed = SetLayerGroupLocked(sourceLayers, rowTag.GroupName, nextLocked);
+                }
+
+                if (!changed)
+                {
+                    RefreshLayersTab();
+                    return;
+                }
+
+                QueueLayerPanelApply(sourceLayers, sourceActiveLayerId);
+                return;
+            }
+
+            if (!string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal) &&
+                !string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal) &&
+                !string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            LayerDefinition targetLayer = sourceLayers.FirstOrDefault(layer =>
+                string.Equals(NormalizeLayerIdValue(layer.Id), NormalizeLayerIdValue(rowTag.LayerId), StringComparison.OrdinalIgnoreCase));
             if (targetLayer == null)
             {
                 RefreshLayersTab();
                 return;
             }
 
-            string nextActiveLayerId = activeLayerId;
-            bool changed = false;
-            string columnName = layersGridView.Columns[e.ColumnIndex].Name;
-
+            string nextActiveLayerId = sourceActiveLayerId;
+            bool layerChanged = false;
             if (string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal))
             {
-                bool makeActive = Convert.ToBoolean(row.Cells[e.ColumnIndex].Value ?? false);
-                if (makeActive)
+                if (!string.Equals(NormalizeLayerIdValue(sourceActiveLayerId), NormalizeLayerIdValue(targetLayer.Id), StringComparison.OrdinalIgnoreCase))
                 {
                     nextActiveLayerId = targetLayer.Id;
-                    changed = !string.Equals(NormalizeLayerIdValue(activeLayerId), NormalizeLayerIdValue(targetLayer.Id), StringComparison.OrdinalIgnoreCase);
-                }
-                else
-                {
-                    RefreshLayersTab();
-                    return;
+                    layerChanged = true;
                 }
             }
             else if (string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal))
             {
-                bool nextVisible = Convert.ToBoolean(row.Cells[e.ColumnIndex].Value ?? false);
-                if (targetLayer.IsVisible != nextVisible)
-                {
-                    targetLayer.IsVisible = nextVisible;
-                    changed = true;
-                }
+                targetLayer.IsVisible = !targetLayer.IsVisible;
+                layerChanged = true;
             }
             else if (string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal))
             {
-                bool nextLocked = Convert.ToBoolean(row.Cells[e.ColumnIndex].Value ?? false);
-                if (targetLayer.IsLocked != nextLocked)
-                {
-                    targetLayer.IsLocked = nextLocked;
-                    changed = true;
-                }
+                targetLayer.IsLocked = !targetLayer.IsLocked;
+                layerChanged = true;
             }
 
-            if (!changed)
+            if (!layerChanged)
             {
                 RefreshLayersTab();
                 return;
             }
 
-            ApplyLayerConfiguration(updatedLayers, nextActiveLayerId, markProjectChanged: true);
+            QueueLayerPanelApply(sourceLayers, nextActiveLayerId);
+        }
+
+        private void LayersGridView_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            if (suppressLayersGridEvents || layersGridView == null || e.RowIndex < 0 || e.ColumnIndex < 0)
+            {
+                return;
+            }
         }
 
         private void LayersGridView_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
@@ -2267,8 +2617,46 @@ namespace AnonPDF
                 return;
             }
 
-            DataGridViewRow row = layersGridView.Rows[e.RowIndex];
-            string layerId = row.Tag as string;
+            if (!(layersGridView.Rows[e.RowIndex].Tag is LayerPanelRowTag rowTag))
+            {
+                return;
+            }
+
+            if (rowTag.Kind == LayerPanelRowKind.Group)
+            {
+                if (!PromptForLayerGroupNameFromMainForm(rowTag.GroupName, out string updatedGroupName))
+                {
+                    RefreshLayersTab();
+                    return;
+                }
+
+                List<LayerDefinition> updatedLayers = documentLayers.Select(layer => layer.Clone()).ToList();
+                string sourceGroupName = NormalizeLayerGroupName(rowTag.GroupName);
+                string targetGroupName = NormalizeLayerGroupName(updatedGroupName);
+                bool changed = false;
+                foreach (LayerDefinition layer in updatedLayers.Where(layer =>
+                             string.Equals(NormalizeLayerGroupName(layer.GroupName, string.Equals(NormalizeLayerIdValue(layer.Id), WorkLayerId, StringComparison.OrdinalIgnoreCase)), sourceGroupName, StringComparison.CurrentCultureIgnoreCase)))
+                {
+                    if (!string.Equals(NormalizeLayerGroupName(layer.GroupName), targetGroupName, StringComparison.CurrentCulture))
+                    {
+                        layer.GroupName = targetGroupName;
+                        changed = true;
+                    }
+                }
+
+                if (changed)
+                {
+                    ApplyLayerConfiguration(updatedLayers, activeLayerId, markProjectChanged: true);
+                }
+                else
+                {
+                    RefreshLayersTab();
+                }
+
+                return;
+            }
+
+            string layerId = rowTag.LayerId;
             if (string.IsNullOrWhiteSpace(layerId))
             {
                 return;
@@ -2309,7 +2697,167 @@ namespace AnonPDF
 
         private bool PromptForLayerNameFromMainForm(string initialValue, out string layerName)
         {
-            layerName = initialValue ?? string.Empty;
+            return PromptForLayerValueFromMainForm(
+                LocalizedText("Dialog_Layers_Rename_Title"),
+                LocalizedText("Dialog_Layers_Rename_Label"),
+                initialValue,
+                out layerName);
+        }
+
+        private void LayersGridView_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0 || layersGridView == null)
+            {
+                return;
+            }
+
+            string columnName = layersGridView.Columns[e.ColumnIndex].Name;
+            bool isCheckboxColumn =
+                string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal) ||
+                string.Equals(columnName, "LayersVisibleColumn", StringComparison.Ordinal) ||
+                string.Equals(columnName, "LayersLockedColumn", StringComparison.Ordinal);
+            if (!isCheckboxColumn)
+            {
+                return;
+            }
+
+            if (!(layersGridView.Rows[e.RowIndex].Tag is LayerPanelRowTag rowTag))
+            {
+                return;
+            }
+
+            if (rowTag.Kind == LayerPanelRowKind.Group && string.Equals(columnName, "LayersActiveColumn", StringComparison.Ordinal))
+            {
+                e.PaintBackground(e.CellBounds, true);
+                e.Handled = true;
+                return;
+            }
+
+            e.PaintBackground(e.CellBounds, true);
+            DrawThemedGridCheckBox(e.Graphics, e.CellBounds, e.State, e.Value, CurrentTheme, e.CellStyle?.Font ?? layersGridView.Font);
+            e.Handled = true;
+        }
+
+        private static void DrawThemedGridCheckBox(Graphics graphics, Rectangle bounds, DataGridViewElementStates state, object value, UiThemePalette theme, Font font)
+        {
+            if (graphics == null || theme == null)
+            {
+                return;
+            }
+
+            bool enabled = true;
+            CheckState checkState = CheckState.Unchecked;
+            switch (value)
+            {
+                case CheckState stateValue:
+                    checkState = stateValue;
+                    break;
+                case bool boolValue:
+                    checkState = boolValue ? CheckState.Checked : CheckState.Unchecked;
+                    break;
+            }
+
+            int side = Math.Max(13, Math.Min(18, (font?.Height ?? SystemFonts.DefaultFont.Height) - 1));
+            var glyphRect = new Rectangle(
+                bounds.Left + (bounds.Width - side) / 2,
+                bounds.Top + (bounds.Height - side) / 2,
+                side,
+                side);
+
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+            System.Drawing.Color normalBorderColor = LayerCheckboxDarkenColor(theme.BorderColor, 0.18f);
+            System.Drawing.Color borderColor = enabled ? normalBorderColor : ControlPaint.Light(normalBorderColor);
+            System.Drawing.Color accentColor = enabled ? theme.SelectionBackColor : ControlPaint.Light(theme.SelectionBackColor);
+            System.Drawing.Color boxBackColor = enabled ? theme.SectionBackColor : ControlPaint.Light(theme.SectionBackColor);
+
+            using (var backBrush = new SolidBrush(boxBackColor))
+            using (var borderPen = new Pen(borderColor, 1f))
+            {
+                graphics.FillRectangle(backBrush, glyphRect);
+                graphics.DrawRectangle(borderPen, glyphRect.X, glyphRect.Y, glyphRect.Width - 1, glyphRect.Height - 1);
+            }
+
+            if (checkState == CheckState.Indeterminate)
+            {
+                Rectangle indeterminateRect = Rectangle.Inflate(glyphRect, -3, -3);
+                using (var accentBrush = new SolidBrush(accentColor))
+                {
+                    graphics.FillRectangle(accentBrush, indeterminateRect);
+                }
+                System.Drawing.Color minusColor = LayerCheckboxGetContrastColor(accentColor);
+                using (var minusPen = new Pen(minusColor, 2f))
+                {
+                    minusPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                    minusPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+                    int y = glyphRect.Top + glyphRect.Height / 2;
+                    int x1 = glyphRect.Left + (int)(glyphRect.Width * 0.24f);
+                    int x2 = glyphRect.Right - (int)(glyphRect.Width * 0.24f) - 1;
+                    graphics.DrawLine(minusPen, x1, y, x2, y);
+                }
+                return;
+            }
+
+            if (checkState != CheckState.Checked)
+            {
+                return;
+            }
+
+            Rectangle fillRect = Rectangle.Inflate(glyphRect, -2, -2);
+            using (var accentBrush = new SolidBrush(accentColor))
+            {
+                graphics.FillRectangle(accentBrush, fillRect);
+            }
+
+            System.Drawing.Color checkColor = LayerCheckboxGetContrastColor(accentColor);
+            using (var checkPen = new Pen(checkColor, 2f))
+            {
+                checkPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                checkPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+
+                int x1 = glyphRect.Left + (int)(glyphRect.Width * 0.24f);
+                int y1 = glyphRect.Top + (int)(glyphRect.Height * 0.55f);
+                int x2 = glyphRect.Left + (int)(glyphRect.Width * 0.44f);
+                int y2 = glyphRect.Top + (int)(glyphRect.Height * 0.74f);
+                int x3 = glyphRect.Left + (int)(glyphRect.Width * 0.76f);
+                int y3 = glyphRect.Top + (int)(glyphRect.Height * 0.30f);
+
+                graphics.DrawLines(checkPen, new[]
+                {
+                    new Point(x1, y1),
+                    new Point(x2, y2),
+                    new Point(x3, y3)
+                });
+            }
+        }
+
+        private static System.Drawing.Color LayerCheckboxGetContrastColor(System.Drawing.Color color)
+        {
+            double luminance = ((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B)) / 255d;
+            return luminance > 0.55 ? System.Drawing.Color.Black : System.Drawing.Color.White;
+        }
+
+        private static System.Drawing.Color LayerCheckboxDarkenColor(System.Drawing.Color color, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            int r = (int)Math.Round(color.R * (1f - amount));
+            int g = (int)Math.Round(color.G * (1f - amount));
+            int b = (int)Math.Round(color.B * (1f - amount));
+            return System.Drawing.Color.FromArgb(color.A, Math.Max(0, r), Math.Max(0, g), Math.Max(0, b));
+        }
+
+        private bool PromptForLayerGroupNameFromMainForm(string initialValue, out string groupName)
+        {
+            return PromptForLayerValueFromMainForm(
+                LocalizedText("Dialog_Layers_Group_Title"),
+                LocalizedText("Dialog_Layers_Group_Label"),
+                initialValue,
+                out groupName);
+        }
+
+        private bool PromptForLayerValueFromMainForm(string title, string labelText, string initialValue, out string value)
+        {
+            value = initialValue ?? string.Empty;
 
             using (Form prompt = new Form())
             using (TextBox inputTextBox = new TextBox())
@@ -2317,7 +2865,7 @@ namespace AnonPDF
             using (Button okButton = new Button())
             using (Button cancelButton = new Button())
             {
-                prompt.Text = LocalizedText("Dialog_Layers_Rename_Title");
+                prompt.Text = title;
                 prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
                 prompt.MinimizeBox = false;
@@ -2328,12 +2876,12 @@ namespace AnonPDF
                 label.AutoSize = true;
                 label.Left = 12;
                 label.Top = 14;
-                label.Text = LocalizedText("Dialog_Layers_Rename_Label");
+                label.Text = labelText;
 
                 inputTextBox.Left = 12;
                 inputTextBox.Top = 38;
                 inputTextBox.Width = 396;
-                inputTextBox.Text = layerName;
+                inputTextBox.Text = value;
 
                 okButton.Text = LocalizedText("Dialog_Button_Save");
                 okButton.Width = 100;
@@ -2367,7 +2915,7 @@ namespace AnonPDF
                     return false;
                 }
 
-                layerName = (inputTextBox.Text ?? string.Empty).Trim();
+                value = (inputTextBox.Text ?? string.Empty).Trim();
                 return true;
             }
         }
@@ -17043,6 +17591,7 @@ namespace AnonPDF
                     {
                         Id = layerId,
                         Name = NormalizeLayerDisplayName(layer.Name, layerId),
+                        GroupName = NormalizeLayerGroupName(layer.GroupName),
                         Order = layer.Order,
                         IsVisible = layer.IsVisible,
                         IsLocked = layer.IsLocked,
@@ -17072,6 +17621,7 @@ namespace AnonPDF
                 {
                     Id = DefaultLayerId,
                     Name = NormalizeLayerDisplayName(defaultCandidate?.Name, DefaultLayerId),
+                    GroupName = NormalizeLayerGroupName(defaultCandidate?.GroupName),
                     Order = defaultCandidate?.Order ?? 0,
                     IsVisible = defaultCandidate?.IsVisible ?? true,
                     IsLocked = defaultCandidate?.IsLocked ?? false,
@@ -28655,6 +29205,7 @@ namespace AnonPDF
             {
                 Id = layerId,
                 Name = NormalizeLayerDisplayName(candidate.Name, layerId),
+                GroupName = NormalizeLayerGroupName(candidate.GroupName),
                 Order = desiredOrder,
                 IsVisible = true,
                 IsLocked = false,
@@ -44101,6 +44652,7 @@ namespace AnonPDF
     {
         public string Id { get; set; }
         public string Name { get; set; }
+        public string GroupName { get; set; }
         public int Order { get; set; }
         public bool IsVisible { get; set; } = true;
         public bool IsLocked { get; set; }
@@ -44113,6 +44665,7 @@ namespace AnonPDF
             {
                 Id = Id,
                 Name = Name,
+                GroupName = GroupName,
                 Order = Order,
                 IsVisible = IsVisible,
                 IsLocked = IsLocked,

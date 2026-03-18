@@ -182,6 +182,9 @@
   <data name="Dialog_Layers_Column_Name" xml:space="preserve">
     <value>Nazwa</value>
   </data>
+  <data name="Dialog_Layers_Column_Group" xml:space="preserve">
+    <value>Grupa</value>
+  </data>
   <data name="Dialog_Layers_Column_Visible" xml:space="preserve">
     <value>Widoczna</value>
   </data>
@@ -226,6 +229,12 @@
   </data>
   <data name="Dialog_Layers_Rename_Label" xml:space="preserve">
     <value>Nazwa warstwy:</value>
+  </data>
+  <data name="Dialog_Layers_Group_Title" xml:space="preserve">
+    <value>Zmie&#324; nazw&#281; grupy</value>
+  </data>
+  <data name="Dialog_Layers_Group_Label" xml:space="preserve">
+    <value>Nazwa grupy:</value>
   </data>
   <data name="Dialog_Button_Yes" xml:space="preserve">
     <value>Tak</value>
