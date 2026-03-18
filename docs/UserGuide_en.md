@@ -214,6 +214,11 @@ When working with objects, you can also use:
 - `CTRL + V` - paste an object from the clipboard. The pasted object is created on the active layer, keeps the original stacking order, and can be scaled down automatically if the target page is smaller.
 - Object copy and paste also works between two running instances of the application.
 - `DELETE` - remove the active object or active object group.
+- In the text dialog, you can enable the `Arrow` option for the text box frame.
+- For a text arrow, you can set `Arrow line width`, `Head length`, and `Head width`.
+- The end of the text arrow can be dragged with the mouse, and the attachment point on the frame updates automatically to corners and side centers.
+- Rotating the text does not rotate the arrow end; only the attachment point on the frame is updated.
+- Scaling the text also scales the frame and attached arrow as a single object.
 
 Modifiers while editing objects:
 
@@ -293,5 +298,6 @@ Recent versions include:
 - Working layers with separate visibility, lock state, and active layer selection.
 - Extended context menus for selections and objects (copy, cut, duplicate, remove duplicated copies).
 - Corner-handle scaling for single objects and object groups (`SHIFT` - proportional, `ALT` - from center).
+- The `Arrow` option in the text dialog, with adjustable arrow line width, head length, and head width.
 - Object copy and paste through the system clipboard, including between two running application instances, with preserved stacking order.
 - `Undo` (`CTRL+Z`) and `Redo` (`CTRL+Y`).

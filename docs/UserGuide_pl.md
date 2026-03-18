@@ -212,6 +212,11 @@ Podczas pracy z obiektami dostępne są także:
 - `CTRL + V` - wklej obiekt ze schowka. Wklejony obiekt trafia na aktywną warstwę, zachowuje kolejność nakładania ze źródła i może zostać automatycznie przeskalowany, jeśli strona docelowa jest mniejsza.
 - Kopiowanie i wklejanie obiektów działa również między dwoma uruchomionymi instancjami aplikacji.
 - `DELETE` - usuń aktywny obiekt lub grupę aktywnych obiektów.
+- W dialogu napisów można włączyć opcję `Strzałka` dla ramki tekstu.
+- Dla strzałki napisu można ustawić `Grubość linii strzałki`, `Długość grotu` i `Szerokość grotu`.
+- Koniec strzałki napisu można przeciągać myszą, a punkt przypięcia do ramki aktualizuje się automatycznie do narożników i środków boków.
+- Obrót napisu nie obraca końca strzałki; aktualizuje się tylko miejsce przypięcia do ramki.
+- Skalowanie napisu skaluje także ramkę i przypiętą strzałkę jako jeden obiekt.
 
 Modyfikatory podczas pracy z obiektami:
 
@@ -291,5 +296,6 @@ W ostatnich wersjach dodano m.in.:
 - Obsługę warstw roboczych z własną widocznością, blokadą i aktywną warstwą.
 - Rozszerzone menu kontekstowe dla zaznaczeń i obiektów (m.in. kopiowanie, wycinanie, powielanie, usuwanie kopii).
 - Skalowanie pojedynczych obiektów i grup obiektów narożnymi uchwytami (`SHIFT` - proporcje, `ALT` - od środka).
+- Opcję `Strzałka` w dialogu napisów z regulacją grubości linii strzałki, długości grotu i szerokości grotu.
 - Kopiowanie i wklejanie obiektów przez schowek systemowy także między dwoma instancjami aplikacji, z zachowaniem kolejności nakładania.
 - Funkcje `Cofnij` (`CTRL+Z`) i `Ponów` (`CTRL+Y`).

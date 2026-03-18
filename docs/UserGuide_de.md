@@ -196,6 +196,11 @@ Für die Arbeit mit Objekten stehen außerdem zur Verfügung:
 > \- Das Kopieren und Einfügen von Objekten funktioniert auch zwischen zwei gleichzeitig gestarteten Instanzen der Anwendung.
 
 > \- `DELETE` - aktives Objekt oder aktive Objektgruppe löschen.
+> \- Im Textdialog kann die Option `Pfeil` für den Textrahmen aktiviert werden.
+> \- Für den Textpfeil lassen sich `Liniendicke des Pfeils`, `Spitzenlänge` und `Spitzenbreite` festlegen.
+> \- Das Ende des Textpfeils kann mit der Maus verschoben werden; der Anheftungspunkt am Rahmen wird automatisch auf Ecken und Seitenmitten aktualisiert.
+> \- Beim Drehen des Textes wird das Pfeilende nicht mitgedreht; nur der Anheftungspunkt am Rahmen wird aktualisiert.
+> \- Beim Skalieren des Textes werden Rahmen und angehefteter Pfeil als ein Objekt mit skaliert.
 
 Modifikatoren bei der Objektbearbeitung:
 
@@ -280,5 +285,6 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Unterstützung für Arbeitsebenen mit eigener Sichtbarkeit, Sperre und aktiver Ebene.
 - Erweiterte Kontextmenüs für Markierungen und Objekte (Kopieren, Ausschneiden, Duplizieren, duplizierte Kopien löschen).
 - Skalierung einzelner Objekte und Objektgruppen über Eckgriffe (`SHIFT` - proportional, `ALT` - vom Mittelpunkt).
+- Die Option `Pfeil` im Textdialog mit einstellbarer Liniendicke des Pfeils, Spitzenlänge und Spitzenbreite.
 - Kopieren und Einfügen von Objekten über die Systemzwischenablage, auch zwischen zwei laufenden Instanzen der Anwendung, mit erhaltener Stapelreihenfolge.
 - `Rückgängig` (`CTRL+Z`) und `Wiederholen` (`CTRL+Y`).
