@@ -35,6 +35,7 @@ using iText.Kernel.Pdf.Canvas.Parser.Data;
 using iText.Kernel.Exceptions;
 using System.Text.RegularExpressions;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using AnonPDF.Properties;
 using DrawingImage = System.Drawing.Image;
 using DrawingRectangle = System.Drawing.Rectangle;
@@ -74,6 +75,7 @@ namespace AnonPDF
         private readonly Timer maintenanceCountdownTimer;
         private DateTime? maintenanceShutdownAt;
         private Label maintenanceCountdownLabel;
+        private Label objectSelectionInfoLabel;
         private string serviceEndDate = "";
         private static System.Timers.Timer maintenanceCheckTimer;
         private static bool exitScheduled = false;
@@ -310,6 +312,12 @@ namespace AnonPDF
         private readonly HashSet<string> selectedRasterObjectIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> selectedArrowObjectIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> selectedVectorShapeIds = new HashSet<string>(StringComparer.Ordinal);
+        private Point objectSelectionCyclePoint = Point.Empty;
+        private int objectSelectionCyclePage = -1;
+        private float objectSelectionCycleScale = -1f;
+        private DateTime objectSelectionCycleTimestampUtc = DateTime.MinValue;
+        private int objectSelectionCycleIndex = -1;
+        private List<string> objectSelectionCycleKeys = new List<string>();
         private DataGridView layersGridView;
         private bool suppressLayersGridEvents;
         private ObjectClipboardSnapshot objectClipboardSnapshot;
@@ -4398,18 +4406,32 @@ namespace AnonPDF
             return LayerObjectType.Raster;
         }
 
-        private int GetTotalSelectedObjectsCount()
+        private List<object> GetSelectedObjectsOnCurrentPage()
         {
             var selectedObjects = new HashSet<object>();
+            var orderedSelectedObjects = new List<object>();
+
+            void RegisterSelectedObject(object candidate)
+            {
+                if (candidate == null)
+                {
+                    return;
+                }
+
+                if (selectedObjects.Add(candidate))
+                {
+                    orderedSelectedObjects.Add(candidate);
+                }
+            }
 
             foreach (TextAnnotation text in selectedTextAnnotations.Where(t => t != null && t.PageNumber == currentPage))
             {
-                selectedObjects.Add(text);
+                RegisterSelectedObject(text);
             }
 
             if (selectedTextAnnotation != null && selectedTextAnnotation.PageNumber == currentPage)
             {
-                selectedObjects.Add(selectedTextAnnotation);
+                RegisterSelectedObject(selectedTextAnnotation);
             }
 
             foreach (string rasterId in selectedRasterObjectIds)
@@ -4417,13 +4439,13 @@ namespace AnonPDF
                 RasterObject raster = rasterObjects.FirstOrDefault(r => r != null && r.PageNumber == currentPage && r.Id == rasterId);
                 if (raster != null)
                 {
-                    selectedObjects.Add(raster);
+                    RegisterSelectedObject(raster);
                 }
             }
 
             if (selectedRasterObject != null && selectedRasterObject.PageNumber == currentPage)
             {
-                selectedObjects.Add(selectedRasterObject);
+                RegisterSelectedObject(selectedRasterObject);
             }
 
             foreach (string arrowId in selectedArrowObjectIds)
@@ -4431,18 +4453,18 @@ namespace AnonPDF
                 ArrowObject arrow = arrowObjects.FirstOrDefault(a => a != null && a.PageNumber == currentPage && a.Id == arrowId);
                 if (arrow != null)
                 {
-                    selectedObjects.Add(arrow);
+                    RegisterSelectedObject(arrow);
                 }
             }
 
             if (selectedArrowObject != null && selectedArrowObject.PageNumber == currentPage)
             {
-                selectedObjects.Add(selectedArrowObject);
+                RegisterSelectedObject(selectedArrowObject);
             }
 
             if (selectedVectorShape != null && selectedVectorShape.PageNumber == currentPage)
             {
-                selectedObjects.Add(selectedVectorShape);
+                RegisterSelectedObject(selectedVectorShape);
             }
 
             foreach (string vectorId in selectedVectorShapeIds)
@@ -4450,11 +4472,99 @@ namespace AnonPDF
                 VectorShapeObject vectorShape = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == currentPage && v.Id == vectorId);
                 if (vectorShape != null)
                 {
-                    selectedObjects.Add(vectorShape);
+                    RegisterSelectedObject(vectorShape);
                 }
             }
 
-            return selectedObjects.Count;
+            return orderedSelectedObjects;
+        }
+
+        private object GetCurrentSingleSelectedObject()
+        {
+            List<object> selectedObjects = GetSelectedObjectsOnCurrentPage();
+            return selectedObjects.Count == 1 ? selectedObjects[0] : null;
+        }
+
+        private int GetTotalSelectedObjectsCount()
+        {
+            return GetSelectedObjectsOnCurrentPage().Count;
+        }
+
+        private string BuildObjectSelectionInfoText()
+        {
+            int selectedCount = GetTotalSelectedObjectsCount();
+            if (selectedCount <= 0)
+            {
+                return null;
+            }
+
+            if (selectedCount == 1)
+            {
+                return GetSelectionInfoObjectTypeText(GetCurrentSingleSelectedObject());
+            }
+
+            return GetSelectionInfoCountText(selectedCount);
+        }
+
+        private string GetSelectionInfoCountText(int selectedCount)
+        {
+            string language = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName?.ToLowerInvariant() ?? string.Empty;
+            switch (language)
+            {
+                case "pl":
+                    return $"Obiekty: {selectedCount}";
+                case "de":
+                    return $"Objekte: {selectedCount}";
+                default:
+                    return $"Objects: {selectedCount}";
+            }
+        }
+
+        private string GetSelectionInfoObjectTypeText(object selectedObject)
+        {
+            string language = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName?.ToLowerInvariant() ?? string.Empty;
+
+            switch (selectedObject)
+            {
+                case TextAnnotation _:
+                    switch (language)
+                    {
+                        case "pl":
+                            return "Napis";
+                        case "de":
+                            return "Text";
+                        default:
+                            return "Text";
+                    }
+
+                case RasterObject _:
+                    switch (language)
+                    {
+                        case "pl":
+                            return "Obraz";
+                        case "de":
+                            return "Bild";
+                        default:
+                            return "Image";
+                    }
+
+                case ArrowObject _:
+                    switch (language)
+                    {
+                        case "pl":
+                            return "Strzałka";
+                        case "de":
+                            return "Pfeil";
+                        default:
+                            return "Arrow";
+                    }
+
+                case VectorShapeObject vectorShape:
+                    return GetShapeTypeDisplayName(ParseVectorShapeType(vectorShape.ShapeType));
+
+                default:
+                    return null;
+            }
         }
 
         private static Font CloneFontSafe(Font source)
@@ -5985,6 +6095,7 @@ namespace AnonPDF
             selectedRasterObjectIds.Clear();
             selectedArrowObjectIds.Clear();
             selectedVectorShapeIds.Clear();
+            UpdateObjectSelectionInfoLabel();
         }
 
         private bool SelectAllObjectsOnCurrentPage()
@@ -6032,6 +6143,7 @@ namespace AnonPDF
             }
 
             CollapseGroupSelectionToSingleIfNeeded();
+            UpdateObjectSelectionInfoLabel();
             pdfViewer?.Invalidate();
             return true;
         }
@@ -6083,12 +6195,14 @@ namespace AnonPDF
             selectedRasterObject = null;
             selectedArrowObject = null;
             selectedVectorShape = null;
+            UpdateObjectSelectionInfoLabel();
         }
 
         private void CollapseGroupSelectionToSingleIfNeeded()
         {
             if (GetGroupSelectionCount() != 1)
             {
+                UpdateObjectSelectionInfoLabel();
                 return;
             }
 
@@ -6140,6 +6254,199 @@ namespace AnonPDF
                 .Reverse()
                 .FirstOrDefault(obj => IsPointNearArrowLine(obj, location) || TryGetArrowHandleAtPoint(obj, location, out _));
             return hitArrow != null;
+        }
+
+        private void ResetObjectSelectionCycle()
+        {
+            objectSelectionCyclePoint = Point.Empty;
+            objectSelectionCyclePage = -1;
+            objectSelectionCycleScale = -1f;
+            objectSelectionCycleTimestampUtc = DateTime.MinValue;
+            objectSelectionCycleIndex = -1;
+            objectSelectionCycleKeys.Clear();
+        }
+
+        private static string BuildSelectableObjectCycleKey(object candidate)
+        {
+            switch (candidate)
+            {
+                case TextAnnotation textAnnotation:
+                    return "text:" + (string.IsNullOrWhiteSpace(textAnnotation.Id)
+                        ? RuntimeHelpers.GetHashCode(textAnnotation).ToString(CultureInfo.InvariantCulture)
+                        : textAnnotation.Id);
+                case RasterObject rasterObject:
+                    return "raster:" + (string.IsNullOrWhiteSpace(rasterObject.Id)
+                        ? RuntimeHelpers.GetHashCode(rasterObject).ToString(CultureInfo.InvariantCulture)
+                        : rasterObject.Id);
+                case ArrowObject arrowObject:
+                    return "arrow:" + (string.IsNullOrWhiteSpace(arrowObject.Id)
+                        ? RuntimeHelpers.GetHashCode(arrowObject).ToString(CultureInfo.InvariantCulture)
+                        : arrowObject.Id);
+                case VectorShapeObject vectorShapeObject:
+                    return "vector:" + (string.IsNullOrWhiteSpace(vectorShapeObject.Id)
+                        ? RuntimeHelpers.GetHashCode(vectorShapeObject).ToString(CultureInfo.InvariantCulture)
+                        : vectorShapeObject.Id);
+                default:
+                    return candidate?.GetType().FullName + ":" + RuntimeHelpers.GetHashCode(candidate).ToString(CultureInfo.InvariantCulture);
+            }
+        }
+
+        private List<object> GetSelectableObjectsAtPoint(Point location, float dpiX, float dpiY)
+        {
+            var result = new List<object>();
+            foreach (object candidate in GetOrderedObjectsForCurrentPage().Reverse())
+            {
+                if (candidate is TextAnnotation textAnnotation &&
+                    IsPointNearTextAnnotation(textAnnotation, location, dpiX, dpiY))
+                {
+                    result.Add(textAnnotation);
+                    continue;
+                }
+
+                if (candidate is RasterObject rasterObject &&
+                    IsPointInsideRasterObject(rasterObject, location))
+                {
+                    result.Add(rasterObject);
+                    continue;
+                }
+
+                if (candidate is ArrowObject arrowObject &&
+                    (IsPointNearArrowLine(arrowObject, location) || TryGetArrowHandleAtPoint(arrowObject, location, out _)))
+                {
+                    result.Add(arrowObject);
+                    continue;
+                }
+
+                if (candidate is VectorShapeObject vectorShapeObject &&
+                    IsPointNearVectorShape(vectorShapeObject, location))
+                {
+                    result.Add(vectorShapeObject);
+                }
+            }
+
+            return result;
+        }
+
+        private bool TryGetCycledSelectableObjectAtPoint(Point location, float dpiX, float dpiY, bool advanceCycle, out object hitObject)
+        {
+            hitObject = null;
+            List<object> candidates = GetSelectableObjectsAtPoint(location, dpiX, dpiY);
+            if (candidates.Count == 0)
+            {
+                ResetObjectSelectionCycle();
+                return false;
+            }
+
+            List<string> candidateKeys = candidates.Select(BuildSelectableObjectCycleKey).ToList();
+            bool sameLocation = DistanceBetweenPoints(
+                new PointF(objectSelectionCyclePoint.X, objectSelectionCyclePoint.Y),
+                new PointF(location.X, location.Y)) <= 3f;
+            bool sameCycleContext =
+                objectSelectionCyclePage == currentPage &&
+                Math.Abs(objectSelectionCycleScale - scaleFactor) <= 0.0001f &&
+                (DateTime.UtcNow - objectSelectionCycleTimestampUtc) <= TimeSpan.FromSeconds(2) &&
+                sameLocation &&
+                objectSelectionCycleKeys.SequenceEqual(candidateKeys, StringComparer.Ordinal);
+
+            int nextIndex;
+            if (!sameCycleContext)
+            {
+                nextIndex = 0;
+            }
+            else if (advanceCycle)
+            {
+                nextIndex = (objectSelectionCycleIndex + 1) % candidates.Count;
+            }
+            else
+            {
+                nextIndex = objectSelectionCycleIndex >= 0 ? Math.Min(objectSelectionCycleIndex, candidates.Count - 1) : 0;
+            }
+
+            objectSelectionCyclePoint = location;
+            objectSelectionCyclePage = currentPage;
+            objectSelectionCycleScale = scaleFactor;
+            objectSelectionCycleTimestampUtc = DateTime.UtcNow;
+            objectSelectionCycleIndex = nextIndex;
+            objectSelectionCycleKeys = candidateKeys;
+            hitObject = candidates[nextIndex];
+            return true;
+        }
+
+        private void SelectSingleObject(object hitObject)
+        {
+            selectedTextAnnotation = null;
+            selectedRasterObject = null;
+            selectedArrowObject = null;
+            selectedVectorShape = null;
+            ClearGroupSelection();
+
+            switch (hitObject)
+            {
+                case TextAnnotation textAnnotation:
+                    EnsureTextAnnotationId(textAnnotation);
+                    selectedTextAnnotation = textAnnotation;
+                    break;
+                case RasterObject rasterObject:
+                    EnsureRasterObjectId(rasterObject);
+                    selectedRasterObject = rasterObject;
+                    break;
+                case ArrowObject arrowObject:
+                    EnsureArrowObjectId(arrowObject);
+                    selectedArrowObject = arrowObject;
+                    break;
+                case VectorShapeObject vectorShapeObject:
+                    EnsureVectorShapeId(vectorShapeObject);
+                    selectedVectorShape = vectorShapeObject;
+                    break;
+            }
+
+            UpdateObjectSelectionInfoLabel();
+        }
+
+        private bool ToggleGroupSelectionForObject(object hitObject)
+        {
+            if (hitObject == null)
+            {
+                return false;
+            }
+
+            PromoteSingleSelectionsToGroup();
+            switch (hitObject)
+            {
+                case TextAnnotation textAnnotation:
+                    if (!selectedTextAnnotations.Add(textAnnotation))
+                    {
+                        selectedTextAnnotations.Remove(textAnnotation);
+                    }
+                    break;
+                case RasterObject rasterObject:
+                    EnsureRasterObjectId(rasterObject);
+                    if (!string.IsNullOrWhiteSpace(rasterObject.Id) && !selectedRasterObjectIds.Add(rasterObject.Id))
+                    {
+                        selectedRasterObjectIds.Remove(rasterObject.Id);
+                    }
+                    break;
+                case ArrowObject arrowObject:
+                    EnsureArrowObjectId(arrowObject);
+                    if (!string.IsNullOrWhiteSpace(arrowObject.Id) && !selectedArrowObjectIds.Add(arrowObject.Id))
+                    {
+                        selectedArrowObjectIds.Remove(arrowObject.Id);
+                    }
+                    break;
+                case VectorShapeObject vectorShapeObject:
+                    EnsureVectorShapeId(vectorShapeObject);
+                    if (!string.IsNullOrWhiteSpace(vectorShapeObject.Id) && !selectedVectorShapeIds.Add(vectorShapeObject.Id))
+                    {
+                        selectedVectorShapeIds.Remove(vectorShapeObject.Id);
+                    }
+                    break;
+                default:
+                    return false;
+            }
+
+            CollapseGroupSelectionToSingleIfNeeded();
+            UpdateObjectSelectionInfoLabel();
+            return true;
         }
 
         private bool TryGetHitRasterAtPoint(Point location, out RasterObject hitRaster)
@@ -6295,54 +6602,12 @@ namespace AnonPDF
 
         private bool TryToggleGroupSelectionAtPoint(Point location, float dpiX, float dpiY)
         {
-            if (TryGetHitVectorShapeAtPoint(location, out VectorShapeObject hitVectorShape))
+            if (!TryGetCycledSelectableObjectAtPoint(location, dpiX, dpiY, advanceCycle: true, out object hitObject))
             {
-                EnsureVectorShapeId(hitVectorShape);
-                PromoteSingleSelectionsToGroup();
-                if (!string.IsNullOrWhiteSpace(hitVectorShape.Id) && !selectedVectorShapeIds.Add(hitVectorShape.Id))
-                {
-                    selectedVectorShapeIds.Remove(hitVectorShape.Id);
-                }
-                CollapseGroupSelectionToSingleIfNeeded();
-                return true;
+                return false;
             }
 
-            if (TryGetHitArrowAtPoint(location, out ArrowObject hitArrow))
-            {
-                EnsureArrowObjectId(hitArrow);
-                PromoteSingleSelectionsToGroup();
-                if (!string.IsNullOrWhiteSpace(hitArrow.Id) && !selectedArrowObjectIds.Add(hitArrow.Id))
-                {
-                    selectedArrowObjectIds.Remove(hitArrow.Id);
-                }
-                CollapseGroupSelectionToSingleIfNeeded();
-                return true;
-            }
-
-            if (TryGetHitRasterAtPoint(location, out RasterObject hitRaster))
-            {
-                EnsureRasterObjectId(hitRaster);
-                PromoteSingleSelectionsToGroup();
-                if (!string.IsNullOrWhiteSpace(hitRaster.Id) && !selectedRasterObjectIds.Add(hitRaster.Id))
-                {
-                    selectedRasterObjectIds.Remove(hitRaster.Id);
-                }
-                CollapseGroupSelectionToSingleIfNeeded();
-                return true;
-            }
-
-            if (TryGetHitTextAtPoint(location, dpiX, dpiY, out TextAnnotation hitText))
-            {
-                PromoteSingleSelectionsToGroup();
-                if (!selectedTextAnnotations.Add(hitText))
-                {
-                    selectedTextAnnotations.Remove(hitText);
-                }
-                CollapseGroupSelectionToSingleIfNeeded();
-                return true;
-            }
-
-            return false;
+            return ToggleGroupSelectionForObject(hitObject);
         }
 
         private bool TryBeginGroupMove(Point location, float dpiX, float dpiY)
@@ -8366,6 +8631,7 @@ namespace AnonPDF
         {
             if (currentPage < 1 || currentPage > allPageStatuses.Count)
             {
+                UpdateObjectSelectionInfoLabel();
                 return;
             }
 
@@ -8382,6 +8648,8 @@ namespace AnonPDF
             {
                 ApplyFilter((string)filterComboBox.SelectedItem);
             }
+
+            UpdateObjectSelectionInfoLabel();
         }
 
         private bool DeleteTextObjectWithConfirmation(TextAnnotation annotation)
@@ -9563,6 +9831,7 @@ namespace AnonPDF
             {
                 maintenanceCountdownLabel.Visible = false;
                 maintenanceCountdownTimer.Stop();
+                PositionObjectSelectionInfoLabel();
                 return;
             }
 
@@ -9620,6 +9889,7 @@ namespace AnonPDF
             int x = panelOrigin.X + margin;
             int y = panelOrigin.Y + margin;
             maintenanceCountdownLabel.Location = new Point(x, y);
+            PositionObjectSelectionInfoLabel();
         }
 
         private void ApplyThemeToMaintenanceCountdownLabel()
@@ -9631,6 +9901,86 @@ namespace AnonPDF
 
             maintenanceCountdownLabel.BackColor = CurrentTheme.DangerBackColor;
             maintenanceCountdownLabel.ForeColor = System.Drawing.Color.White;
+        }
+
+        private void EnsureObjectSelectionInfoOverlay()
+        {
+            if (objectSelectionInfoLabel != null)
+            {
+                return;
+            }
+
+            objectSelectionInfoLabel = new Label
+            {
+                AutoSize = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Microsoft Sans Serif", 8.25F, FontStyle.Bold),
+                Padding = new Padding(6, 2, 6, 2),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Visible = false
+            };
+
+            this.Controls.Add(objectSelectionInfoLabel);
+            objectSelectionInfoLabel.BringToFront();
+            this.ClientSizeChanged += (_, __) => PositionObjectSelectionInfoLabel();
+            mainAppSplitContainer.Panel2.SizeChanged += (_, __) => PositionObjectSelectionInfoLabel();
+            ApplyThemeToObjectSelectionInfoLabel();
+            PositionObjectSelectionInfoLabel();
+        }
+
+        private void UpdateObjectSelectionInfoLabel()
+        {
+            string selectionInfoText = BuildObjectSelectionInfoText();
+            if (string.IsNullOrWhiteSpace(selectionInfoText))
+            {
+                if (objectSelectionInfoLabel != null)
+                {
+                    objectSelectionInfoLabel.Visible = false;
+                }
+
+                return;
+            }
+
+            EnsureObjectSelectionInfoOverlay();
+            if (!string.Equals(objectSelectionInfoLabel.Text, selectionInfoText, StringComparison.Ordinal))
+            {
+                objectSelectionInfoLabel.Text = selectionInfoText;
+            }
+
+            objectSelectionInfoLabel.Visible = true;
+            objectSelectionInfoLabel.BringToFront();
+            PositionObjectSelectionInfoLabel();
+        }
+
+        private void PositionObjectSelectionInfoLabel()
+        {
+            if (objectSelectionInfoLabel == null)
+            {
+                return;
+            }
+
+            int margin = 8;
+            int spacing = 6;
+            Point panelOrigin = GetPanel2OriginInForm();
+            int x = panelOrigin.X + margin;
+            int y = panelOrigin.Y + margin;
+            if (maintenanceCountdownLabel != null && maintenanceCountdownLabel.Visible)
+            {
+                y = maintenanceCountdownLabel.Bottom + spacing;
+            }
+
+            objectSelectionInfoLabel.Location = new Point(x, y);
+        }
+
+        private void ApplyThemeToObjectSelectionInfoLabel()
+        {
+            if (objectSelectionInfoLabel == null)
+            {
+                return;
+            }
+
+            objectSelectionInfoLabel.BackColor = CurrentTheme.SelectionBackColor;
+            objectSelectionInfoLabel.ForeColor = CurrentTheme.SelectionForeColor;
         }
 
         private Point GetPanel2OriginInForm()
@@ -10479,6 +10829,8 @@ namespace AnonPDF
             ApplyIconButtonTheme(removePageRangeButton, theme);
             ApplyDangerButtonTheme(clearSelectionButton, theme);
             ApplyThemeToMaintenanceCountdownLabel();
+            ApplyThemeToObjectSelectionInfoLabel();
+            UpdateObjectSelectionInfoLabel();
             ApplyTitleBarColor();
             UpdateSaveGroupState();
             UpdateOptionsGroupState();
@@ -18443,7 +18795,7 @@ namespace AnonPDF
                     Top = 210,
                     Width = 200,
                     Text = LocalizedText("Vector_Dialog_NoFillColor"),
-                    Checked = !HasVisibleVectorColor(working.FillColorArgb) || NormalizeVectorFillOpacity(working.FillOpacity) <= 0f
+                    Checked = !HasVisibleVectorColor(working.FillColorArgb)
                 };
 
                 var labelFillOpacity = new Label { Left = 300, Top = 184, Width = 95, Text = LocalizedText("Vector_Dialog_FillOpacity") };
@@ -18900,7 +19252,7 @@ namespace AnonPDF
                     buttonStrokeColor.BackColor = System.Drawing.Color.FromArgb(strokeColor.R, strokeColor.G, strokeColor.B);
                     numericStrokeWidth.Value = (decimal)NormalizeVectorStrokeWidth(defaults.StrokeWidth);
                     comboStrokeStyle.SelectedIndex = (int)defaults.StrokeKind;
-                    checkNoFillColor.Checked = !HasVisibleVectorColor(defaults.FillColorArgb) || NormalizeVectorFillOpacity(defaults.FillOpacity) <= 0f;
+                    checkNoFillColor.Checked = !HasVisibleVectorColor(defaults.FillColorArgb);
                     System.Drawing.Color fillColor = System.Drawing.Color.FromArgb(defaults.FillColorArgb);
                     buttonFillColor.BackColor = System.Drawing.Color.FromArgb(fillColor.R, fillColor.G, fillColor.B);
                     numericFillOpacity.Value = (decimal)Math.Round(NormalizeVectorFillOpacity(defaults.FillOpacity) * 100f);
@@ -19498,180 +19850,113 @@ namespace AnonPDF
                     return;
                 }
 
-                TextAnnotation hitAnnotation = textAnnotations
-                    .Where(block => block.PageNumber == currentPage)
-                    .Reverse()
-                    .FirstOrDefault(block => IsPointNearTextAnnotation(block, e.Location, dpiX, dpiY));
-
-                if (hitAnnotation != null)
+                if (TryHandleSelectedVectorShapeMouseDown(e.Location))
                 {
                     selectedArrowObject = null;
                     ResetArrowInteractionState();
                     ClearArrowIconClickState();
-                    selectedVectorShape = null;
-                    ResetVectorInteractionState();
                     selectedRasterObject = null;
                     ResetRasterInteractionState();
-                    ClearGroupSelection();
-                    selectedTextAnnotation = hitAnnotation;
+                    ClearRasterIconClickState();
+                    selectedTextAnnotation = null;
+                    arrowMouseActionInProgress = false;
+                    rasterMouseActionInProgress = false;
                     isDrawing = false;
-
-                    if (e.Clicks >= 2)
-                    {
-                        AddEditAnnotation(hitAnnotation);
-                        annotationToMove = null;
-                        isMoving = false;
-                        textMoveMouseOffset = PointF.Empty;
-                        this.Cursor = Cursors.Default;
-                        pdfViewer.Invalidate();
-                        return;
-                    }
-
-                    if (!IsTextAnnotationEffectivelyLocked(hitAnnotation))
-                    {
-                        BeginUndoCapture("Move text");
-                        annotationToMove = hitAnnotation;
-                        isMoving = true;
-                        textMoveStartBounds = hitAnnotation.AnnotationBounds;
-                        textMoveStartLeaderEndPoint = hitAnnotation.LeaderEndPoint;
-                        PointF mouseDoc = new PointF(e.X / scaleFactor, e.Y / scaleFactor);
-                        textMoveMouseOffset = new PointF(
-                            mouseDoc.X - hitAnnotation.AnnotationBounds.X,
-                            mouseDoc.Y - hitAnnotation.AnnotationBounds.Y);
-                        this.Cursor = Cursors.SizeAll;
-                    }
-                    else
-                    {
-                        annotationToMove = null;
-                        isMoving = false;
-                        textMoveStartBounds = RectangleF.Empty;
-                        textMoveMouseOffset = PointF.Empty;
-                        this.Cursor = Cursors.Default;
-                    }
+                    isMoving = false;
+                    annotationToMove = null;
+                    pdfViewer.Invalidate();
+                    return;
                 }
-                else
+
+                if (TryHandleSelectedArrowMouseDown(e.Location))
                 {
-                    if (e.Clicks >= 2 && TryHandleObjectDoubleClick(e.Location))
-                    {
-                        selectedTextAnnotation = null;
-                        annotationToMove = null;
-                        isMoving = false;
-                        textMoveMouseOffset = PointF.Empty;
-                        isDrawing = false;
-                        pdfViewer.Invalidate();
-                        return;
-                    }
+                    selectedTextAnnotation = null;
+                    selectedRasterObject = null;
+                    ResetRasterInteractionState();
+                    selectedVectorShape = null;
+                    ResetVectorInteractionState();
+                    ClearArrowIconClickState();
+                    arrowMouseActionInProgress = true;
+                    arrowInteractionChanged = false;
+                    isDrawing = false;
+                    isMoving = false;
+                    annotationToMove = null;
+                    pdfViewer.Invalidate();
+                    return;
+                }
 
-                    if (TryHandleArrowIconMouseDown(e.Location))
-                    {
-                        selectedTextAnnotation = null;
-                        selectedRasterObject = null;
-                        ResetRasterInteractionState();
-                        selectedVectorShape = null;
-                        ResetVectorInteractionState();
-                        ClearVectorIconClickState();
-                        isDrawing = false;
-                        isMoving = false;
-                        annotationToMove = null;
-                        pdfViewer.Invalidate();
-                        return;
-                    }
-
-                    if (TryHandleVectorIconMouseDown(e.Location))
-                    {
-                        selectedArrowObject = null;
-                        ResetArrowInteractionState();
-                        ClearArrowIconClickState();
-                        selectedRasterObject = null;
-                        ResetRasterInteractionState();
-                        ClearRasterIconClickState();
-                        selectedTextAnnotation = null;
-                        isDrawing = false;
-                        isMoving = false;
-                        annotationToMove = null;
-                        pdfViewer.Invalidate();
-                        return;
-                    }
-
-                    if (TryHandleVectorShapeMouseDown(e.Location))
-                    {
-                        selectedArrowObject = null;
-                        ResetArrowInteractionState();
-                        ClearArrowIconClickState();
-                        selectedRasterObject = null;
-                        ResetRasterInteractionState();
-                        ClearRasterIconClickState();
-                        selectedTextAnnotation = null;
-                        arrowMouseActionInProgress = false;
-                        rasterMouseActionInProgress = false;
-                        isDrawing = false;
-                        isMoving = false;
-                        annotationToMove = null;
-                        pdfViewer.Invalidate();
-                        return;
-                    }
-
-                    if (TryHandleArrowMouseDown(e.Location))
-                    {
-                        selectedTextAnnotation = null;
-                        selectedRasterObject = null;
-                        ResetRasterInteractionState();
-                        selectedVectorShape = null;
-                        ResetVectorInteractionState();
-                        ClearArrowIconClickState();
-                        arrowMouseActionInProgress = true;
-                        arrowInteractionChanged = false;
-                        isDrawing = false;
-                        isMoving = false;
-                        annotationToMove = null;
-                        pdfViewer.Invalidate();
-                        return;
-                    }
-
-                    if (TryHandleRasterIconMouseDown(e.Location))
-                    {
-                        selectedArrowObject = null;
-                        ResetArrowInteractionState();
-                        ClearArrowIconClickState();
-                        selectedVectorShape = null;
-                        ResetVectorInteractionState();
-                        selectedTextAnnotation = null;
-                        isDrawing = false;
-                        isMoving = false;
-                        annotationToMove = null;
-                        pdfViewer.Invalidate();
-                        return;
-                    }
-
-                    if (TryHandleRasterMouseDown(e.Location))
-                    {
-                        selectedArrowObject = null;
-                        ResetArrowInteractionState();
-                        ClearArrowIconClickState();
-                        selectedVectorShape = null;
-                        ResetVectorInteractionState();
-                        selectedTextAnnotation = null;
-                        rasterMouseActionInProgress = true;
-                        isDrawing = false;
-                        isMoving = false;
-                        annotationToMove = null;
-                        pdfViewer.Invalidate();
-                        return;
-                    }
-
+                if (TryHandleSelectedRasterMouseDown(e.Location))
+                {
                     selectedArrowObject = null;
                     ResetArrowInteractionState();
                     ClearArrowIconClickState();
                     selectedVectorShape = null;
                     ResetVectorInteractionState();
                     selectedTextAnnotation = null;
-                    annotationToMove = null;
+                    rasterMouseActionInProgress = true;
+                    isDrawing = false;
                     isMoving = false;
-                    textMoveMouseOffset = PointF.Empty;
-                    isDrawing = true;
-                    BeginUndoCapture(markerRadioButton.Checked ? "Add marker selection" : "Add box selection");
-                    currentSelection = new System.Drawing.RectangleF(startPoint, Size.Empty);
+                    annotationToMove = null;
+                    pdfViewer.Invalidate();
+                    return;
                 }
+
+                if (TryHandleArrowIconMouseDown(e.Location))
+                {
+                    selectedTextAnnotation = null;
+                    selectedRasterObject = null;
+                    ResetRasterInteractionState();
+                    selectedVectorShape = null;
+                    ResetVectorInteractionState();
+                    ClearVectorIconClickState();
+                    isDrawing = false;
+                    isMoving = false;
+                    annotationToMove = null;
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
+                if (TryHandleVectorIconMouseDown(e.Location))
+                {
+                    selectedArrowObject = null;
+                    ResetArrowInteractionState();
+                    ClearArrowIconClickState();
+                    selectedRasterObject = null;
+                    ResetRasterInteractionState();
+                    ClearRasterIconClickState();
+                    selectedTextAnnotation = null;
+                    isDrawing = false;
+                    isMoving = false;
+                    annotationToMove = null;
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
+                bool advanceSelectionCycle = e.Clicks < 2;
+                if (TryGetCycledSelectableObjectAtPoint(e.Location, dpiX, dpiY, advanceSelectionCycle, out object hitObject) &&
+                    TryHandleCycledObjectMouseDown(hitObject, e.Location, e, dpiX, dpiY))
+                {
+                    isDrawing = false;
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
+                ResetObjectSelectionCycle();
+                selectedArrowObject = null;
+                ResetArrowInteractionState();
+                ClearArrowIconClickState();
+                selectedVectorShape = null;
+                ResetVectorInteractionState();
+                selectedRasterObject = null;
+                ResetRasterInteractionState();
+                selectedTextAnnotation = null;
+                annotationToMove = null;
+                isMoving = false;
+                textMoveMouseOffset = PointF.Empty;
+                UpdateObjectSelectionInfoLabel();
+                isDrawing = true;
+                BeginUndoCapture(markerRadioButton.Checked ? "Add marker selection" : "Add box selection");
+                currentSelection = new System.Drawing.RectangleF(startPoint, Size.Empty);
                 pdfViewer.Invalidate();
             }
         }
@@ -32702,6 +32987,311 @@ namespace AnonPDF
             if (IsPointNearArrowLine(selectedArrowObject, location))
             {
                 this.Cursor = IsArrowObjectEffectivelyLocked(selectedArrowObject) ? Cursors.Default : Cursors.SizeAll;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryHandleSelectedVectorShapeMouseDown(Point location)
+        {
+            if (selectedVectorShape == null || selectedVectorShape.PageNumber != currentPage || IsVectorShapeEffectivelyLocked(selectedVectorShape))
+            {
+                return false;
+            }
+
+            if (TryGetVectorHandleAtPoint(selectedVectorShape, location, out int selectedHandleIndex))
+            {
+                BeginUndoCapture("Edit shape");
+                vectorShapeToMove = null;
+                vectorShapeToAdjust = selectedVectorShape;
+                vectorShapeToRotate = null;
+                isMovingVectorShape = false;
+                isAdjustingVectorHandle = true;
+                isRotatingVectorShape = false;
+                vectorHandlePointIndex = selectedHandleIndex;
+                vectorMouseActionInProgress = true;
+                vectorInteractionChanged = false;
+                vectorMoveInitialPoints = (selectedVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
+                this.Cursor = GetVectorHandleCursor(selectedVectorShape, selectedHandleIndex);
+                return true;
+            }
+
+            if (TryGetVectorShapeScreenBounds(selectedVectorShape, out RectangleF selectedVectorBounds) &&
+                TryGetObjectScaleHandleAtPoint(selectedVectorBounds, location, out ObjectScaleHandleCorner selectedScaleHandle))
+            {
+                BeginUndoCapture("Scale shape");
+                vectorShapeToMove = null;
+                vectorShapeToAdjust = null;
+                vectorShapeToRotate = null;
+                vectorShapeToScale = selectedVectorShape;
+                isMovingVectorShape = false;
+                isAdjustingVectorHandle = false;
+                isRotatingVectorShape = false;
+                isScalingVectorShape = true;
+                activeObjectScaleHandleCorner = selectedScaleHandle;
+                vectorMouseActionInProgress = true;
+                vectorInteractionChanged = false;
+                vectorMoveInitialPoints = (selectedVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
+                vectorScaleStartScreenBounds = selectedVectorBounds;
+                vectorScaleStartStrokeWidth = NormalizeVectorStrokeWidth(selectedVectorShape.StrokeWidth);
+                vectorScaleStartStartEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(selectedVectorShape.StartLineEndingPrimarySize);
+                vectorScaleStartStartEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(selectedVectorShape.StartLineEndingSecondarySize);
+                vectorScaleStartEndEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(selectedVectorShape.EndLineEndingPrimarySize);
+                vectorScaleStartEndEndingSecondarySize = NormalizeVectorLineEndingSecondarySize(selectedVectorShape.EndLineEndingSecondarySize);
+                this.Cursor = GetCursorForObjectScaleHandle(selectedScaleHandle);
+                return true;
+            }
+
+            if (TryGetVectorRotationHandleRect(selectedVectorShape, out RectangleF handleRect, out _) && handleRect.Contains(location))
+            {
+                BeginUndoCapture("Rotate shape");
+                vectorShapeToMove = null;
+                vectorShapeToAdjust = null;
+                vectorShapeToRotate = selectedVectorShape;
+                isMovingVectorShape = false;
+                isAdjustingVectorHandle = false;
+                isRotatingVectorShape = true;
+                vectorHandlePointIndex = -1;
+                vectorMouseActionInProgress = true;
+                vectorInteractionChanged = false;
+                vectorRotateInitialPoints = (selectedVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
+                vectorRotateCenterDoc = GetVectorShapeRotationCenterDoc(selectedVectorShape);
+                vectorRotationStartAngle = GetAngleDegrees(new PointF(vectorRotateCenterDoc.X * scaleFactor, vectorRotateCenterDoc.Y * scaleFactor), location);
+                this.Cursor = Cursors.Hand;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryHandleSelectedArrowMouseDown(Point location)
+        {
+            if (selectedArrowObject == null || selectedArrowObject.PageNumber != currentPage || IsArrowObjectEffectivelyLocked(selectedArrowObject))
+            {
+                return false;
+            }
+
+            if (TryGetArrowHandleAtPoint(selectedArrowObject, location, out ArrowHandleType selectedHandle) &&
+                selectedHandle != ArrowHandleType.None)
+            {
+                BeginUndoCapture("Edit arrow");
+                arrowObjectToAdjust = selectedArrowObject;
+                isAdjustingArrowHandle = true;
+                arrowHandleType = selectedHandle;
+                arrowMoveInitialStart = selectedArrowObject.Start;
+                arrowMoveInitialEnd = selectedArrowObject.End;
+                arrowInteractionChanged = false;
+                this.Cursor = GetArrowHandleCursor(selectedArrowObject, selectedHandle);
+                return true;
+            }
+
+            if (TryGetArrowScreenBounds(selectedArrowObject, out RectangleF selectedArrowBounds) &&
+                TryGetObjectScaleHandleAtPoint(selectedArrowBounds, location, out ObjectScaleHandleCorner selectedScaleHandle))
+            {
+                BeginUndoCapture("Scale arrow");
+                arrowObjectToScale = selectedArrowObject;
+                isScalingArrowObject = true;
+                isAdjustingArrowHandle = false;
+                isMovingArrowObject = false;
+                arrowMouseActionInProgress = true;
+                arrowHandleType = ArrowHandleType.None;
+                arrowMoveInitialStart = selectedArrowObject.Start;
+                arrowMoveInitialEnd = selectedArrowObject.End;
+                arrowScaleStartScreenBounds = selectedArrowBounds;
+                arrowScaleStartThickness = NormalizeArrowThickness(selectedArrowObject.Thickness);
+                arrowScaleStartBorderWidth = NormalizeArrowBorderWidth(selectedArrowObject.BorderWidth);
+                arrowScaleStartHeadLength = NormalizeArrowHeadLength(selectedArrowObject.HeadLength);
+                arrowScaleStartHeadWidth = NormalizeArrowHeadWidth(selectedArrowObject.HeadWidth);
+                arrowInteractionChanged = false;
+                activeObjectScaleHandleCorner = selectedScaleHandle;
+                this.Cursor = GetCursorForObjectScaleHandle(selectedScaleHandle);
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryHandleSelectedRasterMouseDown(Point location)
+        {
+            if (selectedRasterObject == null || selectedRasterObject.PageNumber != currentPage || IsRasterObjectEffectivelyLocked(selectedRasterObject))
+            {
+                return false;
+            }
+
+            if (TryGetRasterResizeHandleAtPoint(selectedRasterObject, location, out RasterResizeHandleType handle))
+            {
+                BeginUndoCapture("Resize image");
+                rasterObjectToResize = selectedRasterObject;
+                isResizingRasterObject = true;
+                rasterResizeHandle = handle;
+                rasterResizeStartBounds = selectedRasterObject.Bounds;
+                rasterResizeStartRotation = NormalizeRotation(selectedRasterObject.Rotation);
+                RasterResizeHandleType oppositeHandle = GetOppositeRasterResizeHandle(handle);
+                rasterResizeAnchorWorld = GetRasterResizeHandleWorldPoint(
+                    rasterResizeStartBounds,
+                    rasterResizeStartRotation,
+                    oppositeHandle);
+                this.Cursor = GetCursorForRasterResizeHandle(handle, selectedRasterObject.Rotation);
+                return true;
+            }
+
+            if (TryGetRasterRotationHandleRect(selectedRasterObject, out RectangleF handleRect, out _) && handleRect.Contains(location))
+            {
+                BeginUndoCapture("Rotate image");
+                rasterObjectToRotate = selectedRasterObject;
+                isRotatingRasterObject = true;
+                rasterRotationStartValue = NormalizeRotation(selectedRasterObject.Rotation);
+                rasterRotateStartBounds = selectedRasterObject.Bounds;
+                rasterRotationStartAngle = GetAngleDegrees(GetRasterObjectScreenCenter(selectedRasterObject), location);
+                this.Cursor = Cursors.Hand;
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryHandleCycledObjectMouseDown(object hitObject, Point location, MouseEventArgs e, float dpiX, float dpiY)
+        {
+            if (hitObject == null)
+            {
+                return false;
+            }
+
+            ResetRasterInteractionState();
+            ResetArrowInteractionState();
+            ResetVectorInteractionState();
+            ResetTextRotationInteractionState();
+            ClearRasterIconClickState();
+            ClearArrowIconClickState();
+            ClearVectorIconClickState();
+            annotationToMove = null;
+            isMoving = false;
+            textMoveMouseOffset = PointF.Empty;
+
+            SelectSingleObject(hitObject);
+
+            if (hitObject is TextAnnotation hitAnnotation)
+            {
+                if (e.Clicks >= 2)
+                {
+                    AddEditAnnotation(hitAnnotation);
+                    this.Cursor = Cursors.Default;
+                    return true;
+                }
+
+                if (!IsTextAnnotationEffectivelyLocked(hitAnnotation))
+                {
+                    BeginUndoCapture("Move text");
+                    annotationToMove = hitAnnotation;
+                    isMoving = true;
+                    textMoveStartBounds = hitAnnotation.AnnotationBounds;
+                    textMoveStartLeaderEndPoint = hitAnnotation.LeaderEndPoint;
+                    PointF mouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
+                    textMoveMouseOffset = new PointF(
+                        mouseDoc.X - hitAnnotation.AnnotationBounds.X,
+                        mouseDoc.Y - hitAnnotation.AnnotationBounds.Y);
+                    this.Cursor = Cursors.SizeAll;
+                }
+                else
+                {
+                    this.Cursor = Cursors.Default;
+                }
+
+                return true;
+            }
+
+            if (hitObject is RasterObject hitRaster)
+            {
+                if (e.Clicks >= 2)
+                {
+                    EditRasterObject(hitRaster);
+                    this.Cursor = Cursors.Default;
+                    return true;
+                }
+
+                ClearRasterIconClickState();
+                if (!IsRasterObjectEffectivelyLocked(hitRaster))
+                {
+                    rasterObjectToMove = hitRaster;
+                    BeginUndoCapture("Move image");
+                    rasterMouseActionInProgress = true;
+                    isMovingRasterObject = true;
+                    rasterMoveStartBounds = hitRaster.Bounds;
+                    startPoint = location;
+                    PointF mouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
+                    rasterMoveMouseOffset = new PointF(mouseDoc.X - hitRaster.Bounds.X, mouseDoc.Y - hitRaster.Bounds.Y);
+                    this.Cursor = Cursors.SizeAll;
+                }
+                else
+                {
+                    this.Cursor = Cursors.Default;
+                }
+
+                return true;
+            }
+
+            if (hitObject is ArrowObject hitArrow)
+            {
+                if (e.Clicks >= 2)
+                {
+                    EditArrowObject(hitArrow);
+                    this.Cursor = Cursors.Default;
+                    return true;
+                }
+
+                ClearArrowIconClickState();
+                if (!IsArrowObjectEffectivelyLocked(hitArrow))
+                {
+                    arrowObjectToMove = hitArrow;
+                    BeginUndoCapture("Move arrow");
+                    arrowMouseActionInProgress = true;
+                    isMovingArrowObject = true;
+                    arrowInteractionChanged = false;
+                    startPoint = location;
+                    arrowMoveStartMouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
+                    arrowMoveInitialStart = hitArrow.Start;
+                    arrowMoveInitialEnd = hitArrow.End;
+                    this.Cursor = Cursors.SizeAll;
+                }
+                else
+                {
+                    this.Cursor = Cursors.Default;
+                }
+
+                return true;
+            }
+
+            if (hitObject is VectorShapeObject hitVectorShape)
+            {
+                if (e.Clicks >= 2)
+                {
+                    EditVectorShapeObject(hitVectorShape);
+                    this.Cursor = Cursors.Default;
+                    return true;
+                }
+
+                if (!IsVectorShapeEffectivelyLocked(hitVectorShape))
+                {
+                    vectorShapeToMove = hitVectorShape;
+                    BeginUndoCapture("Move shape");
+                    vectorShapeToAdjust = null;
+                    vectorShapeToRotate = null;
+                    isMovingVectorShape = true;
+                    isAdjustingVectorHandle = false;
+                    isRotatingVectorShape = false;
+                    vectorHandlePointIndex = -1;
+                    vectorMouseActionInProgress = true;
+                    vectorInteractionChanged = false;
+                    vectorMoveStartMouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
+                    vectorMoveInitialPoints = (hitVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
+                    this.Cursor = Cursors.SizeAll;
+                }
+                else
+                {
+                    this.Cursor = Cursors.Default;
+                }
+
                 return true;
             }
 
