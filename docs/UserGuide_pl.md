@@ -213,10 +213,15 @@ Podczas pracy z obiektami dostępne są także:
 - Kopiowanie i wklejanie obiektów działa również między dwoma uruchomionymi instancjami aplikacji.
 - `DELETE` - usuń aktywny obiekt lub grupę aktywnych obiektów.
 - W dialogu napisów można włączyć opcję `Strzałka` dla ramki tekstu.
+- Opcję `Ogranicz widok rastra` w dialogu kształtów dla prostokąta, elipsy, trójkąta i regionu.
 - Dla strzałki napisu można ustawić `Grubość linii strzałki`, `Długość grotu` i `Szerokość grotu`.
 - Koniec strzałki napisu można przeciągać myszą, a punkt przypięcia do ramki aktualizuje się automatycznie do narożników i środków boków.
 - Obrót napisu nie obraca końca strzałki; aktualizuje się tylko miejsce przypięcia do ramki.
 - Skalowanie napisu skaluje także ramkę i przypiętą strzałkę jako jeden obiekt.
+
+- W dialogu kształtów dla prostokąta, elipsy, trójkąta i regionu dostępna jest opcja `Ogranicz widok rastra`.
+- Opcja nie służy do anonimizacji. Ogranicza tylko widoczny obszar rastrów znajdujących się pod kształtem na tej samej warstwie.
+- W podglądzie fragment rastra wewnątrz kształtu pozostaje wyraźny, a obszar poza nim jest przygaszony. W finalnym PDF pozostaje tylko obszar ograniczony kształtem.
 
 Modyfikatory podczas pracy z obiektami:
 

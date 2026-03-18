@@ -1744,6 +1744,9 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="Vector_Dialog_LineEndingBarLength" xml:space="preserve">
     <value>Strichlänge</value>
   </data>
+  <data name="Vector_Dialog_LimitRasterView" xml:space="preserve">
+    <value>Rasteransicht begrenzen</value>
+  </data>
   <data name="Vector_LineEnding_None" xml:space="preserve">
     <value>Keine</value>
   </data>

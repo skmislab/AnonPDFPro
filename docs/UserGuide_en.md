@@ -219,6 +219,9 @@ When working with objects, you can also use:
 - The end of the text arrow can be dragged with the mouse, and the attachment point on the frame updates automatically to corners and side centers.
 - Rotating the text does not rotate the arrow end; only the attachment point on the frame is updated.
 - Scaling the text also scales the frame and attached arrow as a single object.
+- In the shape dialog, the `Limit raster view` option is available for rectangles, ellipses, triangles, and regions.
+- This option is not used for redaction. It only limits the visible area of raster objects located below it on the same layer.
+- In the preview, the raster fragment inside the shape stays clear while the area outside is dimmed. In the final PDF only the area limited by the shape remains visible.
 
 Modifiers while editing objects:
 
@@ -299,5 +302,6 @@ Recent versions include:
 - Extended context menus for selections and objects (copy, cut, duplicate, remove duplicated copies).
 - Corner-handle scaling for single objects and object groups (`SHIFT` - proportional, `ALT` - from center).
 - The `Arrow` option in the text dialog, with adjustable arrow line width, head length, and head width.
+- The `Limit raster view` option in the shape dialog for rectangles, ellipses, triangles, and regions.
 - Object copy and paste through the system clipboard, including between two running application instances, with preserved stacking order.
 - `Undo` (`CTRL+Z`) and `Redo` (`CTRL+Y`).

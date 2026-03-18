@@ -1791,6 +1791,9 @@ Close the application and run the installer now?</value>
   <data name="Vector_Dialog_LineEndingBarLength" xml:space="preserve">
     <value>Bar length</value>
   </data>
+  <data name="Vector_Dialog_LimitRasterView" xml:space="preserve">
+    <value>Limit raster view</value>
+  </data>
   <data name="Vector_LineEnding_None" xml:space="preserve">
     <value>None</value>
   </data>

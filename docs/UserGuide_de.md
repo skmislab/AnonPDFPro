@@ -201,6 +201,9 @@ Für die Arbeit mit Objekten stehen außerdem zur Verfügung:
 > \- Das Ende des Textpfeils kann mit der Maus verschoben werden; der Anheftungspunkt am Rahmen wird automatisch auf Ecken und Seitenmitten aktualisiert.
 > \- Beim Drehen des Textes wird das Pfeilende nicht mitgedreht; nur der Anheftungspunkt am Rahmen wird aktualisiert.
 > \- Beim Skalieren des Textes werden Rahmen und angehefteter Pfeil als ein Objekt mit skaliert.
+- Im Formdialog steht für Rechteck, Ellipse, Dreieck und Region die Option `Rasteransicht begrenzen` zur Verfügung.
+- Diese Option dient nicht der Anonymisierung. Sie begrenzt nur den sichtbaren Bereich von Rasterobjekten, die darunter auf derselben Ebene liegen.
+- In der Vorschau bleibt der Rasterbereich innerhalb der Form klar sichtbar, während der Bereich außerhalb abgeblendet wird. Im finalen PDF bleibt nur der durch die Form begrenzte Bereich sichtbar.
 
 Modifikatoren bei der Objektbearbeitung:
 

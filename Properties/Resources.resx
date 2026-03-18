@@ -1791,6 +1791,9 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="Vector_Dialog_LineEndingBarLength" xml:space="preserve">
     <value>Długość kreski</value>
   </data>
+  <data name="Vector_Dialog_LimitRasterView" xml:space="preserve">
+    <value>Ogranicz widok rastra</value>
+  </data>
   <data name="Vector_LineEnding_None" xml:space="preserve">
     <value>Brak</value>
   </data>

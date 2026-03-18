@@ -571,6 +571,7 @@ namespace AnonPDF
         private sealed class VectorShapeDefaults
         {
             public VectorShapeType ShapeType { get; set; }
+            public bool LimitsRasterView { get; set; }
             public int StrokeColorArgb { get; set; }
             public float StrokeWidth { get; set; }
             public int FillColorArgb { get; set; }
@@ -590,6 +591,7 @@ namespace AnonPDF
                 return new VectorShapeDefaults
                 {
                     ShapeType = VectorShapeType.Polyline,
+                    LimitsRasterView = false,
                     StrokeColorArgb = System.Drawing.Color.Blue.ToArgb(),
                     StrokeWidth = 2f,
                     FillColorArgb = System.Drawing.Color.Gold.ToArgb(),
@@ -611,6 +613,7 @@ namespace AnonPDF
                 return new VectorShapeDefaults
                 {
                     ShapeType = ShapeType,
+                    LimitsRasterView = LimitsRasterView,
                     StrokeColorArgb = StrokeColorArgb,
                     StrokeWidth = StrokeWidth,
                     FillColorArgb = FillColorArgb,
@@ -4318,6 +4321,58 @@ namespace AnonPDF
             }
         }
 
+        private IEnumerable<object> GetOrderedObjectsForPage(int pageNumber, Func<string, bool> layerPredicate)
+        {
+            layerPredicate = layerPredicate ?? (_ => true);
+
+            foreach (var entry in EnumerateObjectLayerEntriesInVisualOrder(entry =>
+                entry.Type == LayerObjectType.Text ||
+                entry.Type == LayerObjectType.Raster ||
+                entry.Type == LayerObjectType.Arrow ||
+                entry.Type == LayerObjectType.VectorShape))
+            {
+                switch (entry.Type)
+                {
+                    case LayerObjectType.Text:
+                    {
+                        var annotation = textAnnotations.FirstOrDefault(a => a != null && a.PageNumber == pageNumber && string.Equals(a.Id, entry.Id, StringComparison.Ordinal));
+                        if (annotation != null && layerPredicate(annotation.LayerId))
+                        {
+                            yield return annotation;
+                        }
+                        break;
+                    }
+                    case LayerObjectType.Raster:
+                    {
+                        var rasterObject = rasterObjects.FirstOrDefault(r => r != null && r.PageNumber == pageNumber && string.Equals(r.Id, entry.Id, StringComparison.Ordinal));
+                        if (rasterObject != null && layerPredicate(rasterObject.LayerId))
+                        {
+                            yield return rasterObject;
+                        }
+                        break;
+                    }
+                    case LayerObjectType.Arrow:
+                    {
+                        var arrowObject = arrowObjects.FirstOrDefault(a => a != null && a.PageNumber == pageNumber && string.Equals(a.Id, entry.Id, StringComparison.Ordinal));
+                        if (arrowObject != null && layerPredicate(arrowObject.LayerId))
+                        {
+                            yield return arrowObject;
+                        }
+                        break;
+                    }
+                    case LayerObjectType.VectorShape:
+                    {
+                        var vectorShape = vectorShapes.FirstOrDefault(v => v != null && v.PageNumber == pageNumber && string.Equals(v.Id, entry.Id, StringComparison.Ordinal));
+                        if (vectorShape != null && layerPredicate(vectorShape.LayerId))
+                        {
+                            yield return vectorShape;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         private IEnumerable<object> GetOrderedGraphicObjectsForExport()
         {
             foreach (var entry in EnumerateObjectLayerEntriesInVisualOrder(entry =>
@@ -5023,6 +5078,7 @@ namespace AnonPDF
                         {
                             LayerId = NormalizeLayerIdValue(vectorShapeObject.LayerId),
                             ShapeType = vectorShapeObject.ShapeType,
+                            IsRasterClip = vectorShapeObject.IsRasterClip,
                             Points = (vectorShapeObject.Points ?? new List<PointF>())
                                 .Select(point => new PointF(point.X - snapshotSourceBounds.X, point.Y - snapshotSourceBounds.Y))
                                 .ToList(),
@@ -5534,6 +5590,7 @@ namespace AnonPDF
                 ["FillOpacity"] = vectorShape.FillOpacity,
                 ["StrokeStyle"] = vectorShape.StrokeStyle,
                 ["FillPattern"] = vectorShape.FillPattern,
+                ["IsRasterClip"] = vectorShape.IsRasterClip,
                 ["StartLineEnding"] = vectorShape.StartLineEnding,
                 ["EndLineEnding"] = vectorShape.EndLineEnding,
                 ["StartLineEndingPrimarySize"] = vectorShape.StartLineEndingPrimarySize,
@@ -5564,6 +5621,7 @@ namespace AnonPDF
                 FillOpacity = NormalizeVectorFillOpacity(vectorJson.Value<float?>("FillOpacity") ?? 0.18f),
                 StrokeStyle = vectorJson.Value<string>("StrokeStyle") ?? "solid",
                 FillPattern = vectorJson.Value<string>("FillPattern") ?? "solid",
+                IsRasterClip = vectorJson.Value<bool?>("IsRasterClip") ?? false,
                 StartLineEnding = vectorJson.Value<string>("StartLineEnding") ?? "None",
                 EndLineEnding = vectorJson.Value<string>("EndLineEnding") ?? "None",
                 StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorJson.Value<float?>("StartLineEndingPrimarySize") ?? 0f),
@@ -5973,6 +6031,7 @@ namespace AnonPDF
                             PageNumber = currentPage,
                             LayerId = targetLayerId,
                             ShapeType = item.VectorShape.ShapeType,
+                            IsRasterClip = item.VectorShape.IsRasterClip,
                             Points = (item.VectorShape.Points ?? new List<PointF>())
                                 .Select(point => new PointF(baseX + (point.X * pasteScale), baseY + (point.Y * pasteScale)))
                                 .ToList(),
@@ -9074,6 +9133,7 @@ namespace AnonPDF
                 PageNumber = source.PageNumber,
                 LayerId = NormalizeLayerIdValue(source.LayerId),
                 ShapeType = source.ShapeType,
+                IsRasterClip = source.IsRasterClip,
                 Points = (source.Points ?? new List<PointF>())
                     .Select(point => new PointF(point.X + 12f, point.Y + 12f))
                     .ToList(),
@@ -18592,7 +18652,7 @@ namespace AnonPDF
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
                 prompt.Width = 620;
-                prompt.Height = 430;
+                prompt.Height = 460;
                 prompt.BackColor = theme.SectionBackColor;
                 prompt.ForeColor = theme.TextPrimaryColor;
 
@@ -18722,7 +18782,7 @@ namespace AnonPDF
                     Top = 116,
                     Width = 70,
                     DecimalPlaces = 1,
-                    Minimum = 1,
+                    Minimum = 0.5m,
                     Maximum = 24,
                     Increment = 0.5m,
                     Value = (decimal)NormalizeVectorStrokeWidth(working.StrokeWidth)
@@ -18948,6 +19008,15 @@ namespace AnonPDF
                     Maximum = 179,
                     Increment = 1
                 };
+                var checkLimitRasterView = new CheckBox
+                {
+                    Left = 12,
+                    Top = 338,
+                    Width = 220,
+                    Text = LocalizedText("Vector_Dialog_LimitRasterView"),
+                    Checked = working.LimitsRasterView
+                };
+                checkLimitRasterView.CheckedChanged += (_, __) => notifyShapePreviewChanged?.Invoke();
 
                 bool suppressLineEndingSizeControlEvents = false;
                 bool startPrimarySizeCustomized = working.StartEndingPrimarySize > 0f;
@@ -19060,6 +19129,7 @@ namespace AnonPDF
                     result.FillPatternColorArgb = hasPatternColor
                         ? System.Drawing.Color.FromArgb(255, selectedPatternColor.R, selectedPatternColor.G, selectedPatternColor.B).ToArgb()
                         : System.Drawing.Color.FromArgb(0, selectedPatternColor.R, selectedPatternColor.G, selectedPatternColor.B).ToArgb();
+                    result.LimitsRasterView = checkLimitRasterView.Checked && ShapeTypeSupportsRasterClip(selectedShape);
 
                     switch (comboStrokeStyle.SelectedIndex)
                     {
@@ -19193,6 +19263,7 @@ namespace AnonPDF
                 {
                     bool supportsFill = ShapeTypeSupportsFill(selectedShape);
                     bool supportsLineEndings = selectedShape == VectorShapeType.Polyline;
+                    bool supportsRasterClip = ShapeTypeSupportsRasterClip(selectedShape);
                     bool hasStroke = !checkNoStrokeColor.Checked;
                     bool hasFill = supportsFill && !checkNoFillColor.Checked;
                     bool hasPattern = hasFill && comboFillPattern.SelectedIndex > 0;
@@ -19216,6 +19287,11 @@ namespace AnonPDF
                     comboStartEnding.Enabled = supportsLineEndings && hasStroke;
                     labelEndEnding.Enabled = supportsLineEndings && hasStroke;
                     comboEndEnding.Enabled = supportsLineEndings && hasStroke;
+                    checkLimitRasterView.Enabled = supportsRasterClip;
+                    if (!supportsRasterClip)
+                    {
+                        checkLimitRasterView.Checked = false;
+                    }
                     UpdateLineEndingSizeControls();
                 };
 
@@ -19263,6 +19339,7 @@ namespace AnonPDF
                         patternColor = System.Drawing.Color.Black;
                     }
                     buttonFillPatternColor.BackColor = System.Drawing.Color.FromArgb(patternColor.R, patternColor.G, patternColor.B);
+                    checkLimitRasterView.Checked = defaults.LimitsRasterView && ShapeTypeSupportsRasterClip(selectedShape);
                     comboStartEnding.SelectedIndex = GetVectorLineEndingComboIndex(defaults.StartEnding);
                     comboEndEnding.SelectedIndex = GetVectorLineEndingComboIndex(defaults.EndEnding);
                     working.StartEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(defaults.StartEndingPrimarySize);
@@ -19280,7 +19357,7 @@ namespace AnonPDF
                 var buttonRestoreDefaults = new Button
                 {
                     Left = 212,
-                    Top = 338,
+                    Top = 368,
                     Width = 140,
                     Text = GetRestoreSettingsButtonText()
                 };
@@ -19290,8 +19367,8 @@ namespace AnonPDF
                     notifyShapePreviewChanged?.Invoke();
                 };
 
-                var buttonOk = new Button { Left = 364, Top = 338, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
-                var buttonCancel = new Button { Left = 486, Top = 338, Width = 110, Text = GetCancelButtonText(), DialogResult = DialogResult.Cancel };
+                var buttonOk = new Button { Left = 364, Top = 368, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
+                var buttonCancel = new Button { Left = 486, Top = 368, Width = 110, Text = GetCancelButtonText(), DialogResult = DialogResult.Cancel };
 
                 prompt.Controls.Add(labelShapes);
                 prompt.Controls.Add(shapesPanel);
@@ -19323,6 +19400,7 @@ namespace AnonPDF
                 prompt.Controls.Add(numericEndEndingPrimary);
                 prompt.Controls.Add(labelEndEndingSecondary);
                 prompt.Controls.Add(numericEndEndingSecondary);
+                prompt.Controls.Add(checkLimitRasterView);
                 prompt.Controls.Add(buttonRestoreDefaults);
                 prompt.Controls.Add(buttonOk);
                 prompt.Controls.Add(buttonCancel);
@@ -19432,6 +19510,7 @@ namespace AnonPDF
                 PageNumber = currentPage,
                 LayerId = GetResolvedActiveLayerId(),
                 ShapeType = activeVectorShapeType.ToString(),
+                IsRasterClip = activeVectorShapeDefaults.LimitsRasterView,
                 Points = vectorShapeDraftPoints.ToList(),
                 StrokeColorArgb = activeVectorShapeDefaults.StrokeColorArgb,
                 StrokeWidth = NormalizeVectorStrokeWidth(activeVectorShapeDefaults.StrokeWidth),
@@ -19894,6 +19973,22 @@ namespace AnonPDF
                     ResetVectorInteractionState();
                     selectedTextAnnotation = null;
                     rasterMouseActionInProgress = true;
+                    isDrawing = false;
+                    isMoving = false;
+                    annotationToMove = null;
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
+                if (TryHandleRasterIconMouseDown(e.Location))
+                {
+                    selectedArrowObject = null;
+                    ResetArrowInteractionState();
+                    ClearArrowIconClickState();
+                    selectedVectorShape = null;
+                    ResetVectorInteractionState();
+                    ClearVectorIconClickState();
+                    selectedTextAnnotation = null;
                     isDrawing = false;
                     isMoving = false;
                     annotationToMove = null;
@@ -23352,7 +23447,7 @@ namespace AnonPDF
 
             foreach (var vectorShape in shapes)
             {
-                if (vectorShape == null || vectorShape.Points == null || vectorShape.Points.Count < 2)
+                if (vectorShape == null || vectorShape.IsRasterClip || vectorShape.Points == null || vectorShape.Points.Count < 2)
                 {
                     continue;
                 }
@@ -23740,17 +23835,19 @@ namespace AnonPDF
                 return;
             }
 
-            if (!TryCreateRasterImageData(rasterObject, out iText.IO.Image.ImageData imageData))
-            {
-                return;
-            }
-
             bool baseRotationBaked = pagesWithBakedRotation != null && pagesWithBakedRotation.Contains(pageNumber);
             int rotation = baseRotationBaked ? GetRotationOffset(pageNumber) : GetEffectiveRotationDegrees(pageNumber);
             var page = pdfDoc.GetPage(pageNumber);
             var pdfCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page);
             RectangleF viewBounds = rasterObject.Bounds;
             if (viewBounds.Width <= 0f || viewBounds.Height <= 0f)
+            {
+                return;
+            }
+
+            List<VectorShapeObject> clipShapes = GetRasterClipShapesForExport(rasterObject);
+
+            if (!TryCreateRasterImageData(rasterObject, out iText.IO.Image.ImageData imageData))
             {
                 return;
             }
@@ -23795,6 +23892,8 @@ namespace AnonPDF
             }
 
             float opacity = NormalizeOpacity(rasterObject.Opacity);
+            pdfCanvas.SaveState();
+            ApplyRasterClipPathToPdf(pdfCanvas, pageNumber, rotation, includeBaseRotation: !baseRotationBaked, clipShapes);
             if (opacity >= 0.999f)
             {
                 pdfCanvas.AddImageWithTransformationMatrix(imageData, a, b, c, d, e, f, false);
@@ -23804,11 +23903,11 @@ namespace AnonPDF
                 var extGState = new PdfExtGState()
                     .SetFillOpacity(opacity)
                     .SetStrokeOpacity(opacity);
-                pdfCanvas.SaveState();
                 pdfCanvas.SetExtGState(extGState);
                 pdfCanvas.AddImageWithTransformationMatrix(imageData, a, b, c, d, e, f, false);
-                pdfCanvas.RestoreState();
             }
+
+            pdfCanvas.RestoreState();
         }
 
         private void RenderArrowObjectToPdf(
@@ -24742,6 +24841,7 @@ namespace AnonPDF
                 using (var pen = new Pen(System.Drawing.Color.FromArgb(vectorShape.StrokeColorArgb), NormalizeVectorStrokeWidth(vectorShape.StrokeWidth) * scaleFactor))
                 {
                     bool isSelectedVector = IsVectorShapeSelected(vectorShape);
+                    bool isRasterClipShape = SupportsRasterClip(vectorShape);
                     bool hasStrokeColor = HasVisibleVectorColor(vectorShape.StrokeColorArgb);
                     bool drawStroke = hasStrokeColor || isSelectedVector;
                     System.Drawing.Color strokeRenderColor = pen.Color;
@@ -24758,12 +24858,28 @@ namespace AnonPDF
                     pen.StartCap = LineCap.Round;
                     pen.EndCap = LineCap.Round;
 
+                    if (isRasterClipShape)
+                    {
+                        pen.Color = isSelectedVector ? System.Drawing.Color.Red : System.Drawing.Color.ForestGreen;
+                        pen.Width = Math.Max(isSelectedVector ? SelectedObjectBorderWidth : 1.5f, 1.5f);
+                        pen.DashStyle = DashStyle.Dash;
+                        strokeRenderColor = pen.Color;
+                        drawStroke = true;
+                    }
+
                     bool isClosed = IsShapeClosed(shapeType);
                     bool supportsFill = ShapeTypeSupportsFill(shapeType);
                     if (isClosed && points.Length >= 3)
                     {
                         bool hasFillColor = HasVisibleVectorColor(vectorShape.FillColorArgb);
-                        if (supportsFill && hasFillColor)
+                        if (isRasterClipShape)
+                        {
+                            using (var clipFillBrush = new SolidBrush(System.Drawing.Color.FromArgb(24, pen.Color)))
+                            {
+                                graphics.FillPolygon(clipFillBrush, points);
+                            }
+                        }
+                        else if (supportsFill && hasFillColor)
                         {
                             int alpha = (int)(NormalizeVectorFillOpacity(vectorShape.FillOpacity) * 255f);
                             alpha = Math.Max(0, Math.Min(255, alpha));
@@ -24922,6 +25038,7 @@ namespace AnonPDF
                 bool showRasterTools = selectedRasterObject != null &&
                                        selectedRasterObject.Id == rasterObject.Id &&
                                        GetGroupSelectionCount() == 0;
+                List<VectorShapeObject> clipShapes = GetRasterClipShapesForPreview(rasterObject);
                 RectangleF scaledBounds = new RectangleF(
                     rasterObject.Bounds.X * scaleFactor,
                     rasterObject.Bounds.Y * scaleFactor,
@@ -24931,40 +25048,90 @@ namespace AnonPDF
                 var state = graphics.Save();
                 try
                 {
-                    graphics.TranslateTransform(
-                        scaledBounds.X + (scaledBounds.Width / 2f),
-                        scaledBounds.Y + (scaledBounds.Height / 2f));
-                    graphics.RotateTransform(rasterObject.Rotation);
-                    graphics.TranslateTransform(-(scaledBounds.Width / 2f), -(scaledBounds.Height / 2f));
-                    float opacity = NormalizeOpacity(rasterObject.Opacity);
-                    if (opacity >= 0.999f)
+                    using (GraphicsPath clipPath = BuildRasterClipPathForPreview(clipShapes))
                     {
-                        graphics.DrawImage(previewImage, new RectangleF(0f, 0f, scaledBounds.Width, scaledBounds.Height));
-                    }
-                    else
-                    {
-                        using (var imageAttributes = new ImageAttributes())
+                        bool hasClip = clipPath.PointCount >= 3;
+                        Action drawRasterImage = () =>
                         {
-                            var colorMatrix = new ColorMatrix
+                            float opacity = NormalizeOpacity(rasterObject.Opacity);
+                            if (opacity >= 0.999f)
                             {
-                                Matrix33 = opacity
-                            };
-                            imageAttributes.SetColorMatrix(colorMatrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-                            var drawRect = new Rectangle(
-                                0,
-                                0,
-                                Math.Max(1, (int)Math.Round(scaledBounds.Width)),
-                                Math.Max(1, (int)Math.Round(scaledBounds.Height)));
-                            graphics.DrawImage(
-                                previewImage,
-                                drawRect,
-                                0,
-                                0,
-                                previewImage.Width,
-                                previewImage.Height,
-                                GraphicsUnit.Pixel,
-                                imageAttributes);
+                                graphics.DrawImage(previewImage, new RectangleF(0f, 0f, scaledBounds.Width, scaledBounds.Height));
+                            }
+                            else
+                            {
+                                using (var imageAttributes = new ImageAttributes())
+                                {
+                                    var colorMatrix = new ColorMatrix
+                                    {
+                                        Matrix33 = opacity
+                                    };
+                                    imageAttributes.SetColorMatrix(colorMatrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+                                    var drawRect = new Rectangle(
+                                        0,
+                                        0,
+                                        Math.Max(1, (int)Math.Round(scaledBounds.Width)),
+                                        Math.Max(1, (int)Math.Round(scaledBounds.Height)));
+                                    graphics.DrawImage(
+                                        previewImage,
+                                        drawRect,
+                                        0,
+                                        0,
+                                        previewImage.Width,
+                                        previewImage.Height,
+                                        GraphicsUnit.Pixel,
+                                        imageAttributes);
+                                }
+                            }
+                        };
+
+                        Action applyRasterTransform = () =>
+                        {
+                            graphics.TranslateTransform(
+                                scaledBounds.X + (scaledBounds.Width / 2f),
+                                scaledBounds.Y + (scaledBounds.Height / 2f));
+                            graphics.RotateTransform(rasterObject.Rotation);
+                            graphics.TranslateTransform(-(scaledBounds.Width / 2f), -(scaledBounds.Height / 2f));
+                        };
+
+                        applyRasterTransform();
+
+                        if (hasClip)
+                        {
+                            using (var grayscaleAttributes = new ImageAttributes())
+                            {
+                                var grayscaleMatrix = new ColorMatrix(new[]
+                                {
+                                    new[] { 0.299f, 0.299f, 0.299f, 0f, 0f },
+                                    new[] { 0.587f, 0.587f, 0.587f, 0f, 0f },
+                                    new[] { 0.114f, 0.114f, 0.114f, 0f, 0f },
+                                    new[] { 0f,     0f,     0f,     0.38f, 0f },
+                                    new[] { 0f,     0f,     0f,     0f,    1f }
+                                });
+                                grayscaleAttributes.SetColorMatrix(grayscaleMatrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+                                var grayRect = new Rectangle(
+                                    0,
+                                    0,
+                                    Math.Max(1, (int)Math.Round(scaledBounds.Width)),
+                                    Math.Max(1, (int)Math.Round(scaledBounds.Height)));
+                                graphics.DrawImage(
+                                    previewImage,
+                                    grayRect,
+                                    0,
+                                    0,
+                                    previewImage.Width,
+                                    previewImage.Height,
+                                    GraphicsUnit.Pixel,
+                                    grayscaleAttributes);
+                            }
+
+                            graphics.Restore(state);
+                            state = graphics.Save();
+                            graphics.SetClip(clipPath, CombineMode.Replace);
+                            applyRasterTransform();
                         }
+
+                        drawRasterImage();
                     }
                     System.Drawing.Color borderColor = (isSelectedRaster && !multiSelectionActive)
                         ? System.Drawing.Color.Red
@@ -28645,6 +28812,7 @@ namespace AnonPDF
                 !AreSameFloat(left.FillOpacity, right.FillOpacity) ||
                 !string.Equals(left.StrokeStyle, right.StrokeStyle, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(left.FillPattern, right.FillPattern, StringComparison.OrdinalIgnoreCase) ||
+                left.IsRasterClip != right.IsRasterClip ||
                 !string.Equals(left.StartLineEnding, right.StartLineEnding, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(left.EndLineEnding, right.EndLineEnding, StringComparison.OrdinalIgnoreCase) ||
                 !AreSameFloat(NormalizeVectorLineEndingPrimarySize(left.StartLineEndingPrimarySize), NormalizeVectorLineEndingPrimarySize(right.StartLineEndingPrimarySize)) ||
@@ -30456,6 +30624,7 @@ namespace AnonPDF
             float originalFillOpacity = NormalizeVectorFillOpacity(vectorShape.FillOpacity);
             string originalStrokeStyle = vectorShape.StrokeStyle;
             string originalFillPattern = vectorShape.FillPattern;
+            bool originalIsRasterClip = vectorShape.IsRasterClip;
             string originalStartLineEnding = vectorShape.StartLineEnding;
             string originalEndLineEnding = vectorShape.EndLineEnding;
             float originalStartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(vectorShape.StartLineEndingPrimarySize);
@@ -30467,6 +30636,7 @@ namespace AnonPDF
             var initialDefaults = new VectorShapeDefaults
             {
                 ShapeType = ParseVectorShapeType(vectorShape.ShapeType),
+                LimitsRasterView = vectorShape.IsRasterClip,
                 StrokeColorArgb = vectorShape.StrokeColorArgb,
                 StrokeWidth = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth),
                 FillColorArgb = vectorShape.FillColorArgb,
@@ -30496,6 +30666,7 @@ namespace AnonPDF
                 vectorShape.FillOpacity = originalFillOpacity;
                 vectorShape.StrokeStyle = originalStrokeStyle;
                 vectorShape.FillPattern = originalFillPattern;
+                vectorShape.IsRasterClip = originalIsRasterClip;
                 vectorShape.StartLineEnding = originalStartLineEnding;
                 vectorShape.EndLineEnding = originalEndLineEnding;
                 vectorShape.StartLineEndingPrimarySize = originalStartLineEndingPrimarySize;
@@ -30523,6 +30694,7 @@ namespace AnonPDF
                 !AreSameFloat(originalFillOpacity, NormalizeVectorFillOpacity(selectedDefaults.FillOpacity)) ||
                 !string.Equals(originalStrokeStyle ?? string.Empty, selectedDefaults.StrokeKind.ToString(), StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(originalFillPattern ?? string.Empty, selectedDefaults.FillPattern.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                originalIsRasterClip != selectedDefaults.LimitsRasterView ||
                 !string.Equals(originalStartLineEnding ?? string.Empty, selectedDefaults.StartEnding.ToString(), StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(originalEndLineEnding ?? string.Empty, selectedDefaults.EndEnding.ToString(), StringComparison.OrdinalIgnoreCase) ||
                 !AreSameFloat(originalStartLineEndingPrimarySize, NormalizeVectorLineEndingPrimarySize(selectedDefaults.StartEndingPrimarySize)) ||
@@ -30553,6 +30725,7 @@ namespace AnonPDF
             vectorShape.FillOpacity = NormalizeVectorFillOpacity(defaults.FillOpacity);
             vectorShape.StrokeStyle = defaults.StrokeKind.ToString();
             vectorShape.FillPattern = defaults.FillPattern.ToString();
+            vectorShape.IsRasterClip = defaults.LimitsRasterView;
             vectorShape.StartLineEnding = defaults.StartEnding.ToString();
             vectorShape.EndLineEnding = defaults.EndEnding.ToString();
             vectorShape.StartLineEndingPrimarySize = NormalizeVectorLineEndingPrimarySize(defaults.StartEndingPrimarySize);
@@ -31238,6 +31411,14 @@ namespace AnonPDF
                    || type == VectorShapeType.Triangle;
         }
 
+        private static bool ShapeTypeSupportsRasterClip(VectorShapeType type)
+        {
+            return type == VectorShapeType.Region
+                   || type == VectorShapeType.Rectangle
+                   || type == VectorShapeType.Ellipse
+                   || type == VectorShapeType.Triangle;
+        }
+
         private static bool ShapeTypeSupportsRotationHandle(VectorShapeType type)
         {
             return type != VectorShapeType.Rectangle
@@ -31513,7 +31694,6 @@ namespace AnonPDF
                         return BuildArcFromThreePoints(points[0], points[1], points[2]);
                     }
 
-                    // Backward compatibility for older projects that stored arc as two points.
                     if (points.Count < 2)
                     {
                         return result;
@@ -31552,6 +31732,278 @@ namespace AnonPDF
             }
         }
 
+        private static bool SupportsRasterClip(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null || !vectorShape.IsRasterClip)
+            {
+                return false;
+            }
+
+            VectorShapeType shapeType = ParseVectorShapeType(vectorShape.ShapeType);
+            if (!ShapeTypeSupportsRasterClip(shapeType))
+            {
+                return false;
+            }
+
+            List<PointF> renderPoints = BuildVectorShapeRenderPoints(shapeType, vectorShape.Points);
+            return renderPoints.Count >= 3;
+        }
+
+        private static RectangleF GetRasterObjectDocFrameBounds(RasterObject rasterObject)
+        {
+            if (rasterObject == null)
+            {
+                return RectangleF.Empty;
+            }
+
+            RectangleF bounds = rasterObject.Bounds;
+            if (bounds.Width <= 0f || bounds.Height <= 0f)
+            {
+                return RectangleF.Empty;
+            }
+
+            PointF center = new PointF(bounds.X + (bounds.Width / 2f), bounds.Y + (bounds.Height / 2f));
+            int rotation = NormalizeRotation(rasterObject.Rotation);
+            PointF vx = RotateVector(new PointF(bounds.Width / 2f, 0f), rotation);
+            PointF vy = RotateVector(new PointF(0f, bounds.Height / 2f), rotation);
+
+            PointF[] corners = new[]
+            {
+                new PointF(center.X - vx.X - vy.X, center.Y - vx.Y - vy.Y),
+                new PointF(center.X + vx.X - vy.X, center.Y + vx.Y - vy.Y),
+                new PointF(center.X + vx.X + vy.X, center.Y + vx.Y + vy.Y),
+                new PointF(center.X - vx.X + vy.X, center.Y - vx.Y + vy.Y)
+            };
+
+            float minX = corners.Min(p => p.X);
+            float maxX = corners.Max(p => p.X);
+            float minY = corners.Min(p => p.Y);
+            float maxY = corners.Max(p => p.Y);
+            return new RectangleF(minX, minY, Math.Max(0f, maxX - minX), Math.Max(0f, maxY - minY));
+        }
+
+        private static RectangleF GetVectorShapeRenderBoundsDoc(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null)
+            {
+                return RectangleF.Empty;
+            }
+
+            VectorShapeType shapeType = ParseVectorShapeType(vectorShape.ShapeType);
+            List<PointF> renderPoints = BuildVectorShapeRenderPoints(shapeType, vectorShape.Points);
+            if (renderPoints.Count == 0)
+            {
+                return RectangleF.Empty;
+            }
+
+            float minX = renderPoints.Min(p => p.X);
+            float maxX = renderPoints.Max(p => p.X);
+            float minY = renderPoints.Min(p => p.Y);
+            float maxY = renderPoints.Max(p => p.Y);
+            return new RectangleF(minX, minY, Math.Max(0f, maxX - minX), Math.Max(0f, maxY - minY));
+        }
+
+        private static bool DoesRasterClipShapeIntersectRaster(RasterObject rasterObject, VectorShapeObject vectorShape)
+        {
+            RectangleF rasterBounds = GetRasterObjectDocFrameBounds(rasterObject);
+            RectangleF clipBounds = GetVectorShapeRenderBoundsDoc(vectorShape);
+            return !rasterBounds.IsEmpty && !clipBounds.IsEmpty && rasterBounds.IntersectsWith(clipBounds);
+        }
+
+        private static Dictionary<string, List<VectorShapeObject>> BuildRasterClipMap(IEnumerable<object> orderedObjects)
+        {
+            var result = new Dictionary<string, List<VectorShapeObject>>(StringComparer.Ordinal);
+            var rastersBelow = new List<RasterObject>();
+
+            foreach (object orderedObject in orderedObjects ?? Enumerable.Empty<object>())
+            {
+                if (orderedObject is RasterObject rasterObject)
+                {
+                    if (!string.IsNullOrWhiteSpace(rasterObject.Id))
+                    {
+                        rastersBelow.Add(rasterObject);
+                    }
+                    continue;
+                }
+
+                if (!(orderedObject is VectorShapeObject vectorShape) || rastersBelow.Count == 0)
+                {
+                    continue;
+                }
+
+                if (!SupportsRasterClip(vectorShape))
+                {
+                    continue;
+                }
+
+                foreach (RasterObject rasterBelow in rastersBelow)
+                {
+                    if (!string.Equals(
+                            NormalizeLayerIdValue(rasterBelow.LayerId),
+                            NormalizeLayerIdValue(vectorShape.LayerId),
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (!DoesRasterClipShapeIntersectRaster(rasterBelow, vectorShape))
+                    {
+                        continue;
+                    }
+
+                    if (!result.TryGetValue(rasterBelow.Id, out List<VectorShapeObject> masks))
+                    {
+                        masks = new List<VectorShapeObject>();
+                        result[rasterBelow.Id] = masks;
+                    }
+
+                    if (!masks.Any(existing => existing != null && string.Equals(existing.Id, vectorShape.Id, StringComparison.Ordinal)))
+                    {
+                        masks.Add(vectorShape);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private List<VectorShapeObject> GetRasterClipShapesForPreview(RasterObject rasterObject)
+        {
+            if (rasterObject == null || string.IsNullOrWhiteSpace(rasterObject.Id))
+            {
+                return new List<VectorShapeObject>();
+            }
+
+            Dictionary<string, List<VectorShapeObject>> clipMap = BuildRasterClipMap(GetOrderedObjectsForCurrentPage());
+            return clipMap.TryGetValue(rasterObject.Id, out List<VectorShapeObject> masks)
+                ? masks
+                : new List<VectorShapeObject>();
+        }
+
+        private List<VectorShapeObject> GetRasterClipShapesForExport(RasterObject rasterObject)
+        {
+            if (rasterObject == null || string.IsNullOrWhiteSpace(rasterObject.Id))
+            {
+                return new List<VectorShapeObject>();
+            }
+
+            Dictionary<string, List<VectorShapeObject>> clipMap = BuildRasterClipMap(
+                GetOrderedObjectsForPage(rasterObject.PageNumber, layerId => ShouldExportLayer(layerId)));
+
+            return clipMap.TryGetValue(rasterObject.Id, out List<VectorShapeObject> masks)
+                ? masks.Where(mask => mask.PageNumber == rasterObject.PageNumber).ToList()
+                : new List<VectorShapeObject>();
+        }
+
+        private GraphicsPath BuildRasterClipPathForPreview(IEnumerable<VectorShapeObject> clipShapes)
+        {
+            var path = new GraphicsPath();
+            foreach (VectorShapeObject clipShape in clipShapes ?? Enumerable.Empty<VectorShapeObject>())
+            {
+                if (!SupportsRasterClip(clipShape))
+                {
+                    continue;
+                }
+
+                VectorShapeType shapeType = ParseVectorShapeType(clipShape.ShapeType);
+                if (shapeType == VectorShapeType.Rectangle && clipShape.Points != null && clipShape.Points.Count >= 2)
+                {
+                    RectangleF rect = CreateNormalizedRectangle(clipShape.Points[0], clipShape.Points[clipShape.Points.Count - 1]);
+                    if (rect.Width > 0.0001f && rect.Height > 0.0001f)
+                    {
+                        path.AddRectangle(new RectangleF(
+                            rect.Left * scaleFactor,
+                            rect.Top * scaleFactor,
+                            rect.Width * scaleFactor,
+                            rect.Height * scaleFactor));
+                    }
+
+                    continue;
+                }
+
+                PointF[] screenPoints = BuildVectorShapeRenderPoints(shapeType, clipShape.Points)
+                    .Select(point => new PointF(point.X * scaleFactor, point.Y * scaleFactor))
+                    .ToArray();
+
+                if (screenPoints.Length >= 3)
+                {
+                    path.AddPolygon(screenPoints);
+                }
+            }
+
+            return path;
+        }
+
+        private void ApplyRasterClipPathToPdf(
+            iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
+            int pageNumber,
+            int rotation,
+            bool includeBaseRotation,
+            IEnumerable<VectorShapeObject> clipShapes)
+        {
+            bool hasAnyClip = false;
+
+            foreach (VectorShapeObject clipShape in clipShapes ?? Enumerable.Empty<VectorShapeObject>())
+            {
+                if (!SupportsRasterClip(clipShape))
+                {
+                    continue;
+                }
+
+                VectorShapeType shapeType = ParseVectorShapeType(clipShape.ShapeType);
+                if (shapeType == VectorShapeType.Rectangle && clipShape.Points != null && clipShape.Points.Count >= 2)
+                {
+                    RectangleF docRect = CreateNormalizedRectangle(clipShape.Points[0], clipShape.Points[clipShape.Points.Count - 1]);
+                    if (docRect.Width > 0.0001f && docRect.Height > 0.0001f)
+                    {
+                        var pdfCorners = new[]
+                        {
+                            ConvertPointToPdfCoordinates(new PointF(docRect.Left, docRect.Top), pageNumber, rotation, includeBaseRotation),
+                            ConvertPointToPdfCoordinates(new PointF(docRect.Right, docRect.Top), pageNumber, rotation, includeBaseRotation),
+                            ConvertPointToPdfCoordinates(new PointF(docRect.Right, docRect.Bottom), pageNumber, rotation, includeBaseRotation),
+                            ConvertPointToPdfCoordinates(new PointF(docRect.Left, docRect.Bottom), pageNumber, rotation, includeBaseRotation)
+                        };
+
+                        float left = pdfCorners.Min(p => p.X);
+                        float right = pdfCorners.Max(p => p.X);
+                        float bottom = pdfCorners.Min(p => p.Y);
+                        float top = pdfCorners.Max(p => p.Y);
+
+                        if ((right - left) > 0.0001f && (top - bottom) > 0.0001f)
+                        {
+                            pdfCanvas.Rectangle(left, bottom, right - left, top - bottom);
+                            hasAnyClip = true;
+                            continue;
+                        }
+                    }
+                }
+
+                List<PointF> pdfPoints = BuildVectorShapeRenderPoints(shapeType, clipShape.Points)
+                    .Select(point => ConvertPointToPdfCoordinates(point, pageNumber, rotation, includeBaseRotation))
+                    .ToList();
+
+                if (pdfPoints.Count < 3)
+                {
+                    continue;
+                }
+
+                pdfCanvas.MoveTo(pdfPoints[0].X, pdfPoints[0].Y);
+                for (int i = 1; i < pdfPoints.Count; i++)
+                {
+                    pdfCanvas.LineTo(pdfPoints[i].X, pdfPoints[i].Y);
+                }
+
+                pdfCanvas.ClosePath();
+                hasAnyClip = true;
+            }
+
+            if (hasAnyClip)
+            {
+                pdfCanvas.Clip();
+                pdfCanvas.EndPath();
+            }
+        }
+
         private void NormalizeVectorShape(VectorShapeObject vectorShape)
         {
             if (vectorShape == null)
@@ -31566,6 +32018,7 @@ namespace AnonPDF
 
             VectorShapeType parsedType = ParseVectorShapeType(vectorShape.ShapeType);
             vectorShape.ShapeType = parsedType.ToString();
+            vectorShape.IsRasterClip = vectorShape.IsRasterClip && ShapeTypeSupportsRasterClip(parsedType);
             vectorShape.StrokeWidth = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth);
             vectorShape.FillOpacity = NormalizeVectorFillOpacity(vectorShape.FillOpacity);
             vectorShape.StrokeStyle = ParseVectorStrokeKind(vectorShape.StrokeStyle).ToString();
@@ -32490,6 +32943,7 @@ namespace AnonPDF
                     PageNumber = targetPage,
                     LayerId = NormalizeLayerIdValue(sourceShape.LayerId),
                     ShapeType = sourceShape.ShapeType,
+                    IsRasterClip = sourceShape.IsRasterClip,
                     Points = (sourceShape.Points ?? new List<PointF>())
                         .Select(point => new PointF(point.X, point.Y))
                         .ToList(),
@@ -43616,6 +44070,7 @@ namespace AnonPDF
         public int PageNumber { get; set; }
         public string LayerId { get; set; } = PDFForm.DefaultLayerId;
         public string ShapeType { get; set; }
+        public bool IsRasterClip { get; set; }
         public List<PointF> Points { get; set; } = new List<PointF>();
         public int StrokeColorArgb { get; set; } = System.Drawing.Color.Blue.ToArgb();
         public float StrokeWidth { get; set; } = 2f;
