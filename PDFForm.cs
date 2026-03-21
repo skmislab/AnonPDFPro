@@ -5496,18 +5496,24 @@ namespace AnonPDF
 
         private string BuildObjectSelectionInfoText()
         {
-            int selectedCount = GetTotalSelectedObjectsCount();
+            List<object> selectedObjects = GetSelectedObjectsOnCurrentPage();
+            int selectedCount = selectedObjects.Count;
             if (selectedCount <= 0)
             {
                 return null;
             }
 
+            List<string> selectedLayerIds = GetSelectionInfoLayerIds(selectedObjects);
+            string layerInfoText = GetSelectionInfoLayerText(selectedLayerIds);
+
             if (selectedCount == 1)
             {
-                return GetSelectionInfoObjectTypeText(GetCurrentSingleSelectedObject());
+                string objectTypeText = GetSelectionInfoObjectTypeText(selectedObjects[0]);
+                return AppendSelectionInfoLayerText(layerInfoText, objectTypeText);
             }
 
-            return GetSelectionInfoCountText(selectedCount);
+            string countText = GetSelectionInfoCountText(selectedCount);
+            return AppendSelectionInfoLayerText(layerInfoText, countText);
         }
 
         private string GetSelectionInfoCountText(int selectedCount)
@@ -5569,6 +5575,79 @@ namespace AnonPDF
                 default:
                     return null;
             }
+        }
+
+        private List<string> GetSelectionInfoLayerIds(IEnumerable<object> selectedObjects)
+        {
+            return (selectedObjects ?? Enumerable.Empty<object>())
+                .Select(GetSelectionInfoLayerId)
+                .Where(layerId => !string.IsNullOrWhiteSpace(layerId))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private string GetSelectionInfoLayerId(object selectedObject)
+        {
+            switch (selectedObject)
+            {
+                case TextAnnotation textAnnotation:
+                    return NormalizeLayerIdValue(textAnnotation.LayerId);
+                case RasterObject rasterObject:
+                    return NormalizeLayerIdValue(rasterObject.LayerId);
+                case ArrowObject arrowObject:
+                    return NormalizeLayerIdValue(arrowObject.LayerId);
+                case VectorShapeObject vectorShape:
+                    return NormalizeLayerIdValue(vectorShape.LayerId);
+                default:
+                    return null;
+            }
+        }
+
+        private string GetSelectionInfoLayerText(IReadOnlyList<string> layerIds)
+        {
+            if (layerIds == null || layerIds.Count <= 0)
+            {
+                return null;
+            }
+
+            string language = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName?.ToLowerInvariant() ?? string.Empty;
+            if (layerIds.Count == 1)
+            {
+                return GetSelectionInfoLayerDisplayName(layerIds[0]);
+            }
+
+            switch (language)
+            {
+                case "pl":
+                    return $"Warstwy: {layerIds.Count}";
+                case "de":
+                    return $"Ebenen: {layerIds.Count}";
+                default:
+                    return $"Layers: {layerIds.Count}";
+            }
+        }
+
+        private string GetSelectionInfoLayerDisplayName(string layerId)
+        {
+            string normalizedLayerId = NormalizeLayerIdValue(layerId);
+            LayerDefinition layer = documentLayers.FirstOrDefault(candidate =>
+                string.Equals(NormalizeLayerIdValue(candidate?.Id), normalizedLayerId, StringComparison.OrdinalIgnoreCase));
+            return NormalizeLayerDisplayName(layer?.Name, normalizedLayerId);
+        }
+
+        private static string AppendSelectionInfoLayerText(string layerText, string baseText)
+        {
+            if (string.IsNullOrWhiteSpace(layerText))
+            {
+                return baseText;
+            }
+
+            if (string.IsNullOrWhiteSpace(baseText))
+            {
+                return layerText;
+            }
+
+            return $"{layerText} | {baseText}";
         }
 
         private static Font CloneFontSafe(Font source)

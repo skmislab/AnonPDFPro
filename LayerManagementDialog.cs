@@ -70,6 +70,7 @@ namespace AnonPDF
             layersGridView.CellValueChanged += LayersGridView_CellValueChanged;
             layersGridView.CellDoubleClick += LayersGridView_CellDoubleClick;
             layersGridView.CellContentClick += LayersGridView_CellContentClick;
+            layersGridView.CellPainting += LayersGridView_CellPainting;
             layersGridView.SelectionChanged += (_, __) => UpdateButtonState();
 
             layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
@@ -630,6 +631,25 @@ namespace AnonPDF
             }
 
             LayersGridView_CellValueChanged(sender, new DataGridViewCellEventArgs(e.ColumnIndex, e.RowIndex));
+        }
+
+        private void LayersGridView_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= layerRows.Count || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            LayerRowModel row = layerRows[e.RowIndex];
+            string propertyName = layersGridView.Columns[e.ColumnIndex].DataPropertyName;
+            if (!string.Equals(propertyName, nameof(LayerRowModel.ExportEnabled), StringComparison.Ordinal) ||
+                !string.Equals(row.Id, PDFForm.WorkLayerId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border);
+            e.Handled = true;
         }
 
         private void LayersGridView_CellValueChanged(object sender, DataGridViewCellEventArgs e)
