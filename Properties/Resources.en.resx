@@ -1318,7 +1318,7 @@ Project: {0}</value>
   <data name="About_Message" xml:space="preserve">
     <value>Application: {0}
 Version: {1}
-Company: {2}
+Developer: {2}
 {3}
 
 Description: {4}
@@ -1332,13 +1332,13 @@ Licenses and components:
 
 Source code available under AGPL-3.0 (see LICENSE file).
 Copyright: see NOTICE.md.
-Repository: https://github.com/misart/AnonPDFPro</value>
+Repository: https://github.com/skmislab/AnonPDFPro</value>
   </data>
   <data name="About_Description" xml:space="preserve">
     <value>Dedicated application for PDF anonymization</value>
   </data>
   <data name="About_Copyright" xml:space="preserve">
-    <value>Copyright © 2025–2026 Urząd Miasta Szczecin; Modifications © 2026 MISART</value>
+    <value>Copyright © 2025–2026 Urząd Miasta Szczecin; Modifications © 2026–2027 Sławomir Klimek</value>
   </data>
   <data name="Demo_Watermark_Text" xml:space="preserve">
     <value>WERSJA DEMONSTRACYJNA ANONPDF PRO</value>

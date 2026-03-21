@@ -327,7 +327,7 @@ Anwendung schließen und Installer jetzt starten?</value>
     <value>X</value>
   </data>
   <data name="About_Copyright" xml:space="preserve">
-    <value>Copyright © 2025–2026 Urz¹d Miasta Szczecin; Änderungen © 2026 MISART</value>
+    <value>Copyright © 2025–2026 Urząd Miasta Szczecin; Änderungen © 2026–2027 Sławomir Klimek</value>
   </data>
   <data name="About_Description" xml:space="preserve">
     <value>Anwendung zur Anonymisierung von PDF-Dateien</value>
@@ -988,7 +988,7 @@ Nochmal klicken, um Markierungen zu entfernen.</value>
   <data name="About_Message" xml:space="preserve">
     <value>Anwendung: {0}
 Version: {1}
-Firma: {2}
+Entwickler: {2}
 {3}
 
 Beschreibung: {4}
@@ -1002,7 +1002,7 @@ Lizenzen und Komponenten:
 
 Quellcode verfügbar unter AGPL-3.0 (siehe Datei LICENSE).
 Urheberrechte: siehe NOTICE.md.
-Repository: https://github.com/misart/AnonPDFPro</value>
+Repository: https://github.com/skmislab/AnonPDFPro</value>
   </data>
   <data name="Delete_Err_NoData" xml:space="preserve">
     <value>Geben Sie mindestens eine Seitennummer oder einen Teilungsschritt an!</value>

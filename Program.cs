@@ -127,7 +127,7 @@ namespace AnonPDF
 
         private static string GetErrorLogDirectory()
         {
-            string companyName = GetSafeDirectoryName(Application.CompanyName, "MISART");
+            string companyName = GetSafeDirectoryName(Application.CompanyName, "skmislab");
             string productName = GetSafeDirectoryName(Application.ProductName, "AnonPDFPro");
 
             return Path.Combine(

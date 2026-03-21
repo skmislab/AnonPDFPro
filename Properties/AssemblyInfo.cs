@@ -9,9 +9,9 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyTitle("AnonPDF Pro")]
 [assembly: AssemblyDescription("Aplikacja dedykowana do anonimizacji plików PDF")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("MISART")]
+[assembly: AssemblyCompany("Sławomir Klimek")]
 [assembly: AssemblyProduct("AnonPDF Pro")]
-[assembly: AssemblyCopyright("Copyright © 2025–2026 Urząd Miasta Szczecin; Modifications © 2026 MISART")]
+[assembly: AssemblyCopyright("Copyright © 2025–2026 Urząd Miasta Szczecin; Modifications © 2026–2027 Sławomir Klimek")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

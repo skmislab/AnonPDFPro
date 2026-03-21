@@ -11493,10 +11493,7 @@ namespace AnonPDF
             var requiredSet = new HashSet<string>(requiredFiles, StringComparer.OrdinalIgnoreCase);
             if (string.IsNullOrWhiteSpace(userLicenseDirectory))
             {
-                userLicenseDirectory = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "MISART",
-                    "AnonPDFPro");
+                userLicenseDirectory = LicenseManager.GetDefaultUserDataDirectory();
             }
 
             try
@@ -17317,10 +17314,7 @@ namespace AnonPDF
                 return userDir;
             }
 
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "MISART",
-                "AnonPDFPro");
+            return LicenseManager.GetDefaultUserDataDirectory();
         }
 
         private static string GetResumeStateFilePath()
@@ -28362,11 +28356,7 @@ namespace AnonPDF
                     thumbnailsImageList.ImageSize.Width.ToString(CultureInfo.InvariantCulture),
                     thumbnailsImageList.ImageSize.Height.ToString(CultureInfo.InvariantCulture));
                 string key = ComputeSha256Hex(keySource);
-                string root = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "MISART",
-                    "AnonPDFPro",
-                    "thumbcache");
+                string root = LicenseManager.GetThumbnailCacheRootDirectory();
                 string documentDir = Path.Combine(root, key);
                 Directory.CreateDirectory(documentDir);
                 thumbnailCacheDocumentDirectory = documentDir;

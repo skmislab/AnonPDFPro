@@ -61,7 +61,7 @@ namespace AnonPDF.Properties {
         }
         
         /// <summary>
-        /// Wyszukuje zlokalizowany ciąg podobny do ciągu Copyright © 2025–2026 Urząd Miasta Szczecin; Modyfikacje © 2026 MISART.
+        /// Wyszukuje zlokalizowany ciąg podobny do ciągu Copyright © 2025–2026 Urząd Miasta Szczecin; Modyfikacje © 2026–2027 Sławomir Klimek.
         /// </summary>
         internal static string About_Copyright {
             get {
@@ -95,7 +95,7 @@ namespace AnonPDF.Properties {
         ///
         ///Kod źródłowy dostępny zgodnie z AGPL-3.0 (zobacz plik LICENSE).
         ///Prawa autorskie: zobacz NOTICE.md.
-        ///Repozytorium: https://github.com/misart/AnonPDFPro.
+        ///Repozytorium: https://github.com/skmislab/AnonPDFPro.
         /// </summary>
         internal static string About_Message {
             get {

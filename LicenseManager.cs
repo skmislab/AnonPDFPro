@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
@@ -466,6 +467,20 @@ namespace AnonPDF
 
     internal static class LicenseManager
     {
+        internal const string PublisherDisplayName = "Sławomir Klimek";
+        private const string PublisherDirectoryName = "skmislab";
+        private const string ProductDirectoryName = "AnonPDFPro";
+        private static readonly string[] UserDataMarkerFiles =
+        {
+            "config.json",
+            "license.json",
+            "license_public.xml",
+            "resume-state.json",
+            "resume-project.app",
+            "user_exclusion_scopes.json",
+            "user_legal_bases.json"
+        };
+
         internal static AppConfig Config { get; private set; }
         internal static LicenseInfo Current { get; private set; }
         internal static string InstallBaseDirectory { get; private set; }
@@ -514,10 +529,7 @@ namespace AnonPDF
             InstallBaseDirectory = string.IsNullOrWhiteSpace(baseDir)
                 ? AppDomain.CurrentDomain.BaseDirectory
                 : baseDir;
-            UserLicenseDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "MISART",
-                "AnonPDFPro");
+            UserLicenseDirectory = GetDefaultUserDataDirectory();
 
             Config = AppConfig.Load(InstallBaseDirectory, UserLicenseDirectory);
             Current = LicenseInfo.Load(Config);
@@ -526,6 +538,44 @@ namespace AnonPDF
             IsRevoked = false;
             ServerMessage = null;
             RefreshUpdateRange();
+        }
+
+        internal static string GetDefaultUserDataDirectory()
+        {
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string preferredDirectory = Path.Combine(localAppData, PublisherDirectoryName, ProductDirectoryName);
+            if (Directory.Exists(preferredDirectory))
+            {
+                return preferredDirectory;
+            }
+
+            try
+            {
+                foreach (string vendorDirectory in Directory.EnumerateDirectories(localAppData))
+                {
+                    string candidateDirectory = Path.Combine(vendorDirectory, ProductDirectoryName);
+                    if (!Directory.Exists(candidateDirectory))
+                    {
+                        continue;
+                    }
+
+                    if (UserDataMarkerFiles.Any(marker => File.Exists(Path.Combine(candidateDirectory, marker))))
+                    {
+                        return candidateDirectory;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore fallback lookup failures and use the preferred directory.
+            }
+
+            return preferredDirectory;
+        }
+
+        internal static string GetThumbnailCacheRootDirectory()
+        {
+            return Path.Combine(GetDefaultUserDataDirectory(), "thumbcache");
         }
 
         internal static bool RefreshServerStatus()
