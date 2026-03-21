@@ -106,7 +106,7 @@ To search within the document:
 
 > **2.** Use the search navigation buttons to move between search results.
 
-> **3.** Use the "PESEL, KW ?" button to check whether the document contains Polish identifiers such as a PESEL number, a Land and Mortgage Register number (KW), or a Polish ID card number.
+> **3.** Use the "PESEL, KW etc." button to check whether the document contains Polish identifiers such as a PESEL number, a Land and Mortgage Register number (KW), or a Polish ID card number.
 
 > **4.** To remove a search result, click the "X" button next to it.
 
@@ -159,8 +159,8 @@ If your document contains many selections, use "First selection", "Previous sele
 
 ## 6.1 Clearing selections
 
-- "Clear current page" removes all redaction areas from the current page.
-- "Clear all pages" removes all redaction areas from the entire document.
+- `Clear current page` removes all redaction areas from the current page and requires confirmation.
+- `Clear all` removes all redaction areas from the entire document and also requires confirmation.
 
 ## 6.2 Signatures
 

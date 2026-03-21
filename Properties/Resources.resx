@@ -541,7 +541,7 @@ końcowy i trzeci punkt łuku.</value>
     <value>Opcje</value>
   </data>
   <data name="UI_Group_Selections" xml:space="preserve">
-    <value>Zaznaczenia</value>
+    <value>Anonimizacja</value>
   </data>
   <data name="UI_Group_Signatures" xml:space="preserve">
     <value>Podpisy</value>
@@ -1220,6 +1220,9 @@ Masz zdefiniowane i nie zapisane zaznaczenia w treści...</value>
   </data>
   <data name="Msg_Confirm_ClearAllSelections" xml:space="preserve">
     <value>Czy na pewno chcesz usunąć wszystkie zaznaczenia z dokumentu?</value>
+  </data>
+  <data name="Msg_Confirm_ClearPageSelections" xml:space="preserve">
+    <value>Czy na pewno chcesz usun&#261;&#263; wszystkie zaznaczenia z bie&#380;&#261;cej strony?</value>
   </data>
   <data name="Msg_Confirm_DiscardUnsavedRedactions" xml:space="preserve">
     <value>Masz niezapisane zmiany redakcyjne w dokumencie.

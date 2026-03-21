@@ -73,13 +73,13 @@ So suchen Sie im Dokument:
 
 > **1.** Geben Sie den Suchtext im linken Bereich ein und bestätigen Sie mit Enter.
 
+> **1.** Geben Sie den Suchtext im linken Bereich ein und best?tigen Sie mit Enter.
+
 > **2.** Wechseln Sie mit den Such-Navigationstasten zwischen Treffern.
 
-> **3.** Mit der Funktion für PESEL/KW können zusätzlich typische Identifikatoren erkannt werden.
+> **3.** Verwenden Sie die Schaltfl?che ?PESEL, KW usw.?, um zus?tzlich typische Identifikatoren zu erkennen.
 
-> **4.** Über die Schaltfläche X kann ein Suchtreffer aus der Liste entfernt werden.
-
-## 4.4 Bereiche zur Anonymisierung markieren
+> **4.** ?ber die Schaltfl?che X kann ein Suchtreffer aus der Liste entfernt werden.
 
 Zum Markieren eines Bereichs:
 
@@ -131,9 +131,9 @@ Mit den Funktionen Erste/Vorherige/Nächste/Letzte Markierung springen Sie schne
 
 ## 6.1 Markierungen löschen
 
-> \- Aktuelle Seite löschen entfernt alle Markierungen auf der aktiven Seite.
+- `Aktuelle Seite löschen` entfernt alle Markierungen auf der aktiven Seite und verlangt eine Bestätigung.
 
-> \- Alle Seiten löschen entfernt alle Markierungen im gesamten Dokument.
+- `Alle Seiten löschen` entfernt alle Markierungen im gesamten Dokument und verlangt ebenfalls eine Bestätigung.
 
 ## 6.2 Signaturen
 
@@ -239,20 +239,20 @@ Für duplizierte Objekte gibt es zusätzlich:
 
 ## 6.11 Ebenen
 
-Die Anwendung unterst?tzt Arbeitsebenen f?r Markierungen und Objekte.
+Die Anwendung unterstützt Arbeitsebenen für Markierungen und Objekte.
 
-- Im Tab `Ebenen` im rechten Panel k?nnen aktive Ebene, Sichtbarkeit und Sperre schnell ge?ndert werden.
-- Ebenen k?nnen zus?tzlich ?ber einen gemeinsamen Gruppennamen gruppiert werden.
-- Mit der Gruppen-Checkbox lassen sich Sichtbarkeit oder Sperre f?r alle Ebenen der Gruppe mit einem Klick ?ndern.
-- Haben Ebenen einer Gruppe unterschiedliche Zust?nde, zeigt die Gruppen-Checkbox einen gemischten Zustand an.
-- Ein Doppelklick auf den Gruppennamen im Tab `Ebenen` erm?glicht das Umbenennen der Gruppe.
-- `Werkzeuge -> Ebenen` ?ffnet das vollst?ndige Ebenenfenster.
-- Im Ebenendialog kann eine Ebene ?ber die Spalte `Gruppe` einer Gruppe zugeordnet werden.
+- Im Tab `Ebenen` im rechten Panel können aktive Ebene, Sichtbarkeit und Sperre schnell geändert werden.
+- Ebenen können zusätzlich über einen gemeinsamen Gruppennamen gruppiert werden.
+- Mit der Gruppen-Checkbox lassen sich Sichtbarkeit oder Sperre für alle Ebenen der Gruppe mit einem Klick ändern.
+- Haben Ebenen einer Gruppe unterschiedliche Zustände, zeigt die Gruppen-Checkbox einen gemischten Zustand an.
+- Ein Doppelklick auf den Gruppennamen im Tab `Ebenen` ermöglicht das Umbenennen der Gruppe.
+- `Werkzeuge -> Ebenen` öffnet das vollständige Ebenenfenster.
+- Im Ebenendialog kann eine Ebene über die Spalte `Gruppe` einer Gruppe zugeordnet werden.
 - Neue Markierungen und neue Objekte werden auf der aktuell aktiven Ebene erstellt.
-- Eingef?gte Objekte werden auf der aktiven Ebene erstellt und behalten die Stapelreihenfolge der Quelle.
+- Eingefügte Objekte werden auf der aktiven Ebene erstellt und behalten die Stapelreihenfolge der Quelle.
 - Die Ebene `Robocza` liegt immer ganz oben und wird nicht in das finale PDF exportiert.
 - Mit ausgeblendeten Ebenen kann in der Vorschau nicht interagiert werden.
-- Gesperrte Ebenen blockieren Verschieben, Bearbeiten, Skalieren und L?schen von Objekten.
+- Gesperrte Ebenen blockieren Verschieben, Bearbeiten, Skalieren und Löschen von Objekten.
 - Beim Projektimport bleiben die Zuordnungen von Objekten zu Ebenen erhalten.
 
 # 7. Häufige Probleme und Hinweise

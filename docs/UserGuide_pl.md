@@ -104,7 +104,7 @@ Aby wyszukać w dokumencie:
 
 > 2\. Użyj przycisków nawigacyjnych, aby poruszać się po wynikach wyszukiwania.
 
-> 3\. Użyj przycisku „PESEL, KW ?” aby sprawdzić dokument czy zawiera identyfikatory PESEL, numer Księgi Wieczystej lub numer dowodu osobistego
+> 3\. Użyj przycisku „PESEL, KW itd.” aby sprawdzić dokument czy zawiera identyfikatory PESEL, numer Księgi Wieczystej lub numer dowodu osobistego
 
 > 4\. Aby usunąć wynik wyszukiwania kliknij przycisk „X”
 
@@ -136,7 +136,7 @@ Jeśli chcesz zapisać stan zaznaczeń do późniejszej edycji, wybierz Zapisz p
 
 Po zaznaczeniu odpowiednich obszarów wybierz przycisk Zapisz plik PDF (lub z paska menu Plik → Zapisz plik PDF). Wskaż docelowy plik wynikowy, w którym uwzględnione zostaną zaznaczone obszary. Po zakończeniu procesu aplikacja wygeneruje nowy, zredagowany plik PDF.
 
-# 5. Zaznaczenia i nawigacja
+# 5. Anonimizacja i nawigacja
 
 ## 5.1 Nawigacja stron
 
@@ -157,8 +157,8 @@ Jeśli w dokumencie jest dużo zaznaczonych obszarów, możesz użyć przyciskó
 
 ## 6.1 Czyszczenie zaznaczeń
 
-- Wyczyść bieżącą stronę – usuwa wszystkie obszary redakcji z aktualnej strony.
-- Wyczyść wszystkie strony – usuwa wszystkie obszary redakcji ze wszystkich stron wczytanego pliku PDF.
+- `Wyczyść bieżącą stronę` usuwa wszystkie obszary redakcji z aktualnej strony i wymaga potwierdzenia.
+- `Wyczyść wszystko` usuwa wszystkie obszary redakcji z całego dokumentu i również wymaga potwierdzenia.
 
 ## 6.2 Podpisy
 
@@ -250,21 +250,21 @@ Dla obiektów powielonych dostępna jest także opcja:
 
 ## 6.11 Warstwy
 
-Aplikacja obs?uguje warstwy robocze dla zaznacze? anonimizacyjnych i obiekt?w.
+Aplikacja obsługuje warstwy robocze dla anonimizacji i obiektów.
 
-- Zak?adka `Warstwy` w prawym panelu pozwala szybko zmienia? aktywn? warstw?, widoczno?? i blokad?.
-- W panelu mo?na te? ??czy? warstwy w grupy po wsp?lnej nazwie.
-- Checkbox grupy pozwala jednym klikni?ciem zmieni? widoczno?? albo blokad? wszystkich warstw nale??cych do tej grupy.
-- Gdy warstwy w grupie maj? r??ne stany, checkbox grupy pokazuje stan mieszany.
-- Dwuklik na nazwie grupy w panelu `Warstwy` pozwala zmieni? nazw? grupy.
-- `Narz?dzia -> Warstwy` lub skr?t `CTRL + L` otwieraj? pe?ne okno zarz?dzania warstwami.
-- W oknie zarz?dzania warstwami mo?na przypisa? warstw? do grupy przez kolumn? `Grupa`.
-- Nowe zaznaczenia i nowe obiekty powstaj? na aktualnie aktywnej warstwie.
-- Wklejane obiekty trafiaj? na aktywn? warstw?, z zachowaniem kolejno?ci nak?adania ze ?r?d?a.
-- Warstwa `Robocza` jest zawsze najwy?ej i nie trafia do finalnego PDF.
-- Ukryte warstwy nie bior? udzia?u w interakcji na podgl?dzie.
-- Zablokowane warstwy blokuj? przesuwanie, edycj?, skalowanie i usuwanie obiekt?w.
-- Import projektu zachowuje przypisanie obiekt?w do warstw.
+- Zakładka `Warstwy` w prawym panelu pozwala szybko zmieniać aktywną warstwę, widoczność i blokadę.
+- W panelu można też łączyć warstwy w grupy po wspólnej nazwie.
+- Checkbox grupy pozwala jednym kliknięciem zmienić widoczność albo blokadę wszystkich warstw należących do tej grupy.
+- Gdy warstwy w grupie mają różne stany, checkbox grupy pokazuje stan mieszany.
+- Dwuklik na nazwie grupy w panelu `Warstwy` pozwala zmienić nazwę grupy.
+- `Narzędzia -> Warstwy` lub skrót `CTRL + L` otwierają pełne okno zarządzania warstwami.
+- W oknie zarządzania warstwami można przypisać warstwę do grupy przez kolumnę `Grupa`.
+- Nowe zaznaczenia i nowe obiekty powstają na aktualnie aktywnej warstwie.
+- Wklejane obiekty trafiają na aktywną warstwę, z zachowaniem kolejności nakładania ze źródła.
+- Warstwa `Robocza` jest zawsze najwyżej i nie trafia do finalnego PDF.
+- Ukryte warstwy nie biorą udziału w interakcji na podglądzie.
+- Zablokowane warstwy blokują przesuwanie, edycję, skalowanie i usuwanie obiektów.
+- Import projektu zachowuje przypisanie obiektów do warstw.
 
 # 7. Najczęstsze problemy i wskazówki
 

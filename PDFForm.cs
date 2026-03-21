@@ -134,6 +134,8 @@ namespace AnonPDF
         private bool suppressNextLeftMouseUpAfterEscape;
         private bool suppressUndoRedoCapture;
         private bool isMarkerCtrlBoxMode;
+        private bool suppressRedactionModeTracking;
+        private bool? lastManualRedactionModeIsMarker;
         private bool isMoving;
         private bool isScalingTextAnnotation;
         private bool isRotatingTextAnnotation;
@@ -1419,9 +1421,17 @@ namespace AnonPDF
             safeModeCheckBox.CheckedChanged += SafeModeCheckBox_CheckedChanged;
             colorCheckBox.CheckedChanged += ColorCheckBox_CheckedChanged;
             outlineCheckBox.CheckedChanged += OutlineCheckBox_CheckedChanged;
+            markerRadioButton.CheckedChanged += MarkerRadioButton_CheckedChanged;
+            boxRadioButton.CheckedChanged += BoxRadioButton_CheckedChanged;
             signaturesRemoveRadioButton.CheckedChanged += SignaturesRemoveRadioButton_CheckedChanged;
             signaturesOriginalRadioButton.CheckedChanged += SignaturesOriginalRadioButton_CheckedChanged;
             signaturesReportRadioButton.CheckedChanged += SignaturesReportRadioButton_CheckedChanged;
+
+            lastManualRedactionModeIsMarker = markerRadioButton.Checked
+                ? true
+                : boxRadioButton.Checked
+                    ? false
+                    : (bool?)null;
 
             removePageButton.Click += RemovePageButton_Click;
             removePageRangeButton.Click += RemovePageRangeButton_Click;
@@ -7372,6 +7382,7 @@ namespace AnonPDF
 
         private void SelectSingleObject(object hitObject)
         {
+            DisableRedactionSelectionMode();
             selectedTextAnnotation = null;
             selectedRasterObject = null;
             selectedArrowObject = null;
@@ -7408,6 +7419,7 @@ namespace AnonPDF
                 return false;
             }
 
+            DisableRedactionSelectionMode();
             PromoteSingleSelectionsToGroup();
             switch (hitObject)
             {
@@ -7687,7 +7699,8 @@ namespace AnonPDF
                     Type = GroupMoveObjectType.Text,
                     Text = text,
                     Bounds = text.AnnotationBounds,
-                    VisualBounds = visualBounds
+                    VisualBounds = visualBounds,
+                    TextLeaderEndPoint = text.LeaderEndPoint
                 });
 
                 minX = Math.Min(minX, visualBounds.Left);
@@ -9350,6 +9363,7 @@ namespace AnonPDF
         private void AddEditAnnotation(TextAnnotation annotation = null, string initialText = null)
         {
             DeactivateObjectCreationModes();
+            DisableRedactionSelectionMode();
 
             if (!EnsureCurrentPageEditable(true))
             {
@@ -20403,6 +20417,7 @@ namespace AnonPDF
                 return;
             }
 
+            DisableRedactionSelectionMode();
             activeVectorShapeDefaults = selectedDefaults.Clone();
             activeVectorShapeType = activeVectorShapeDefaults.ShapeType;
             isVectorShapeCreationMode = true;
@@ -20434,6 +20449,563 @@ namespace AnonPDF
             }
 
             pdfViewer.Invalidate();
+        }
+
+        private void DisableRedactionSelectionMode()
+        {
+            isDrawing = false;
+            isMarkerCtrlBoxMode = false;
+            currentSelection = RectangleF.Empty;
+            suppressRedactionModeTracking = true;
+            markerRadioButton.Checked = false;
+            boxRadioButton.Checked = false;
+            suppressRedactionModeTracking = false;
+        }
+
+        private bool TryRestoreRedactionSelectionModeFromHitBlock(Point location)
+        {
+            if (pdf == null || currentPage <= 0 || currentPage > numPages)
+            {
+                return false;
+            }
+
+            float docX = location.X / scaleFactor;
+            float docY = location.Y / scaleFactor;
+            RedactionBlock hitBlock = redactionBlocks
+                .Where(block => block != null &&
+                                block.PageNumber == currentPage &&
+                                IsLayerVisible(block.LayerId) &&
+                                block.Bounds.Contains(docX, docY))
+                .LastOrDefault();
+            if (hitBlock == null)
+            {
+                return false;
+            }
+
+            isMarkerCtrlBoxMode = false;
+            bool restoreMarker = lastManualRedactionModeIsMarker ?? hitBlock.IsMarkerSelection;
+            suppressRedactionModeTracking = true;
+            markerRadioButton.Checked = restoreMarker;
+            boxRadioButton.Checked = !restoreMarker;
+            suppressRedactionModeTracking = false;
+            return true;
+        }
+
+        private bool IsRedactionSelectionModeEnabled()
+        {
+            return markerRadioButton.Checked || boxRadioButton.Checked;
+        }
+
+        private static bool DoesGraphicsPathIntersectRectangle(GraphicsPath path, RectangleF rectangle)
+        {
+            if (path == null || path.PointCount == 0 || rectangle.Width <= 0f || rectangle.Height <= 0f)
+            {
+                return false;
+            }
+
+            using (var region = new Region(path))
+            using (var identityMatrix = new System.Drawing.Drawing2D.Matrix())
+            {
+                region.Intersect(rectangle);
+                RectangleF[] scans = region.GetRegionScans(identityMatrix);
+                return scans != null && scans.Length > 0;
+            }
+        }
+
+        private static bool DoesWidenedPathIntersectRectangle(GraphicsPath sourcePath, float width, RectangleF rectangle)
+        {
+            if (sourcePath == null || sourcePath.PointCount == 0)
+            {
+                return false;
+            }
+
+            using (var widenedPath = (GraphicsPath)sourcePath.Clone())
+            using (var pen = new Pen(System.Drawing.Color.Black, Math.Max(1f, width)))
+            {
+                pen.LineJoin = LineJoin.Round;
+                pen.StartCap = LineCap.Round;
+                pen.EndCap = LineCap.Round;
+                widenedPath.Widen(pen);
+                return DoesGraphicsPathIntersectRectangle(widenedPath, rectangle);
+            }
+        }
+
+        private bool TryGetRasterObjectScreenCorners(RasterObject rasterObject, out PointF[] corners)
+        {
+            corners = null;
+            if (rasterObject == null || rasterObject.PageNumber != currentPage)
+            {
+                return false;
+            }
+
+            RectangleF bounds = GetRasterObjectScreenBounds(rasterObject);
+            if (bounds.Width <= 0f || bounds.Height <= 0f)
+            {
+                return false;
+            }
+
+            PointF center = new PointF(bounds.X + (bounds.Width / 2f), bounds.Y + (bounds.Height / 2f));
+            int rotation = NormalizeRotation(rasterObject.Rotation);
+            PointF vx = RotateVector(new PointF(bounds.Width / 2f, 0f), rotation);
+            PointF vy = RotateVector(new PointF(0f, bounds.Height / 2f), rotation);
+            corners = new[]
+            {
+                new PointF(center.X - vx.X - vy.X, center.Y - vx.Y - vy.Y),
+                new PointF(center.X + vx.X - vy.X, center.Y + vx.Y - vy.Y),
+                new PointF(center.X + vx.X + vy.X, center.Y + vx.Y + vy.Y),
+                new PointF(center.X - vx.X + vy.X, center.Y - vx.Y + vy.Y)
+            };
+            return true;
+        }
+
+        private bool DoesRasterObjectIntersectMarquee(RasterObject rasterObject, RectangleF marqueeScreenRect)
+        {
+            if (!TryGetRasterObjectScreenCorners(rasterObject, out PointF[] corners))
+            {
+                return false;
+            }
+
+            using (var path = new GraphicsPath())
+            {
+                path.AddPolygon(corners);
+                return DoesGraphicsPathIntersectRectangle(path, marqueeScreenRect);
+            }
+        }
+
+        private bool DoesArrowObjectIntersectMarquee(ArrowObject arrowObject, RectangleF marqueeScreenRect)
+        {
+            if (arrowObject == null || arrowObject.PageNumber != currentPage)
+            {
+                return false;
+            }
+
+            PointF startScreen = GetArrowScreenPoint(arrowObject.Start);
+            PointF endScreen = GetArrowScreenPoint(arrowObject.End);
+            PointF lineEndScreen = endScreen;
+            float headLengthPx = Math.Max(4f, NormalizeArrowHeadLength(arrowObject.HeadLength) * scaleFactor);
+            float headWidthPx = Math.Max(4f, NormalizeArrowHeadWidth(arrowObject.HeadWidth) * scaleFactor);
+            if (TryBuildArrowHead(startScreen, endScreen, headLengthPx, headWidthPx, out PointF leftPoint, out PointF rightPoint, out PointF lineEndPoint))
+            {
+                using (var headPath = new GraphicsPath())
+                {
+                    headPath.AddPolygon(new[] { endScreen, leftPoint, rightPoint });
+                    if (DoesGraphicsPathIntersectRectangle(headPath, marqueeScreenRect))
+                    {
+                        return true;
+                    }
+                }
+
+                lineEndScreen = lineEndPoint;
+            }
+
+            float lineWidthPx = (NormalizeArrowThickness(arrowObject.Thickness) + (2f * NormalizeArrowBorderWidth(arrowObject.BorderWidth))) * scaleFactor;
+            using (var linePath = new GraphicsPath())
+            {
+                linePath.AddLine(startScreen, lineEndScreen);
+                return DoesWidenedPathIntersectRectangle(linePath, lineWidthPx, marqueeScreenRect);
+            }
+        }
+
+        private static bool HasVisibleVectorFill(VectorShapeObject vectorShape, VectorShapeType shapeType)
+        {
+            if (vectorShape == null || !ShapeTypeSupportsFill(shapeType))
+            {
+                return false;
+            }
+
+            float fillOpacity = NormalizeVectorFillOpacity(vectorShape.FillOpacity);
+            if (fillOpacity <= 0f)
+            {
+                return false;
+            }
+
+            bool hasFillColor = HasVisibleVectorColor(vectorShape.FillColorArgb);
+            bool hasPatternColor = HasVisibleVectorColor(vectorShape.FillPatternColorArgb);
+            VectorFillPatternKind fillPattern = ParseVectorFillPattern(vectorShape.FillPattern);
+            return hasFillColor || (fillPattern != VectorFillPatternKind.Solid && hasPatternColor);
+        }
+
+        private static bool DoesVectorLineEndingIntersectMarquee(
+            PointF anchor,
+            PointF towardPoint,
+            VectorLineEndingKind ending,
+            float strokeWidthPx,
+            float primarySize,
+            float secondarySize,
+            RectangleF marqueeScreenRect)
+        {
+            if (ending == VectorLineEndingKind.None)
+            {
+                return false;
+            }
+
+            PointF direction = new PointF(anchor.X - towardPoint.X, anchor.Y - towardPoint.Y);
+            float length = (float)Math.Sqrt((direction.X * direction.X) + (direction.Y * direction.Y));
+            if (length < 0.001f)
+            {
+                return false;
+            }
+
+            float ux = direction.X / length;
+            float uy = direction.Y / length;
+            float px = -uy;
+            float py = ux;
+            GetVectorLineEndingMetrics(ending, strokeWidthPx, primarySize, secondarySize, out float markerLength, out float markerWidth, out float radius);
+
+            switch (ending)
+            {
+                case VectorLineEndingKind.Arrow:
+                {
+                    PointF baseCenter = new PointF(anchor.X - (ux * markerLength), anchor.Y - (uy * markerLength));
+                    PointF left = new PointF(baseCenter.X + (px * (markerWidth / 2f)), baseCenter.Y + (py * (markerWidth / 2f)));
+                    PointF right = new PointF(baseCenter.X - (px * (markerWidth / 2f)), baseCenter.Y - (py * (markerWidth / 2f)));
+                    using (var path = new GraphicsPath())
+                    {
+                        path.AddPolygon(new[] { anchor, left, right });
+                        return DoesGraphicsPathIntersectRectangle(path, marqueeScreenRect);
+                    }
+                }
+                case VectorLineEndingKind.OpenArrow:
+                {
+                    PointF baseCenter = new PointF(anchor.X - (ux * markerLength), anchor.Y - (uy * markerLength));
+                    PointF left = new PointF(baseCenter.X + (px * (markerWidth / 2f)), baseCenter.Y + (py * (markerWidth / 2f)));
+                    PointF right = new PointF(baseCenter.X - (px * (markerWidth / 2f)), baseCenter.Y - (py * (markerWidth / 2f)));
+                    using (var path = new GraphicsPath())
+                    {
+                        path.AddLine(anchor, left);
+                        path.StartFigure();
+                        path.AddLine(anchor, right);
+                        return DoesWidenedPathIntersectRectangle(path, strokeWidthPx, marqueeScreenRect);
+                    }
+                }
+                case VectorLineEndingKind.DoubleOpenArrow:
+                {
+                    PointF baseCenter = new PointF(anchor.X - (ux * markerLength), anchor.Y - (uy * markerLength));
+                    PointF left = new PointF(baseCenter.X + (px * (markerWidth / 2f)), baseCenter.Y + (py * (markerWidth / 2f)));
+                    PointF right = new PointF(baseCenter.X - (px * (markerWidth / 2f)), baseCenter.Y - (py * (markerWidth / 2f)));
+                    float secondaryOffset = GetDoubleOpenArrowSecondaryOffset(markerLength, strokeWidthPx);
+                    PointF secondAnchor = new PointF(anchor.X - (ux * secondaryOffset), anchor.Y - (uy * secondaryOffset));
+                    PointF secondBaseCenter = new PointF(secondAnchor.X - (ux * markerLength), secondAnchor.Y - (uy * markerLength));
+                    PointF secondLeft = new PointF(secondBaseCenter.X + (px * (markerWidth / 2f)), secondBaseCenter.Y + (py * (markerWidth / 2f)));
+                    PointF secondRight = new PointF(secondBaseCenter.X - (px * (markerWidth / 2f)), secondBaseCenter.Y - (py * (markerWidth / 2f)));
+                    using (var path = new GraphicsPath())
+                    {
+                        path.AddLine(anchor, left);
+                        path.StartFigure();
+                        path.AddLine(anchor, right);
+                        path.StartFigure();
+                        path.AddLine(secondAnchor, secondLeft);
+                        path.StartFigure();
+                        path.AddLine(secondAnchor, secondRight);
+                        return DoesWidenedPathIntersectRectangle(path, strokeWidthPx, marqueeScreenRect);
+                    }
+                }
+                case VectorLineEndingKind.Circle:
+                case VectorLineEndingKind.FilledCircle:
+                {
+                    using (var path = new GraphicsPath())
+                    {
+                        path.AddEllipse(anchor.X - radius, anchor.Y - radius, radius * 2f, radius * 2f);
+                        return ending == VectorLineEndingKind.FilledCircle
+                            ? DoesGraphicsPathIntersectRectangle(path, marqueeScreenRect)
+                            : DoesWidenedPathIntersectRectangle(path, strokeWidthPx, marqueeScreenRect);
+                    }
+                }
+                case VectorLineEndingKind.Bar:
+                {
+                    PointF left = new PointF(anchor.X + (px * radius), anchor.Y + (py * radius));
+                    PointF right = new PointF(anchor.X - (px * radius), anchor.Y - (py * radius));
+                    using (var path = new GraphicsPath())
+                    {
+                        path.AddLine(left, right);
+                        return DoesWidenedPathIntersectRectangle(path, strokeWidthPx, marqueeScreenRect);
+                    }
+                }
+                default:
+                    return false;
+            }
+        }
+
+        private bool DoesVectorShapeIntersectMarquee(VectorShapeObject vectorShape, RectangleF marqueeScreenRect)
+        {
+            if (vectorShape == null || vectorShape.PageNumber != currentPage || vectorShape.Points == null || vectorShape.Points.Count < 2)
+            {
+                return false;
+            }
+
+            VectorShapeType shapeType = ParseVectorShapeType(vectorShape.ShapeType);
+            PointF[] points = BuildVectorShapeRenderPoints(shapeType, vectorShape.Points)
+                .Select(p => new PointF(p.X * scaleFactor, p.Y * scaleFactor))
+                .ToArray();
+            if (points.Length < 2)
+            {
+                return false;
+            }
+
+            bool closedShape = IsShapeClosed(shapeType);
+            bool hasStroke = HasVisibleVectorColor(vectorShape.StrokeColorArgb);
+            bool hasFill = HasVisibleVectorFill(vectorShape, shapeType) || (vectorShape.IsRasterClip && closedShape);
+            float strokeWidthPx = NormalizeVectorStrokeWidth(vectorShape.StrokeWidth) * scaleFactor;
+
+            if (closedShape && points.Length >= 3)
+            {
+                using (var polygonPath = new GraphicsPath())
+                {
+                    polygonPath.AddPolygon(points);
+                    if (hasFill && DoesGraphicsPathIntersectRectangle(polygonPath, marqueeScreenRect))
+                    {
+                        return true;
+                    }
+
+                    if (hasStroke && DoesWidenedPathIntersectRectangle(polygonPath, strokeWidthPx, marqueeScreenRect))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            if (hasStroke)
+            {
+                PointF[] strokePoints = shapeType == VectorShapeType.Polyline
+                    ? GetPolylineStrokePointsWithEndings(
+                        points,
+                        ParseVectorLineEndingKind(vectorShape.StartLineEnding),
+                        ParseVectorLineEndingKind(vectorShape.EndLineEnding),
+                        strokeWidthPx,
+                        vectorShape.StartLineEndingPrimarySize,
+                        vectorShape.StartLineEndingSecondarySize,
+                        vectorShape.EndLineEndingPrimarySize,
+                        vectorShape.EndLineEndingSecondarySize)
+                    : points;
+
+                using (var linePath = new GraphicsPath())
+                {
+                    linePath.AddLines(strokePoints);
+                    if (DoesWidenedPathIntersectRectangle(linePath, strokeWidthPx, marqueeScreenRect))
+                    {
+                        return true;
+                    }
+                }
+
+                if (shapeType == VectorShapeType.Polyline && points.Length >= 2)
+                {
+                    if (DoesVectorLineEndingIntersectMarquee(
+                            points[0],
+                            points[1],
+                            ParseVectorLineEndingKind(vectorShape.StartLineEnding),
+                            strokeWidthPx,
+                            vectorShape.StartLineEndingPrimarySize,
+                            vectorShape.StartLineEndingSecondarySize,
+                            marqueeScreenRect))
+                    {
+                        return true;
+                    }
+
+                    if (DoesVectorLineEndingIntersectMarquee(
+                            points[points.Length - 1],
+                            points[points.Length - 2],
+                            ParseVectorLineEndingKind(vectorShape.EndLineEnding),
+                            strokeWidthPx,
+                            vectorShape.EndLineEndingPrimarySize,
+                            vectorShape.EndLineEndingSecondarySize,
+                            marqueeScreenRect))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private bool DoesTextAnnotationIntersectMarquee(TextAnnotation annotation, RectangleF marqueeScreenRect, float dpiX, float dpiY)
+        {
+            if (annotation == null || annotation.PageNumber != currentPage || !IsLayerVisible(annotation.LayerId))
+            {
+                return false;
+            }
+
+            if (TryGetAnnotationTextFrameGeometry(annotation, dpiX, dpiY, out PointF[] frameCorners, out _, out _, out _))
+            {
+                using (var framePath = new GraphicsPath())
+                {
+                    framePath.AddPolygon(frameCorners);
+                    if (DoesGraphicsPathIntersectRectangle(framePath, marqueeScreenRect))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            if (!annotation.HasLeaderArrow ||
+                !TryGetAnnotationLeaderGeometry(annotation, dpiX, dpiY, out PointF anchorPoint, out PointF endPoint, out PointF leftPoint, out PointF rightPoint, out PointF lineEndPoint))
+            {
+                return false;
+            }
+
+            using (var headPath = new GraphicsPath())
+            {
+                headPath.AddPolygon(new[] { endPoint, leftPoint, rightPoint });
+                if (DoesGraphicsPathIntersectRectangle(headPath, marqueeScreenRect))
+                {
+                    return true;
+                }
+            }
+
+            using (var linePath = new GraphicsPath())
+            {
+                linePath.AddLine(anchorPoint, lineEndPoint);
+                float lineWidthPx = GetEffectiveTextLeaderLineWidth(annotation) * scaleFactor;
+                return DoesWidenedPathIntersectRectangle(linePath, lineWidthPx, marqueeScreenRect);
+            }
+        }
+
+        private bool DoesObjectIntersectMarquee(object candidate, RectangleF marqueeScreenRect, float dpiX, float dpiY)
+        {
+            switch (candidate)
+            {
+                case TextAnnotation textAnnotation:
+                    return DoesTextAnnotationIntersectMarquee(textAnnotation, marqueeScreenRect, dpiX, dpiY);
+                case RasterObject rasterObject:
+                    return DoesRasterObjectIntersectMarquee(rasterObject, marqueeScreenRect);
+                case ArrowObject arrowObject:
+                    return DoesArrowObjectIntersectMarquee(arrowObject, marqueeScreenRect);
+                case VectorShapeObject vectorShapeObject:
+                    return DoesVectorShapeIntersectMarquee(vectorShapeObject, marqueeScreenRect);
+                default:
+                    return false;
+            }
+        }
+
+        private void DrawObjectMarqueeSelectionOverlay(Graphics graphics)
+        {
+            if (graphics == null || !isDrawing || currentSelection.Width <= 0 || currentSelection.Height <= 0)
+            {
+                return;
+            }
+
+            if (isCommentCreationMode || IsRedactionSelectionModeEnabled())
+            {
+                return;
+            }
+
+            System.Drawing.Color marqueeColor = ControlPaint.Dark(CurrentTheme.SelectionBackColor, 0.45f);
+            using (Pen pen = new Pen(marqueeColor, 3f))
+            {
+                pen.DashStyle = DashStyle.Dash;
+                pen.DashPattern = new[] { 5f, 3f };
+                graphics.DrawRectangle(
+                    pen,
+                    currentSelection.X,
+                    currentSelection.Y,
+                    currentSelection.Width,
+                    currentSelection.Height);
+            }
+        }
+
+        private bool TrySelectObjectsInMarquee(RectangleF marqueeScreenRect, bool additiveSelection)
+        {
+            if (marqueeScreenRect.Width <= 0f || marqueeScreenRect.Height <= 0f)
+            {
+                return false;
+            }
+
+            var hits = new List<object>();
+            float dpiX = 96f;
+            float dpiY = 96f;
+            using (Graphics graphics = pdfViewer.CreateGraphics())
+            {
+                dpiX = graphics.DpiX;
+                dpiY = graphics.DpiY;
+            }
+
+            foreach (object candidate in GetOrderedObjectsForCurrentPage())
+            {
+                if (DoesObjectIntersectMarquee(candidate, marqueeScreenRect, dpiX, dpiY))
+                {
+                    hits.Add(candidate);
+                }
+            }
+
+            if (hits.Count == 0)
+            {
+                if (!additiveSelection)
+                {
+                    selectedTextAnnotation = null;
+                    selectedRasterObject = null;
+                    selectedArrowObject = null;
+                    selectedVectorShape = null;
+                    ClearGroupSelection();
+                    UpdateObjectSelectionInfoLabel();
+                }
+                return false;
+            }
+
+            if (additiveSelection)
+            {
+                PromoteSingleSelectionsToGroup();
+            }
+            else
+            {
+                selectedTextAnnotation = null;
+                selectedRasterObject = null;
+                selectedArrowObject = null;
+                selectedVectorShape = null;
+                ClearGroupSelection();
+            }
+
+            foreach (object hitObject in hits)
+            {
+                switch (hitObject)
+                {
+                    case TextAnnotation textAnnotation:
+                        selectedTextAnnotations.Add(textAnnotation);
+                        break;
+                    case RasterObject rasterObject:
+                        EnsureRasterObjectId(rasterObject);
+                        if (!string.IsNullOrWhiteSpace(rasterObject.Id))
+                        {
+                            selectedRasterObjectIds.Add(rasterObject.Id);
+                        }
+                        break;
+                    case ArrowObject arrowObject:
+                        EnsureArrowObjectId(arrowObject);
+                        if (!string.IsNullOrWhiteSpace(arrowObject.Id))
+                        {
+                            selectedArrowObjectIds.Add(arrowObject.Id);
+                        }
+                        break;
+                    case VectorShapeObject vectorShapeObject:
+                        EnsureVectorShapeId(vectorShapeObject);
+                        if (!string.IsNullOrWhiteSpace(vectorShapeObject.Id))
+                        {
+                            selectedVectorShapeIds.Add(vectorShapeObject.Id);
+                        }
+                        break;
+                }
+            }
+
+            CollapseGroupSelectionToSingleIfNeeded();
+            UpdateObjectSelectionInfoLabel();
+            return true;
+        }
+
+        private void MarkerRadioButton_CheckedChanged(object sender, EventArgs e)
+        {
+            if (!suppressRedactionModeTracking && markerRadioButton.Checked)
+            {
+                lastManualRedactionModeIsMarker = true;
+            }
+        }
+
+        private void BoxRadioButton_CheckedChanged(object sender, EventArgs e)
+        {
+            if (!suppressRedactionModeTracking && boxRadioButton.Checked)
+            {
+                lastManualRedactionModeIsMarker = false;
+            }
         }
 
         private void EndVectorShapeCreationMode(bool keepDefaults = true)
@@ -21004,8 +21576,12 @@ namespace AnonPDF
                 isMoving = false;
                 textMoveMouseOffset = PointF.Empty;
                 UpdateObjectSelectionInfoLabel();
+                TryRestoreRedactionSelectionModeFromHitBlock(e.Location);
                 isDrawing = true;
-                BeginUndoCapture(markerRadioButton.Checked ? "Add marker selection" : "Add box selection");
+                if (IsRedactionSelectionModeEnabled())
+                {
+                    BeginUndoCapture(markerRadioButton.Checked ? "Add marker selection" : "Add box selection");
+                }
                 currentSelection = new System.Drawing.RectangleF(startPoint, Size.Empty);
                 pdfViewer.Invalidate();
             }
@@ -22326,6 +22902,11 @@ namespace AnonPDF
                                 renderTimer.Start();
                             }
                         }
+                        else if (!IsRedactionSelectionModeEnabled())
+                        {
+                            bool additiveSelection = (Control.ModifierKeys & Keys.Control) == Keys.Control;
+                            TrySelectObjectsInMarquee(currentSelection, additiveSelection);
+                        }
                     }
                 }
 
@@ -22419,10 +23000,7 @@ namespace AnonPDF
             }
 
             isCommentCreationMode = true;
-            isDrawing = false;
-            isMarkerCtrlBoxMode = false;
-            currentSelection = RectangleF.Empty;
-            markerRadioButton.Checked = true;
+            DisableRedactionSelectionMode();
             this.Cursor = Cursors.Cross;
             pdfViewer.Invalidate();
         }
@@ -27060,8 +27638,8 @@ namespace AnonPDF
 
         private void OnPaint(object sender, PaintEventArgs e)
         {
-            // Draw current selection
-            if (isDrawing && currentSelection.Width > 0 && currentSelection.Height > 0)
+            if (isDrawing && currentSelection.Width > 0 && currentSelection.Height > 0 &&
+                (isCommentCreationMode || IsRedactionSelectionModeEnabled()))
             {
                 System.Drawing.Color selectionPreviewColor = isCommentCreationMode
                     ? System.Drawing.Color.FromArgb(140, 255, 235, 59)
@@ -27432,6 +28010,7 @@ namespace AnonPDF
                 }
             }
 
+            DrawObjectMarqueeSelectionOverlay(e.Graphics);
 
         }
 
@@ -27454,6 +28033,18 @@ namespace AnonPDF
 
         private void ClearPageButton_Click(object sender, EventArgs e)
         {
+            DialogResult result = MessageBox.Show(this,
+                LocalizedText("Msg_Confirm_ClearPageSelections"),
+                Resources.Title_Confirmation,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Exclamation, MessageBoxDefaultButton.Button2
+            );
+
+            if (result == DialogResult.No)
+            {
+                return;
+            }
+
             ClearCurrentPageRedactionBlock();
         }
 
@@ -31365,6 +31956,7 @@ namespace AnonPDF
             ConstrainRasterObjectToPage(rasterObject);
             rasterObject.InitialBounds = rasterObject.Bounds;
             rasterObjects.Add(rasterObject);
+            DisableRedactionSelectionMode();
             ClearGroupSelection();
             selectedRasterObject = rasterObject;
             selectedTextAnnotation = null;
@@ -31437,6 +32029,7 @@ namespace AnonPDF
 
             ConstrainArrowToPage(arrow);
             arrowObjects.Add(arrow);
+            DisableRedactionSelectionMode();
             ClearGroupSelection();
             selectedArrowObject = arrow;
             selectedRasterObject = null;

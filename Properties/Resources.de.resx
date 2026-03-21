@@ -775,7 +775,7 @@ und dritten Punkt setzen.</value>
     <value>Optionen</value>
   </data>
   <data name="UI_Group_Selections" xml:space="preserve">
-    <value>Markierungen</value>
+    <value>Anonymisierung</value>
   </data>
   <data name="UI_Group_Signatures" xml:space="preserve">
     <value>Signaturen</value>
@@ -1296,6 +1296,9 @@ Die Anwendung wird geschlossen.</value>
   </data>
   <data name="Msg_Confirm_ClearAllSelections" xml:space="preserve">
     <value>Möchten Sie wirklich alle Markierungen aus dem Dokument entfernen?</value>
+  </data>
+  <data name="Msg_Confirm_ClearPageSelections" xml:space="preserve">
+    <value>M&#246;chten Sie wirklich alle Markierungen von der aktuellen Seite entfernen?</value>
   </data>
   <data name="Msg_Confirm_CloseApp" xml:space="preserve">
     <value>Möchten Sie die Anwendung wirklich schließen?</value>
