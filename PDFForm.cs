@@ -17385,6 +17385,46 @@ namespace AnonPDF
             }
         }
 
+        private static string ResolveProjectPdfPath(string savedPdfPath, string projectPath)
+        {
+            if (string.IsNullOrWhiteSpace(savedPdfPath))
+            {
+                return savedPdfPath;
+            }
+
+            if (File.Exists(savedPdfPath))
+            {
+                return savedPdfPath;
+            }
+
+            if (string.IsNullOrWhiteSpace(projectPath))
+            {
+                return savedPdfPath;
+            }
+
+            try
+            {
+                string projectDirectory = Path.GetDirectoryName(Path.GetFullPath(projectPath));
+                string pdfFileName = Path.GetFileName(savedPdfPath);
+                if (string.IsNullOrWhiteSpace(projectDirectory) || string.IsNullOrWhiteSpace(pdfFileName))
+                {
+                    return savedPdfPath;
+                }
+
+                string fallbackPath = Path.Combine(projectDirectory, pdfFileName);
+                if (File.Exists(fallbackPath))
+                {
+                    return fallbackPath;
+                }
+            }
+            catch
+            {
+                // ignore and fall back to saved path
+            }
+
+            return savedPdfPath;
+        }
+
         private static string GetUserDataDirectory()
         {
             string userDir = LicenseManager.UserLicenseDirectory;
@@ -29426,7 +29466,7 @@ namespace AnonPDF
                 try
                 {
                     ProjectData projectData = JsonConvert.DeserializeObject<ProjectData>(json);
-                    var filePath = projectData.FilePath ?? "";
+                    var filePath = ResolveProjectPdfPath(projectData.FilePath ?? "", inputProjectPathTemp);
 
                     if (filePath !="" && filePath != inputPdfPath)
                     {
