@@ -556,7 +556,7 @@ and a third arc point.</value>
     <value>Options</value>
   </data>
   <data name="UI_Group_Selections" xml:space="preserve">
-    <value>Anonymization</value>
+    <value>Anonymization selections</value>
   </data>
   <data name="UI_Group_Signatures" xml:space="preserve">
     <value>Signatures</value>
@@ -819,10 +819,10 @@ Click again to remove marks.</value>
     <value>Last page with selections.</value>
   </data>
   <data name="Tooltip_Marker" xml:space="preserve">
-    <value>Marker mode — paint with strokes. CTRL - box mode.</value>
+    <value>Marker: select a line of text. CTRL: select with a rectangle.</value>
   </data>
   <data name="Tooltip_Box" xml:space="preserve">
-    <value>Box mode — draw a rectangle.</value>
+    <value>Box: select a text area with a rectangle.</value>
   </data>
   <data name="Tooltip_ClearPage" xml:space="preserve">
     <value>Remove selections from current page.</value>

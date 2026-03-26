@@ -790,7 +790,7 @@ und dritten Punkt setzen.</value>
     <value>Optionen</value>
   </data>
   <data name="UI_Group_Selections" xml:space="preserve">
-    <value>Anonymisierung</value>
+    <value>Anonymisierungsmarkierungen</value>
   </data>
   <data name="UI_Group_Signatures" xml:space="preserve">
     <value>Signaturen</value>
@@ -980,10 +980,10 @@ Nochmal klicken, um Markierungen zu entfernen.</value>
     <value>Letzte Seite mit Markierungen.</value>
   </data>
   <data name="Tooltip_Marker" xml:space="preserve">
-    <value>Marker-Modus — mit Strichen markieren. STRG - Box-Modus.</value>
+    <value>Marker: eine Textzeile markieren. STRG: mit Rechteck markieren.</value>
   </data>
   <data name="Tooltip_Box" xml:space="preserve">
-    <value>Box-Modus — Rechteck zeichnen.</value>
+    <value>Box: einen Textbereich mit einem Rechteck markieren.</value>
   </data>
   <data name="Tooltip_ClearPage" xml:space="preserve">
     <value>Markierungen von der aktuellen Seite entfernen.</value>

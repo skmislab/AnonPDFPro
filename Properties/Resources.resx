@@ -556,7 +556,7 @@ końcowy i trzeci punkt łuku.</value>
     <value>Opcje</value>
   </data>
   <data name="UI_Group_Selections" xml:space="preserve">
-    <value>Anonimizacja</value>
+    <value>Zaznaczenia anonimizacji</value>
   </data>
   <data name="UI_Group_Signatures" xml:space="preserve">
     <value>Podpisy</value>
@@ -819,10 +819,10 @@ Ponowne kliknięcie usunie zaznaczenia.</value>
     <value>Ostatnia strona z zaznaczeniami.</value>
   </data>
   <data name="Tooltip_Marker" xml:space="preserve">
-    <value>Tryb marker — maluj pociągnięciami. CTRL - tryb box.</value>
+    <value>Marker: zaznacz linię tekstu. CTRL: zaznacz prostokątem.</value>
   </data>
   <data name="Tooltip_Box" xml:space="preserve">
-    <value>Tryb box — zaznacz prostokątem.</value>
+    <value>Box: zaznacz obszar tekstu prostokątem.</value>
   </data>
   <data name="Tooltip_ClearPage" xml:space="preserve">
     <value>Usuń zaznaczenia z bieżącej strony.</value>
