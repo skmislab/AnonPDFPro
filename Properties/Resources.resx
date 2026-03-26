@@ -222,7 +222,22 @@
     <value>Tej warstwy nie można usunąć.</value>
   </data>
   <data name="Dialog_Layers_DeleteNonEmpty" xml:space="preserve">
-    <value>Nie można usunąć warstwy, ponieważ zawiera {0} obiektów.</value>
+    <value>Warstwa &quot;{0}&quot; zawiera {1} obiekt&#243;w. Co chcesz z nimi zrobi&#263;?</value>
+  </data>
+  <data name="Dialog_Layers_DeleteConfirmEmpty" xml:space="preserve">
+    <value>Czy chcesz usun&#261;&#263; warstw&#281; &quot;{0}&quot;?</value>
+  </data>
+  <data name="Dialog_Layers_DeleteNonEmpty_Title" xml:space="preserve">
+    <value>Usuwanie warstwy</value>
+  </data>
+  <data name="Dialog_Layers_DeleteMoveTarget" xml:space="preserve">
+    <value>Przenie&#347; obiekty na warstw&#281;:</value>
+  </data>
+  <data name="Dialog_Layers_DeleteObjects" xml:space="preserve">
+    <value>Usu&#324;</value>
+  </data>
+  <data name="Dialog_Layers_MoveObjects" xml:space="preserve">
+    <value>Przenie&#347;</value>
   </data>
   <data name="Dialog_Layers_Rename_Title" xml:space="preserve">
     <value>Zmień nazwę warstwy</value>

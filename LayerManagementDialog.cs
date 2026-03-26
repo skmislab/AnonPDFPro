@@ -20,6 +20,7 @@ namespace AnonPDF
         private readonly Button moveDownButton;
         private readonly Button saveButton;
         private readonly Button cancelButton;
+        private readonly List<LayerDeletionAction> pendingLayerDeletionActions = new List<LayerDeletionAction>();
 
         internal event Action<List<LayerDefinition>, string> PreviewChanged;
 
@@ -213,8 +214,21 @@ namespace AnonPDF
             return activeRow?.Id ?? PDFForm.DefaultLayerId;
         }
 
+        internal List<LayerDeletionAction> GetLayerDeletionActions()
+        {
+            return pendingLayerDeletionActions
+                .Select(action => action?.Clone())
+                .Where(action => action != null)
+                .ToList();
+        }
+
         private void RaisePreviewChanged()
         {
+            if (pendingLayerDeletionActions.Count > 0)
+            {
+                return;
+            }
+
             PreviewChanged?.Invoke(GetLayers(), GetActiveLayerId());
         }
 
@@ -249,7 +263,7 @@ namespace AnonPDF
         {
             LayerRowModel selectedRow = GetSelectedRow();
             bool hasSelection = selectedRow != null;
-            bool canDelete = hasSelection && !selectedRow.IsSystem && selectedRow.UsageCount == 0;
+            bool canDelete = hasSelection && !selectedRow.IsSystem;
             bool canMoveUp = hasSelection && CanMoveRow(selectedRow, moveUp: true);
             bool canMoveDown = hasSelection && CanMoveRow(selectedRow, moveUp: false);
 
@@ -374,15 +388,46 @@ namespace AnonPDF
                 return;
             }
 
+            if (pendingLayerDeletionActions.Any(action => string.Equals(action.SourceLayerId, selectedRow.Id, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
             if (selectedRow.UsageCount > 0)
             {
-                MessageBox.Show(
-                    this,
-                    string.Format(CultureInfo.CurrentCulture, Tr("Dialog_Layers_DeleteNonEmpty"), selectedRow.UsageCount),
-                    Resources.Title_Warning,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Exclamation);
-                return;
+                List<LayerMoveTargetOption> targetOptions = layerRows
+                    .Where(row => row != null &&
+                        !string.Equals(row.Id, selectedRow.Id, StringComparison.OrdinalIgnoreCase))
+                    .Select(row => new LayerMoveTargetOption
+                    {
+                        Id = row.Id,
+                        Name = row.Name
+                    })
+                    .ToList();
+                string defaultTargetLayerId = targetOptions
+                    .FirstOrDefault(option => string.Equals(option.Id, PDFForm.WorkLayerId, StringComparison.OrdinalIgnoreCase))?.Id
+                    ?? targetOptions.FirstOrDefault()?.Id
+                    ?? PDFForm.WorkLayerId;
+
+                LayerDeleteDecision decision = PromptForDeleteLayerDecision(selectedRow, defaultTargetLayerId, targetOptions);
+                if (decision.Action == LayerDeleteAction.Cancel)
+                {
+                    return;
+                }
+
+                pendingLayerDeletionActions.Add(new LayerDeletionAction
+                {
+                    SourceLayerId = selectedRow.Id,
+                    Action = decision.Action,
+                    TargetLayerId = decision.TargetLayerId
+                });
+            }
+            else
+            {
+                if (!ConfirmDeleteEmptyLayer(selectedRow))
+                {
+                    return;
+                }
             }
 
             bool wasActive = selectedRow.IsActive;
@@ -410,6 +455,137 @@ namespace AnonPDF
 
             UpdateButtonState();
             RaisePreviewChanged();
+        }
+
+        private LayerDeleteDecision PromptForDeleteLayerDecision(
+            LayerRowModel selectedRow,
+            string defaultTargetLayerId,
+            IReadOnlyList<LayerMoveTargetOption> targetOptions)
+        {
+            using (var prompt = new Form())
+            {
+                prompt.Text = Tr("Dialog_Layers_DeleteNonEmpty_Title");
+                prompt.StartPosition = FormStartPosition.CenterParent;
+                prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
+                prompt.MinimizeBox = false;
+                prompt.MaximizeBox = false;
+                prompt.ShowInTaskbar = false;
+                prompt.ClientSize = new Size(520, 180);
+
+                var infoLabel = new Label
+                {
+                    Left = 16,
+                    Top = 16,
+                    Width = 488,
+                    Height = 46,
+                    Text = string.Format(CultureInfo.CurrentCulture, Tr("Dialog_Layers_DeleteNonEmpty"), selectedRow.Name, selectedRow.UsageCount)
+                };
+
+                var comboLabel = new Label
+                {
+                    Left = 16,
+                    Top = 76,
+                    Width = 180,
+                    Text = Tr("Dialog_Layers_DeleteMoveTarget")
+                };
+
+                var layerCombo = new ComboBox
+                {
+                    Left = 16,
+                    Top = 100,
+                    Width = 488,
+                    DropDownStyle = ComboBoxStyle.DropDownList,
+                    DisplayMember = nameof(LayerMoveTargetOption.Name),
+                    ValueMember = nameof(LayerMoveTargetOption.Id)
+                };
+                layerCombo.Items.AddRange(targetOptions.Cast<object>().ToArray());
+                if (layerCombo.Items.Count > 0)
+                {
+                    int selectedIndex = targetOptions
+                        .Select((option, index) => new { option, index })
+                        .FirstOrDefault(item => string.Equals(item.option.Id, defaultTargetLayerId, StringComparison.OrdinalIgnoreCase))?.index ?? 0;
+                    layerCombo.SelectedIndex = selectedIndex;
+                }
+
+                var deleteButton = new Button
+                {
+                    Left = 16,
+                    Top = 138,
+                    Width = 110,
+                    Text = Tr("Dialog_Layers_DeleteObjects")
+                };
+
+                var cancelButton = new Button
+                {
+                    Left = 205,
+                    Top = 138,
+                    Width = 110,
+                    Text = Tr("Dialog_Button_Cancel")
+                };
+
+                var moveButton = new Button
+                {
+                    Left = 394,
+                    Top = 138,
+                    Width = 110,
+                    Text = Tr("Dialog_Layers_MoveObjects")
+                };
+
+                LayerDeleteDecision decision = new LayerDeleteDecision
+                {
+                    Action = LayerDeleteAction.Cancel,
+                    TargetLayerId = defaultTargetLayerId
+                };
+
+                deleteButton.Click += (_, __) =>
+                {
+                    decision.Action = LayerDeleteAction.DeleteObjects;
+                    prompt.DialogResult = DialogResult.OK;
+                    prompt.Close();
+                };
+                cancelButton.Click += (_, __) =>
+                {
+                    decision.Action = LayerDeleteAction.Cancel;
+                    prompt.DialogResult = DialogResult.Cancel;
+                    prompt.Close();
+                };
+                moveButton.Click += (_, __) =>
+                {
+                    string targetLayerId = layerCombo.SelectedValue as string ?? defaultTargetLayerId;
+                    if (string.IsNullOrWhiteSpace(targetLayerId))
+                    {
+                        return;
+                    }
+
+                    decision.Action = LayerDeleteAction.MoveObjects;
+                    decision.TargetLayerId = targetLayerId;
+                    prompt.DialogResult = DialogResult.OK;
+                    prompt.Close();
+                };
+
+                prompt.AcceptButton = moveButton;
+                prompt.CancelButton = cancelButton;
+                prompt.Controls.Add(infoLabel);
+                prompt.Controls.Add(comboLabel);
+                prompt.Controls.Add(layerCombo);
+                prompt.Controls.Add(deleteButton);
+                prompt.Controls.Add(cancelButton);
+                prompt.Controls.Add(moveButton);
+                prompt.ShowDialog(this);
+                return decision;
+            }
+        }
+
+        private bool ConfirmDeleteEmptyLayer(LayerRowModel selectedRow)
+        {
+            DialogResult result = MessageBox.Show(
+                this,
+                string.Format(CultureInfo.CurrentCulture, Tr("Dialog_Layers_DeleteConfirmEmpty"), selectedRow.Name),
+                Tr("Dialog_Layers_DeleteNonEmpty_Title"),
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Exclamation,
+                MessageBoxDefaultButton.Button2);
+            return result == DialogResult.Yes;
         }
 
         private void MoveUpButton_Click(object sender, EventArgs e)
@@ -819,6 +995,42 @@ namespace AnonPDF
             {
                 PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
             }
+        }
+
+        internal enum LayerDeleteAction
+        {
+            Cancel = 0,
+            DeleteObjects = 1,
+            MoveObjects = 2
+        }
+
+        internal sealed class LayerDeletionAction
+        {
+            public string SourceLayerId { get; set; }
+            public LayerDeleteAction Action { get; set; }
+            public string TargetLayerId { get; set; }
+
+            public LayerDeletionAction Clone()
+            {
+                return new LayerDeletionAction
+                {
+                    SourceLayerId = SourceLayerId,
+                    Action = Action,
+                    TargetLayerId = TargetLayerId
+                };
+            }
+        }
+
+        private sealed class LayerDeleteDecision
+        {
+            public LayerDeleteAction Action { get; set; }
+            public string TargetLayerId { get; set; }
+        }
+
+        private sealed class LayerMoveTargetOption
+        {
+            public string Id { get; set; }
+            public string Name { get; set; }
         }
 
     }

@@ -222,7 +222,22 @@
     <value>This layer cannot be deleted.</value>
   </data>
   <data name="Dialog_Layers_DeleteNonEmpty" xml:space="preserve">
-    <value>The layer cannot be deleted because it contains {0} objects.</value>
+    <value>The layer "{0}" contains {1} objects. What do you want to do with them?</value>
+  </data>
+  <data name="Dialog_Layers_DeleteNonEmpty_Title" xml:space="preserve">
+    <value>Delete layer</value>
+  </data>
+  <data name="Dialog_Layers_DeleteConfirmEmpty" xml:space="preserve">
+    <value>Do you want to delete the layer "{0}"?</value>
+  </data>
+  <data name="Dialog_Layers_DeleteMoveTarget" xml:space="preserve">
+    <value>Move objects to layer:</value>
+  </data>
+  <data name="Dialog_Layers_DeleteObjects" xml:space="preserve">
+    <value>Delete</value>
+  </data>
+  <data name="Dialog_Layers_MoveObjects" xml:space="preserve">
+    <value>Move</value>
   </data>
   <data name="Dialog_Layers_Rename_Title" xml:space="preserve">
     <value>Rename layer</value>

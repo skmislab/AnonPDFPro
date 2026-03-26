@@ -297,6 +297,8 @@ namespace AnonPDF
         private PointF rasterMoveMouseOffset;
         private RectangleF rasterMoveStartBounds = RectangleF.Empty;
         private RectangleF rasterRotateStartBounds = RectangleF.Empty;
+        private readonly List<GroupMoveEntry> rasterMoveAttachedClipEntries = new List<GroupMoveEntry>();
+        private readonly List<GroupMoveEntry> rasterRotateAttachedClipEntries = new List<GroupMoveEntry>();
         private PointF arrowMoveStartMouseDoc;
         private PointF arrowMoveInitialStart;
         private PointF arrowMoveInitialEnd;
@@ -1960,8 +1962,119 @@ namespace AnonPDF
                     return;
                 }
 
-                ApplyLayerConfiguration(dialog.GetLayers(), dialog.GetActiveLayerId(), markProjectChanged: true);
+                List<LayerDefinition> updatedLayers = dialog.GetLayers();
+                ApplyLayerDeletionActions(dialog.GetLayerDeletionActions(), updatedLayers);
+                ApplyLayerConfiguration(updatedLayers, dialog.GetActiveLayerId(), markProjectChanged: true);
             }
+        }
+
+        private void ApplyLayerDeletionActions(
+            IEnumerable<LayerManagementDialog.LayerDeletionAction> actions,
+            IEnumerable<LayerDefinition> resultingLayers)
+        {
+            List<LayerManagementDialog.LayerDeletionAction> actionList = (actions ?? Enumerable.Empty<LayerManagementDialog.LayerDeletionAction>())
+                .Where(action => action != null)
+                .Select(action => action.Clone())
+                .Where(action => action != null && !string.IsNullOrWhiteSpace(action.SourceLayerId))
+                .ToList();
+            if (actionList.Count == 0)
+            {
+                return;
+            }
+
+            var targetLayerIds = new HashSet<string>(
+                (resultingLayers ?? Enumerable.Empty<LayerDefinition>())
+                    .Where(layer => layer != null)
+                    .Select(layer => NormalizeLayerIdValue(layer.Id)),
+                StringComparer.OrdinalIgnoreCase);
+
+            string fallbackTargetLayerId = targetLayerIds.Contains(WorkLayerId)
+                ? WorkLayerId
+                : (targetLayerIds.Contains(DefaultLayerId) ? DefaultLayerId : WorkLayerId);
+
+            void MoveObjects(string sourceLayerId, string targetLayerId)
+            {
+                foreach (RedactionBlock block in redactionBlocks.Where(block => block != null && string.Equals(NormalizeLayerIdValue(block.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    block.LayerId = targetLayerId;
+                }
+
+                foreach (CommentAnnotation comment in commentAnnotations.Where(comment => comment != null && string.Equals(NormalizeLayerIdValue(comment.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    comment.LayerId = targetLayerId;
+                }
+
+                foreach (TextAnnotation annotation in textAnnotations.Where(annotation => annotation != null && string.Equals(NormalizeLayerIdValue(annotation.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    annotation.LayerId = targetLayerId;
+                }
+
+                foreach (RasterObject rasterObject in rasterObjects.Where(rasterObject => rasterObject != null && string.Equals(NormalizeLayerIdValue(rasterObject.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    rasterObject.LayerId = targetLayerId;
+                }
+
+                foreach (ArrowObject arrowObject in arrowObjects.Where(arrowObject => arrowObject != null && string.Equals(NormalizeLayerIdValue(arrowObject.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    arrowObject.LayerId = targetLayerId;
+                }
+
+                foreach (VectorShapeObject vectorShape in vectorShapes.Where(vectorShape => vectorShape != null && string.Equals(NormalizeLayerIdValue(vectorShape.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    vectorShape.LayerId = targetLayerId;
+                }
+            }
+
+            void DeleteObjects(string sourceLayerId)
+            {
+                redactionBlocks.RemoveAll(block => block != null && string.Equals(NormalizeLayerIdValue(block.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
+                commentAnnotations.RemoveAll(comment => comment != null && string.Equals(NormalizeLayerIdValue(comment.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
+                textAnnotations.RemoveAll(annotation => annotation != null && string.Equals(NormalizeLayerIdValue(annotation.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
+                rasterObjects.RemoveAll(rasterObject => rasterObject != null && string.Equals(NormalizeLayerIdValue(rasterObject.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
+                arrowObjects.RemoveAll(arrowObject => arrowObject != null && string.Equals(NormalizeLayerIdValue(arrowObject.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
+                vectorShapes.RemoveAll(vectorShape => vectorShape != null && string.Equals(NormalizeLayerIdValue(vectorShape.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            foreach (LayerManagementDialog.LayerDeletionAction action in actionList)
+            {
+                string sourceLayerId = NormalizeLayerIdValue(action.SourceLayerId);
+                if (string.IsNullOrWhiteSpace(sourceLayerId))
+                {
+                    continue;
+                }
+
+                if (action.Action == LayerManagementDialog.LayerDeleteAction.DeleteObjects)
+                {
+                    DeleteObjects(sourceLayerId);
+                    continue;
+                }
+
+                if (action.Action != LayerManagementDialog.LayerDeleteAction.MoveObjects)
+                {
+                    continue;
+                }
+
+                string targetLayerId = NormalizeLayerIdValue(action.TargetLayerId);
+                if (string.IsNullOrWhiteSpace(targetLayerId) ||
+                    string.Equals(targetLayerId, sourceLayerId, StringComparison.OrdinalIgnoreCase) ||
+                    !targetLayerIds.Contains(targetLayerId))
+                {
+                    targetLayerId = fallbackTargetLayerId;
+                }
+
+                if (string.IsNullOrWhiteSpace(targetLayerId) || string.Equals(targetLayerId, sourceLayerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                MoveObjects(sourceLayerId, targetLayerId);
+            }
+
+            selectedTextAnnotation = null;
+            selectedRasterObject = null;
+            selectedArrowObject = null;
+            selectedVectorShape = null;
+            ClearGroupSelection();
         }
 
         private void InitializeLayersTab()
@@ -7832,6 +7945,46 @@ namespace AnonPDF
                 minY = Math.Min(minY, bounds.Top);
                 maxX = Math.Max(maxX, bounds.Right);
                 maxY = Math.Max(maxY, bounds.Bottom);
+            }
+
+            var addedVectorIds = new HashSet<string>(
+                selectedVectorShapeIds.Where(id => !string.IsNullOrWhiteSpace(id)),
+                StringComparer.Ordinal);
+
+            foreach (var rasterId in selectedRasterObjectIds)
+            {
+                RasterObject raster = rasterObjects.FirstOrDefault(r => r != null && r.PageNumber == currentPage && r.Id == rasterId && !IsRasterObjectEffectivelyLocked(r));
+                if (raster == null)
+                {
+                    continue;
+                }
+
+                foreach (VectorShapeObject clipShape in GetRasterClipShapesForMove(raster))
+                {
+                    if (clipShape == null || string.IsNullOrWhiteSpace(clipShape.Id) || !addedVectorIds.Add(clipShape.Id))
+                    {
+                        continue;
+                    }
+
+                    RectangleF bounds = GetVectorShapeBounds(clipShape.Points);
+                    if (bounds.IsEmpty)
+                    {
+                        continue;
+                    }
+
+                    groupMoveEntries.Add(new GroupMoveEntry
+                    {
+                        Type = GroupMoveObjectType.VectorShape,
+                        VectorShape = clipShape,
+                        Points = (clipShape.Points ?? new List<PointF>()).Select(p => new PointF(p.X, p.Y)).ToList(),
+                        Bounds = bounds
+                    });
+
+                    minX = Math.Min(minX, bounds.Left);
+                    minY = Math.Min(minY, bounds.Top);
+                    maxX = Math.Max(maxX, bounds.Right);
+                    maxY = Math.Max(maxY, bounds.Bottom);
+                }
             }
 
             foreach (var arrowId in selectedArrowObjectIds)
@@ -22061,6 +22214,13 @@ namespace AnonPDF
                 rasterObjectToRotate.Rotation = NormalizeRotation(rasterRotationStartValue + (int)Math.Round(delta));
                 ConstrainRasterObjectToPage(rasterObjectToRotate);
                 rasterObjectToRotate.UpdatedAtUtc = DateTime.UtcNow;
+                if (HasPositiveSize(rasterRotateStartBounds))
+                {
+                    PointF centerDoc = new PointF(
+                        rasterRotateStartBounds.X + (rasterRotateStartBounds.Width / 2f),
+                        rasterRotateStartBounds.Y + (rasterRotateStartBounds.Height / 2f));
+                    ApplyRasterRotateAttachedClipDelta(delta, centerDoc);
+                }
                 pdfViewer.Invalidate();
                 return;
             }
@@ -22245,6 +22405,12 @@ namespace AnonPDF
                 rasterObjectToMove.Bounds = new RectangleF(newX, newY, bounds.Width, bounds.Height);
                 ConstrainRasterObjectToPage(rasterObjectToMove);
                 rasterObjectToMove.UpdatedAtUtc = DateTime.UtcNow;
+                if (HasPositiveSize(rasterMoveStartBounds))
+                {
+                    float appliedDx = rasterObjectToMove.Bounds.X - rasterMoveStartBounds.X;
+                    float appliedDy = rasterObjectToMove.Bounds.Y - rasterMoveStartBounds.Y;
+                    ApplyRasterMoveAttachedClipDelta(appliedDx, appliedDy);
+                }
                 pdfViewer.Invalidate();
                 return;
             }
@@ -31592,6 +31758,7 @@ namespace AnonPDF
                 if (isMovingRasterObject && rasterObjectToMove != null && HasPositiveSize(rasterMoveStartBounds))
                 {
                     rasterObjectToMove.Bounds = rasterMoveStartBounds;
+                    ApplyRasterMoveAttachedClipDelta(0f, 0f);
                 }
 
                 if (isRotatingRasterObject && rasterObjectToRotate != null)
@@ -31600,6 +31767,10 @@ namespace AnonPDF
                     if (HasPositiveSize(rasterRotateStartBounds))
                     {
                         rasterObjectToRotate.Bounds = rasterRotateStartBounds;
+                        PointF centerDoc = new PointF(
+                            rasterRotateStartBounds.X + (rasterRotateStartBounds.Width / 2f),
+                            rasterRotateStartBounds.Y + (rasterRotateStartBounds.Height / 2f));
+                        ApplyRasterRotateAttachedClipDelta(0f, centerDoc);
                     }
                 }
 
@@ -32669,6 +32840,8 @@ namespace AnonPDF
             rasterMouseActionInProgress = false;
             rasterMoveMouseOffset = PointF.Empty;
             rasterMoveStartBounds = RectangleF.Empty;
+            rasterMoveAttachedClipEntries.Clear();
+            rasterRotateAttachedClipEntries.Clear();
             rasterRotateStartBounds = RectangleF.Empty;
             rasterResizeStartBounds = RectangleF.Empty;
             rasterResizeAnchorWorld = PointF.Empty;
@@ -33525,11 +33698,59 @@ namespace AnonPDF
             return new RectangleF(minX, minY, Math.Max(0f, maxX - minX), Math.Max(0f, maxY - minY));
         }
 
+        private static GraphicsPath BuildRasterClipShapePathDoc(VectorShapeObject vectorShape)
+        {
+            if (!SupportsRasterClip(vectorShape))
+            {
+                return null;
+            }
+
+            VectorShapeType shapeType = ParseVectorShapeType(vectorShape.ShapeType);
+            var path = new GraphicsPath();
+
+            if (shapeType == VectorShapeType.Rectangle && vectorShape.Points != null && vectorShape.Points.Count >= 2)
+            {
+                RectangleF rect = CreateNormalizedRectangle(vectorShape.Points[0], vectorShape.Points[vectorShape.Points.Count - 1]);
+                if (rect.Width > 0.0001f && rect.Height > 0.0001f)
+                {
+                    path.AddRectangle(rect);
+                }
+                if (path.PointCount > 0)
+                {
+                    return path;
+                }
+
+                path.Dispose();
+                return null;
+            }
+
+            PointF[] renderPoints = BuildVectorShapeRenderPoints(shapeType, vectorShape.Points).ToArray();
+            if (renderPoints.Length >= 3)
+            {
+                path.AddPolygon(renderPoints);
+            }
+
+            if (path.PointCount > 0)
+            {
+                return path;
+            }
+
+            path.Dispose();
+            return null;
+        }
+
         private static bool DoesRasterClipShapeIntersectRaster(RasterObject rasterObject, VectorShapeObject vectorShape)
         {
             RectangleF rasterBounds = GetRasterObjectDocFrameBounds(rasterObject);
-            RectangleF clipBounds = GetVectorShapeRenderBoundsDoc(vectorShape);
-            return !rasterBounds.IsEmpty && !clipBounds.IsEmpty && rasterBounds.IntersectsWith(clipBounds);
+            if (rasterBounds.IsEmpty)
+            {
+                return false;
+            }
+
+            using (GraphicsPath clipPath = BuildRasterClipShapePathDoc(vectorShape))
+            {
+                return clipPath != null && DoesGraphicsPathIntersectRectangle(clipPath, rasterBounds);
+            }
         }
 
         private static Dictionary<string, List<VectorShapeObject>> BuildRasterClipMap(IEnumerable<object> orderedObjects)
@@ -33587,6 +33808,131 @@ namespace AnonPDF
             }
 
             return result;
+        }
+
+        private List<VectorShapeObject> GetRasterClipShapesForMove(RasterObject rasterObject)
+        {
+            if (rasterObject == null)
+            {
+                return new List<VectorShapeObject>();
+            }
+
+            return GetRasterClipShapesForPreview(rasterObject)
+                .Where(shape => shape != null &&
+                    shape.PageNumber == rasterObject.PageNumber &&
+                    !IsVectorShapeEffectivelyLocked(shape))
+                .ToList();
+        }
+
+        private void PopulateRasterMoveAttachedClipEntries(RasterObject rasterObject)
+        {
+            rasterMoveAttachedClipEntries.Clear();
+            if (rasterObject == null)
+            {
+                return;
+            }
+
+            foreach (VectorShapeObject clipShape in GetRasterClipShapesForMove(rasterObject))
+            {
+                List<PointF> points = (clipShape.Points ?? new List<PointF>())
+                    .Select(point => new PointF(point.X, point.Y))
+                    .ToList();
+                if (points.Count == 0)
+                {
+                    continue;
+                }
+
+                RectangleF bounds = GetVectorShapeBounds(points);
+                if (bounds.IsEmpty)
+                {
+                    continue;
+                }
+
+                rasterMoveAttachedClipEntries.Add(new GroupMoveEntry
+                {
+                    Type = GroupMoveObjectType.VectorShape,
+                    VectorShape = clipShape,
+                    Points = points,
+                    Bounds = bounds
+                });
+            }
+        }
+
+        private void ApplyRasterMoveAttachedClipDelta(float dx, float dy)
+        {
+            foreach (GroupMoveEntry entry in rasterMoveAttachedClipEntries)
+            {
+                if (entry?.VectorShape == null || entry.Points == null || entry.Points.Count == 0)
+                {
+                    continue;
+                }
+
+                entry.VectorShape.Points = entry.Points
+                    .Select(point => new PointF(point.X + dx, point.Y + dy))
+                    .ToList();
+                entry.VectorShape.UpdatedAtUtc = DateTime.UtcNow;
+            }
+        }
+
+        private void PopulateRasterRotateAttachedClipEntries(RasterObject rasterObject)
+        {
+            rasterRotateAttachedClipEntries.Clear();
+            if (rasterObject == null)
+            {
+                return;
+            }
+
+            foreach (VectorShapeObject clipShape in GetRasterClipShapesForMove(rasterObject))
+            {
+                List<PointF> points = (clipShape.Points ?? new List<PointF>())
+                    .Select(point => new PointF(point.X, point.Y))
+                    .ToList();
+                if (points.Count == 0)
+                {
+                    continue;
+                }
+
+                RectangleF bounds = GetVectorShapeBounds(points);
+                if (bounds.IsEmpty)
+                {
+                    continue;
+                }
+
+                rasterRotateAttachedClipEntries.Add(new GroupMoveEntry
+                {
+                    Type = GroupMoveObjectType.VectorShape,
+                    VectorShape = clipShape,
+                    Points = points,
+                    Bounds = bounds
+                });
+            }
+        }
+
+        private void ApplyRasterRotateAttachedClipDelta(float deltaDegrees, PointF centerDoc)
+        {
+            float radians = (float)(Math.PI * deltaDegrees / 180.0);
+            float cos = (float)Math.Cos(radians);
+            float sin = (float)Math.Sin(radians);
+
+            foreach (GroupMoveEntry entry in rasterRotateAttachedClipEntries)
+            {
+                if (entry?.VectorShape == null || entry.Points == null || entry.Points.Count == 0)
+                {
+                    continue;
+                }
+
+                entry.VectorShape.Points = entry.Points
+                    .Select(point =>
+                    {
+                        float localX = point.X - centerDoc.X;
+                        float localY = point.Y - centerDoc.Y;
+                        return new PointF(
+                            centerDoc.X + (localX * cos) - (localY * sin),
+                            centerDoc.Y + (localX * sin) + (localY * cos));
+                    })
+                    .ToList();
+                entry.VectorShape.UpdatedAtUtc = DateTime.UtcNow;
+            }
         }
 
         private List<VectorShapeObject> GetRasterClipShapesForPreview(RasterObject rasterObject)
@@ -35319,6 +35665,7 @@ namespace AnonPDF
                 isRotatingRasterObject = true;
                 rasterRotationStartValue = NormalizeRotation(selectedRasterObject.Rotation);
                 rasterRotateStartBounds = selectedRasterObject.Bounds;
+                PopulateRasterRotateAttachedClipEntries(selectedRasterObject);
                 rasterRotationStartAngle = GetAngleDegrees(GetRasterObjectScreenCenter(selectedRasterObject), location);
                 this.Cursor = Cursors.Hand;
                 return true;
@@ -35397,6 +35744,7 @@ namespace AnonPDF
                     startPoint = location;
                     PointF mouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
                     rasterMoveMouseOffset = new PointF(mouseDoc.X - hitRaster.Bounds.X, mouseDoc.Y - hitRaster.Bounds.Y);
+                    PopulateRasterMoveAttachedClipEntries(hitRaster);
                     this.Cursor = Cursors.SizeAll;
                 }
                 else
@@ -38709,6 +39057,7 @@ namespace AnonPDF
                     isRotatingRasterObject = true;
                     rasterRotationStartValue = NormalizeRotation(selectedRasterObject.Rotation);
                     rasterRotateStartBounds = selectedRasterObject.Bounds;
+                    PopulateRasterRotateAttachedClipEntries(selectedRasterObject);
                     rasterRotationStartAngle = GetAngleDegrees(GetRasterObjectScreenCenter(selectedRasterObject), location);
                     this.Cursor = Cursors.Hand;
                     return true;
@@ -38744,6 +39093,7 @@ namespace AnonPDF
             startPoint = location;
             PointF mouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
             rasterMoveMouseOffset = new PointF(mouseDoc.X - hitObject.Bounds.X, mouseDoc.Y - hitObject.Bounds.Y);
+            PopulateRasterMoveAttachedClipEntries(hitObject);
             this.Cursor = Cursors.SizeAll;
             return true;
         }

@@ -474,7 +474,22 @@ Anwendung schließen und Installer jetzt starten?</value>
     <value>Diese Ebene kann nicht geloescht werden.</value>
   </data>
   <data name="Dialog_Layers_DeleteNonEmpty" xml:space="preserve">
-    <value>Die Ebene kann nicht geloescht werden, da sie {0} Objekte enthaelt.</value>
+    <value>Die Ebene "{0}" enthaelt {1} Objekte. Was soll mit ihnen geschehen?</value>
+  </data>
+  <data name="Dialog_Layers_DeleteNonEmpty_Title" xml:space="preserve">
+    <value>Ebene loeschen</value>
+  </data>
+  <data name="Dialog_Layers_DeleteConfirmEmpty" xml:space="preserve">
+    <value>Soll die Ebene "{0}" geloescht werden?</value>
+  </data>
+  <data name="Dialog_Layers_DeleteMoveTarget" xml:space="preserve">
+    <value>Objekte in folgende Ebene verschieben:</value>
+  </data>
+  <data name="Dialog_Layers_DeleteObjects" xml:space="preserve">
+    <value>Loeschen</value>
+  </data>
+  <data name="Dialog_Layers_MoveObjects" xml:space="preserve">
+    <value>Verschieben</value>
   </data>
   <data name="Dialog_Layers_Rename_Title" xml:space="preserve">
     <value>Ebenennamen aendern</value>
