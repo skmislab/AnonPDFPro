@@ -321,8 +321,9 @@ namespace AnonPDF
         private int objectSelectionCyclePage = -1;
         private float objectSelectionCycleScale = -1f;
         private DateTime objectSelectionCycleTimestampUtc = DateTime.MinValue;
-        private int objectSelectionCycleIndex = -1;
-        private List<string> objectSelectionCycleKeys = new List<string>();
+        private string objectSelectionCycleTopKey = string.Empty;
+        private string objectSelectionCycleCurrentKey = string.Empty;
+        private List<string> objectSelectionCycleVisitedKeys = new List<string>();
         private LayerPanelControl layersPanelView;
         private List<LayerDefinition> pendingLayerPanelApplyLayers;
         private string pendingLayerPanelApplyActiveLayerId;
@@ -7349,8 +7350,9 @@ namespace AnonPDF
             objectSelectionCyclePage = -1;
             objectSelectionCycleScale = -1f;
             objectSelectionCycleTimestampUtc = DateTime.MinValue;
-            objectSelectionCycleIndex = -1;
-            objectSelectionCycleKeys.Clear();
+            objectSelectionCycleTopKey = string.Empty;
+            objectSelectionCycleCurrentKey = string.Empty;
+            objectSelectionCycleVisitedKeys.Clear();
         }
 
         private static string BuildSelectableObjectCycleKey(object candidate)
@@ -7425,36 +7427,58 @@ namespace AnonPDF
             }
 
             List<string> candidateKeys = candidates.Select(BuildSelectableObjectCycleKey).ToList();
-            bool sameLocation = DistanceBetweenPoints(
-                new PointF(objectSelectionCyclePoint.X, objectSelectionCyclePoint.Y),
-                new PointF(location.X, location.Y)) <= 3f;
+            string topKey = candidateKeys[0];
             bool sameCycleContext =
                 objectSelectionCyclePage == currentPage &&
                 Math.Abs(objectSelectionCycleScale - scaleFactor) <= 0.0001f &&
                 (DateTime.UtcNow - objectSelectionCycleTimestampUtc) <= TimeSpan.FromSeconds(2) &&
-                sameLocation &&
-                objectSelectionCycleKeys.SequenceEqual(candidateKeys, StringComparer.Ordinal);
+                string.Equals(objectSelectionCycleTopKey, topKey, StringComparison.Ordinal);
 
-            int nextIndex;
+            string nextKey;
             if (!sameCycleContext)
             {
-                nextIndex = 0;
+                objectSelectionCycleVisitedKeys.Clear();
+                nextKey = topKey;
+                objectSelectionCycleVisitedKeys.Add(nextKey);
             }
             else if (advanceCycle)
             {
-                nextIndex = (objectSelectionCycleIndex + 1) % candidates.Count;
+                nextKey = candidateKeys.FirstOrDefault(key => !objectSelectionCycleVisitedKeys.Contains(key));
+                if (string.IsNullOrWhiteSpace(nextKey))
+                {
+                    objectSelectionCycleVisitedKeys.Clear();
+                    nextKey = topKey;
+                    objectSelectionCycleVisitedKeys.Add(nextKey);
+                }
+                else if (!objectSelectionCycleVisitedKeys.Contains(nextKey))
+                {
+                    objectSelectionCycleVisitedKeys.Add(nextKey);
+                }
             }
             else
             {
-                nextIndex = objectSelectionCycleIndex >= 0 ? Math.Min(objectSelectionCycleIndex, candidates.Count - 1) : 0;
+                nextKey = candidateKeys.FirstOrDefault(key => string.Equals(key, objectSelectionCycleCurrentKey, StringComparison.Ordinal));
+                if (string.IsNullOrWhiteSpace(nextKey))
+                {
+                    nextKey = topKey;
+                    objectSelectionCycleVisitedKeys.Clear();
+                    objectSelectionCycleVisitedKeys.Add(nextKey);
+                }
+            }
+
+            int nextIndex = candidateKeys.FindIndex(key => string.Equals(key, nextKey, StringComparison.Ordinal));
+            if (nextIndex < 0)
+            {
+                nextIndex = 0;
+                nextKey = topKey;
             }
 
             objectSelectionCyclePoint = location;
             objectSelectionCyclePage = currentPage;
             objectSelectionCycleScale = scaleFactor;
             objectSelectionCycleTimestampUtc = DateTime.UtcNow;
-            objectSelectionCycleIndex = nextIndex;
-            objectSelectionCycleKeys = candidateKeys;
+            objectSelectionCycleTopKey = topKey;
+            objectSelectionCycleCurrentKey = nextKey;
             hitObject = candidates[nextIndex];
             return true;
         }
