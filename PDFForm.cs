@@ -188,6 +188,11 @@ namespace AnonPDF
         private readonly object pdfRenderSync = new object();
         private System.Threading.CancellationTokenSource previewRenderCts;
         private int previewRenderRequestId;
+        private System.Threading.CancellationTokenSource redactionPreviewRectsCts;
+        private int redactionPreviewRectsRequestId;
+        private System.Threading.CancellationTokenSource redactionPreviewOverlayCts;
+        private int redactionPreviewOverlayRequestId;
+        private Bitmap redactionPreviewOverlayBitmap;
         private readonly List<ExclusionScopeDefinition> exclusionScopesCatalog = new List<ExclusionScopeDefinition>();
         private readonly Dictionary<string, ExclusionScopeDefinition> exclusionScopesById = new Dictionary<string, ExclusionScopeDefinition>(StringComparer.OrdinalIgnoreCase);
         private readonly List<LegalBasisDefinition> legalBasesCatalog = new List<LegalBasisDefinition>();
@@ -2076,6 +2081,7 @@ namespace AnonPDF
             selectedArrowObject = null;
             selectedVectorShape = null;
             ClearGroupSelection();
+            RefreshRedactionPreviewForCurrentPage();
         }
 
         private void InitializeLayersTab()
@@ -12821,6 +12827,11 @@ namespace AnonPDF
             {
                 return;
             }
+            if (!HasVisibleCommentsOnPage(currentPage))
+            {
+                delayCommentAndSelectionOverlayUntilPreviewReady = false;
+                return;
+            }
             ShowRedactPreview();
             pdfViewer.Invalidate();
         }
@@ -13695,10 +13706,15 @@ namespace AnonPDF
                 scaleFactor = maxScaleFactor;
             }
 
+            ClearRedactionPreviewOverlay();
+            EnsureRedactionPreviewRectsForPage(pageNumber);
             pdfViewer.Image = RenderOriginalPage(pageNumber);
             commentPreviewOverlayReady = false;
             renderTimer.Stop();
-            renderTimer.Start();
+            if (HasVisibleCommentsOnPage(pageNumber))
+            {
+                renderTimer.Start();
+            }
 
             pageNumberTextBox.Text = pageNumber.ToString();
             numPagesLabel.Text = "/  " + numPages.ToString(CultureInfo.CurrentCulture);
@@ -15122,6 +15138,7 @@ namespace AnonPDF
         private void ClearRedactionBlocks()
         {
             redactionBlocks.Clear();
+            ClearRedactionPreviewOverlay();
             pdfViewer.Invalidate();
             UpdateSelectionNavigationButtons();
             foreach (PageItemStatus status in allPageStatuses)
@@ -15149,6 +15166,7 @@ namespace AnonPDF
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
             projectWasChangedAfterLastSave = true;
+            RefreshRedactionPreviewForCurrentPage();
             renderTimer.Stop();
             renderTimer.Start();
         }
@@ -15162,6 +15180,7 @@ namespace AnonPDF
 
             redactionBlocks.RemoveAll(block => block.PageNumber == currentPage);
             projectWasChangedAfterLastSave = true;
+            RefreshRedactionPreviewForCurrentPage();
 
             RedactionBlock blocksByPage = redactionBlocks.FirstOrDefault(block => block.PageNumber == currentPage);
             if (blocksByPage == null)
@@ -16243,6 +16262,7 @@ namespace AnonPDF
             foreach (var block in redactionBlocks.Where(b => b.PageNumber == currentPage))
             {
                 block.Bounds = RotateRectClockwise(block.Bounds, pageSize.Width, pageSize.Height);
+                InvalidateRedactionPreviewRects(block);
                 TouchRedactionBlock(block);
             }
 
@@ -23211,10 +23231,12 @@ namespace AnonPDF
                             {
                                 // Marker + CTRL temporarily switches to box behavior.
                                 bool markerModeForBlock = !isMarkerCtrlBoxMode;
-                                redactionBlocks.Add(CreateRedactionBlockWithAutomaticClassification(
+                                var createdBlock = CreateRedactionBlockWithAutomaticClassification(
                                     rect,
                                     currentPage,
-                                    isMarkerSelection: markerModeForBlock));
+                                    isMarkerSelection: markerModeForBlock);
+                                redactionBlocks.Add(createdBlock);
+                                TryComputeRedactionPreviewRects(createdBlock);
                                 
                                 
 
@@ -23245,7 +23267,9 @@ namespace AnonPDF
                             renderTimer.Stop();
                             if (isDrawing && currentSelection.Width > markerWidth * scaleFactor && currentSelection.Height > markerHeight * scaleFactor)
                             {
-                                redactionBlocks.Add(CreateRedactionBlockWithAutomaticClassification(rect, currentPage, isMarkerSelection: false));
+                                var createdBlock = CreateRedactionBlockWithAutomaticClassification(rect, currentPage, isMarkerSelection: false);
+                                redactionBlocks.Add(createdBlock);
+                                TryComputeRedactionPreviewRects(createdBlock);
 
                                 
                                 status.HasSelections = true;
@@ -24684,6 +24708,173 @@ namespace AnonPDF
             NormalizeRedactionBlockMetadata(block);
             TryApplyAutomaticFootnoteClassification(block);
             return block;
+        }
+
+        private void InvalidateRedactionPreviewRects(RedactionBlock block)
+        {
+            if (block == null)
+            {
+                return;
+            }
+
+            block.PreviewTextRectsPdf = null;
+        }
+
+        private List<RectangleF> ComputeRedactionPreviewRects(
+            iText.Kernel.Pdf.PdfPage page,
+            RedactionBlock block,
+            int rotation)
+        {
+            if (page == null || block == null)
+            {
+                return new List<RectangleF>();
+            }
+
+            RectangleF pdfCoords = ConvertToPdfCoordinates(block.Bounds, block.PageNumber, rotation);
+            iText.Kernel.Geom.Rectangle sourceRect = ConvertToItTextRectangle(pdfCoords);
+            List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetVisualLineRectsForBlock(
+                page,
+                sourceRect,
+                block.PageNumber,
+                rotation,
+                block.IsMarkerSelection ? "visual" : "box");
+
+            return pdfLineRects
+                .Where(r => r != null && r.GetWidth() > 0f && r.GetHeight() > 0f)
+                .Select(ConvertToItTextRectangleF)
+                .ToList();
+        }
+
+        private void QueueRedactionPreviewRectsForPage(int pageNumber)
+        {
+            if (pageNumber < 1 || string.IsNullOrWhiteSpace(inputPdfPath) || !File.Exists(inputPdfPath))
+            {
+                return;
+            }
+
+            foreach (var block in redactionBlocks.Where(b => b != null && b.PageNumber == pageNumber))
+            {
+                if (block.PreviewTextRectsPdf == null)
+                {
+                    block.PreviewTextRectsPdf = new List<RectangleF>();
+                }
+            }
+
+            var blocksForPage = redactionBlocks
+                .Where(b => b != null && b.PageNumber == pageNumber && IsLayerVisible(b.LayerId))
+                .ToList();
+
+            var previousCts = redactionPreviewRectsCts;
+            redactionPreviewRectsCts = new System.Threading.CancellationTokenSource();
+            int requestId = ++redactionPreviewRectsRequestId;
+            string sourcePdfPath = inputPdfPath;
+            string password = userPassword;
+            var token = redactionPreviewRectsCts.Token;
+
+            try
+            {
+                previousCts?.Cancel();
+            }
+            catch
+            {
+            }
+
+            Task.Run(() =>
+            {
+                var results = new Dictionary<RedactionBlock, List<RectangleF>>();
+                try
+                {
+                    var props = new ReaderProperties();
+                    if (!string.IsNullOrEmpty(password))
+                    {
+                        props.SetPassword(System.Text.Encoding.UTF8.GetBytes(password));
+                    }
+
+                    using (var reader = new PdfReader(sourcePdfPath, props).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+                    using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
+                    {
+                        if (pageNumber < 1 || pageNumber > pdfDoc.GetNumberOfPages())
+                        {
+                            return results;
+                        }
+
+                        var page = pdfDoc.GetPage(pageNumber);
+                        int rotation = GetEffectiveRotationDegrees(pageNumber);
+                        foreach (var block in blocksForPage)
+                        {
+                            if (token.IsCancellationRequested)
+                            {
+                                return null;
+                            }
+
+                            results[block] = ComputeRedactionPreviewRects(page, block, rotation);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"QueueRedactionPreviewRectsForPage page={pageNumber} err={ex.Message}");
+                }
+
+                return results;
+            }, token).ContinueWith(t =>
+            {
+                if (IsDisposed || token.IsCancellationRequested || t.IsCanceled || t.Result == null)
+                {
+                    return;
+                }
+
+                if (requestId != redactionPreviewRectsRequestId || currentPage != pageNumber)
+                {
+                    return;
+                }
+
+                foreach (var kvp in t.Result)
+                {
+                    if (redactionBlocks.Contains(kvp.Key))
+                    {
+                        kvp.Key.PreviewTextRectsPdf = kvp.Value ?? new List<RectangleF>();
+                    }
+                }
+
+                QueueRedactionPreviewOverlayForPage(pageNumber);
+                pdfViewer.Invalidate();
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+        }
+
+        private void TryComputeRedactionPreviewRects(RedactionBlock block)
+        {
+            if (block == null)
+            {
+                return;
+            }
+
+            InvalidateRedactionPreviewRects(block);
+            if (block.PageNumber == currentPage)
+            {
+                QueueRedactionPreviewRectsForPage(block.PageNumber);
+            }
+        }
+
+        private void EnsureRedactionPreviewRectsForPage(int pageNumber)
+        {
+            if (pageNumber < 1)
+            {
+                return;
+            }
+            QueueRedactionPreviewRectsForPage(pageNumber);
+        }
+
+        private void RefreshRedactionPreviewForCurrentPage()
+        {
+            if (currentPage < 1)
+            {
+                return;
+            }
+
+            ClearRedactionPreviewOverlay();
+            QueueRedactionPreviewRectsForPage(currentPage);
+            pdfViewer.Invalidate();
         }
 
         private bool TryApplyAutomaticFootnoteClassification(RedactionBlock block)
@@ -26655,6 +26846,8 @@ namespace AnonPDF
                 return;
             }
 
+            RefreshRedactionPreviewForCurrentPage();
+
             PageItemStatus status = allPageStatuses[currentPage - 1];
             RedactionBlock blocksByPage = redactionBlocks.FirstOrDefault(block => block.PageNumber == currentPage);
             if (blocksByPage == null)
@@ -28005,20 +28198,18 @@ namespace AnonPDF
             return bitmap;
         }
 
-        private void OnPaint(object sender, PaintEventArgs e)
+        private void DrawRedactionPreviewTextOverlay(Graphics graphics)
         {
-            if (isDrawing && currentSelection.Width > 0 && currentSelection.Height > 0 &&
-                (isCommentCreationMode || IsRedactionSelectionModeEnabled()))
+            if (graphics == null || redactionPreviewOverlayBitmap == null)
             {
-                System.Drawing.Color selectionPreviewColor = isCommentCreationMode
-                    ? System.Drawing.Color.FromArgb(140, 255, 235, 59)
-                    : System.Drawing.Color.FromArgb(128, 255, 0, 0);
-                using (SolidBrush brush = new SolidBrush(selectionPreviewColor))
-                {
-                    e.Graphics.FillRectangle(brush, currentSelection);
-                }
+                return;
             }
 
+            graphics.DrawImageUnscaled(redactionPreviewOverlayBitmap, 0, 0);
+        }
+
+        private void OnPaint(object sender, PaintEventArgs e)
+        {
             if (!delayCommentAndSelectionOverlayUntilPreviewReady && commentPreviewOverlayReady)
             {
                 DrawCommentAnnotationsOnPreview(e.Graphics);
@@ -28027,10 +28218,10 @@ namespace AnonPDF
             Dictionary<string, int> previewBasisNumberMap = BuildLegalBasisFootnoteNumberMap(
                 redactionBlocks.Where(block => block != null && block.PageNumber == currentPage && IsLayerVisible(block.LayerId)));
 
+            DrawRedactionPreviewTextOverlay(e.Graphics);
+
             // Drawing saved redaction blocks for current page
-            foreach (var block in delayCommentAndSelectionOverlayUntilPreviewReady
-                ? Enumerable.Empty<RedactionBlock>()
-                : redactionBlocks.Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId)))
+            foreach (var block in redactionBlocks.Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId)))
             {
                 using (SolidBrush brush = new SolidBrush(System.Drawing.Color.FromArgb(128, 255, 0, 0)))
                 {
@@ -28233,6 +28424,18 @@ namespace AnonPDF
                             }
                         }
                     }
+                }
+            }
+
+            if (isDrawing && currentSelection.Width > 0 && currentSelection.Height > 0 &&
+                (isCommentCreationMode || IsRedactionSelectionModeEnabled()))
+            {
+                System.Drawing.Color selectionPreviewColor = isCommentCreationMode
+                    ? System.Drawing.Color.FromArgb(140, 255, 235, 59)
+                    : System.Drawing.Color.FromArgb(128, 255, 0, 0);
+                using (SolidBrush brush = new SolidBrush(selectionPreviewColor))
+                {
+                    e.Graphics.FillRectangle(brush, currentSelection);
                 }
             }
 
@@ -34705,6 +34908,10 @@ namespace AnonPDF
                     string.Equals(block.DuplicateGroupId, normalizedGroupId, StringComparison.OrdinalIgnoreCase));
                 UpdateSelectionNavigationButtons();
             }
+            if (changedPages.Contains(currentPage))
+            {
+                RefreshRedactionPreviewForCurrentPage();
+            }
             if (textToRemove.Count > 0)
             {
                 textAnnotations.RemoveAll(obj =>
@@ -34830,6 +35037,7 @@ namespace AnonPDF
             {
                 var duplicateBlock = CloneRedactionBlockForPage(sourceBlock, targetPage, duplicateGroupId);
                 redactionBlocks.Add(duplicateBlock);
+                TryComputeRedactionPreviewRects(duplicateBlock);
                 changedPages.Add(targetPage);
             }
 
@@ -41639,6 +41847,206 @@ namespace AnonPDF
             }
         }
 
+        private bool HasVisibleCommentsOnPage(int pageNumber)
+        {
+            return commentAnnotations.Any(c =>
+                c != null &&
+                c.PageNumber == pageNumber &&
+                IsLayerVisible(c.LayerId));
+        }
+
+        private void ClearRedactionPreviewOverlay()
+        {
+            try
+            {
+                redactionPreviewOverlayCts?.Cancel();
+            }
+            catch
+            {
+            }
+
+            redactionPreviewOverlayCts = null;
+            redactionPreviewOverlayRequestId++;
+
+            if (redactionPreviewOverlayBitmap != null)
+            {
+                redactionPreviewOverlayBitmap.Dispose();
+                redactionPreviewOverlayBitmap = null;
+            }
+        }
+
+        private Bitmap BuildRedactionPreviewOverlayBitmap(
+            Bitmap sourceBitmap,
+            List<RedactionBlock> blocksForPage,
+            float renderScale)
+        {
+            if (sourceBitmap == null || blocksForPage == null || blocksForPage.Count == 0)
+            {
+                return null;
+            }
+
+            Bitmap overlay = new Bitmap(sourceBitmap.Width, sourceBitmap.Height, PixelFormat.Format32bppArgb);
+            DrawingRectangle fullRect = new DrawingRectangle(0, 0, sourceBitmap.Width, sourceBitmap.Height);
+            BitmapData sourceData = sourceBitmap.LockBits(fullRect, ImageLockMode.ReadOnly, sourceBitmap.PixelFormat);
+            BitmapData overlayData = overlay.LockBits(fullRect, ImageLockMode.WriteOnly, overlay.PixelFormat);
+
+            try
+            {
+                int sourceBpp = Image.GetPixelFormatSize(sourceBitmap.PixelFormat) / 8;
+                int overlayBpp = Image.GetPixelFormatSize(overlay.PixelFormat) / 8;
+                int sourceStride = sourceData.Stride;
+                int overlayStride = overlayData.Stride;
+
+                unsafe
+                {
+                    byte* sourcePtr = (byte*)sourceData.Scan0;
+                    byte* overlayPtr = (byte*)overlayData.Scan0;
+
+                    foreach (var block in blocksForPage)
+                    {
+                        if (block?.PreviewTextRectsPdf == null || block.PreviewTextRectsPdf.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        int rotation = GetEffectiveRotationDegrees(block.PageNumber);
+                        foreach (RectangleF pdfRect in block.PreviewTextRectsPdf)
+                        {
+                            RectangleF viewRect = ConvertPdfToViewCoordinates(pdfRect, block.PageNumber, rotation);
+                            int left = Math.Max(0, (int)Math.Floor(viewRect.X * renderScale));
+                            int top = Math.Max(0, (int)Math.Floor(viewRect.Y * renderScale));
+                            int right = Math.Min(sourceBitmap.Width - 1, (int)Math.Ceiling((viewRect.Right * renderScale) - 1));
+                            int bottom = Math.Min(sourceBitmap.Height - 1, (int)Math.Ceiling((viewRect.Bottom * renderScale) - 1));
+                            if (right < left || bottom < top)
+                            {
+                                continue;
+                            }
+
+                            for (int y = top; y <= bottom; y++)
+                            {
+                                byte* sourceRow = sourcePtr + (y * sourceStride);
+                                byte* overlayRow = overlayPtr + (y * overlayStride);
+                                for (int x = left; x <= right; x++)
+                                {
+                                    int sourceIndex = x * sourceBpp;
+                                    int overlayIndex = x * overlayBpp;
+                                    byte b = sourceRow[sourceIndex];
+                                    byte g = sourceRow[sourceIndex + 1];
+                                    byte r = sourceRow[sourceIndex + 2];
+                                    int luminance = (299 * r + 587 * g + 114 * b) / 1000;
+                                    if (luminance >= 245)
+                                    {
+                                        continue;
+                                    }
+
+                                    byte alpha = (byte)Math.Max(0, Math.Min(190, (255 - luminance) * 2 / 3));
+                                    if (alpha == 0)
+                                    {
+                                        continue;
+                                    }
+
+                                    if (overlayRow[overlayIndex + 3] < alpha)
+                                    {
+                                        overlayRow[overlayIndex] = 255;
+                                        overlayRow[overlayIndex + 1] = 255;
+                                        overlayRow[overlayIndex + 2] = 255;
+                                        overlayRow[overlayIndex + 3] = alpha;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                sourceBitmap.UnlockBits(sourceData);
+                overlay.UnlockBits(overlayData);
+            }
+
+            return overlay;
+        }
+
+        private void QueueRedactionPreviewOverlayForPage(int pageNumber)
+        {
+            if (pageNumber < 1 || pageNumber != currentPage)
+            {
+                return;
+            }
+
+            List<RedactionBlock> blocksForPage = redactionBlocks
+                .Where(b => b != null &&
+                            b.PageNumber == pageNumber &&
+                            IsLayerVisible(b.LayerId) &&
+                            b.PreviewTextRectsPdf != null &&
+                            b.PreviewTextRectsPdf.Count > 0)
+                .ToList();
+
+            if (blocksForPage.Count == 0)
+            {
+                if (redactionPreviewOverlayBitmap != null)
+                {
+                    redactionPreviewOverlayBitmap.Dispose();
+                    redactionPreviewOverlayBitmap = null;
+                    pdfViewer.Invalidate();
+                }
+                return;
+            }
+
+            var previousCts = redactionPreviewOverlayCts;
+            redactionPreviewOverlayCts = new System.Threading.CancellationTokenSource();
+            int requestId = ++redactionPreviewOverlayRequestId;
+            float renderScale = scaleFactor;
+            var token = redactionPreviewOverlayCts.Token;
+
+            try
+            {
+                previousCts?.Cancel();
+            }
+            catch
+            {
+            }
+
+            Task.Run(() =>
+            {
+                if (token.IsCancellationRequested)
+                {
+                    return null;
+                }
+
+                using (Bitmap sourceBitmap = new Bitmap(RenderOriginalPageAtScale(pageNumber, renderScale)))
+                {
+                    if (token.IsCancellationRequested)
+                    {
+                        return null;
+                    }
+
+                    return BuildRedactionPreviewOverlayBitmap(sourceBitmap, blocksForPage, renderScale);
+                }
+            }, token).ContinueWith(t =>
+            {
+                if (IsDisposed || token.IsCancellationRequested || t.IsCanceled || requestId != redactionPreviewOverlayRequestId)
+                {
+                    t.Result?.Dispose();
+                    return;
+                }
+
+                if (pageNumber != currentPage)
+                {
+                    t.Result?.Dispose();
+                    return;
+                }
+
+                if (redactionPreviewOverlayBitmap != null)
+                {
+                    redactionPreviewOverlayBitmap.Dispose();
+                }
+
+                redactionPreviewOverlayBitmap = t.Result;
+                pdfViewer.Invalidate();
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+        }
+
         private void StartAsyncRedactPreview(
             int pageNumber,
             float renderScale,
@@ -41861,17 +42269,6 @@ namespace AnonPDF
 
         private void ShowRedactPreview()
         {
-            var blocksForThisPage = redactionBlocks
-                .Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId))
-                .Select(b => new RedactionBlock
-                {
-                    Bounds = b.Bounds,
-                    PageNumber = b.PageNumber,
-                    LayerId = b.LayerId,
-                    IsMarkerSelection = b.IsMarkerSelection
-                })
-                .ToList();
-
             var commentsForThisPage = commentAnnotations
                 .Where(c => c != null && c.PageNumber == currentPage && IsLayerVisible(c.LayerId))
                 .Select(c => new CommentAnnotation
@@ -41885,7 +42282,6 @@ namespace AnonPDF
                 })
                 .ToList();
 
-            bool hasBlocks = blocksForThisPage.Count > 0;
             bool hasComments = commentsForThisPage.Count > 0;
             bool preserveExistingCommentOverlay =
                 !delayCommentAndSelectionOverlayUntilPreviewReady &&
@@ -41897,15 +42293,14 @@ namespace AnonPDF
                 commentNoteRectsDoc.Clear();
                 commentPreviewOverlayReady = false;
             }
-            if (!hasBlocks && !hasComments)
+            if (!hasComments)
             {
                 delayCommentAndSelectionOverlayUntilPreviewReady = false;
                 CancelPreviewRender();
-                pdfViewer.Image = RenderOriginalPage(currentPage);
                 return;
             }
 
-            StartAsyncRedactPreview(currentPage, scaleFactor, blocksForThisPage, commentsForThisPage);
+            StartAsyncRedactPreview(currentPage, scaleFactor, new List<RedactionBlock>(), commentsForThisPage);
         }
 
         private DrawingImage RenderBitmapWithCommentHighlights(DrawingImage sourceImage)
@@ -42574,10 +42969,23 @@ namespace AnonPDF
                 return sourceRectangle;
             }
 
+            float expandedLeft;
+            float expandedRight;
+            if (commentContext)
+            {
+                expandedLeft = textBounds.GetLeft();
+                expandedRight = textBounds.GetRight();
+            }
+            else
+            {
+                expandedLeft = Math.Min(sourceRectangle.GetLeft(), textBounds.GetLeft());
+                expandedRight = Math.Max(sourceRectangle.GetRight(), textBounds.GetRight());
+            }
+
             var adjusted = new iText.Kernel.Geom.Rectangle(
-                sourceRectangle.GetX(),
+                expandedLeft,
                 expandedBottom,
-                sourceRectangle.GetWidth(),
+                expandedRight - expandedLeft,
                 expandedTop - expandedBottom);
 
             if (DebugLogEnabled)
@@ -42591,6 +42999,70 @@ namespace AnonPDF
             }
 
             return adjusted;
+        }
+
+        private List<iText.Kernel.Geom.Rectangle> GetVisualLineRectsForBlock(
+            iText.Kernel.Pdf.PdfPage page,
+            iText.Kernel.Geom.Rectangle sourceRectangle,
+            int pageNumber,
+            int rotation,
+            string context)
+        {
+            var fallback = new List<iText.Kernel.Geom.Rectangle> { sourceRectangle };
+            if (page == null || sourceRectangle == null)
+            {
+                return fallback;
+            }
+
+            List<iText.Kernel.Geom.Rectangle> lineRects = null;
+            CustomTextExtractionStrategy strategyRef = null;
+            try
+            {
+                strategyRef = new CustomTextExtractionStrategy(sourceRectangle);
+                PdfTextExtractor.GetTextFromPage(page, strategyRef);
+                strategyRef.TryGetPerLineBounds(out lineRects);
+            }
+            catch
+            {
+            }
+
+            if (DebugLogEnabled && strategyRef != null && lineRects != null)
+            {
+                LogDebug(
+                    $"PerLineBounds page={pageNumber} rot={NormalizeRotation(rotation)} lines={lineRects.Count} " +
+                    $"source={FormatRectFInvariant(ConvertToItTextRectangleF(sourceRectangle))}");
+            }
+
+            if (lineRects == null || lineRects.Count == 0)
+            {
+                return fallback;
+            }
+
+            var pageSize = page.GetPageSize();
+            float minPageY = pageSize.GetBottom();
+            float maxPageY = pageSize.GetTop();
+
+            var result = new List<iText.Kernel.Geom.Rectangle>(lineRects.Count);
+            foreach (var lineRect in lineRects)
+            {
+                float expandedTop = lineRect.GetTop() + MarkerCleanupVerticalPadding;
+                float expandedBottom = lineRect.GetBottom() - MarkerCleanupVerticalPadding;
+
+                expandedBottom = Math.Max(minPageY, expandedBottom);
+                expandedTop = Math.Min(maxPageY, expandedTop);
+                if (expandedTop <= expandedBottom)
+                {
+                    continue;
+                }
+
+                result.Add(new iText.Kernel.Geom.Rectangle(
+                    lineRect.GetLeft(),
+                    expandedBottom,
+                    lineRect.GetRight() - lineRect.GetLeft(),
+                    expandedTop - expandedBottom));
+            }
+
+            return result.Count > 0 ? result : fallback;
         }
 
         private bool TryGetTextBoundsInRectangle(
@@ -42684,6 +43156,7 @@ namespace AnonPDF
                     convertedResults.Any(cr => RectEquals(
                         ConvertToItTextRectangle(rb.Bounds),
                         ConvertToItTextRectangle(cr.ConvertedRect), 0.01f)));
+                RefreshRedactionPreviewForCurrentPage();
             }
             else
             {
@@ -42692,10 +43165,12 @@ namespace AnonPDF
                 {
                     // Search results are treated as marker selections (fixed thickness),
                     // so PDF cleanup stays exact but visual overlay can expand to full text bounds.
-                    redactionBlocks.Add(CreateRedactionBlockWithAutomaticClassification(
+                    var createdBlock = CreateRedactionBlockWithAutomaticClassification(
                         cr.ConvertedRect,
                         cr.PageNumber,
-                        isMarkerSelection: true));
+                        isMarkerSelection: true);
+                    redactionBlocks.Add(createdBlock);
+                    TryComputeRedactionPreviewRects(createdBlock);
                 }
             }
 
@@ -45931,6 +46406,8 @@ namespace AnonPDF
         public string DuplicateGroupId { get; set; }
         public DateTime CreatedAtUtc { get; set; }
         public DateTime UpdatedAtUtc { get; set; }
+        [JsonIgnore]
+        public List<System.Drawing.RectangleF> PreviewTextRectsPdf { get; set; }
 
         public RedactionBlock()
         {
@@ -45945,6 +46422,7 @@ namespace AnonPDF
             DuplicateGroupId = null;
             CreatedAtUtc = DateTime.MinValue;
             UpdatedAtUtc = DateTime.MinValue;
+            PreviewTextRectsPdf = null;
         }
 
         public RedactionBlock(System.Drawing.RectangleF bounds, int pageNumber)
@@ -47212,6 +47690,21 @@ namespace AnonPDF
                     float y1 = descentLine.GetStartPoint().Get(1); // Bottom edge (descent)
                     float y2 = ascentLine.GetStartPoint().Get(1); // Top edge (ascent)
 
+                    string glyphText = chunk.GetText();
+                    if (glyphText.Length == 1 && y2 > y1)
+                    {
+                        string nfd = glyphText[0].ToString().Normalize(System.Text.NormalizationForm.FormD);
+                        for (int ni = 1; ni < nfd.Length; ni++)
+                        {
+                            int cp = (int)nfd[ni];
+                            if (cp >= 0x0300 && cp <= 0x0315)
+                            {
+                                y2 += (y2 - y1) * 0.20f;
+                                break;
+                            }
+                        }
+                    }
+
                     // Check whether the character's bounding box touches or is inside the rectangle
                     bool intersects = IsBoundingBoxInRectangle(x1, y1, x2, y2, _targetRect);
 
@@ -47314,6 +47807,54 @@ namespace AnonPDF
 
             bounds = new iText.Kernel.Geom.Rectangle(_coveredMinX, _coveredMinY, width, height);
             return true;
+        }
+
+        public bool TryGetPerLineBounds(out List<iText.Kernel.Geom.Rectangle> lineBounds)
+        {
+            lineBounds = null;
+            if (_coveredGlyphs.Count == 0)
+            {
+                return false;
+            }
+
+            const float baselineStep = 1.5f;
+            var lines = new Dictionary<float, List<GlyphBounds>>();
+            foreach (var glyph in _coveredGlyphs)
+            {
+                float key = (float)Math.Round(glyph.Baseline / baselineStep) * baselineStep;
+                if (!lines.TryGetValue(key, out List<GlyphBounds> list))
+                {
+                    list = new List<GlyphBounds>();
+                    lines[key] = list;
+                }
+
+                list.Add(glyph);
+            }
+
+            lineBounds = new List<iText.Kernel.Geom.Rectangle>(lines.Count);
+            foreach (var entry in lines)
+            {
+                float minX = float.MaxValue;
+                float minY = float.MaxValue;
+                float maxX = float.MinValue;
+                float maxY = float.MinValue;
+                foreach (var glyph in entry.Value)
+                {
+                    minX = Math.Min(minX, glyph.Left);
+                    minY = Math.Min(minY, glyph.Bottom);
+                    maxX = Math.Max(maxX, glyph.Right);
+                    maxY = Math.Max(maxY, glyph.Top);
+                }
+
+                float width = maxX - minX;
+                float height = maxY - minY;
+                if (width > 0f && height > 0f)
+                {
+                    lineBounds.Add(new iText.Kernel.Geom.Rectangle(minX, minY, width, height));
+                }
+            }
+
+            return lineBounds.Count > 0;
         }
 
         public bool TryGetCoveredBoundsForMarkerLine(out iText.Kernel.Geom.Rectangle bounds)
