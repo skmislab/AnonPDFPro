@@ -14863,7 +14863,7 @@ namespace AnonPDF
                                 cleanupRectangle,
                                 pageNum,
                                 rotation,
-                                "visual");
+                                "export-visual");
                             if (DebugLogEnabled)
                             {
                                 LogDebug(
@@ -43031,6 +43031,13 @@ namespace AnonPDF
                 LogDebug(
                     $"PerLineBounds page={pageNumber} rot={NormalizeRotation(rotation)} lines={lineRects.Count} " +
                     $"source={FormatRectFInvariant(ConvertToItTextRectangleF(sourceRectangle))}");
+                if (strategyRef.TryGetPerLineDiagnostics(out List<string> lineDiagnostics))
+                {
+                    foreach (string lineDiagnostic in lineDiagnostics)
+                    {
+                        LogDebug($"PerLineBounds detail page={pageNumber} rot={NormalizeRotation(rotation)} context={context} {lineDiagnostic}");
+                    }
+                }
             }
 
             if (lineRects == null || lineRects.Count == 0)
@@ -43080,7 +43087,11 @@ namespace AnonPDF
 
             try
             {
-                CustomTextExtractionStrategy strategy = new CustomTextExtractionStrategy(rectangle);
+                bool disableVisualDiacriticExpansion =
+                    string.Equals(context, "export-visual", StringComparison.OrdinalIgnoreCase);
+                CustomTextExtractionStrategy strategy = new CustomTextExtractionStrategy(
+                    rectangle,
+                    expandDiacriticsForVisualBounds: !disableVisualDiacriticExpansion);
                 PdfTextExtractor.GetTextFromPage(page, strategy);
                 bool commentMarkerContext = !string.IsNullOrWhiteSpace(context) &&
                     context.StartsWith("comment-marker", StringComparison.OrdinalIgnoreCase);
@@ -43095,6 +43106,13 @@ namespace AnonPDF
                     LogDebug(
                         $"MarkerTextBounds page={pageNumber} context={context} query={FormatRectFInvariant(ConvertToItTextRectangleF(rectangle))} " +
                         $"result={boundsText}");
+                    if (strategy.TryGetMarkerLineDiagnostics(out List<string> markerDiagnostics))
+                    {
+                        foreach (string markerDiagnostic in markerDiagnostics)
+                        {
+                            LogDebug($"MarkerTextBounds detail page={pageNumber} context={context} {markerDiagnostic}");
+                        }
+                    }
                 }
                 return hasBounds;
             }
@@ -47652,6 +47670,7 @@ namespace AnonPDF
         private readonly iText.Kernel.Geom.Rectangle _targetRect;
         private readonly List<TextChunk> _textChunks;
         private readonly List<GlyphBounds> _coveredGlyphs;
+        private readonly bool _expandDiacriticsForVisualBounds;
         private readonly float _yTolerance = 1.0f; // Tolerance for Y coordinate (in points)
         private readonly bool _sortByX = false; // Set to true if you want to sort by X
         private readonly bool _reverseOrder = false; // Ustaw na true dla tekstu od prawej do lewej
@@ -47661,11 +47680,14 @@ namespace AnonPDF
         private float _coveredMaxX;
         private float _coveredMaxY;
 
-        public CustomTextExtractionStrategy(iText.Kernel.Geom.Rectangle targetRect)
+        public CustomTextExtractionStrategy(
+            iText.Kernel.Geom.Rectangle targetRect,
+            bool expandDiacriticsForVisualBounds = true)
         {
             _targetRect = targetRect;
             _textChunks = new List<TextChunk>();
             _coveredGlyphs = new List<GlyphBounds>();
+            _expandDiacriticsForVisualBounds = expandDiacriticsForVisualBounds;
             _hasCoveredBounds = false;
             _coveredMinX = float.MaxValue;
             _coveredMinY = float.MaxValue;
@@ -47691,7 +47713,7 @@ namespace AnonPDF
                     float y2 = ascentLine.GetStartPoint().Get(1); // Top edge (ascent)
 
                     string glyphText = chunk.GetText();
-                    if (glyphText.Length == 1 && y2 > y1)
+                    if (_expandDiacriticsForVisualBounds && glyphText.Length == 1 && y2 > y1)
                     {
                         string nfd = glyphText[0].ToString().Normalize(System.Text.NormalizationForm.FormD);
                         for (int ni = 1; ni < nfd.Length; ni++)
@@ -47717,7 +47739,8 @@ namespace AnonPDF
                             Math.Min(y1, y2),
                             Math.Max(x1, x2),
                             Math.Max(y1, y2),
-                            y1));
+                            y1,
+                            glyphText));
                         if (!_hasCoveredBounds)
                         {
                             _coveredMinX = x1;
@@ -47857,6 +47880,53 @@ namespace AnonPDF
             return lineBounds.Count > 0;
         }
 
+        public bool TryGetPerLineDiagnostics(out List<string> diagnostics)
+        {
+            diagnostics = null;
+            if (_coveredGlyphs.Count == 0)
+            {
+                return false;
+            }
+
+            const float baselineStep = 1.5f;
+            var lines = new Dictionary<float, List<GlyphBounds>>();
+            foreach (var glyph in _coveredGlyphs)
+            {
+                float key = (float)Math.Round(glyph.Baseline / baselineStep) * baselineStep;
+                if (!lines.TryGetValue(key, out List<GlyphBounds> list))
+                {
+                    list = new List<GlyphBounds>();
+                    lines[key] = list;
+                }
+
+                list.Add(glyph);
+            }
+
+            diagnostics = new List<string>(lines.Count);
+            foreach (var entry in lines.OrderByDescending(e => e.Key))
+            {
+                string lineText = string.Concat(entry.Value.Select(g => EscapeDiagnosticText(g.Text)));
+                float minX = float.MaxValue;
+                float minY = float.MaxValue;
+                float maxX = float.MinValue;
+                float maxY = float.MinValue;
+                foreach (var glyph in entry.Value)
+                {
+                    minX = Math.Min(minX, glyph.Left);
+                    minY = Math.Min(minY, glyph.Bottom);
+                    maxX = Math.Max(maxX, glyph.Right);
+                    maxY = Math.Max(maxY, glyph.Top);
+                }
+
+                diagnostics.Add(
+                    $"baseline={entry.Key.ToString("0.###", CultureInfo.InvariantCulture)} " +
+                    $"glyphs={entry.Value.Count} rect={FormatInvariantRect(minX, minY, maxX - minX, maxY - minY)} " +
+                    $"height={(maxY - minY).ToString("0.###", CultureInfo.InvariantCulture)} text=\"{lineText}\"");
+            }
+
+            return diagnostics.Count > 0;
+        }
+
         public bool TryGetCoveredBoundsForMarkerLine(out iText.Kernel.Geom.Rectangle bounds)
         {
             bounds = null;
@@ -47922,6 +47992,99 @@ namespace AnonPDF
             return true;
         }
 
+        public bool TryGetMarkerLineDiagnostics(out List<string> diagnostics)
+        {
+            diagnostics = null;
+            if (_coveredGlyphs.Count == 0)
+            {
+                return false;
+            }
+
+            const float baselineStep = 1.5f;
+            float targetCenterY = _targetRect.GetBottom() + (_targetRect.GetHeight() / 2f);
+            var lines = new Dictionary<float, List<GlyphBounds>>();
+            foreach (var glyph in _coveredGlyphs)
+            {
+                float key = (float)Math.Round(glyph.Baseline / baselineStep) * baselineStep;
+                if (!lines.TryGetValue(key, out List<GlyphBounds> list))
+                {
+                    list = new List<GlyphBounds>();
+                    lines[key] = list;
+                }
+
+                list.Add(glyph);
+            }
+
+            float selectedKey = 0f;
+            int selectedCount = -1;
+            float selectedDistance = float.MaxValue;
+            foreach (var entry in lines)
+            {
+                int count = entry.Value.Count;
+                float distance = Math.Abs(entry.Key - targetCenterY);
+                if (count > selectedCount || (count == selectedCount && distance < selectedDistance))
+                {
+                    selectedCount = count;
+                    selectedDistance = distance;
+                    selectedKey = entry.Key;
+                }
+            }
+
+            diagnostics = new List<string>(lines.Count + 1)
+            {
+                $"targetCenterY={targetCenterY.ToString("0.###", CultureInfo.InvariantCulture)} selectedBaseline={selectedKey.ToString("0.###", CultureInfo.InvariantCulture)} selectedGlyphs={selectedCount}"
+            };
+
+            foreach (var entry in lines.OrderByDescending(e => e.Key))
+            {
+                string lineText = string.Concat(entry.Value.Select(g => EscapeDiagnosticText(g.Text)));
+                float minX = float.MaxValue;
+                float minY = float.MaxValue;
+                float maxX = float.MinValue;
+                float maxY = float.MinValue;
+                foreach (var glyph in entry.Value)
+                {
+                    minX = Math.Min(minX, glyph.Left);
+                    minY = Math.Min(minY, glyph.Bottom);
+                    maxX = Math.Max(maxX, glyph.Right);
+                    maxY = Math.Max(maxY, glyph.Top);
+                }
+
+                string selectedFlag = Math.Abs(entry.Key - selectedKey) < 0.001f ? " selected=1" : string.Empty;
+                diagnostics.Add(
+                    $"line baseline={entry.Key.ToString("0.###", CultureInfo.InvariantCulture)} distance={Math.Abs(entry.Key - targetCenterY).ToString("0.###", CultureInfo.InvariantCulture)} " +
+                    $"glyphs={entry.Value.Count} rect={FormatInvariantRect(minX, minY, maxX - minX, maxY - minY)} " +
+                    $"height={(maxY - minY).ToString("0.###", CultureInfo.InvariantCulture)} text=\"{lineText}\"{selectedFlag}");
+            }
+
+            return diagnostics.Count > 0;
+        }
+
+        private static string FormatInvariantRect(float x, float y, float width, float height)
+        {
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{{X={0:0.###},Y={1:0.###},W={2:0.###},H={3:0.###}}}",
+                x,
+                y,
+                width,
+                height);
+        }
+
+        private static string EscapeDiagnosticText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            return text
+                .Replace("\\", "\\\\")
+                .Replace("\r", "\\r")
+                .Replace("\n", "\\n")
+                .Replace("\t", "\\t");
+        }
+
         private struct GlyphBounds
         {
             public float Left { get; }
@@ -47929,14 +48092,16 @@ namespace AnonPDF
             public float Right { get; }
             public float Top { get; }
             public float Baseline { get; }
+            public string Text { get; }
 
-            public GlyphBounds(float left, float bottom, float right, float top, float baseline)
+            public GlyphBounds(float left, float bottom, float right, float top, float baseline, string text)
             {
                 Left = left;
                 Bottom = bottom;
                 Right = right;
                 Top = top;
                 Baseline = baseline;
+                Text = text;
             }
         }
 
