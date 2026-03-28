@@ -504,6 +504,9 @@ and a third arc point.</value>
   <data name="Menu_Help_WhatsNew" xml:space="preserve">
     <value>What's new?</value>
   </data>
+  <data name="Menu_Help_QuickStart" xml:space="preserve">
+    <value>Getting started</value>
+  </data>
   <data name="Menu_Help_Tutorial" xml:space="preserve">
     <value>Tutorial</value>
   </data>
@@ -1868,5 +1871,41 @@ Close the application and run the installer now?</value>
   </data>
   <data name="EditText_LabelLeaderLineWidth" xml:space="preserve">
     <value>Arrow line width:</value>
+  </data>
+  <data name="QuickStart_Title" xml:space="preserve">
+    <value>Quick start</value>
+  </data>
+  <data name="QuickStart_Step1_Title" xml:space="preserve">
+    <value>1. Choose Marker or Box mode</value>
+  </data>
+  <data name="QuickStart_Step1_Line1" xml:space="preserve">
+    <value>Marker is used to select a line of text.</value>
+  </data>
+  <data name="QuickStart_Step1_Line2" xml:space="preserve">
+    <value>Box is used to select a rectangular area.</value>
+  </data>
+  <data name="QuickStart_Step2_Title" xml:space="preserve">
+    <value>2. Select text fragments</value>
+  </data>
+  <data name="QuickStart_Step2_Line1" xml:space="preserve">
+    <value>To select, press the left mouse button, drag, and release.</value>
+  </data>
+  <data name="QuickStart_Step2_Line2" xml:space="preserve">
+    <value>You can remove selections with the right mouse button on a selection, or with "Clear page" and "Clear all".</value>
+  </data>
+  <data name="QuickStart_Step3_Title" xml:space="preserve">
+    <value>3. Save the redacted PDF</value>
+  </data>
+  <data name="QuickStart_Step3_Line1" xml:space="preserve">
+    <value>Click "Save PDF" to create a new file without exposed data.</value>
+  </data>
+  <data name="QuickStart_Button_Back" xml:space="preserve">
+    <value>Back</value>
+  </data>
+  <data name="QuickStart_Button_Next" xml:space="preserve">
+    <value>Next</value>
+  </data>
+  <data name="QuickStart_Button_Understood" xml:space="preserve">
+    <value>Got it</value>
   </data>
 </root>

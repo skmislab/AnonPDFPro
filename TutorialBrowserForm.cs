@@ -173,13 +173,14 @@ namespace AnonPDF
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 3,
+                RowCount = 4,
                 Padding = new Padding(12),
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var titleLabel = new Label
             {
@@ -238,10 +239,32 @@ namespace AnonPDF
             listView.ItemActivate += (_, __) => PlaySelectedItem();
             listView.Resize += (_, __) => ResizeListColumns();
 
+            var buttonsPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                FlowDirection = FlowDirection.RightToLeft,
+                AutoSize = true,
+                WrapContents = false,
+                Margin = new Padding(0, 12, 0, 0)
+            };
+
+            var cancelButton = new Button
+            {
+                Text = Properties.Resources.ResourceManager.GetString("Dialog_Button_Cancel") ?? "Cancel",
+                AutoSize = true,
+                DialogResult = DialogResult.Cancel,
+                Margin = new Padding(0)
+            };
+
+            buttonsPanel.Controls.Add(cancelButton);
+
             layout.Controls.Add(titleLabel, 0, 0);
             layout.Controls.Add(descriptionLabel, 0, 1);
             layout.Controls.Add(listView, 0, 2);
+            layout.Controls.Add(buttonsPanel, 0, 3);
             Controls.Add(layout);
+
+            CancelButton = cancelButton;
 
             ResizeListColumns();
         }

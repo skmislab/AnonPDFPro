@@ -504,6 +504,9 @@ końcowy i trzeci punkt łuku.</value>
   <data name="Menu_Help_WhatsNew" xml:space="preserve">
     <value>Co nowego?</value>
   </data>
+  <data name="Menu_Help_QuickStart" xml:space="preserve">
+    <value>Jak zacząć?</value>
+  </data>
   <data name="Menu_Help_Tutorial" xml:space="preserve">
     <value>Samouczek</value>
   </data>
@@ -1868,5 +1871,41 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   </data>
   <data name="EditText_LabelLeaderLineWidth" xml:space="preserve">
     <value>Grubo&#347;&#263; linii strza&#322;ki:</value>
+  </data>
+  <data name="QuickStart_Title" xml:space="preserve">
+    <value>Szybki start</value>
+  </data>
+  <data name="QuickStart_Step1_Title" xml:space="preserve">
+    <value>1. Wybierz tryb Marker albo Box</value>
+  </data>
+  <data name="QuickStart_Step1_Line1" xml:space="preserve">
+    <value>Marker s&#322;u&#380;y do zaznaczania linii tekstu.</value>
+  </data>
+  <data name="QuickStart_Step1_Line2" xml:space="preserve">
+    <value>Box s&#322;u&#380;y do zaznaczania obszaru prostok&#261;tem.</value>
+  </data>
+  <data name="QuickStart_Step2_Title" xml:space="preserve">
+    <value>2. Zaznacz fragmenty tekstu</value>
+  </data>
+  <data name="QuickStart_Step2_Line1" xml:space="preserve">
+    <value>Aby zaznaczy&#263; naci&#347;nij lewy przycisk myszy, przeci&#261;gnij i pu&#347;&#263;.</value>
+  </data>
+  <data name="QuickStart_Step2_Line2" xml:space="preserve">
+    <value>Zaznaczenia mo&#380;esz usun&#261;&#263; prawym przyciskiem myszy na zaznaczeniu, przyciskami "Wyczy&#347;&#263; stron&#281;" lub "Wyczy&#347;&#263; wszystko".</value>
+  </data>
+  <data name="QuickStart_Step3_Title" xml:space="preserve">
+    <value>3. Zapisz zanonimizowany PDF</value>
+  </data>
+  <data name="QuickStart_Step3_Line1" xml:space="preserve">
+    <value>Kliknij "Zapisz PDF", aby utworzy&#263; nowy plik bez ujawnionych danych.</value>
+  </data>
+  <data name="QuickStart_Button_Back" xml:space="preserve">
+    <value>Wstecz</value>
+  </data>
+  <data name="QuickStart_Button_Next" xml:space="preserve">
+    <value>Dalej</value>
+  </data>
+  <data name="QuickStart_Button_Understood" xml:space="preserve">
+    <value>Rozumiem</value>
   </data>
 </root>

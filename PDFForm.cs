@@ -76,6 +76,7 @@ namespace AnonPDF
         private DateTime? maintenanceShutdownAt;
         private Label maintenanceCountdownLabel;
         private Label objectSelectionInfoLabel;
+        private QuickStartTutorialOverlay quickStartTutorialOverlay;
         private string serviceEndDate = "";
         private static System.Timers.Timer maintenanceCheckTimer;
         private static bool exitScheduled = false;
@@ -8713,6 +8714,7 @@ namespace AnonPDF
             {
                 activateLicenseToolStripMenuItem.Text = LocalizedText("Menu_Help_ActivateLicense");
             }
+            quickStartMenuItem.Text = LocalizedText("Menu_Help_QuickStart");
             tutorialMenuItem.Text = Resources.Menu_Help_Tutorial;
             diagnosticModeMenuItem.Text = Resources.Menu_Help_DiagnosticMode;
             aboutMenuItem.Text = Resources.Menu_Help_About;
@@ -8818,6 +8820,7 @@ namespace AnonPDF
             try { toolTip1.SetToolTip(buttonRedactText, Resources.Tooltip_SavePdf); } catch { }
             try { toolTip1.SetToolTip(pagesListView, Resources.Tooltip_PagesList); } catch { }
             try { toolTip1.SetToolTip(thumbnailsListView, LocalizedText("Tooltip_PageThumbnails")); } catch { }
+            try { quickStartMenuItem.ShortcutKeys = Keys.Control | Keys.T; } catch { }
 
             // Filter combo: localized items and colors
             allComboItem = Resources.UI_Filter_AllPages;
@@ -8858,6 +8861,7 @@ namespace AnonPDF
             string instructionPath = Path.Combine(Application.StartupPath, $"UserGuide_{culture}.pdf");
             if (!File.Exists(instructionPath)) instructionPath = Path.Combine(Application.StartupPath, "UserGuide.pdf");
             helpMenuItem.Enabled = File.Exists(instructionPath);
+            quickStartMenuItem.Enabled = true;
 
             string tutorialDir = GetTutorialDirectory();
             bool hasTutorialJson = Directory.Exists(tutorialDir)
@@ -11966,16 +11970,6 @@ namespace AnonPDF
         private void PDFForm_Shown(object sender, EventArgs e)
         {
             ApplyRightPanelDividerFromSettings();
-            if (!Properties.Settings.Default.TutorialShown)
-            {
-                if (ShowTutorial())
-                {
-                    // Set flag to true so it doesn't show again
-                    Properties.Settings.Default.TutorialShown = true;
-                    Properties.Settings.Default.Save();
-                }
-            }
-
             PromptMaintenanceRecoveryIfAvailable();
             UpdateLeftPanelWidth();
             Task.Run(() => CheckForNewVersion(UpdateCheckSource.Startup));
@@ -12549,6 +12543,70 @@ namespace AnonPDF
             }
 
             return true;
+        }
+
+        private bool CanShowQuickStartTutorial()
+        {
+            return buttonRedactText != null
+                   && markerRadioButton != null
+                   && boxRadioButton != null
+                   && pdfViewer != null;
+        }
+
+        private void ShowQuickStartTutorial()
+        {
+            if (quickStartTutorialOverlay != null || !CanShowQuickStartTutorial())
+            {
+                return;
+            }
+
+            Bitmap snapshot = null;
+            try
+            {
+                Rectangle clientOnScreen = RectangleToScreen(ClientRectangle);
+                snapshot = new Bitmap(ClientSize.Width, ClientSize.Height);
+                using (Graphics g = Graphics.FromImage(snapshot))
+                {
+                    g.CopyFromScreen(clientOnScreen.Location, Point.Empty, ClientSize);
+                }
+            }
+            catch
+            {
+                snapshot?.Dispose();
+                snapshot = null;
+            }
+
+            quickStartTutorialOverlay = new QuickStartTutorialOverlay(markerRadioButton, boxRadioButton, pdfViewer, buttonRedactText, snapshot);
+            quickStartTutorialOverlay.Dismissed += (_, __) => CompleteQuickStartTutorial();
+            Controls.Add(quickStartTutorialOverlay);
+            quickStartTutorialOverlay.BringToFront();
+            quickStartTutorialOverlay.Focus();
+        }
+
+        private void ShowQuickStartTutorialIfNeeded()
+        {
+            if (Properties.Settings.Default.TutorialShown)
+            {
+                return;
+            }
+
+            ShowQuickStartTutorial();
+        }
+
+        private void CompleteQuickStartTutorial()
+        {
+            if (quickStartTutorialOverlay != null)
+            {
+                Controls.Remove(quickStartTutorialOverlay);
+                quickStartTutorialOverlay.Dispose();
+                quickStartTutorialOverlay = null;
+            }
+
+            if (!Properties.Settings.Default.TutorialShown)
+            {
+                Properties.Settings.Default.TutorialShown = true;
+                Properties.Settings.Default.Save();
+            }
         }
 
         private static string GetTutorialDirectory()
@@ -15495,6 +15553,14 @@ namespace AnonPDF
             ExtractSignatures();
             AddRecentFile(inputPdfPath);
             CloseSplashIfVisible();
+            if (IsHandleCreated)
+            {
+                BeginInvoke(new Action(ShowQuickStartTutorialIfNeeded));
+            }
+            else
+            {
+                ShowQuickStartTutorialIfNeeded();
+            }
             }
             finally
             {
@@ -31934,6 +32000,17 @@ namespace AnonPDF
                 return true;
             }
 
+            if (keyData == (Keys.Control | Keys.T))
+            {
+                if (IsTextInputFocused())
+                {
+                    return base.ProcessCmdKey(ref msg, keyData);
+                }
+
+                ShowQuickStartTutorial();
+                return true;
+            }
+
             if (keyData == (Keys.Control | Keys.G))
             {
                 if (IsTextInputFocused())
@@ -42850,6 +42927,11 @@ namespace AnonPDF
         private void CloseDocumentMenuItem_Click(object sender, EventArgs e)
         {
             CloseCurrentDocument();
+        }
+
+        private void QuickStartMenuItem_Click(object sender, EventArgs e)
+        {
+            ShowQuickStartTutorial();
         }
 
         private void TutorialToolStripMenuItem_Click(object sender, EventArgs e)

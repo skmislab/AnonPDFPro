@@ -756,6 +756,9 @@ und dritten Punkt setzen.</value>
   <data name="Menu_Help_WhatsNew" xml:space="preserve">
     <value>Was ist neu?</value>
   </data>
+  <data name="Menu_Help_QuickStart" xml:space="preserve">
+    <value>Erste Schritte</value>
+  </data>
   <data name="Menu_Help_Tutorial" xml:space="preserve">
     <value>Tutorial</value>
   </data>
@@ -1821,5 +1824,41 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   </data>
   <data name="EditText_LabelLeaderLineWidth" xml:space="preserve">
     <value>Liniendicke des Pfeils:</value>
+  </data>
+  <data name="QuickStart_Title" xml:space="preserve">
+    <value>Schnellstart</value>
+  </data>
+  <data name="QuickStart_Step1_Title" xml:space="preserve">
+    <value>1. Marker- oder Box-Modus waehlen</value>
+  </data>
+  <data name="QuickStart_Step1_Line1" xml:space="preserve">
+    <value>Marker dient zum Markieren einer Textzeile.</value>
+  </data>
+  <data name="QuickStart_Step1_Line2" xml:space="preserve">
+    <value>Box dient zum Markieren eines rechteckigen Bereichs.</value>
+  </data>
+  <data name="QuickStart_Step2_Title" xml:space="preserve">
+    <value>2. Textfragmente markieren</value>
+  </data>
+  <data name="QuickStart_Step2_Line1" xml:space="preserve">
+    <value>Zum Markieren druecken Sie die linke Maustaste, ziehen und lassen los.</value>
+  </data>
+  <data name="QuickStart_Step2_Line2" xml:space="preserve">
+    <value>Sie koennen Markierungen mit der rechten Maustaste auf einer Markierung oder mit "Seite leeren" und "Alles leeren" entfernen.</value>
+  </data>
+  <data name="QuickStart_Step3_Title" xml:space="preserve">
+    <value>3. Anonymisierte PDF speichern</value>
+  </data>
+  <data name="QuickStart_Step3_Line1" xml:space="preserve">
+    <value>Klicken Sie auf "PDF speichern", um eine neue Datei ohne offengelegte Daten zu erstellen.</value>
+  </data>
+  <data name="QuickStart_Button_Back" xml:space="preserve">
+    <value>Zurueck</value>
+  </data>
+  <data name="QuickStart_Button_Next" xml:space="preserve">
+    <value>Weiter</value>
+  </data>
+  <data name="QuickStart_Button_Understood" xml:space="preserve">
+    <value>Verstanden</value>
   </data>
 </root>

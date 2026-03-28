@@ -133,6 +133,7 @@
             this.whatsNewMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.showLicenseToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.thirdPartyNoticesToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.quickStartMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.tutorialMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.diagnosticModeMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.aboutMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -1263,6 +1264,7 @@
             this.helpMenuItem,
             this.whatsNewMenuItem,
             this.showLicenseToolStripMenuItem,
+            this.quickStartMenuItem,
             this.tutorialMenuItem,
             this.diagnosticModeMenuItem,
             this.aboutMenuItem});
@@ -1292,6 +1294,14 @@
             this.showLicenseToolStripMenuItem.Text = Res("Menu_Help_Licenses");
             this.showLicenseToolStripMenuItem.Click += new System.EventHandler(this.ShowLicenseToolStripMenuItem_Click);
             // 
+            // quickStartMenuItem
+            // 
+            this.quickStartMenuItem.Name = "quickStartMenuItem";
+            this.quickStartMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.T)));
+            this.quickStartMenuItem.Size = new System.Drawing.Size(216, 22);
+            this.quickStartMenuItem.Text = Res("Menu_Help_QuickStart");
+            this.quickStartMenuItem.Click += new System.EventHandler(this.QuickStartMenuItem_Click);
+            // 
             // thirdPartyNoticesToolStripMenuItem
             // 
             this.thirdPartyNoticesToolStripMenuItem.Name = "thirdPartyNoticesToolStripMenuItem";
@@ -1302,7 +1312,6 @@
             // tutorialMenuItem
             // 
             this.tutorialMenuItem.Name = "tutorialMenuItem";
-            this.tutorialMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.T)));
             this.tutorialMenuItem.Size = new System.Drawing.Size(216, 22);
             this.tutorialMenuItem.Text = Res("Menu_Help_Tutorial");
             this.tutorialMenuItem.Click += new System.EventHandler(this.TutorialToolStripMenuItem_Click);
@@ -1614,6 +1623,7 @@
         private System.Windows.Forms.Button searchToSelectionButton;
         private System.Windows.Forms.Button searchButton;
         private ThemedCheckBox safeModeCheckBox;
+        private System.Windows.Forms.ToolStripMenuItem quickStartMenuItem;
         private System.Windows.Forms.ToolStripMenuItem tutorialMenuItem;
         private System.Windows.Forms.ToolStripMenuItem diagnosticModeMenuItem;
         private System.Windows.Forms.ToolStripMenuItem showLicenseToolStripMenuItem;
