@@ -41987,6 +41987,53 @@ namespace AnonPDF
                                 continue;
                             }
 
+                            long sumB = 0;
+                            long sumG = 0;
+                            long sumR = 0;
+                            int sampleCount = 0;
+                            for (int x = left; x <= right; x++)
+                            {
+                                int topIndex = x * sourceBpp;
+                                byte* topRow = sourcePtr + (top * sourceStride);
+                                sumB += topRow[topIndex];
+                                sumG += topRow[topIndex + 1];
+                                sumR += topRow[topIndex + 2];
+                                sampleCount++;
+
+                                if (bottom != top)
+                                {
+                                    byte* bottomRow = sourcePtr + (bottom * sourceStride);
+                                    int bottomIndex = x * sourceBpp;
+                                    sumB += bottomRow[bottomIndex];
+                                    sumG += bottomRow[bottomIndex + 1];
+                                    sumR += bottomRow[bottomIndex + 2];
+                                    sampleCount++;
+                                }
+                            }
+
+                            for (int y = top + 1; y < bottom; y++)
+                            {
+                                byte* row = sourcePtr + (y * sourceStride);
+                                int leftIndex = left * sourceBpp;
+                                sumB += row[leftIndex];
+                                sumG += row[leftIndex + 1];
+                                sumR += row[leftIndex + 2];
+                                sampleCount++;
+
+                                if (right != left)
+                                {
+                                    int rightIndex = right * sourceBpp;
+                                    sumB += row[rightIndex];
+                                    sumG += row[rightIndex + 1];
+                                    sumR += row[rightIndex + 2];
+                                    sampleCount++;
+                                }
+                            }
+
+                            byte backgroundB = sampleCount > 0 ? (byte)(sumB / sampleCount) : (byte)255;
+                            byte backgroundG = sampleCount > 0 ? (byte)(sumG / sampleCount) : (byte)255;
+                            byte backgroundR = sampleCount > 0 ? (byte)(sumR / sampleCount) : (byte)255;
+
                             for (int y = top; y <= bottom; y++)
                             {
                                 byte* sourceRow = sourcePtr + (y * sourceStride);
@@ -41998,13 +42045,16 @@ namespace AnonPDF
                                     byte b = sourceRow[sourceIndex];
                                     byte g = sourceRow[sourceIndex + 1];
                                     byte r = sourceRow[sourceIndex + 2];
-                                    int luminance = (299 * r + 587 * g + 114 * b) / 1000;
-                                    if (luminance >= 245)
+                                    int colorDistance =
+                                        Math.Abs(r - backgroundR) +
+                                        Math.Abs(g - backgroundG) +
+                                        Math.Abs(b - backgroundB);
+                                    if (colorDistance < 36)
                                     {
                                         continue;
                                     }
 
-                                    byte alpha = (byte)Math.Max(0, Math.Min(190, (255 - luminance) * 2 / 3));
+                                    byte alpha = (byte)Math.Max(96, Math.Min(190, colorDistance));
                                     if (alpha == 0)
                                     {
                                         continue;
@@ -42012,9 +42062,9 @@ namespace AnonPDF
 
                                     if (overlayRow[overlayIndex + 3] < alpha)
                                     {
-                                        overlayRow[overlayIndex] = 255;
-                                        overlayRow[overlayIndex + 1] = 255;
-                                        overlayRow[overlayIndex + 2] = 255;
+                                        overlayRow[overlayIndex] = 160;
+                                        overlayRow[overlayIndex + 1] = 160;
+                                        overlayRow[overlayIndex + 2] = 160;
                                         overlayRow[overlayIndex + 3] = alpha;
                                     }
                                 }
@@ -48396,5 +48446,4 @@ namespace AnonPDF
 }
 
 #pragma warning restore SPELL
-
 
