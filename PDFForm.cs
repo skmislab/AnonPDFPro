@@ -345,6 +345,8 @@ namespace AnonPDF
         private bool isCommentCreationMode;
         private bool commentPreviewOverlayReady;
         private bool delayCommentAndSelectionOverlayUntilPreviewReady;
+        private System.Threading.CancellationTokenSource commentPreviewRectsCts;
+        private int commentPreviewRectsRequestId;
         private bool isMovingCommentNote;
         private bool commentNoteMoveChanged;
         private CommentAnnotation commentNoteToMove;
@@ -355,6 +357,7 @@ namespace AnonPDF
         private PointF commentNoteResizeAnchorDoc = PointF.Empty;
         private RectangleF commentNoteStartRectDoc = RectangleF.Empty;
         private readonly Dictionary<string, RectangleF> commentNoteRectsDoc = new Dictionary<string, RectangleF>(StringComparer.Ordinal);
+        private readonly Dictionary<string, RectangleF> commentPreviewRectsPdf = new Dictionary<string, RectangleF>(StringComparer.Ordinal);
         private const float CommentNoteResizeHandleSizePx = 10f;
         private TextDialogDefaults activeTextDialogDefaults = TextDialogDefaults.CreateDefault();
         private CommentDialogDefaults activeCommentDialogDefaults = CommentDialogDefaults.CreateDefault();
@@ -13708,6 +13711,7 @@ namespace AnonPDF
 
             ClearRedactionPreviewOverlay();
             EnsureRedactionPreviewRectsForPage(pageNumber);
+            EnsureCommentPreviewRectsForPage(pageNumber);
             pdfViewer.Image = RenderOriginalPage(pageNumber);
             commentPreviewOverlayReady = false;
             renderTimer.Stop();
@@ -15265,7 +15269,7 @@ namespace AnonPDF
             commentAnnotations.Clear();
             commentNoteRectsDoc.Clear();
             ResetCommentNoteMoveState();
-            commentPreviewOverlayReady = false;
+            ClearCommentPreviewRects();
             pdfViewer.Invalidate();
         }
 
@@ -16383,7 +16387,7 @@ namespace AnonPDF
 
             currentSelection = RectangleF.Empty;
             commentNoteRectsDoc.Clear();
-            commentPreviewOverlayReady = false;
+            ClearCommentPreviewRects();
 
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
@@ -19137,7 +19141,7 @@ namespace AnonPDF
             ResetVectorInteractionState();
             ResetCommentNoteMoveState();
             commentNoteRectsDoc.Clear();
-            commentPreviewOverlayReady = false;
+            ClearCommentPreviewRects();
             isDrawing = false;
             isMarkerCtrlBoxMode = false;
             currentSelection = RectangleF.Empty;
@@ -24041,7 +24045,7 @@ namespace AnonPDF
         private void RefreshPreviewAfterCommentChange()
         {
             commentNoteRectsDoc.Clear();
-            commentPreviewOverlayReady = false;
+            ClearCommentPreviewRects();
 
             if (IsDisposed || Disposing || pdf == null || numPages <= 0)
             {
@@ -27781,11 +27785,21 @@ namespace AnonPDF
                 for (int index = 0; index < comments.Count; index++)
                 {
                     CommentAnnotation comment = comments[index];
+                    RectangleF highlightDocRect = comment.Bounds;
+                    if (!string.IsNullOrWhiteSpace(comment.Id) &&
+                        commentPreviewRectsPdf.TryGetValue(comment.Id, out RectangleF cachedPdfRect) &&
+                        cachedPdfRect.Width > 0f &&
+                        cachedPdfRect.Height > 0f)
+                    {
+                        int rotation = GetEffectiveRotationDegrees(comment.PageNumber);
+                        highlightDocRect = ConvertPdfToViewCoordinates(cachedPdfRect, comment.PageNumber, rotation);
+                    }
+
                     RectangleF highlightRect = new RectangleF(
-                        comment.Bounds.X * scaleFactor,
-                        comment.Bounds.Y * scaleFactor,
-                        comment.Bounds.Width * scaleFactor,
-                        comment.Bounds.Height * scaleFactor);
+                        highlightDocRect.X * scaleFactor,
+                        highlightDocRect.Y * scaleFactor,
+                        highlightDocRect.Width * scaleFactor,
+                        highlightDocRect.Height * scaleFactor);
 
                     string text = string.IsNullOrWhiteSpace(comment.CommentText)
                         ? GetDefaultCommentText()
@@ -27808,6 +27822,7 @@ namespace AnonPDF
                     using (Pen connectorPen = new Pen(highlightColor, connectorThickness))
                     using (SolidBrush noteTextBrush = new SolidBrush(textColor))
                     {
+                        DrawCommentHighlightOnPreview(graphics, highlightRect, highlightColor);
                         connectorPen.DashStyle = DashStyle.Solid;
                         PointF from = new PointF(
                             highlightRect.Right,
@@ -27833,6 +27848,65 @@ namespace AnonPDF
                         graphics.DrawString(noteText, noteFont, noteTextBrush, textRect);
                     }
                 }
+            }
+        }
+
+        private void DrawCommentHighlightOnPreview(Graphics graphics, RectangleF highlightRect, System.Drawing.Color highlightColor)
+        {
+            if (graphics == null || pdfViewer?.Image == null)
+            {
+                return;
+            }
+
+            Rectangle rect = Rectangle.Round(highlightRect);
+            rect.Intersect(new Rectangle(0, 0, pdfViewer.Image.Width, pdfViewer.Image.Height));
+            if (rect.Width <= 0 || rect.Height <= 0)
+            {
+                return;
+            }
+
+            using (Bitmap sourceBitmap = new Bitmap(pdfViewer.Image))
+            using (Bitmap tintedBitmap = sourceBitmap.Clone(rect, PixelFormat.Format32bppArgb))
+            {
+                const float blendFactor = 0.86f;
+                Rectangle imageBounds = new Rectangle(0, 0, tintedBitmap.Width, tintedBitmap.Height);
+                BitmapData data = tintedBitmap.LockBits(imageBounds, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+
+                try
+                {
+                    int stride = data.Stride;
+                    IntPtr scan0 = data.Scan0;
+
+                    for (int y = 0; y < tintedBitmap.Height; y++)
+                    {
+                        IntPtr rowPtr = IntPtr.Add(scan0, y * stride);
+                        for (int x = 0; x < tintedBitmap.Width; x++)
+                        {
+                            int pixelOffset = x * 4;
+                            byte b = Marshal.ReadByte(rowPtr, pixelOffset);
+                            byte g = Marshal.ReadByte(rowPtr, pixelOffset + 1);
+                            byte r = Marshal.ReadByte(rowPtr, pixelOffset + 2);
+
+                            float mulR = (r * highlightColor.R) / 255f;
+                            float mulG = (g * highlightColor.G) / 255f;
+                            float mulB = (b * highlightColor.B) / 255f;
+
+                            byte outR = (byte)Math.Max(0, Math.Min(255, (r * (1f - blendFactor)) + (mulR * blendFactor)));
+                            byte outG = (byte)Math.Max(0, Math.Min(255, (g * (1f - blendFactor)) + (mulG * blendFactor)));
+                            byte outB = (byte)Math.Max(0, Math.Min(255, (b * (1f - blendFactor)) + (mulB * blendFactor)));
+
+                            Marshal.WriteByte(rowPtr, pixelOffset, outB);
+                            Marshal.WriteByte(rowPtr, pixelOffset + 1, outG);
+                            Marshal.WriteByte(rowPtr, pixelOffset + 2, outR);
+                        }
+                    }
+                }
+                finally
+                {
+                    tintedBitmap.UnlockBits(data);
+                }
+
+                graphics.DrawImageUnscaled(tintedBitmap, rect.Location);
             }
         }
 
@@ -28275,7 +28349,7 @@ namespace AnonPDF
 
         private void OnPaint(object sender, PaintEventArgs e)
         {
-            if (!delayCommentAndSelectionOverlayUntilPreviewReady && commentPreviewOverlayReady)
+            if (!delayCommentAndSelectionOverlayUntilPreviewReady)
             {
                 DrawCommentAnnotationsOnPreview(e.Graphics);
             }
@@ -35492,7 +35566,7 @@ namespace AnonPDF
             if (refreshCommentOverlay)
             {
                 commentNoteRectsDoc.Clear();
-                commentPreviewOverlayReady = false;
+                ClearCommentPreviewRects();
             }
             renderTimer.Stop();
             renderTimer.Start();
@@ -41920,6 +41994,165 @@ namespace AnonPDF
                 IsLayerVisible(c.LayerId));
         }
 
+        private void CancelCommentPreviewRects()
+        {
+            var cts = commentPreviewRectsCts;
+            commentPreviewRectsCts = null;
+            if (cts == null)
+            {
+                return;
+            }
+
+            try
+            {
+                cts.Cancel();
+            }
+            catch
+            {
+            }
+        }
+
+        private void ClearCommentPreviewRects()
+        {
+            CancelCommentPreviewRects();
+            commentPreviewRectsPdf.Clear();
+            commentPreviewOverlayReady = false;
+        }
+
+        private void EnsureCommentPreviewRectsForPage(int pageNumber)
+        {
+            if (pageNumber < 1 || !HasVisibleCommentsOnPage(pageNumber))
+            {
+                return;
+            }
+
+            bool missingCache = commentAnnotations.Any(comment =>
+                comment != null &&
+                comment.PageNumber == pageNumber &&
+                IsLayerVisible(comment.LayerId) &&
+                !string.IsNullOrWhiteSpace(comment.Id) &&
+                !commentPreviewRectsPdf.ContainsKey(comment.Id));
+            if (missingCache)
+            {
+                QueueCommentPreviewRectsForPage(pageNumber);
+            }
+        }
+
+        private void QueueCommentPreviewRectsForPage(int pageNumber)
+        {
+            if (pageNumber < 1 || string.IsNullOrWhiteSpace(inputPdfPath) || !File.Exists(inputPdfPath))
+            {
+                commentPreviewOverlayReady = true;
+                delayCommentAndSelectionOverlayUntilPreviewReady = false;
+                return;
+            }
+
+            var commentsForPage = commentAnnotations
+                .Where(comment =>
+                    comment != null &&
+                    comment.PageNumber == pageNumber &&
+                    IsLayerVisible(comment.LayerId) &&
+                    !string.IsNullOrWhiteSpace(comment.Id))
+                .ToList();
+
+            if (commentsForPage.Count == 0)
+            {
+                commentPreviewOverlayReady = true;
+                delayCommentAndSelectionOverlayUntilPreviewReady = false;
+                return;
+            }
+
+            var previousCts = commentPreviewRectsCts;
+            commentPreviewRectsCts = new System.Threading.CancellationTokenSource();
+            int requestId = ++commentPreviewRectsRequestId;
+            string sourcePdfPath = inputPdfPath;
+            string password = userPassword;
+            var token = commentPreviewRectsCts.Token;
+
+            try
+            {
+                previousCts?.Cancel();
+            }
+            catch
+            {
+            }
+
+            Task.Run(() =>
+            {
+                var results = new Dictionary<string, RectangleF>(StringComparer.Ordinal);
+                try
+                {
+                    var props = new ReaderProperties();
+                    if (!string.IsNullOrEmpty(password))
+                    {
+                        props.SetPassword(System.Text.Encoding.UTF8.GetBytes(password));
+                    }
+
+                    using (var reader = new PdfReader(sourcePdfPath, props).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+                    using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
+                    {
+                        if (pageNumber < 1 || pageNumber > pdfDoc.GetNumberOfPages())
+                        {
+                            return results;
+                        }
+
+                        var page = pdfDoc.GetPage(pageNumber);
+                        int rotation = GetEffectiveRotationDegrees(pageNumber);
+                        foreach (var comment in commentsForPage)
+                        {
+                            if (token.IsCancellationRequested)
+                            {
+                                return null;
+                            }
+
+                            RectangleF sourcePdfRect = ConvertToPdfCoordinates(comment.Bounds, pageNumber, rotation);
+                            var sourceRectangle = ConvertToItTextRectangle(sourcePdfRect);
+                            var visualRectangle = ExpandMarkerCleanupRectangleToTextBounds(
+                                page,
+                                sourceRectangle,
+                                pageNumber,
+                                rotation,
+                                comment.IsMarkerSelection ? "comment-marker-preview" : "comment-box-preview");
+                            RectangleF visualPdfRect = ConvertToItTextRectangleF(visualRectangle);
+                            if (visualPdfRect.Width > 0f && visualPdfRect.Height > 0f)
+                            {
+                                results[comment.Id] = visualPdfRect;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogDebug("Comment preview marker expansion failed: " + ex.Message);
+                }
+
+                return results;
+            }, token).ContinueWith(t =>
+            {
+                if (IsDisposed || Disposing || token.IsCancellationRequested || requestId != commentPreviewRectsRequestId)
+                {
+                    return;
+                }
+
+                if (t.Status == TaskStatus.RanToCompletion && t.Result != null)
+                {
+                    foreach (var comment in commentsForPage)
+                    {
+                        commentPreviewRectsPdf.Remove(comment.Id);
+                    }
+
+                    foreach (var pair in t.Result)
+                    {
+                        commentPreviewRectsPdf[pair.Key] = pair.Value;
+                    }
+                }
+
+                commentPreviewOverlayReady = true;
+                delayCommentAndSelectionOverlayUntilPreviewReady = false;
+                pdfViewer?.Invalidate();
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+        }
+
         private void ClearRedactionPreviewOverlay()
         {
             try
@@ -42384,38 +42617,19 @@ namespace AnonPDF
 
         private void ShowRedactPreview()
         {
-            var commentsForThisPage = commentAnnotations
-                .Where(c => c != null && c.PageNumber == currentPage && IsLayerVisible(c.LayerId))
-                .Select(c => new CommentAnnotation
-                {
-                    Id = c.Id,
-                    PageNumber = c.PageNumber,
-                    LayerId = c.LayerId,
-                    Bounds = c.Bounds,
-                    HighlightColorArgb = c.HighlightColorArgb,
-                    IsMarkerSelection = c.IsMarkerSelection
-                })
-                .ToList();
-
-            bool hasComments = commentsForThisPage.Count > 0;
-            bool preserveExistingCommentOverlay =
-                !delayCommentAndSelectionOverlayUntilPreviewReady &&
-                hasComments &&
-                commentPreviewOverlayReady &&
-                commentNoteRectsDoc.Count > 0;
-            if (!preserveExistingCommentOverlay)
-            {
-                commentNoteRectsDoc.Clear();
-                commentPreviewOverlayReady = false;
-            }
-            if (!hasComments)
+            commentNoteRectsDoc.Clear();
+            if (!HasVisibleCommentsOnPage(currentPage))
             {
                 delayCommentAndSelectionOverlayUntilPreviewReady = false;
+                ClearCommentPreviewRects();
                 CancelPreviewRender();
+                pdfViewer?.Invalidate();
                 return;
             }
 
-            StartAsyncRedactPreview(currentPage, scaleFactor, new List<RedactionBlock>(), commentsForThisPage);
+            commentPreviewOverlayReady = false;
+            QueueCommentPreviewRectsForPage(currentPage);
+            pdfViewer?.Invalidate();
         }
 
         private DrawingImage RenderBitmapWithCommentHighlights(DrawingImage sourceImage)
@@ -48446,4 +48660,3 @@ namespace AnonPDF
 }
 
 #pragma warning restore SPELL
-
