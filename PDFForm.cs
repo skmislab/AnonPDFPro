@@ -1396,6 +1396,8 @@ namespace AnonPDF
             pdfViewer.MouseMove += OnMouseMove;
             pdfViewer.MouseUp += OnMouseUp;
             pdfViewer.MouseUp += OnMouseUpFinalizeUndoCapture;
+            pdfViewer.MouseEnter += PdfViewer_MouseEnter;
+            pdfViewer.MouseLeave += PdfViewer_MouseLeave;
             pdfViewer.MouseCaptureChanged += PdfViewer_MouseCaptureChanged;
             pdfViewer.Paint += OnPaint;
             this.Shown += PDFForm_Shown;
@@ -2135,6 +2137,46 @@ namespace AnonPDF
             {
                 Cursor = Cursors.Default;
             }
+        }
+
+        private void PdfViewer_MouseEnter(object sender, EventArgs e)
+        {
+            UpdatePdfViewerToolCursor();
+        }
+
+        private void PdfViewer_MouseLeave(object sender, EventArgs e)
+        {
+            if (!IsViewportPanningActive())
+            {
+                this.Cursor = Cursors.Default;
+            }
+
+            if (pdfViewer != null)
+            {
+                pdfViewer.Cursor = Cursors.Default;
+            }
+        }
+
+        private void UpdatePdfViewerToolCursor()
+        {
+            if (pdfViewer == null)
+            {
+                return;
+            }
+
+            if (isVectorShapeCreationMode)
+            {
+                pdfViewer.Cursor = Cursors.Cross;
+                return;
+            }
+
+            if (isCommentCreationMode || IsRedactionSelectionModeEnabled())
+            {
+                pdfViewer.Cursor = Cursors.IBeam;
+                return;
+            }
+
+            pdfViewer.Cursor = Cursors.Default;
         }
 
         private void ApplyLayerConfiguration(IEnumerable<LayerDefinition> layers, string nextActiveLayerId, bool markProjectChanged)
@@ -20833,7 +20875,7 @@ namespace AnonPDF
             isVectorShapeCreationMode = true;
             vectorShapeDraftPoints.Clear();
             vectorShapeDraftHoverActive = false;
-            this.Cursor = Cursors.Cross;
+            UpdatePdfViewerToolCursor();
             pdfViewer.Invalidate();
         }
 
@@ -20858,6 +20900,7 @@ namespace AnonPDF
                 this.Cursor = Cursors.Default;
             }
 
+            UpdatePdfViewerToolCursor();
             pdfViewer.Invalidate();
         }
 
@@ -21408,6 +21451,11 @@ namespace AnonPDF
             {
                 lastManualRedactionModeIsMarker = true;
             }
+
+            if (markerRadioButton.Checked)
+            {
+                UpdatePdfViewerToolCursor();
+            }
         }
 
         private void BoxRadioButton_CheckedChanged(object sender, EventArgs e)
@@ -21415,6 +21463,11 @@ namespace AnonPDF
             if (!suppressRedactionModeTracking && boxRadioButton.Checked)
             {
                 lastManualRedactionModeIsMarker = false;
+            }
+
+            if (boxRadioButton.Checked)
+            {
+                UpdatePdfViewerToolCursor();
             }
         }
 
@@ -21424,6 +21477,10 @@ namespace AnonPDF
             vectorShapeDraftPoints.Clear();
             vectorShapeDraftHoverActive = false;
             this.Cursor = Cursors.Default;
+            if (pdfViewer != null)
+            {
+                pdfViewer.Cursor = Cursors.Default;
+            }
             if (!keepDefaults)
             {
                 activeVectorShapeDefaults = VectorShapeDefaults.CreateDefault();
@@ -21671,6 +21728,8 @@ namespace AnonPDF
                     !hitNoteRect.IsEmpty &&
                     hitNoteRect.Contains(docX, docY))
                 {
+                    DisableRedactionSelectionMode();
+
                     if (e.Clicks >= 2)
                     {
                         EditCommentAnnotation(hitComment);
@@ -22670,34 +22729,42 @@ namespace AnonPDF
 
             if (Control.MouseButtons == MouseButtons.None)
             {
-                float dpiX;
-                float dpiY;
-                using (Graphics g = pdfViewer.CreateGraphics())
+                if (isCommentCreationMode || IsRedactionSelectionModeEnabled())
                 {
-                    dpiX = g.DpiX;
-                    dpiY = g.DpiY;
+                    this.Cursor = Cursors.Default;
+                    UpdatePdfViewerToolCursor();
                 }
-
-                float docX = e.X / scaleFactor;
-                float docY = e.Y / scaleFactor;
-                bool overCommentNote = TryGetCommentAtPoint(e.Location, out CommentAnnotation hoverComment, out RectangleF hoverNoteRect) &&
-                    hoverComment != null &&
-                    !hoverNoteRect.IsEmpty &&
-                    hoverNoteRect.Contains(docX, docY);
-
-                if (overCommentNote)
+                else
                 {
-                    this.Cursor = IsPointInCommentResizeHandle(e.Location, hoverNoteRect)
-                        ? Cursors.SizeNWSE
-                        : Cursors.SizeAll;
-                }
-                else if (!TryUpdateGroupHoverCursor(e.Location, dpiX, dpiY) &&
-                    !TryUpdateTextHoverCursor(e.Location, dpiX, dpiY) &&
-                    !TryUpdateVectorHoverCursor(e.Location) &&
-                    !TryUpdateArrowHoverCursor(e.Location) &&
-                    !TryUpdateRasterHoverCursor(e.Location))
-                {
-                    this.Cursor = isCommentCreationMode ? Cursors.Cross : Cursors.Default;
+                    float dpiX;
+                    float dpiY;
+                    using (Graphics g = pdfViewer.CreateGraphics())
+                    {
+                        dpiX = g.DpiX;
+                        dpiY = g.DpiY;
+                    }
+
+                    float docX = e.X / scaleFactor;
+                    float docY = e.Y / scaleFactor;
+                    bool overCommentNote = TryGetCommentAtPoint(e.Location, out CommentAnnotation hoverComment, out RectangleF hoverNoteRect) &&
+                        hoverComment != null &&
+                        !hoverNoteRect.IsEmpty &&
+                        hoverNoteRect.Contains(docX, docY);
+
+                    if (overCommentNote)
+                    {
+                        this.Cursor = IsPointInCommentResizeHandle(e.Location, hoverNoteRect)
+                            ? Cursors.SizeNWSE
+                            : Cursors.SizeAll;
+                    }
+                    else if (!TryUpdateGroupHoverCursor(e.Location, dpiX, dpiY) &&
+                        !TryUpdateTextHoverCursor(e.Location, dpiX, dpiY) &&
+                        !TryUpdateVectorHoverCursor(e.Location) &&
+                        !TryUpdateArrowHoverCursor(e.Location) &&
+                        !TryUpdateRasterHoverCursor(e.Location))
+                    {
+                        this.Cursor = Cursors.Default;
+                    }
                 }
             }
 
@@ -23428,7 +23495,7 @@ namespace AnonPDF
 
             isCommentCreationMode = true;
             DisableRedactionSelectionMode();
-            this.Cursor = Cursors.Cross;
+            UpdatePdfViewerToolCursor();
             pdfViewer.Invalidate();
         }
 
@@ -23442,6 +23509,7 @@ namespace AnonPDF
             {
                 this.Cursor = Cursors.Default;
             }
+            UpdatePdfViewerToolCursor();
         }
 
         private void ResetCommentNoteMoveState()
@@ -23949,6 +24017,12 @@ namespace AnonPDF
 
             NormalizeCommentAnnotation(comment);
             commentAnnotations.Add(comment);
+            DisableRedactionSelectionMode();
+            ClearGroupSelection();
+            selectedTextAnnotation = null;
+            selectedRasterObject = null;
+            selectedArrowObject = null;
+            selectedVectorShape = null;
 
             if (currentPage >= 1 && currentPage <= allPageStatuses.Count)
             {
@@ -24012,6 +24086,13 @@ namespace AnonPDF
             {
                 return;
             }
+
+            DisableRedactionSelectionMode();
+            ClearGroupSelection();
+            selectedTextAnnotation = null;
+            selectedRasterObject = null;
+            selectedArrowObject = null;
+            selectedVectorShape = null;
 
             if (!PromptForCommentText(
                 comment.CommentText,
@@ -28569,12 +28650,19 @@ namespace AnonPDF
             if (isDrawing && currentSelection.Width > 0 && currentSelection.Height > 0 &&
                 (isCommentCreationMode || IsRedactionSelectionModeEnabled()))
             {
-                System.Drawing.Color selectionPreviewColor = isCommentCreationMode
-                    ? System.Drawing.Color.FromArgb(140, 255, 235, 59)
-                    : System.Drawing.Color.FromArgb(128, 255, 0, 0);
-                using (SolidBrush brush = new SolidBrush(selectionPreviewColor))
+                if (isCommentCreationMode)
                 {
-                    e.Graphics.FillRectangle(brush, currentSelection);
+                    DrawCommentHighlightOnPreview(
+                        e.Graphics,
+                        currentSelection,
+                        activeCommentDialogDefaults.HighlightColor);
+                }
+                else
+                {
+                    using (SolidBrush brush = new SolidBrush(System.Drawing.Color.FromArgb(128, 255, 0, 0)))
+                    {
+                        e.Graphics.FillRectangle(brush, currentSelection);
+                    }
                 }
             }
 
