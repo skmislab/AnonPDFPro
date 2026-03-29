@@ -97,7 +97,7 @@ Zum Markieren eines Bereichs:
 
 ## 4.5 Vorschau der markierten Ausschlüsse
 
-Nach dem Markieren wird der betroffene Text nach kurzer Zeit in der Vorschau hervorgehoben.
+Nach dem Markieren wird der betroffene Text in der Vorschau sofort grau dargestellt.
 
 ## 4.6 Projekt speichern
 
@@ -149,11 +149,11 @@ Für qualifizierte Signaturen stehen mehrere Optionen zur Verfügung:
 
 > \- Mit den Lösch-Symbolen können einzelne Seiten oder Bereiche zum Entfernen markiert werden.
 
-## 6.4 Farbe der Ausschlüsse
+## 6.4 Schwärzung
 
 Standardmäßig wird Inhalt im markierten Bereich entfernt. Bei Bild-/Scan-Inhalten wird der entfernte Bereich passend gefüllt.
 
-Wenn Hervorhebung aktiviert ist, werden Ausschlussbereiche im Export-PDF schwarz dargestellt.
+Wenn die Option `Schwärzung` aktiviert ist, werden markierte Bereiche in der gespeicherten PDF-Datei schwarz dargestellt.
 
 ## 6.5 Vorschau nach dem Speichern
 
@@ -163,6 +163,8 @@ Ist diese Option aktiv, wird die gespeicherte PDF-Datei nach dem Export automati
 
 Ein gespeichertes Projekt kann jederzeit erneut geladen werden, um die Bearbeitung fortzusetzen.
 
+Wenn die im Projekt gespeicherte PDF-Datei unter dem ursprünglichen Pfad nicht verfügbar ist, sucht die Anwendung zusätzlich nach einer PDF-Datei mit demselben Namen im Ordner der `.app`-Projektdatei.
+
 ## 6.7 Anwendung schließen
 
 Beim Beenden fragt die Anwendung bei ungespeicherten Änderungen nach einer Bestätigung.
@@ -170,6 +172,8 @@ Beim Beenden fragt die Anwendung bei ungespeicherten Änderungen nach einer Best
 ## 6.8 Hilfe
 
 > \- Benutzeranleitung: öffnet die Anleitung.
+
+> \- `Wie fange ich an?`: öffnet das kurze Start-Tutorial.
 
 > \- Über: zeigt Versions- und Herstellerinformationen.
 
@@ -204,6 +208,7 @@ Für die Arbeit mit Objekten stehen außerdem zur Verfügung:
 - Im Formdialog steht für Rechteck, Ellipse, Dreieck und Region die Option `Rasteransicht begrenzen` zur Verfügung.
 - Diese Option dient nicht der Anonymisierung. Sie begrenzt nur den sichtbaren Bereich von Rasterobjekten, die darunter auf derselben Ebene liegen.
 - In der Vorschau bleibt der Rasterbereich innerhalb der Form klar sichtbar, während der Bereich außerhalb abgeblendet wird. Im finalen PDF bleibt nur der durch die Form begrenzte Bereich sichtbar.
+- Beim Erstellen von Mehrpunktformen zeigt das Overlay eine kurze Anleitung an. Die linke Maustaste fügt den nächsten Punkt hinzu, die rechte Maustaste beendet das Zeichnen.
 
 Modifikatoren bei der Objektbearbeitung:
 
@@ -287,6 +292,7 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Option `Seitenbereich als PDF speichern` im Menü `Datei`, standardmäßig mit der aktuellen Seite vorbelegt.
 - Drei Tabs auf der rechten Seite: `Seitenliste`, `Miniaturen` und `Ebenen`.
 - Dynamische Erzeugung von Miniaturen sowie Miniatur-Cache für bessere Leistung bei großen Dokumenten.
+- Miniaturen, die zusätzlich Markierungen, Kommentare, Objekte und zum Löschen markierte Seiten anzeigen.
 - Speicherung des zuletzt gewählten rechten Tabs (`Seitenliste` / `Miniaturen` / `Ebenen`).
 - Speicherung der Breite des rechten Panels zwischen Programmstarts.
 - Speicherung und Wiederherstellung der Scroll-Positionen in den rechten Panels (`Seitenliste` und `Miniaturen`) beim Fortsetzen eines Projekts.
@@ -296,3 +302,4 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Die Option `Pfeil` im Textdialog mit einstellbarer Liniendicke des Pfeils, Spitzenlänge und Spitzenbreite.
 - Kopieren und Einfügen von Objekten über die Systemzwischenablage, auch zwischen zwei laufenden Instanzen der Anwendung, mit erhaltener Stapelreihenfolge.
 - `Rückgängig` (`CTRL+Z`) und `Wiederholen` (`CTRL+Y`).
+- Kurzes Start-Tutorial über `? -> Wie fange ich an?`.

@@ -126,7 +126,7 @@ Aby utworzyć obszar redakcji:
 
 ## 4.5 Podgląd po zmianach
 
-Po wprowadzeniu zaznaczenia po 2 sekundach tekst który będzie usunięty zostanie zaznaczony w kolorze szarym.
+Po wprowadzeniu zaznaczenia tekst, który będzie usunięty, jest od razu wyszarzany na podglądzie.
 
 ## 4.6 Zapisywanie projektu
 
@@ -173,11 +173,11 @@ Aplikacja udostępnia opcje związane z kwalifikowanymi podpisami elektronicznym
 - Kliknięcie na ikonce „Kosz 1..n” w lewym panelu umożliwia oznaczenie wybranego zakresu stron do usunięcia lub rezygnacji z usunięcia.
 - Kliknięcie na ikonce „Kosz” w lewym panelu umożliwia oznaczenie strony do usunięcia. Ikonka zmienia kolor tła na czarny.
 
-## 6.4 Wyróżnienie kolorem
+## 6.4 Zaczernienie
 
 Domyślnie w zapisanym pliku PDF usuwane są treści, które znajdują się w obrębie zaznaczenia. W przypadku obrazów, grafik lub skanów obszar usuwany jest wypełniany kolorem białym i jest tej samej wielkości co zaznaczenie.
 
-Użycie opcji „Wyróżnienie kolorem” zmienia kolor zaznaczeń w pliku PDF na czarny.
+Użycie opcji `Zaczernienie` powoduje, że w zapisanym pliku PDF zaznaczenia będą zaczernione.
 
 ## 6.5 Podgląd po zapisaniu
 
@@ -187,6 +187,8 @@ Włączona opcja „Podgląd po zapisaniu” – umożliwi automatyczne otwieran
 
 Możesz w dowolnym momencie załadować gotowy plik .app z opisem redakcji (np. dostarczony przez inną osobę lub utworzony wcześniej), co zaktualizuje zaznaczenia i przypisane dane w aplikacji.
 
+Jeżeli zapisany w projekcie plik PDF nie jest dostępny pod oryginalną ścieżką, aplikacja spróbuje odnaleźć plik PDF o tej samej nazwie w katalogu projektu `.app`.
+
 ## 6.7 Zamykanie aplikacji
 
 Podczas zamykania aplikacja może zapytać, czy zapisać zmiany w projekcie ("Zapisz", "Nie zapisuj", "Anuluj").
@@ -194,6 +196,7 @@ Podczas zamykania aplikacja może zapytać, czy zapisać zmiany w projekcie ("Za
 ## 6.8 Menu \[?\] - pomoc 
 
 - Menu \[?\] wyświetla instrukcję użytkownika oraz okno "O aplikacji".
+- Opcja `Jak zacząć?` uruchamia krótki samouczek startowy.
 - O aplikacji - wyświetla informacje o wersji, autorze i prawach autorskich.
 
 ## 6.9 Dodawanie i obsługa obiektów
@@ -222,6 +225,7 @@ Podczas pracy z obiektami dostępne są także:
 - W dialogu kształtów dla prostokąta, elipsy, trójkąta i regionu dostępna jest opcja `Ogranicz widok rastra`.
 - Opcja nie służy do anonimizacji. Ogranicza tylko widoczny obszar rastrów znajdujących się pod kształtem na tej samej warstwie.
 - W podglądzie fragment rastra wewnątrz kształtu pozostaje wyraźny, a obszar poza nim jest przygaszony. W finalnym PDF pozostaje tylko obszar ograniczony kształtem.
+- Podczas rysowania kształtów wielopunktowych aplikacja pokazuje w overlayu krótką instrukcję. Lewy przycisk myszy dodaje kolejny punkt, a prawy kończy rysowanie.
 
 Modyfikatory podczas pracy z obiektami:
 
@@ -300,6 +304,7 @@ W ostatnich wersjach dodano m.in.:
 - Opcję `Zapisz zakres stron do PDF` (menu `Plik`) z domyślnym zakresem ustawionym na bieżącą stronę.
 - Trzy zakładki po prawej stronie: `Lista stron`, `Miniatury` i `Warstwy`.
 - Dynamiczne generowanie miniaturek stron oraz pamięć podręczną miniaturek dla szybszej pracy na dużych dokumentach.
+- Miniatury pokazujące również zaznaczenia anonimizacji, komentarze, obiekty oraz strony oznaczone do usunięcia.
 - Zapamiętywanie ostatnio wybranej zakładki po prawej stronie (`Lista stron` / `Miniatury` / `Warstwy`).
 - Zapamiętywanie szerokości prawego panelu między uruchomieniami aplikacji.
 - Zapamiętywanie i odtwarzanie pozycji przewijania w prawych panelach (`Lista stron` i `Miniatury`) po wznowieniu pracy z projektem.
@@ -309,3 +314,4 @@ W ostatnich wersjach dodano m.in.:
 - Opcję `Strzałka` w dialogu napisów z regulacją grubości linii strzałki, długości grotu i szerokości grotu.
 - Kopiowanie i wklejanie obiektów przez schowek systemowy także między dwoma instancjami aplikacji, z zachowaniem kolejności nakładania.
 - Funkcje `Cofnij` (`CTRL+Z`) i `Ponów` (`CTRL+Y`).
+- Krótki samouczek startowy dostępny z menu `? -> Jak zacząć?`.

@@ -128,7 +128,7 @@ To create a redaction area:
 
 ## 4.5 Preview pending redactions
 
-After you create a selection, within about 2 seconds the text that will be removed is highlighted in gray.
+After you create a selection, the text that will be removed is immediately shaded gray in the preview.
 
 ## 4.6 Save your redaction project
 
@@ -175,11 +175,11 @@ The application provides options related to qualified electronic signatures:
 - Click the "Trash 1..n" icon in the left panel to mark a selected page range for removal (or to cancel removal).
 - Click the "Trash" icon in the left panel to mark a single page for removal. The icon background turns black.
 
-## 6.4 Redaction fill color
+## 6.4 Black fill
 
 By default, the application removes content located inside the selection area. For images, graphics, or scanned pages, the removed area is filled with white and matches the selection size.
 
-Enabling the "Highlight color" option changes the fill color of redaction areas in the output PDF to black.
+Enabling the `Black fill` option makes the selected areas black in the saved PDF.
 
 ## 6.5 Open after saving
 
@@ -189,6 +189,8 @@ When "Preview after saving" is enabled, the application automatically opens the 
 
 You can load a .pap project file at any time (for example, prepared by another person or created earlier). This updates the selections in the application to match the loaded project.
 
+If the PDF path stored in the project is no longer available, the application also looks for a PDF file with the same name in the `.app` project folder.
+
 ## 6.7 Closing the application
 
 When closing, the application may ask you to confirm exiting, especially if you have unsaved changes.
@@ -196,6 +198,7 @@ When closing, the application may ask you to confirm exiting, especially if you 
 ## 6.8 Help menu
 
 - "User Guide" - opens this help/instruction content.
+- "How to start?" - opens the short quick-start tutorial.
 - "About" - shows version information, author, and copyright.
 
 ## 6.9 Creating and managing objects
@@ -222,6 +225,7 @@ When working with objects, you can also use:
 - In the shape dialog, the `Limit raster view` option is available for rectangles, ellipses, triangles, and regions.
 - This option is not used for redaction. It only limits the visible area of raster objects located below it on the same layer.
 - In the preview, the raster fragment inside the shape stays clear while the area outside is dimmed. In the final PDF only the area limited by the shape remains visible.
+- While creating multi-point shapes, the overlay shows a short instruction. The left mouse button adds another point and the right mouse button finishes drawing.
 
 Modifiers while editing objects:
 
@@ -300,6 +304,7 @@ Recent versions include:
 - `Save page range to PDF` in the `File` menu, with the current page prefilled by default.
 - Three right-side tabs: `Page List`, `Thumbnails`, and `Layers`.
 - Dynamic thumbnail generation plus thumbnail cache for better performance on large documents.
+- Thumbnails that also show redaction selections, comments, objects, and pages marked for deletion.
 - Remembering the last selected right-side tab (`Page List` / `Thumbnails` / `Layers`).
 - Remembering right panel width between application launches.
 - Remembering and restoring scroll positions in right panels (`Page List` and `Thumbnails`) when resuming a project.
@@ -311,3 +316,4 @@ Recent versions include:
 - The `Limit raster view` option in the shape dialog for rectangles, ellipses, triangles, and regions.
 - Object copy and paste through the system clipboard, including between two running application instances, with preserved stacking order.
 - `Undo` (`CTRL+Z`) and `Redo` (`CTRL+Y`).
+- A short quick-start tutorial available from `? -> How to start?`.
