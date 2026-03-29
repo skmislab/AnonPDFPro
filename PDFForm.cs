@@ -2081,7 +2081,7 @@ namespace AnonPDF
             selectedArrowObject = null;
             selectedVectorShape = null;
             ClearGroupSelection();
-            RefreshRedactionPreviewForCurrentPage();
+            RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
         }
 
         private void InitializeLayersTab()
@@ -15166,7 +15166,7 @@ namespace AnonPDF
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
             projectWasChangedAfterLastSave = true;
-            RefreshRedactionPreviewForCurrentPage();
+            RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
             renderTimer.Stop();
             renderTimer.Start();
         }
@@ -15180,7 +15180,7 @@ namespace AnonPDF
 
             redactionBlocks.RemoveAll(block => block.PageNumber == currentPage);
             projectWasChangedAfterLastSave = true;
-            RefreshRedactionPreviewForCurrentPage();
+            RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
 
             RedactionBlock blocksByPage = redactionBlocks.FirstOrDefault(block => block.PageNumber == currentPage);
             if (blocksByPage == null)
@@ -24865,14 +24865,31 @@ namespace AnonPDF
             QueueRedactionPreviewRectsForPage(pageNumber);
         }
 
-        private void RefreshRedactionPreviewForCurrentPage()
+        private void RefreshRedactionPreviewForCurrentPage(bool keepCurrentOverlay = false)
         {
             if (currentPage < 1)
             {
                 return;
             }
 
-            ClearRedactionPreviewOverlay();
+            if (keepCurrentOverlay)
+            {
+                try
+                {
+                    redactionPreviewOverlayCts?.Cancel();
+                }
+                catch
+                {
+                }
+
+                redactionPreviewOverlayCts = null;
+                redactionPreviewOverlayRequestId++;
+            }
+            else
+            {
+                ClearRedactionPreviewOverlay();
+            }
+
             QueueRedactionPreviewRectsForPage(currentPage);
             pdfViewer.Invalidate();
         }
@@ -26846,7 +26863,7 @@ namespace AnonPDF
                 return;
             }
 
-            RefreshRedactionPreviewForCurrentPage();
+            RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
 
             PageItemStatus status = allPageStatuses[currentPage - 1];
             RedactionBlock blocksByPage = redactionBlocks.FirstOrDefault(block => block.PageNumber == currentPage);
@@ -34910,7 +34927,7 @@ namespace AnonPDF
             }
             if (changedPages.Contains(currentPage))
             {
-                RefreshRedactionPreviewForCurrentPage();
+                RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
             }
             if (textToRemove.Count > 0)
             {
@@ -43174,7 +43191,7 @@ namespace AnonPDF
                     convertedResults.Any(cr => RectEquals(
                         ConvertToItTextRectangle(rb.Bounds),
                         ConvertToItTextRectangle(cr.ConvertedRect), 0.01f)));
-                RefreshRedactionPreviewForCurrentPage();
+                RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
             }
             else
             {

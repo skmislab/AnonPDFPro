@@ -616,7 +616,7 @@ and a third arc point.</value>
     <value>Save Project As</value>
   </data>
   <data name="UI_Check_HighlightColor" xml:space="preserve">
-    <value>Highlight with color</value>
+    <value>Blackout</value>
   </data>
   <data name="UI_Check_ShowOutline" xml:space="preserve">
     <value>Show outline</value>
@@ -804,7 +804,7 @@ Click again to remove marks.</value>
     <value>Open a project with marks for anonymization. CTRL + O.</value>
   </data>
   <data name="Tooltip_HighlightColor" xml:space="preserve">
-    <value>Highlights will be colored in the saved file.</value>
+    <value>Selections will be blacked out in the saved PDF file.</value>
   </data>
   <data name="Tooltip_ShowOutline" xml:space="preserve">
     <value>Draw a thin outline for redaction areas in the saved file.</value>

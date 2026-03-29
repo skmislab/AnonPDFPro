@@ -850,7 +850,7 @@ und dritten Punkt setzen.</value>
     <value>Projekt speichern unter</value>
   </data>
   <data name="UI_Check_HighlightColor" xml:space="preserve">
-    <value>Farblich hervorheben</value>
+    <value>Schw?rzung</value>
   </data>
   <data name="UI_Check_ShowOutline" xml:space="preserve">
     <value>Umriss anzeigen</value>
@@ -965,7 +965,7 @@ Nochmal klicken, um Markierungen zu entfernen.</value>
     <value>Projekt mit Markierungen zur Anonymisierung öffnen. STRG + O.</value>
   </data>
   <data name="Tooltip_HighlightColor" xml:space="preserve">
-    <value>Markierungen werden in der gespeicherten Datei farbig dargestellt.</value>
+    <value>Markierungen werden in der gespeicherten PDF-Datei geschw?rzt.</value>
   </data>
   <data name="Tooltip_ShowOutline" xml:space="preserve">
     <value>In der gespeicherten Datei einen dünnen Umriss der Markierungen anzeigen.</value>
