@@ -42789,7 +42789,8 @@ namespace AnonPDF
                                         continue;
                                     }
 
-                                    byte alpha = (byte)Math.Max(96, Math.Min(190, colorDistance));
+                                    int luminance = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+                                    byte alpha = (byte)Math.Max(0, Math.Min(220, (255 - luminance) * 5 / 6));
                                     if (alpha == 0)
                                     {
                                         continue;
@@ -42797,9 +42798,9 @@ namespace AnonPDF
 
                                     if (overlayRow[overlayIndex + 3] < alpha)
                                     {
-                                        overlayRow[overlayIndex] = 160;
-                                        overlayRow[overlayIndex + 1] = 160;
-                                        overlayRow[overlayIndex + 2] = 160;
+                                        overlayRow[overlayIndex] = 220;
+                                        overlayRow[overlayIndex + 1] = 220;
+                                        overlayRow[overlayIndex + 2] = 220;
                                         overlayRow[overlayIndex + 3] = alpha;
                                     }
                                 }
