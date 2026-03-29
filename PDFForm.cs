@@ -5661,6 +5661,11 @@ namespace AnonPDF
 
         private string BuildObjectSelectionInfoText()
         {
+            if (isVectorShapeCreationMode)
+            {
+                return BuildVectorShapeCreationInfoText();
+            }
+
             List<object> selectedObjects = GetSelectedObjectsOnCurrentPage();
             int selectedCount = selectedObjects.Count;
             if (selectedCount <= 0)
@@ -5679,6 +5684,50 @@ namespace AnonPDF
 
             string countText = GetSelectionInfoCountText(selectedCount);
             return AppendSelectionInfoLayerText(layerInfoText, countText);
+        }
+
+        private string BuildVectorShapeCreationInfoText()
+        {
+            string shapeName = GetShapeTypeDisplayName(activeVectorShapeType);
+            string language = (Resources.Culture ?? CultureInfo.CurrentUICulture).TwoLetterISOLanguageName?.ToLowerInvariant() ?? string.Empty;
+            int pointCount = vectorShapeDraftPoints?.Count ?? 0;
+
+            switch (activeVectorShapeType)
+            {
+                case VectorShapeType.Polyline:
+                case VectorShapeType.Region:
+                    switch (language)
+                    {
+                        case "pl":
+                            return $"{shapeName} | Punkty: {pointCount} | LPM: dodaj punkt | PPM: zakończ rysowanie";
+                        case "de":
+                            return $"{shapeName} | Punkte: {pointCount} | LMT: Punkt hinzufügen | RMT: Zeichnen beenden";
+                        default:
+                            return $"{shapeName} | Points: {pointCount} | LMB: add point | RMB: finish drawing";
+                    }
+
+                case VectorShapeType.Arc:
+                    switch (language)
+                    {
+                        case "pl":
+                            return $"{shapeName} | Punkty: {Math.Min(pointCount, 3)}/3 | LPM: wskaż 3 punkty";
+                        case "de":
+                            return $"{shapeName} | Punkte: {Math.Min(pointCount, 3)}/3 | LMT: 3 Punkte angeben";
+                        default:
+                            return $"{shapeName} | Points: {Math.Min(pointCount, 3)}/3 | LMB: choose 3 points";
+                    }
+
+                default:
+                    switch (language)
+                    {
+                        case "pl":
+                            return $"{shapeName} | Punkty: {Math.Min(pointCount, 2)}/2 | LPM: wskaż 2 punkty";
+                        case "de":
+                            return $"{shapeName} | Punkte: {Math.Min(pointCount, 2)}/2 | LMT: 2 Punkte angeben";
+                        default:
+                            return $"{shapeName} | Points: {Math.Min(pointCount, 2)}/2 | LMB: choose 2 points";
+                    }
+            }
         }
 
         private string GetSelectionInfoCountText(int selectedCount)
@@ -20964,6 +21013,7 @@ namespace AnonPDF
             vectorShapeDraftPoints.Clear();
             vectorShapeDraftHoverActive = false;
             UpdatePdfViewerToolCursor();
+            UpdateObjectSelectionInfoLabel();
             pdfViewer.Invalidate();
         }
 
@@ -21574,6 +21624,7 @@ namespace AnonPDF
                 activeVectorShapeDefaults = VectorShapeDefaults.CreateDefault();
                 activeVectorShapeType = activeVectorShapeDefaults.ShapeType;
             }
+            UpdateObjectSelectionInfoLabel();
         }
 
         private bool TryFinalizeVectorShapeDraft()
@@ -21632,6 +21683,7 @@ namespace AnonPDF
             projectWasChangedAfterLastSave = true;
             saveProjectButton.Enabled = true;
             saveProjectMenuItem.Enabled = true;
+            UpdateObjectSelectionInfoLabel();
             pdfViewer.Invalidate();
             return true;
         }
@@ -21734,6 +21786,7 @@ namespace AnonPDF
                     {
                         TryFinalizeVectorShapeDraft();
                     }
+                    UpdateObjectSelectionInfoLabel();
                     pdfViewer.Invalidate();
                     return;
                 }
@@ -21746,6 +21799,7 @@ namespace AnonPDF
                         {
                             vectorShapeDraftPoints.Clear();
                             vectorShapeDraftHoverActive = false;
+                            UpdateObjectSelectionInfoLabel();
                         }
                         else
                         {
@@ -21753,6 +21807,7 @@ namespace AnonPDF
                         }
                     }
 
+                    UpdateObjectSelectionInfoLabel();
                     pdfViewer.Invalidate();
                     return;
                 }
