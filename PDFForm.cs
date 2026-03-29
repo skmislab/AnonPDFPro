@@ -8871,7 +8871,7 @@ namespace AnonPDF
             try { toolTip1.SetToolTip(buttonRedactText, Resources.Tooltip_SavePdf); } catch { }
             try { toolTip1.SetToolTip(pagesListView, Resources.Tooltip_PagesList); } catch { }
             try { toolTip1.SetToolTip(thumbnailsListView, LocalizedText("Tooltip_PageThumbnails")); } catch { }
-            try { quickStartMenuItem.ShortcutKeys = Keys.Control | Keys.T; } catch { }
+            try { quickStartMenuItem.ShortcutKeys = Keys.None; } catch { }
 
             // Filter combo: localized items and colors
             allComboItem = Resources.UI_Filter_AllPages;
@@ -23009,6 +23009,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
+                        InvalidateThumbnailPage(currentPage);
                     }
                     pdfViewer.Invalidate();
                     return;
@@ -23024,6 +23025,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
+                        InvalidateThumbnailPage(currentPage);
                     }
                     pdfViewer.Invalidate();
                     return;
@@ -23039,6 +23041,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
+                        InvalidateThumbnailPage(currentPage);
                     }
                     pdfViewer.Invalidate();
                     return;
@@ -23054,6 +23057,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
+                        InvalidateThumbnailPage(currentPage);
                     }
                     pdfViewer.Invalidate();
                     return;
@@ -23069,6 +23073,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
+                        InvalidateThumbnailPage(currentPage);
                     }
                     pdfViewer.Invalidate();
                     return;
@@ -23084,6 +23089,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
+                        InvalidateThumbnailPage(currentPage);
                     }
                     pdfViewer.Invalidate();
                     return;
@@ -23099,6 +23105,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
+                        InvalidateThumbnailPage(currentPage);
                     }
                     pdfViewer.Invalidate();
                     return;
@@ -23114,6 +23121,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
+                        InvalidateThumbnailPage(currentPage);
                     }
                     pdfViewer.Invalidate();
                     return;
@@ -23307,6 +23315,7 @@ namespace AnonPDF
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
+                        InvalidateThumbnailPage(currentPage);
                     }
                     else
                     {
@@ -29754,6 +29763,69 @@ namespace AnonPDF
             }
         }
 
+        private void DrawThumbnailTextAnnotationOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
+        {
+            if (graphics == null || pageNumber < 1 || pageNumber > numPages)
+            {
+                return;
+            }
+
+            foreach (TextAnnotation annotation in textAnnotations.Where(annotation => annotation != null && annotation.PageNumber == pageNumber && IsLayerVisible(annotation.LayerId)))
+            {
+                if (!TryGetTextAnnotationVisualDocBounds(annotation, out RectangleF textBounds))
+                {
+                    continue;
+                }
+
+                RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(textBounds, pageNumber, contentRect);
+                if (thumbnailRect.Width <= 0f || thumbnailRect.Height <= 0f)
+                {
+                    continue;
+                }
+
+                System.Drawing.Color backColor = GetAnnotationBackgroundColor(annotation);
+                System.Drawing.Color borderColor = GetAnnotationBorderColor(annotation);
+                if (backColor.A > 0)
+                {
+                    int overlayAlpha = Math.Min(180, Math.Max(70, (int)backColor.A));
+                    using (var fillBrush = new SolidBrush(System.Drawing.Color.FromArgb(overlayAlpha, backColor)))
+                    {
+                        graphics.FillRectangle(fillBrush, thumbnailRect);
+                    }
+                }
+
+                System.Drawing.Color strokeColor = borderColor.A > 0 ? borderColor : annotation.AnnotationColor;
+                using (var borderPen = new Pen(strokeColor, 1.1f))
+                {
+                    graphics.DrawRectangle(borderPen, thumbnailRect.X, thumbnailRect.Y, thumbnailRect.Width, thumbnailRect.Height);
+                }
+            }
+        }
+
+        private void DrawThumbnailRasterOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
+        {
+            if (graphics == null || pageNumber < 1 || pageNumber > numPages)
+            {
+                return;
+            }
+
+            using (var borderPen = new Pen(System.Drawing.Color.FromArgb(220, 42, 119, 219), 1.1f))
+            {
+                borderPen.DashStyle = DashStyle.Solid;
+                foreach (RasterObject rasterObject in rasterObjects.Where(rasterObject => rasterObject != null && rasterObject.PageNumber == pageNumber && IsLayerVisible(rasterObject.LayerId)))
+                {
+                    RectangleF rasterBounds = GetRasterObjectDocFrameBounds(rasterObject);
+                    RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(rasterBounds, pageNumber, contentRect);
+                    if (thumbnailRect.Width <= 0f || thumbnailRect.Height <= 0f)
+                    {
+                        continue;
+                    }
+
+                    graphics.DrawRectangle(borderPen, thumbnailRect.X, thumbnailRect.Y, thumbnailRect.Width, thumbnailRect.Height);
+                }
+            }
+        }
+
         private void DrawThumbnailDeletionOverlay(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
         {
             if (graphics == null || pageNumber < 1 || pageNumber > allPageStatuses.Count)
@@ -29964,6 +30036,8 @@ namespace AnonPDF
             {
                 DrawThumbnailRedactionOverlays(e.Graphics, pageNumber, contentRect);
                 DrawThumbnailCommentOverlays(e.Graphics, pageNumber, contentRect);
+                DrawThumbnailTextAnnotationOverlays(e.Graphics, pageNumber, contentRect);
+                DrawThumbnailRasterOverlays(e.Graphics, pageNumber, contentRect);
                 DrawThumbnailDeletionOverlay(e.Graphics, pageNumber, contentRect);
             }
 
@@ -32595,17 +32669,6 @@ namespace AnonPDF
                 BeginUndoCapture("Rotate page");
                 RotateCurrentPageClockwise();
                 CommitUndoCapture();
-                return true;
-            }
-
-            if (keyData == (Keys.Control | Keys.T))
-            {
-                if (IsTextInputFocused())
-                {
-                    return base.ProcessCmdKey(ref msg, keyData);
-                }
-
-                ShowQuickStartTutorial();
                 return true;
             }
 

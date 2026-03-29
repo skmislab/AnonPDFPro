@@ -27,6 +27,7 @@ namespace AnonPDF
         private readonly Bitmap tutorialPreviewBitmap;
         private readonly Button nextButton;
         private readonly Button backButton;
+        private readonly Button cancelButton;
         private readonly List<TutorialStep> steps;
         private int currentStepIndex;
         private Rectangle cardBounds = Rectangle.Empty;
@@ -119,7 +120,17 @@ namespace AnonPDF
                 Dismissed?.Invoke(this, EventArgs.Empty);
             };
 
+            cancelButton = new Button
+            {
+                Text = Resources.ResourceManager.GetString("Dialog_Button_Cancel") ?? "Cancel",
+                Width = 110,
+                Height = 32,
+                Font = new Font(Font.FontFamily, 10f, FontStyle.Regular)
+            };
+            cancelButton.Click += (_, __) => Dismissed?.Invoke(this, EventArgs.Empty);
+
             Controls.Add(backButton);
+            Controls.Add(cancelButton);
             Controls.Add(nextButton);
 
             UpdateButtons();
@@ -171,6 +182,7 @@ namespace AnonPDF
 
             int buttonTop = cardBounds.Bottom - 48;
             backButton.Location = new Point(cardBounds.Left + 24, buttonTop);
+            cancelButton.Location = new Point((cardBounds.Left + cardBounds.Right - cancelButton.Width) / 2, buttonTop);
             nextButton.Location = new Point(cardBounds.Right - nextButton.Width - 24, buttonTop);
             Invalidate();
         }
