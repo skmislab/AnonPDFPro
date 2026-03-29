@@ -14868,7 +14868,23 @@ namespace AnonPDF
                             {
                                 LogDebug(
                                     $"Redact marker-visual page={pageNum} source={FormatRectFInvariant(pdfCoordinates)} visual={FormatRectFInvariant(ConvertToItTextRectangleF(visualRectangle))}");
-                                }
+                            }
+
+                            cleanupRectangle = visualRectangle;
+                        }
+                        else
+                        {
+                            visualRectangle = ExpandMarkerCleanupRectangleToTextBounds(
+                                pageWithSelections,
+                                cleanupRectangle,
+                                pageNum,
+                                rotation,
+                                "export-visual-box");
+                            if (DebugLogEnabled)
+                            {
+                                LogDebug(
+                                    $"Redact box-visual page={pageNum} source={FormatRectFInvariant(pdfCoordinates)} visual={FormatRectFInvariant(ConvertToItTextRectangleF(visualRectangle))}");
+                            }
                         }
                         redactionVisualPdfBoundsByBlock[block] = ConvertToItTextRectangleF(visualRectangle);
 
@@ -14889,7 +14905,7 @@ namespace AnonPDF
                     return;
                 }
 
-                if ((colorCheckBox.Checked || outlineCheckBox.Checked) && redactionVisualPdfBoundsByBlock.Count > 0)
+                if (redactionVisualPdfBoundsByBlock.Count > 0)
                 {
                     foreach (var pageGroup in redactionVisualPdfBoundsByBlock
                         .Where(kvp => kvp.Key != null && kvp.Key.PageNumber >= 1 && kvp.Key.PageNumber <= pdfDoc.GetNumberOfPages())
@@ -14910,7 +14926,12 @@ namespace AnonPDF
                             {
                                 canvas.SaveState();
                                 canvas.SetFillColor(cleanUpColorBlack);
-                                canvas.Rectangle(visualRect.X, visualRect.Y, visualRect.Width, visualRect.Height);
+                                const float cleanupEdgeEpsilon = 0.2f;
+                                canvas.Rectangle(
+                                    visualRect.X - cleanupEdgeEpsilon,
+                                    visualRect.Y - cleanupEdgeEpsilon,
+                                    visualRect.Width + 2 * cleanupEdgeEpsilon,
+                                    visualRect.Height + 2 * cleanupEdgeEpsilon);
                                 canvas.Fill();
                                 canvas.RestoreState();
                             }
@@ -14922,6 +14943,15 @@ namespace AnonPDF
                                 canvas.SetLineWidth(0.4f);
                                 canvas.Rectangle(visualRect.X, visualRect.Y, visualRect.Width, visualRect.Height);
                                 canvas.Stroke();
+                                canvas.RestoreState();
+                            }
+
+                            if (!colorCheckBox.Checked && !outlineCheckBox.Checked)
+                            {
+                                canvas.SaveState();
+                                canvas.SetFillColor(cleanUpColorWhite);
+                                canvas.Rectangle(visualRect.X, visualRect.Y, visualRect.Width, visualRect.Height);
+                                canvas.Fill();
                                 canvas.RestoreState();
                             }
                         }
@@ -26358,6 +26388,24 @@ namespace AnonPDF
                         anchoredY = markerAnchorRect.Top;
                     }
                     markerViewPoint = new PointF(markerViewPoint.X, anchoredY);
+                }
+                // Shift the footnote marker away from the exclusion edge by its own height so it
+                // does not overlap text that appears to the right of the exclusion rectangle.
+                // The direction of "up" depends on the page rotation.
+                switch (NormalizeRotation(markerAnchorRotation))
+                {
+                    case 90:
+                        markerViewPoint = new PointF(markerViewPoint.X + markerHeight / 2f, markerViewPoint.Y);
+                        break;
+                    case 180:
+                        markerViewPoint = new PointF(markerViewPoint.X, markerViewPoint.Y + markerHeight / 2f);
+                        break;
+                    case 270:
+                        markerViewPoint = new PointF(markerViewPoint.X - markerHeight / 2f, markerViewPoint.Y);
+                        break;
+                    default:
+                        markerViewPoint = new PointF(markerViewPoint.X, markerViewPoint.Y - markerHeight / 2f);
+                        break;
                 }
                 RectangleF badgeRect = new RectangleF(
                     markerViewPoint.X,
@@ -42952,12 +43000,14 @@ namespace AnonPDF
 
             bool commentContext = !string.IsNullOrWhiteSpace(context) &&
                 context.StartsWith("comment", StringComparison.OrdinalIgnoreCase);
+            bool exportVisualContext = string.Equals(context, "export-visual", StringComparison.OrdinalIgnoreCase);
+            bool exportVisualBoxContext = string.Equals(context, "export-visual-box", StringComparison.OrdinalIgnoreCase);
 
             float sourceTop = sourceRectangle.GetTop();
             float sourceBottom = sourceRectangle.GetBottom();
             float expandedTop;
             float expandedBottom;
-            if (commentContext)
+            if (commentContext || exportVisualBoxContext)
             {
                 expandedTop = textBounds.GetTop() + MarkerCleanupVerticalPadding;
                 expandedBottom = textBounds.GetBottom() - MarkerCleanupVerticalPadding;
@@ -42988,10 +43038,15 @@ namespace AnonPDF
 
             float expandedLeft;
             float expandedRight;
-            if (commentContext)
+            if (commentContext || exportVisualContext)
             {
                 expandedLeft = textBounds.GetLeft();
                 expandedRight = textBounds.GetRight();
+            }
+            else if (exportVisualBoxContext)
+            {
+                expandedLeft = Math.Max(sourceRectangle.GetLeft(), textBounds.GetLeft());
+                expandedRight = Math.Min(sourceRectangle.GetRight(), textBounds.GetRight());
             }
             else
             {
@@ -43104,17 +43159,21 @@ namespace AnonPDF
 
             try
             {
-                bool disableVisualDiacriticExpansion =
-                    string.Equals(context, "export-visual", StringComparison.OrdinalIgnoreCase);
+                bool exportVisualMarker = string.Equals(context, "export-visual", StringComparison.OrdinalIgnoreCase);
+                bool exportVisualBox = string.Equals(context, "export-visual-box", StringComparison.OrdinalIgnoreCase);
+                bool bodyBoundsOnly = exportVisualMarker || exportVisualBox;
                 CustomTextExtractionStrategy strategy = new CustomTextExtractionStrategy(
                     rectangle,
-                    expandDiacriticsForVisualBounds: !disableVisualDiacriticExpansion);
+                    expandDiacriticsForVisualBounds: !bodyBoundsOnly,
+                    bodyBoundsOnly: bodyBoundsOnly);
                 PdfTextExtractor.GetTextFromPage(page, strategy);
                 bool commentMarkerContext = !string.IsNullOrWhiteSpace(context) &&
                     context.StartsWith("comment-marker", StringComparison.OrdinalIgnoreCase);
                 bool hasBounds = commentMarkerContext
                     ? strategy.TryGetCoveredBoundsForMarkerLine(out textBounds)
-                    : strategy.TryGetCoveredBounds(out textBounds);
+                    : exportVisualMarker
+                        ? strategy.TryGetCoveredBoundsForMarkerLineVisual(out textBounds)
+                        : strategy.TryGetCoveredBounds(out textBounds);
                 if (DebugLogEnabled)
                 {
                     string boundsText = hasBounds
@@ -43128,6 +43187,13 @@ namespace AnonPDF
                         foreach (string markerDiagnostic in markerDiagnostics)
                         {
                             LogDebug($"MarkerTextBounds detail page={pageNumber} context={context} {markerDiagnostic}");
+                        }
+                    }
+                    if (exportVisualMarker && strategy.TryGetMarkerLineVisualDiagnostics(out List<string> visualDiagnostics))
+                    {
+                        foreach (string visualDiagnostic in visualDiagnostics)
+                        {
+                            LogDebug($"MarkerTextBounds visual page={pageNumber} context={context} {visualDiagnostic}");
                         }
                     }
                 }
@@ -47688,6 +47754,7 @@ namespace AnonPDF
         private readonly List<TextChunk> _textChunks;
         private readonly List<GlyphBounds> _coveredGlyphs;
         private readonly bool _expandDiacriticsForVisualBounds;
+        private readonly bool _bodyBoundsOnly;
         private readonly float _yTolerance = 1.0f; // Tolerance for Y coordinate (in points)
         private readonly bool _sortByX = false; // Set to true if you want to sort by X
         private readonly bool _reverseOrder = false; // Ustaw na true dla tekstu od prawej do lewej
@@ -47699,12 +47766,14 @@ namespace AnonPDF
 
         public CustomTextExtractionStrategy(
             iText.Kernel.Geom.Rectangle targetRect,
-            bool expandDiacriticsForVisualBounds = true)
+            bool expandDiacriticsForVisualBounds = true,
+            bool bodyBoundsOnly = false)
         {
             _targetRect = targetRect;
             _textChunks = new List<TextChunk>();
             _coveredGlyphs = new List<GlyphBounds>();
             _expandDiacriticsForVisualBounds = expandDiacriticsForVisualBounds;
+            _bodyBoundsOnly = bodyBoundsOnly;
             _hasCoveredBounds = false;
             _coveredMinX = float.MaxValue;
             _coveredMinY = float.MaxValue;
@@ -47726,11 +47795,11 @@ namespace AnonPDF
                     // Get character bounding box coordinates
                     float x1 = Math.Min(ascentLine.GetStartPoint().Get(0), descentLine.GetStartPoint().Get(0));
                     float x2 = Math.Max(ascentLine.GetEndPoint().Get(0), descentLine.GetEndPoint().Get(0));
-                    float y1 = descentLine.GetStartPoint().Get(1); // Bottom edge (descent)
+                    float y1Detect = descentLine.GetStartPoint().Get(1); // Bottom edge (descent) — used for intersection
                     float y2 = ascentLine.GetStartPoint().Get(1); // Top edge (ascent)
 
                     string glyphText = chunk.GetText();
-                    if (_expandDiacriticsForVisualBounds && glyphText.Length == 1 && y2 > y1)
+                    if (_expandDiacriticsForVisualBounds && glyphText.Length == 1 && y2 > y1Detect)
                     {
                         string nfd = glyphText[0].ToString().Normalize(System.Text.NormalizationForm.FormD);
                         for (int ni = 1; ni < nfd.Length; ni++)
@@ -47738,30 +47807,32 @@ namespace AnonPDF
                             int cp = (int)nfd[ni];
                             if (cp >= 0x0300 && cp <= 0x0315)
                             {
-                                y2 += (y2 - y1) * 0.20f;
+                                y2 += (y2 - y1Detect) * 0.20f;
                                 break;
                             }
                         }
                     }
 
-                    // Check whether the character's bounding box touches or is inside the rectangle
-                    bool intersects = IsBoundingBoxInRectangle(x1, y1, x2, y2, _targetRect);
+                    bool intersects = IsBoundingBoxInRectangle(x1, y1Detect, x2, y2, _targetRect);
 
-                    // Add character if its bounding box meets conditions
                     if (intersects)
                     {
-                        _textChunks.Add(new TextChunk(chunk.GetText(), y1, x1));
+                        float y1Store = _bodyBoundsOnly
+                            ? chunk.GetBaseline().GetStartPoint().Get(1)
+                            : y1Detect;
+
+                        _textChunks.Add(new TextChunk(chunk.GetText(), y1Store, x1));
                         _coveredGlyphs.Add(new GlyphBounds(
                             Math.Min(x1, x2),
-                            Math.Min(y1, y2),
+                            Math.Min(y1Store, y2),
                             Math.Max(x1, x2),
-                            Math.Max(y1, y2),
-                            y1,
+                            Math.Max(y1Store, y2),
+                            y1Store,
                             glyphText));
                         if (!_hasCoveredBounds)
                         {
                             _coveredMinX = x1;
-                            _coveredMinY = y1;
+                            _coveredMinY = y1Store;
                             _coveredMaxX = x2;
                             _coveredMaxY = y2;
                             _hasCoveredBounds = true;
@@ -47769,11 +47840,10 @@ namespace AnonPDF
                         else
                         {
                             _coveredMinX = Math.Min(_coveredMinX, x1);
-                            _coveredMinY = Math.Min(_coveredMinY, y1);
+                            _coveredMinY = Math.Min(_coveredMinY, y1Store);
                             _coveredMaxX = Math.Max(_coveredMaxX, x2);
                             _coveredMaxY = Math.Max(_coveredMaxY, y2);
                         }
-                        // Debug: print coordinates (uncomment if needed)
                     }
                 }
             }
@@ -47952,6 +48022,68 @@ namespace AnonPDF
                 return false;
             }
 
+            if (!TryGetSelectedMarkerLine(out List<GlyphBounds> selectedLine, out _, out _, out _))
+            {
+                return false;
+            }
+
+            return TryBuildBoundsFromGlyphs(selectedLine, out bounds);
+        }
+
+        public bool TryGetCoveredBoundsForMarkerLineVisual(out iText.Kernel.Geom.Rectangle bounds)
+        {
+            bounds = null;
+            if (!TryGetSelectedMarkerLine(out List<GlyphBounds> selectedLine, out _, out _, out _))
+            {
+                return false;
+            }
+
+            if (selectedLine.Count == 0)
+            {
+                return false;
+            }
+
+            float minX = selectedLine.Min(g => g.Left);
+            float maxX = selectedLine.Max(g => g.Right);
+            List<float> bottoms = selectedLine.Select(g => g.Bottom).OrderBy(v => v).ToList();
+            List<float> tops = selectedLine.Select(g => g.Top).OrderBy(v => v).ToList();
+
+            float normalizedBottom = SelectMarkerVisualEdge(bottoms, preferUpperValues: true);
+            float normalizedTop = SelectMarkerVisualEdge(tops, preferUpperValues: false);
+
+            // Keep the visual rect valid even when normalization becomes too aggressive.
+            if (normalizedTop <= normalizedBottom)
+            {
+                return TryBuildBoundsFromGlyphs(selectedLine, out bounds);
+            }
+
+            float width = maxX - minX;
+            float height = normalizedTop - normalizedBottom;
+            if (width <= 0f || height <= 0f)
+            {
+                return false;
+            }
+
+            bounds = new iText.Kernel.Geom.Rectangle(minX, normalizedBottom, width, height);
+            return true;
+        }
+
+        private bool TryGetSelectedMarkerLine(
+            out List<GlyphBounds> selectedLine,
+            out float selectedKey,
+            out int selectedCount,
+            out float selectedDistance)
+        {
+            selectedLine = null;
+            selectedKey = 0f;
+            selectedCount = -1;
+            selectedDistance = float.MaxValue;
+
+            if (_coveredGlyphs.Count == 0)
+            {
+                return false;
+            }
+
             const float baselineStep = 1.5f;
             float targetCenterY = _targetRect.GetBottom() + (_targetRect.GetHeight() / 2f);
             var lines = new Dictionary<float, List<GlyphBounds>>();
@@ -47963,12 +48095,10 @@ namespace AnonPDF
                     list = new List<GlyphBounds>();
                     lines[key] = list;
                 }
+
                 list.Add(glyph);
             }
 
-            float selectedKey = 0f;
-            int selectedCount = -1;
-            float selectedDistance = float.MaxValue;
             foreach (var entry in lines)
             {
                 int count = entry.Value.Count;
@@ -47981,7 +48111,13 @@ namespace AnonPDF
                 }
             }
 
-            if (!lines.TryGetValue(selectedKey, out List<GlyphBounds> selectedLine) || selectedLine.Count == 0)
+            return lines.TryGetValue(selectedKey, out selectedLine) && selectedLine != null && selectedLine.Count > 0;
+        }
+
+        private static bool TryBuildBoundsFromGlyphs(List<GlyphBounds> glyphs, out iText.Kernel.Geom.Rectangle bounds)
+        {
+            bounds = null;
+            if (glyphs == null || glyphs.Count == 0)
             {
                 return false;
             }
@@ -47990,7 +48126,7 @@ namespace AnonPDF
             float minY = float.MaxValue;
             float maxX = float.MinValue;
             float maxY = float.MinValue;
-            foreach (var glyph in selectedLine)
+            foreach (var glyph in glyphs)
             {
                 minX = Math.Min(minX, glyph.Left);
                 minY = Math.Min(minY, glyph.Bottom);
@@ -48007,6 +48143,27 @@ namespace AnonPDF
 
             bounds = new iText.Kernel.Geom.Rectangle(minX, minY, width, height);
             return true;
+        }
+
+        private static float SelectMarkerVisualEdge(List<float> sortedValues, bool preferUpperValues)
+        {
+            if (sortedValues == null || sortedValues.Count == 0)
+            {
+                return 0f;
+            }
+
+            if (sortedValues.Count <= 2)
+            {
+                return preferUpperValues ? sortedValues[sortedValues.Count - 1] : sortedValues[0];
+            }
+
+            int trimCount = Math.Max(1, sortedValues.Count / 6);
+            trimCount = Math.Min(trimCount, sortedValues.Count - 1);
+            int index = preferUpperValues
+                ? sortedValues.Count - 1 - trimCount
+                : trimCount;
+            index = Math.Max(0, Math.Min(sortedValues.Count - 1, index));
+            return sortedValues[index];
         }
 
         public bool TryGetMarkerLineDiagnostics(out List<string> diagnostics)
@@ -48032,20 +48189,7 @@ namespace AnonPDF
                 list.Add(glyph);
             }
 
-            float selectedKey = 0f;
-            int selectedCount = -1;
-            float selectedDistance = float.MaxValue;
-            foreach (var entry in lines)
-            {
-                int count = entry.Value.Count;
-                float distance = Math.Abs(entry.Key - targetCenterY);
-                if (count > selectedCount || (count == selectedCount && distance < selectedDistance))
-                {
-                    selectedCount = count;
-                    selectedDistance = distance;
-                    selectedKey = entry.Key;
-                }
-            }
+            TryGetSelectedMarkerLine(out _, out float selectedKey, out int selectedCount, out float selectedDistance);
 
             diagnostics = new List<string>(lines.Count + 1)
             {
@@ -48072,6 +48216,40 @@ namespace AnonPDF
                     $"line baseline={entry.Key.ToString("0.###", CultureInfo.InvariantCulture)} distance={Math.Abs(entry.Key - targetCenterY).ToString("0.###", CultureInfo.InvariantCulture)} " +
                     $"glyphs={entry.Value.Count} rect={FormatInvariantRect(minX, minY, maxX - minX, maxY - minY)} " +
                     $"height={(maxY - minY).ToString("0.###", CultureInfo.InvariantCulture)} text=\"{lineText}\"{selectedFlag}");
+            }
+
+            return diagnostics.Count > 0;
+        }
+
+        public bool TryGetMarkerLineVisualDiagnostics(out List<string> diagnostics)
+        {
+            diagnostics = null;
+            if (!TryGetSelectedMarkerLine(out List<GlyphBounds> selectedLine, out float selectedKey, out int selectedCount, out float selectedDistance))
+            {
+                return false;
+            }
+
+            if (!TryBuildBoundsFromGlyphs(selectedLine, out iText.Kernel.Geom.Rectangle rawBounds))
+            {
+                return false;
+            }
+
+            List<float> bottoms = selectedLine.Select(g => g.Bottom).OrderBy(v => v).ToList();
+            List<float> tops = selectedLine.Select(g => g.Top).OrderBy(v => v).ToList();
+            int trimCount = selectedLine.Count <= 2 ? 0 : Math.Min(Math.Max(1, selectedLine.Count / 6), selectedLine.Count - 1);
+            float normalizedBottom = SelectMarkerVisualEdge(bottoms, preferUpperValues: true);
+            float normalizedTop = SelectMarkerVisualEdge(tops, preferUpperValues: false);
+
+            diagnostics = new List<string>(selectedLine.Count + 2)
+            {
+                $"selectedBaseline={selectedKey.ToString("0.###", CultureInfo.InvariantCulture)} selectedGlyphs={selectedCount} distance={selectedDistance.ToString("0.###", CultureInfo.InvariantCulture)} rawRect={FormatInvariantRect(rawBounds.GetX(), rawBounds.GetY(), rawBounds.GetWidth(), rawBounds.GetHeight())}",
+                $"visual normalizedBottom={normalizedBottom.ToString("0.###", CultureInfo.InvariantCulture)} normalizedTop={normalizedTop.ToString("0.###", CultureInfo.InvariantCulture)} normalizedHeight={(normalizedTop - normalizedBottom).ToString("0.###", CultureInfo.InvariantCulture)} trimCount={trimCount} rawBottomMin={bottoms.First().ToString("0.###", CultureInfo.InvariantCulture)} rawBottomMax={bottoms.Last().ToString("0.###", CultureInfo.InvariantCulture)} rawTopMin={tops.First().ToString("0.###", CultureInfo.InvariantCulture)} rawTopMax={tops.Last().ToString("0.###", CultureInfo.InvariantCulture)}"
+            };
+
+            foreach (var glyph in selectedLine.OrderBy(g => g.Left))
+            {
+                diagnostics.Add(
+                    $"glyph text=\"{EscapeDiagnosticText(glyph.Text)}\" left={glyph.Left.ToString("0.###", CultureInfo.InvariantCulture)} right={glyph.Right.ToString("0.###", CultureInfo.InvariantCulture)} bottom={glyph.Bottom.ToString("0.###", CultureInfo.InvariantCulture)} top={glyph.Top.ToString("0.###", CultureInfo.InvariantCulture)} baseline={glyph.Baseline.ToString("0.###", CultureInfo.InvariantCulture)}");
             }
 
             return diagnostics.Count > 0;

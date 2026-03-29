@@ -616,7 +616,7 @@ końcowy i trzeci punkt łuku.</value>
     <value>Zapisz projekt jako</value>
   </data>
   <data name="UI_Check_HighlightColor" xml:space="preserve">
-    <value>Wyróżnienie kolorem</value>
+    <value>Zaczernienie</value>
   </data>
   <data name="UI_Check_ShowOutline" xml:space="preserve">
     <value>Pokaż obrys</value>
@@ -804,7 +804,7 @@ Ponowne kliknięcie usunie zaznaczenia.</value>
     <value>Otwórz projekt z oznaczeniami do anonimizacji. CTRL + O.</value>
   </data>
   <data name="Tooltip_HighlightColor" xml:space="preserve">
-    <value>W zapisie zaznaczenia będą wyróżnione kolorem.</value>
+    <value>W zapisanym pliku PDF zaznaczenia będą zaczernione.</value>
   </data>
   <data name="Tooltip_ShowOutline" xml:space="preserve">
     <value>W zapisie pokaż cienki obrys zaznaczeń.</value>
