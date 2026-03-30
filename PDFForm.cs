@@ -28206,9 +28206,17 @@ namespace AnonPDF
                 return;
             }
 
-            using (Bitmap sourceBitmap = new Bitmap(pdfViewer.Image))
-            using (Bitmap tintedBitmap = sourceBitmap.Clone(rect, PixelFormat.Format32bppArgb))
+            using (Bitmap tintedBitmap = new Bitmap(rect.Width, rect.Height, PixelFormat.Format32bppArgb))
             {
+                using (Graphics tintedGraphics = Graphics.FromImage(tintedBitmap))
+                {
+                    tintedGraphics.DrawImage(
+                        pdfViewer.Image,
+                        new Rectangle(0, 0, rect.Width, rect.Height),
+                        rect,
+                        GraphicsUnit.Pixel);
+                }
+
                 const float blendFactor = 0.86f;
                 Rectangle imageBounds = new Rectangle(0, 0, tintedBitmap.Width, tintedBitmap.Height);
                 BitmapData data = tintedBitmap.LockBits(imageBounds, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
@@ -28993,9 +29001,10 @@ namespace AnonPDF
 
             if (!delayCommentAndSelectionOverlayUntilPreviewReady)
             {
-                foreach (string layerId in EnumerateLayerIdsInVisualOrder())
+                foreach (string layerId in EnumerateLayerIdsInVisualOrder().Where(IsLayerVisible))
                 {
                     foreach (object drawableObject in GetOrderedObjectsForPage(currentPage, candidateLayerId =>
+                        IsLayerVisible(candidateLayerId) &&
                         string.Equals(NormalizeLayerIdValue(candidateLayerId), layerId, StringComparison.OrdinalIgnoreCase)))
                     {
                         if (drawableObject is RasterObject rasterObject)
