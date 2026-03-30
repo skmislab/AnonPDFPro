@@ -449,6 +449,9 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="Dialog_Layers_Column_ObjectCount" xml:space="preserve">
     <value>Objekte</value>
   </data>
+  <data name="Dialog_Layers_ExportVisibleOnly" xml:space="preserve">
+    <value>Nur sichtbare Ebenen exportieren und drucken</value>
+  </data>
   <data name="Dialog_Layers_Button_SetActive" xml:space="preserve">
     <value>Aktiv setzen</value>
   </data>

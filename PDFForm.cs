@@ -244,6 +244,7 @@ namespace AnonPDF
         private bool snapToGridEnabled = true;
         private bool addObjectsByPageRotationEnabled = false;
         private bool combineObjectsWithScanPagesEnabled = false;
+        private bool exportVisibleLayersOnly = false;
         private bool reducePdfFileSizeEnabled = false;
         private bool suppressAutomaticFootnotesMenuSync;
         private const float SnapGridStep = 5f;
@@ -1958,6 +1959,7 @@ namespace AnonPDF
             using (var dialog = new LayerManagementDialog(
                 documentLayers.Select(layer => layer.Clone()).ToList(),
                 activeLayerId,
+                exportVisibleLayersOnly,
                 BuildLayerUsageCounts(),
                 CurrentTheme.BorderColor,
                 CurrentTheme.SelectionBackColor,
@@ -1974,6 +1976,7 @@ namespace AnonPDF
 
                 List<LayerDefinition> updatedLayers = dialog.GetLayers();
                 ApplyLayerDeletionActions(dialog.GetLayerDeletionActions(), updatedLayers);
+                exportVisibleLayersOnly = dialog.GetExportVisibleLayersOnly();
                 ApplyLayerConfiguration(updatedLayers, dialog.GetActiveLayerId(), markProjectChanged: true);
             }
         }
@@ -15555,6 +15558,7 @@ namespace AnonPDF
             ClearVectorShapes();
             documentLayers = new List<LayerDefinition>();
             activeLayerId = DefaultLayerId;
+            exportVisibleLayersOnly = false;
             EnsureSystemLayers();
             RefreshLayersTab();
             PdfTextSearcher.ClearCache();
@@ -18656,7 +18660,17 @@ namespace AnonPDF
         private bool ShouldExportLayer(string layerId)
         {
             LayerDefinition layer = GetLayerDefinition(layerId);
-            return layer == null || !layer.ExcludeFromExport;
+            if (layer == null)
+            {
+                return true;
+            }
+
+            if (exportVisibleLayersOnly)
+            {
+                return layer.IsVisible;
+            }
+
+            return !layer.ExcludeFromExport;
         }
 
         private bool IsLayerLocked(string layerId)
@@ -18915,7 +18929,8 @@ namespace AnonPDF
                 SignaturesMode = GetSignatureModeForProject(),
                 SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
                 AutoFootnotesEnabled = autoFootnotesEnabled,
-                ExclusionAuthority = exclusionAuthorityName
+                ExclusionAuthority = exclusionAuthorityName,
+                ExportVisibleLayersOnly = exportVisibleLayersOnly
             };
         }
 
@@ -30744,6 +30759,7 @@ namespace AnonPDF
                     }
                     documentLayers = NormalizeLayerDefinitions(layersJson);
                     activeLayerId = NormalizeLayerIdValue(activeLayerIdJson);
+                    exportVisibleLayersOnly = projectData.ExportVisibleLayersOnly;
                     EnsureObjectLayerAssignments();
                     RefreshLayersTab();
                     LoadProjectObjectLayerOrder(projectData.ObjectLayers);
@@ -47551,6 +47567,7 @@ namespace AnonPDF
         public string SignaturesMode { get; set; }
         public bool? AutoFootnotesEnabled { get; set; }
         public string ExclusionAuthority { get; set; }
+        public bool ExportVisibleLayersOnly { get; set; }
         public String FilePath { get; set; }
     }
 

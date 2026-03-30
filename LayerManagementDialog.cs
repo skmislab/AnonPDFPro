@@ -20,6 +20,7 @@ namespace AnonPDF
         private readonly Button moveDownButton;
         private readonly Button saveButton;
         private readonly Button cancelButton;
+        private readonly CheckBox exportVisibleLayersOnlyCheckBox;
         private readonly List<LayerDeletionAction> pendingLayerDeletionActions = new List<LayerDeletionAction>();
 
         internal event Action<List<LayerDefinition>, string> PreviewChanged;
@@ -27,6 +28,7 @@ namespace AnonPDF
         internal LayerManagementDialog(
             IEnumerable<LayerDefinition> layers,
             string activeLayerId,
+            bool exportVisibleLayersOnly,
             IDictionary<string, int> usageCounts,
             Color checkBoxBorderColor,
             Color checkBoxAccentColor,
@@ -143,6 +145,13 @@ namespace AnonPDF
             saveButton = CreateButton("Dialog_Button_Save", SaveButton_Click);
             cancelButton = CreateButton("Dialog_Button_Cancel", (_, __) => DialogResult = DialogResult.Cancel);
             cancelButton.DialogResult = DialogResult.Cancel;
+            exportVisibleLayersOnlyCheckBox = new CheckBox
+            {
+                AutoSize = true,
+                Text = Tr("Dialog_Layers_ExportVisibleOnly"),
+                Checked = exportVisibleLayersOnly,
+                Padding = new Padding(addButton.Margin.Left, 6, 0, 0)
+            };
 
             var leftPanel = new FlowLayoutPanel
             {
@@ -177,16 +186,24 @@ namespace AnonPDF
             buttonsPanel.Controls.Add(leftPanel);
             buttonsPanel.Controls.Add(rightPanel);
 
+            var exportOptionsPanel = new Panel
+            {
+                Dock = DockStyle.Fill
+            };
+            exportOptionsPanel.Controls.Add(exportVisibleLayersOnlyCheckBox);
+
             var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 2
+                RowCount = 3
             };
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
             layout.Controls.Add(layersGridView, 0, 0);
-            layout.Controls.Add(buttonsPanel, 0, 1);
+            layout.Controls.Add(exportOptionsPanel, 0, 1);
+            layout.Controls.Add(buttonsPanel, 0, 2);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
@@ -220,6 +237,11 @@ namespace AnonPDF
                 .Select(action => action?.Clone())
                 .Where(action => action != null)
                 .ToList();
+        }
+
+        internal bool GetExportVisibleLayersOnly()
+        {
+            return exportVisibleLayersOnlyCheckBox?.Checked == true;
         }
 
         private void RaisePreviewChanged()

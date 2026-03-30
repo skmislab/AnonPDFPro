@@ -197,6 +197,9 @@
   <data name="Dialog_Layers_Column_ObjectCount" xml:space="preserve">
     <value>Objects</value>
   </data>
+  <data name="Dialog_Layers_ExportVisibleOnly" xml:space="preserve">
+    <value>Export and print only visible layers</value>
+  </data>
   <data name="Dialog_Layers_Button_SetActive" xml:space="preserve">
     <value>Set active</value>
   </data>
