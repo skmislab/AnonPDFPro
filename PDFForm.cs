@@ -2166,16 +2166,38 @@ namespace AnonPDF
             if (isVectorShapeCreationMode)
             {
                 pdfViewer.Cursor = Cursors.Cross;
+                if (!IsViewportPanningActive())
+                {
+                    this.Cursor = Cursors.Cross;
+                }
                 return;
             }
 
             if (isCommentCreationMode || IsRedactionSelectionModeEnabled())
             {
                 pdfViewer.Cursor = Cursors.IBeam;
+                if (!IsViewportPanningActive())
+                {
+                    this.Cursor = Cursors.IBeam;
+                }
                 return;
             }
 
             pdfViewer.Cursor = Cursors.Default;
+            if (!IsViewportPanningActive())
+            {
+                this.Cursor = Cursors.Default;
+            }
+        }
+
+        private void SyncPdfViewerCursorWithFormCursor()
+        {
+            if (pdfViewer == null)
+            {
+                return;
+            }
+
+            pdfViewer.Cursor = this.Cursor;
         }
 
         private void ApplyLayerConfiguration(IEnumerable<LayerDefinition> layers, string nextActiveLayerId, bool markProjectChanged)
@@ -22874,7 +22896,6 @@ namespace AnonPDF
             {
                 if (isCommentCreationMode || IsRedactionSelectionModeEnabled())
                 {
-                    this.Cursor = Cursors.Default;
                     UpdatePdfViewerToolCursor();
                 }
                 else
@@ -22908,6 +22929,8 @@ namespace AnonPDF
                     {
                         this.Cursor = Cursors.Default;
                     }
+
+                    SyncPdfViewerCursorWithFormCursor();
                 }
             }
 
