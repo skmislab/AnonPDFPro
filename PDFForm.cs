@@ -409,6 +409,7 @@ namespace AnonPDF
         private int rasterResizeStartRotation;
         private const int RasterRotateHandleSize = 14;
         private const int RasterRotateHandleOffset = 35;
+        private const int ObjectToolbarViewportPadding = 12;
         private const int RasterResizeHandleSize = 11;
         private const float ArrowLineSelectionTolerance = 8f;
         private const float DefaultArrowThickness = 3f;
@@ -12536,6 +12537,11 @@ namespace AnonPDF
             // Attach the ZoomPanel to Panel2
             mainAppSplitContainer.Panel2.Controls.Add(zoomPanel);
             zoomPanel.MouseDown += ZoomPanel_MouseDown;
+            zoomPanel.Scroll += (_, __) =>
+            {
+                pdfViewer?.Invalidate();
+                zoomPanel.Invalidate();
+            };
             zoomPanel.Visible = true;
 
             EnsureMaintenanceCountdownOverlay();
@@ -37878,6 +37884,68 @@ namespace AnonPDF
             vectorShapeForIcon = null;
         }
 
+        private int ResolveObjectToolbarTop(float minY, float maxY, int extraOffset = 0)
+        {
+            int preferredTop = (int)Math.Round(minY) - annotationsIconSize - annotationsIconPadding - extraOffset;
+
+            int visibleTop = ObjectToolbarViewportPadding;
+            int visibleBottom = Math.Max(ObjectToolbarViewportPadding, pdfViewer.ClientSize.Height - annotationsIconSize - ObjectToolbarViewportPadding);
+            ZoomPanel panel = GetZoomPanel();
+            if (panel != null)
+            {
+                visibleTop = panel.VerticalScroll.Value + ObjectToolbarViewportPadding;
+                visibleBottom = panel.VerticalScroll.Value + Math.Max(ObjectToolbarViewportPadding, panel.ClientSize.Height - annotationsIconSize - ObjectToolbarViewportPadding);
+            }
+
+            if (preferredTop >= visibleTop && preferredTop <= visibleBottom)
+            {
+                return preferredTop;
+            }
+
+            if (preferredTop < visibleTop)
+            {
+                return visibleTop;
+            }
+
+            if (preferredTop > visibleBottom)
+            {
+                return visibleBottom;
+            }
+
+            return Math.Max(visibleTop, Math.Min(visibleBottom, preferredTop));
+        }
+
+        private int ResolveObjectToolbarRight(float maxX, int totalWidth)
+        {
+            int preferredRight = (int)Math.Round(maxX);
+            int visibleLeft = ObjectToolbarViewportPadding;
+            int visibleRight = Math.Max(ObjectToolbarViewportPadding, pdfViewer.ClientSize.Width - ObjectToolbarViewportPadding);
+            ZoomPanel panel = GetZoomPanel();
+            if (panel != null)
+            {
+                visibleLeft = panel.HorizontalScroll.Value + ObjectToolbarViewportPadding;
+                visibleRight = panel.HorizontalScroll.Value + Math.Max(ObjectToolbarViewportPadding, panel.ClientSize.Width - ObjectToolbarViewportPadding);
+            }
+
+            int right = preferredRight;
+            if (right > visibleRight)
+            {
+                right = visibleRight;
+            }
+
+            if (right - totalWidth < visibleLeft)
+            {
+                right = visibleLeft + totalWidth;
+            }
+
+            if (right > visibleRight)
+            {
+                right = visibleRight;
+            }
+
+            return right;
+        }
+
         private bool TryGetRasterIconRects(RasterObject rasterObject, out Dictionary<RasterIconType, Rectangle> iconRects)
         {
             iconRects = null;
@@ -37910,24 +37978,9 @@ namespace AnonPDF
 
             const int buttonCount = 6;
             int totalWidth = (buttonCount * annotationsIconSize) + ((buttonCount - 1) * annotationsIconPadding);
-            int top = (int)Math.Round(minY) - annotationsIconSize - annotationsIconPadding;
-            int right = (int)Math.Round(maxX);
-
-            if (top < 2)
-            {
-                top = 2;
-            }
-
-            int panelRight = Math.Max(2, pdfViewer.ClientSize.Width - 2);
-            if (right > panelRight)
-            {
-                right = panelRight;
-            }
-
-            if (right - totalWidth < 2)
-            {
-                right = 2 + totalWidth;
-            }
+            float maxY = corners.Max(p => p.Y);
+            int top = ResolveObjectToolbarTop(minY, maxY);
+            int right = ResolveObjectToolbarRight(maxX, totalWidth);
 
             Rectangle BuildRectFromRight(int indexFromRight)
             {
@@ -37969,27 +38022,8 @@ namespace AnonPDF
 
             const int buttonCount = 5;
             int totalWidth = (buttonCount * annotationsIconSize) + ((buttonCount - 1) * annotationsIconPadding);
-            int top = (int)Math.Round(minY) - annotationsIconSize - annotationsIconPadding - 8;
-            int right = (int)Math.Round(maxX);
-            int panelRight = Math.Max(2, pdfViewer.ClientSize.Width - 2);
-            int panelBottom = Math.Max(2, pdfViewer.ClientSize.Height - annotationsIconSize - 2);
-            if (top < 2)
-            {
-                top = (int)Math.Round(maxY) + annotationsIconPadding;
-            }
-            if (top > panelBottom)
-            {
-                top = panelBottom;
-            }
-
-            if (right > panelRight)
-            {
-                right = panelRight;
-            }
-            if (right - totalWidth < 2)
-            {
-                right = 2 + totalWidth;
-            }
+            int top = ResolveObjectToolbarTop(minY, maxY, extraOffset: 8);
+            int right = ResolveObjectToolbarRight(maxX, totalWidth);
 
             Rectangle BuildRectFromRight(int indexFromRight)
             {
@@ -38036,27 +38070,8 @@ namespace AnonPDF
 
             const int buttonCount = 5;
             int totalWidth = (buttonCount * annotationsIconSize) + ((buttonCount - 1) * annotationsIconPadding);
-            int top = (int)Math.Round(minY) - annotationsIconSize - annotationsIconPadding;
-            int right = (int)Math.Round(maxX);
-            int panelRight = Math.Max(2, pdfViewer.ClientSize.Width - 2);
-            int panelBottom = Math.Max(2, pdfViewer.ClientSize.Height - annotationsIconSize - 2);
-            if (top < 2)
-            {
-                top = (int)Math.Round(maxY) + annotationsIconPadding;
-            }
-            if (top > panelBottom)
-            {
-                top = panelBottom;
-            }
-
-            if (right > panelRight)
-            {
-                right = panelRight;
-            }
-            if (right - totalWidth < 2)
-            {
-                right = 2 + totalWidth;
-            }
+            int top = ResolveObjectToolbarTop(minY, maxY);
+            int right = ResolveObjectToolbarRight(maxX, totalWidth);
 
             Rectangle BuildRectFromRight(int indexFromRight)
             {
@@ -38899,29 +38914,34 @@ namespace AnonPDF
                 return false;
             }
 
+            int top = ResolveObjectToolbarTop(annotationRect.Top, annotationRect.Bottom);
+            const int buttonCount = 5;
+            int totalWidth = (buttonCount * annotationsIconSize) + ((buttonCount - 1) * annotationsIconPadding);
+            int right = ResolveObjectToolbarRight(annotationRect.Right, totalWidth);
+
             Rectangle deleteIconRect = new Rectangle(
-                annotationRect.Right - annotationsIconSize,
-                annotationRect.Top - annotationsIconSize - annotationsIconPadding,
+                right - annotationsIconSize,
+                top,
                 annotationsIconSize,
                 annotationsIconSize);
             Rectangle orderIconRect = new Rectangle(
-                annotationRect.Right - (annotationsIconSize * 2) - annotationsIconPadding,
-                annotationRect.Top - annotationsIconSize - annotationsIconPadding,
+                right - (annotationsIconSize * 2) - annotationsIconPadding,
+                top,
                 annotationsIconSize,
                 annotationsIconSize);
             Rectangle duplicateIconRect = new Rectangle(
-                annotationRect.Right - (annotationsIconSize * 3) - (2 * annotationsIconPadding),
-                annotationRect.Top - annotationsIconSize - annotationsIconPadding,
+                right - (annotationsIconSize * 3) - (2 * annotationsIconPadding),
+                top,
                 annotationsIconSize,
                 annotationsIconSize);
             Rectangle lockIconRect = new Rectangle(
-                annotationRect.Right - (annotationsIconSize * 4) - (3 * annotationsIconPadding),
-                annotationRect.Top - annotationsIconSize - annotationsIconPadding,
+                right - (annotationsIconSize * 4) - (3 * annotationsIconPadding),
+                top,
                 annotationsIconSize,
                 annotationsIconSize);
             Rectangle editIconRect = new Rectangle(
-                annotationRect.Right - (annotationsIconSize * 5) - (4 * annotationsIconPadding),
-                annotationRect.Top - annotationsIconSize - annotationsIconPadding,
+                right - (annotationsIconSize * 5) - (4 * annotationsIconPadding),
+                top,
                 annotationsIconSize,
                 annotationsIconSize);
 
