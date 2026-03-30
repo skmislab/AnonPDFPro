@@ -25927,6 +25927,10 @@ namespace AnonPDF
                 {
                     if (hasFill && fillPattern != VectorFillPatternKind.Solid && hasPatternColor)
                     {
+                        System.Drawing.Color fillColor = System.Drawing.Color.FromArgb(vectorShape.FillColorArgb);
+                        System.Drawing.Color patternColor = System.Drawing.Color.FromArgb(vectorShape.FillPatternColorArgb);
+                        DrawVectorHatchFillToPdf(pdfDoc, pdfCanvas, pdfPoints, fillColor, patternColor, fillOpacity, fillPattern);
+
                         if (hasStroke)
                         {
                             pdfCanvas.MoveTo(pdfPoints[0].X, pdfPoints[0].Y);
@@ -25936,10 +25940,6 @@ namespace AnonPDF
                             }
                             pdfCanvas.ClosePathStroke();
                         }
-
-                        System.Drawing.Color fillColor = System.Drawing.Color.FromArgb(vectorShape.FillColorArgb);
-                        System.Drawing.Color patternColor = System.Drawing.Color.FromArgb(vectorShape.FillPatternColorArgb);
-                        DrawVectorHatchFillToPdf(pdfCanvas, pdfPoints, fillColor, patternColor, fillOpacity, fillPattern);
                     }
                     else if (hasFill && hasStroke)
                     {
@@ -26152,6 +26152,7 @@ namespace AnonPDF
         }
 
         private void DrawVectorHatchFillToPdf(
+            iText.Kernel.Pdf.PdfDocument pdfDocument,
             iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
             IList<PointF> polygon,
             System.Drawing.Color fillColor,
@@ -26170,13 +26171,12 @@ namespace AnonPDF
             float maxY = polygon.Max(p => p.Y);
             float width = maxX - minX;
             float height = maxY - minY;
-            if (width <= 0.01f || height <= 0.01f)
+            if (pdfDocument == null || width <= 0.01f || height <= 0.01f)
             {
                 return;
             }
 
-            float spacing = 6f;
-            float margin = Math.Max(width, height) + spacing;
+            float spacing = 5f;
 
             pdfCanvas.SaveState();
             pdfCanvas.MoveTo(polygon[0].X, polygon[0].Y);
@@ -26191,55 +26191,66 @@ namespace AnonPDF
             var backgroundFillState = new PdfExtGState().SetFillOpacity(fillOpacity);
             pdfCanvas.SetExtGState(backgroundFillState);
             pdfCanvas.SetFillColor(new DeviceRgb(fillColor.R, fillColor.G, fillColor.B));
-            pdfCanvas.Rectangle(minX - margin, minY - margin, width + (2f * margin), height + (2f * margin));
+            pdfCanvas.Rectangle(minX, minY, width, height);
             pdfCanvas.Fill();
 
+            var pattern = new iText.Kernel.Pdf.Colorspace.PdfPattern.Tiling(spacing, spacing, true);
+            pattern.SetTilingType((int)iText.Kernel.Pdf.Colorspace.PdfPattern.Tiling.TilingType.CONSTANT_SPACING_AND_FASTER_TILING);
+            var patternCanvas = new iText.Kernel.Pdf.Canvas.PdfPatternCanvas(pattern, pdfDocument);
+            patternCanvas.SaveState();
             if (fillPattern == VectorFillPatternKind.Dot)
             {
                 var fillState = new PdfExtGState().SetFillOpacity(fillOpacity);
-                pdfCanvas.SetExtGState(fillState);
-                pdfCanvas.SetFillColor(new DeviceRgb(patternColor.R, patternColor.G, patternColor.B));
-                float radius = 0.65f;
-                for (float y = minY - margin; y <= maxY + margin; y += spacing)
+                patternCanvas.SetExtGState(fillState);
+                patternCanvas.SetFillColor(new DeviceRgb(patternColor.R, patternColor.G, patternColor.B));
+                float radius = 0.55f;
+                float mid = spacing / 2f;
+                // Match the denser dotted preview more closely: dots on tile corners and edge midpoints.
+                PointF[] dotCenters =
                 {
-                    for (float x = minX - margin; x <= maxX + margin; x += spacing)
-                    {
-                        pdfCanvas.Circle(x, y, radius);
-                    }
-                }
-                pdfCanvas.Fill();
-                pdfCanvas.RestoreState();
-                return;
-            }
-
-            var strokeState = new PdfExtGState().SetStrokeOpacity(fillOpacity);
-            pdfCanvas.SetExtGState(strokeState);
-            pdfCanvas.SetStrokeColor(new DeviceRgb(patternColor.R, patternColor.G, patternColor.B));
-            pdfCanvas.SetLineWidth(0.7f);
-
-            if (fillPattern == VectorFillPatternKind.Diagonal)
-            {
-                for (float x = minX - margin; x <= maxX + margin; x += spacing)
+                    new PointF(0f, 0f),
+                    new PointF(mid, 0f),
+                    new PointF(spacing, 0f),
+                    new PointF(0f, mid),
+                    new PointF(spacing, mid),
+                    new PointF(0f, spacing),
+                    new PointF(mid, spacing),
+                    new PointF(spacing, spacing)
+                };
+                foreach (PointF dotCenter in dotCenters)
                 {
-                    pdfCanvas.MoveTo(x, minY - margin);
-                    pdfCanvas.LineTo(x + height + (margin * 2f), maxY + margin);
+                    patternCanvas.Circle(dotCenter.X, dotCenter.Y, radius);
                 }
+                patternCanvas.Fill();
             }
             else
             {
-                for (float y = minY - margin; y <= maxY + margin; y += spacing)
-                {
-                    pdfCanvas.MoveTo(minX - margin, y);
-                    pdfCanvas.LineTo(maxX + margin, y);
-                }
-                for (float x = minX - margin; x <= maxX + margin; x += spacing)
-                {
-                    pdfCanvas.MoveTo(x, minY - margin);
-                    pdfCanvas.LineTo(x, maxY + margin);
-                }
-            }
+                var strokeState = new PdfExtGState().SetStrokeOpacity(fillOpacity);
+                patternCanvas.SetExtGState(strokeState);
+                patternCanvas.SetStrokeColor(new DeviceRgb(patternColor.R, patternColor.G, patternColor.B));
+                patternCanvas.SetLineWidth(0.7f);
 
-            pdfCanvas.Stroke();
+                if (fillPattern == VectorFillPatternKind.Diagonal)
+                {
+                    patternCanvas.MoveTo(0f, 0f);
+                    patternCanvas.LineTo(spacing, spacing);
+                }
+                else
+                {
+                    float mid = spacing / 2f;
+                    patternCanvas.MoveTo(0f, mid);
+                    patternCanvas.LineTo(spacing, mid);
+                    patternCanvas.MoveTo(mid, 0f);
+                    patternCanvas.LineTo(mid, spacing);
+                }
+
+                patternCanvas.Stroke();
+            }
+            patternCanvas.RestoreState();
+
+            pdfCanvas.SetFillColor(new PatternColor(pattern));
+            pdfCanvas.Rectangle(minX, minY, width, height);
+            pdfCanvas.Fill();
             pdfCanvas.RestoreState();
         }
 
@@ -27315,8 +27326,8 @@ namespace AnonPDF
                                     {
                                         System.Drawing.Color patternBase = System.Drawing.Color.FromArgb(vectorShape.FillPatternColorArgb);
                                         System.Drawing.Color patternColor = System.Drawing.Color.FromArgb(alpha, patternBase.R, patternBase.G, patternBase.B);
-                                        using (var hatchBrush = new HatchBrush(
-                                            ToDrawingHatchStyle(fillPattern),
+                                        using (var hatchBrush = CreateVectorFillPatternBrushForPreview(
+                                            fillPattern,
                                             patternColor,
                                             System.Drawing.Color.FromArgb(0, fillBase.R, fillBase.G, fillBase.B)))
                                         {
@@ -34279,6 +34290,50 @@ namespace AnonPDF
                 default:
                     return HatchStyle.SolidDiamond;
             }
+        }
+
+        private static Brush CreateVectorFillPatternBrushForPreview(
+            VectorFillPatternKind fillPattern,
+            System.Drawing.Color patternColor,
+            System.Drawing.Color transparentFillColor)
+        {
+            if (fillPattern == VectorFillPatternKind.Dot)
+            {
+                const int tileSize = 10;
+                const float radius = 0.55f;
+                var bitmap = new Bitmap(tileSize, tileSize, PixelFormat.Format32bppArgb);
+                using (Graphics g = Graphics.FromImage(bitmap))
+                using (var dotBrush = new SolidBrush(patternColor))
+                {
+                    g.Clear(System.Drawing.Color.Transparent);
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                    float mid = tileSize / 2f;
+                    PointF[] dotCenters =
+                    {
+                        new PointF(0f, 0f),
+                        new PointF(mid, 0f),
+                        new PointF(tileSize - 1f, 0f),
+                        new PointF(0f, mid),
+                        new PointF(tileSize - 1f, mid),
+                        new PointF(0f, tileSize - 1f),
+                        new PointF(mid, tileSize - 1f),
+                        new PointF(tileSize - 1f, tileSize - 1f)
+                    };
+
+                    foreach (PointF center in dotCenters)
+                    {
+                        g.FillEllipse(dotBrush, center.X - radius, center.Y - radius, radius * 2f, radius * 2f);
+                    }
+                }
+
+                return new TextureBrush(bitmap, WrapMode.Tile);
+            }
+
+            return new HatchBrush(
+                ToDrawingHatchStyle(fillPattern),
+                patternColor,
+                transparentFillColor);
         }
 
         private static bool HasVisibleVectorColor(int argb)
