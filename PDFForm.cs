@@ -147,6 +147,7 @@ namespace AnonPDF
         private TextAnnotation annotationToRotate = null;
         private TextAnnotation annotationToAdjustLeader = null;
         private TextAnnotation selectedTextAnnotation = null;
+        private CommentAnnotation selectedCommentAnnotation = null;
         private int textRotationStartValue;
         private float textRotationStartAngle;
         private PointF textRotationStartCenterDoc = PointF.Empty;
@@ -3608,6 +3609,11 @@ namespace AnonPDF
                 selectedVectorShape = null;
             }
 
+            if (selectedCommentAnnotation != null && !IsLayerVisible(selectedCommentAnnotation.LayerId))
+            {
+                selectedCommentAnnotation = null;
+            }
+
             if ((annotationToRotate != null && !IsLayerVisible(annotationToRotate.LayerId)) ||
                 (annotationToScale != null && !IsLayerVisible(annotationToScale.LayerId)) ||
                 (annotationToAdjustLeader != null && !IsLayerVisible(annotationToAdjustLeader.LayerId)))
@@ -5513,6 +5519,16 @@ namespace AnonPDF
             }
         }
 
+        private IEnumerable<string> EnumerateLayerIdsInVisualOrder()
+        {
+            EnsureSystemLayers();
+            return (documentLayers ?? new List<LayerDefinition>())
+                .Where(layer => layer != null)
+                .Select(layer => NormalizeLayerIdValue(layer.Id))
+                .Where(layerId => !string.IsNullOrWhiteSpace(layerId))
+                .Reverse();
+        }
+
         private IEnumerable<object> GetOrderedGraphicObjectsForExport()
         {
             foreach (var entry in EnumerateObjectLayerEntriesInVisualOrder(entry =>
@@ -5696,7 +5712,16 @@ namespace AnonPDF
             int selectedCount = selectedObjects.Count;
             if (selectedCount <= 0)
             {
-                return null;
+                if (selectedCommentAnnotation == null ||
+                    selectedCommentAnnotation.PageNumber != currentPage ||
+                    !IsLayerVisible(selectedCommentAnnotation.LayerId))
+                {
+                    return null;
+                }
+
+                string commentLayerInfoText = GetSelectionInfoLayerText(new[] { GetSelectionInfoLayerId(selectedCommentAnnotation) });
+                string commentTypeText = GetSelectionInfoObjectTypeText(selectedCommentAnnotation);
+                return AppendSelectionInfoLayerText(commentLayerInfoText, commentTypeText);
             }
 
             List<string> selectedLayerIds = GetSelectionInfoLayerIds(selectedObjects);
@@ -5798,6 +5823,9 @@ namespace AnonPDF
                             return "Image";
                     }
 
+                case CommentAnnotation _:
+                    return LocalizedText("Comment_DefaultText");
+
                 case ArrowObject _:
                     switch (language)
                     {
@@ -5834,6 +5862,8 @@ namespace AnonPDF
                     return NormalizeLayerIdValue(textAnnotation.LayerId);
                 case RasterObject rasterObject:
                     return NormalizeLayerIdValue(rasterObject.LayerId);
+                case CommentAnnotation commentAnnotation:
+                    return NormalizeLayerIdValue(commentAnnotation.LayerId);
                 case ArrowObject arrowObject:
                     return NormalizeLayerIdValue(arrowObject.LayerId);
                 case VectorShapeObject vectorShape:
@@ -21907,9 +21937,15 @@ namespace AnonPDF
                 }
                 float docX = e.X / scaleFactor;
                 float docY = e.Y / scaleFactor;
+                bool commentHit = TryGetCommentAtPoint(e.Location, out CommentAnnotation hitComment, out RectangleF hitNoteRect);
+
+                if (!commentHit)
+                {
+                    selectedCommentAnnotation = null;
+                }
 
                 if (!isCommentCreationMode &&
-                    TryGetCommentAtPoint(e.Location, out CommentAnnotation hitComment, out RectangleF hitNoteRect) &&
+                    commentHit &&
                     hitComment != null &&
                     !hitNoteRect.IsEmpty &&
                     hitNoteRect.Contains(docX, docY))
@@ -21939,6 +21975,8 @@ namespace AnonPDF
                     ClearVectorIconClickState();
                     ClearGroupSelection();
                     ResetGroupMoveState();
+                    selectedCommentAnnotation = hitComment;
+                    UpdateObjectSelectionInfoLabel();
 
                     if (IsCommentAnnotationEffectivelyLocked(hitComment))
                     {
@@ -21972,6 +22010,31 @@ namespace AnonPDF
                     return;
                 }
 
+                if (!isCommentCreationMode && commentHit && hitComment != null)
+                {
+                    DisableRedactionSelectionMode();
+                    isDrawing = false;
+                    isMoving = false;
+                    annotationToMove = null;
+                    textMoveMouseOffset = PointF.Empty;
+                    selectedTextAnnotation = null;
+                    selectedRasterObject = null;
+                    selectedArrowObject = null;
+                    selectedVectorShape = null;
+                    ResetRasterInteractionState();
+                    ResetArrowInteractionState();
+                    ResetVectorInteractionState();
+                    ClearRasterIconClickState();
+                    ClearArrowIconClickState();
+                    ClearVectorIconClickState();
+                    ClearGroupSelection();
+                    ResetGroupMoveState();
+                    selectedCommentAnnotation = hitComment;
+                    UpdateObjectSelectionInfoLabel();
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
                 if (isCommentCreationMode)
                 {
                     BeginUndoCapture("Add comment");
@@ -21982,6 +22045,7 @@ namespace AnonPDF
                     selectedRasterObject = null;
                     selectedArrowObject = null;
                     selectedVectorShape = null;
+                    selectedCommentAnnotation = null;
                     ResetRasterInteractionState();
                     ResetArrowInteractionState();
                     ResetVectorInteractionState();
@@ -23751,9 +23815,18 @@ namespace AnonPDF
                 return new List<CommentAnnotation>();
             }
 
+            var layerOrderLookup = EnumerateLayerIdsInVisualOrder()
+                .Select((layerId, index) => new { layerId, index })
+                .ToDictionary(item => item.layerId, item => item.index, StringComparer.OrdinalIgnoreCase);
+
             return commentAnnotations
                 .Where(c => c != null && c.PageNumber == pageNumber && IsLayerVisible(c.LayerId))
-                .OrderBy(c => c.Bounds.Top)
+                .OrderBy(c =>
+                {
+                    string layerId = NormalizeLayerIdValue(c.LayerId);
+                    return layerOrderLookup.TryGetValue(layerId, out int index) ? index : int.MaxValue;
+                })
+                .ThenBy(c => c.Bounds.Top)
                 .ThenBy(c => c.Bounds.Left)
                 .ToList();
         }
@@ -26196,6 +26269,13 @@ namespace AnonPDF
 
             var pattern = new iText.Kernel.Pdf.Colorspace.PdfPattern.Tiling(spacing, spacing, true);
             pattern.SetTilingType((int)iText.Kernel.Pdf.Colorspace.PdfPattern.Tiling.TilingType.CONSTANT_SPACING_AND_FASTER_TILING);
+            if (fillPattern == VectorFillPatternKind.Diagonal)
+            {
+                float bboxPad = 0.5f;
+                pattern.GetPdfObject().Put(
+                    iText.Kernel.Pdf.PdfName.BBox,
+                    new iText.Kernel.Pdf.PdfArray(new float[] { -bboxPad, -bboxPad, spacing + bboxPad, spacing + bboxPad }));
+            }
             var patternCanvas = new iText.Kernel.Pdf.Canvas.PdfPatternCanvas(pattern, pdfDocument);
             patternCanvas.SaveState();
             if (fillPattern == VectorFillPatternKind.Dot)
@@ -26229,6 +26309,7 @@ namespace AnonPDF
                 patternCanvas.SetExtGState(strokeState);
                 patternCanvas.SetStrokeColor(new DeviceRgb(patternColor.R, patternColor.G, patternColor.B));
                 patternCanvas.SetLineWidth(0.7f);
+                patternCanvas.SetLineCapStyle(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.LineCapStyle.BUTT);
 
                 if (fillPattern == VectorFillPatternKind.Diagonal)
                 {
@@ -28009,7 +28090,7 @@ namespace AnonPDF
             }
         }
 
-        private void DrawCommentAnnotationsOnPreview(Graphics graphics)
+        private void DrawCommentAnnotationsOnPreview(Graphics graphics, string layerIdFilter = null)
         {
             if (graphics == null || commentAnnotations == null || commentAnnotations.Count == 0 || currentPage <= 0)
             {
@@ -28017,7 +28098,10 @@ namespace AnonPDF
             }
 
             List<CommentAnnotation> comments = commentAnnotations
-                .Where(c => c != null && c.PageNumber == currentPage && IsLayerVisible(c.LayerId))
+                .Where(c => c != null &&
+                            c.PageNumber == currentPage &&
+                            IsLayerVisible(c.LayerId) &&
+                            (string.IsNullOrWhiteSpace(layerIdFilter) || string.Equals(NormalizeLayerIdValue(c.LayerId), layerIdFilter, StringComparison.OrdinalIgnoreCase)))
                 .OrderBy(c => c.Bounds.Top)
                 .ThenBy(c => c.Bounds.Left)
                 .ToList();
@@ -28606,11 +28690,6 @@ namespace AnonPDF
 
         private void OnPaint(object sender, PaintEventArgs e)
         {
-            if (!delayCommentAndSelectionOverlayUntilPreviewReady)
-            {
-                DrawCommentAnnotationsOnPreview(e.Graphics);
-            }
-
             Dictionary<string, int> previewBasisNumberMap = BuildLegalBasisFootnoteNumberMap(
                 redactionBlocks.Where(block => block != null && block.PageNumber == currentPage && IsLayerVisible(block.LayerId)));
 
@@ -28912,23 +28991,32 @@ namespace AnonPDF
                 }
             }
 
-            foreach (object drawableObject in GetOrderedObjectsForCurrentPage())
+            if (!delayCommentAndSelectionOverlayUntilPreviewReady)
             {
-                if (drawableObject is RasterObject rasterObject)
+                foreach (string layerId in EnumerateLayerIdsInVisualOrder())
                 {
-                    DrawRasterObjectOnPreview(e.Graphics, rasterObject, multiSelectionActive);
-                }
-                else if (drawableObject is ArrowObject arrowObject)
-                {
-                    DrawArrowObjectOnPreview(e.Graphics, arrowObject, multiSelectionActive);
-                }
-                else if (drawableObject is VectorShapeObject vectorShapeObject)
-                {
-                    DrawVectorShapeOnPreview(e.Graphics, vectorShapeObject, multiSelectionActive);
-                }
-                else if (drawableObject is TextAnnotation annotation)
-                {
-                    DrawTextAnnotationOnPreview(e.Graphics, annotation, multiSelectionActive);
+                    foreach (object drawableObject in GetOrderedObjectsForPage(currentPage, candidateLayerId =>
+                        string.Equals(NormalizeLayerIdValue(candidateLayerId), layerId, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        if (drawableObject is RasterObject rasterObject)
+                        {
+                            DrawRasterObjectOnPreview(e.Graphics, rasterObject, multiSelectionActive);
+                        }
+                        else if (drawableObject is ArrowObject arrowObject)
+                        {
+                            DrawArrowObjectOnPreview(e.Graphics, arrowObject, multiSelectionActive);
+                        }
+                        else if (drawableObject is VectorShapeObject vectorShapeObject)
+                        {
+                            DrawVectorShapeOnPreview(e.Graphics, vectorShapeObject, multiSelectionActive);
+                        }
+                        else if (drawableObject is TextAnnotation annotation)
+                        {
+                            DrawTextAnnotationOnPreview(e.Graphics, annotation, multiSelectionActive);
+                        }
+                    }
+
+                    DrawCommentAnnotationsOnPreview(e.Graphics, layerId);
                 }
             }
             DrawVectorShapeDraftOnPreview(e.Graphics);
@@ -30334,11 +30422,11 @@ namespace AnonPDF
             if (pageNumber >= 1)
             {
                 DrawThumbnailRedactionOverlays(e.Graphics, pageNumber, contentRect);
-                DrawThumbnailCommentOverlays(e.Graphics, pageNumber, contentRect);
                 DrawThumbnailTextAnnotationOverlays(e.Graphics, pageNumber, contentRect);
                 DrawThumbnailRasterOverlays(e.Graphics, pageNumber, contentRect);
                 DrawThumbnailArrowOverlays(e.Graphics, pageNumber, contentRect);
                 DrawThumbnailVectorShapeOverlays(e.Graphics, pageNumber, contentRect);
+                DrawThumbnailCommentOverlays(e.Graphics, pageNumber, contentRect);
                 DrawThumbnailDeletionOverlay(e.Graphics, pageNumber, contentRect);
             }
 
@@ -34299,8 +34387,8 @@ namespace AnonPDF
         {
             if (fillPattern == VectorFillPatternKind.Dot)
             {
-                const int tileSize = 10;
-                const float radius = 0.55f;
+                const int tileSize = 5;
+                const float radius = 0.4f;
                 var bitmap = new Bitmap(tileSize, tileSize, PixelFormat.Format32bppArgb);
                 using (Graphics g = Graphics.FromImage(bitmap))
                 using (var dotBrush = new SolidBrush(patternColor))
@@ -34312,12 +34400,8 @@ namespace AnonPDF
                     PointF[] dotCenters =
                     {
                         new PointF(0f, 0f),
-                        new PointF(mid, 0f),
                         new PointF(tileSize - 1f, 0f),
-                        new PointF(0f, mid),
-                        new PointF(tileSize - 1f, mid),
                         new PointF(0f, tileSize - 1f),
-                        new PointF(mid, tileSize - 1f),
                         new PointF(tileSize - 1f, tileSize - 1f)
                     };
 
