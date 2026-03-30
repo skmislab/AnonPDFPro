@@ -34325,9 +34325,7 @@ namespace AnonPDF
 
         private static bool ShapeTypeSupportsRotationHandle(VectorShapeType type)
         {
-            return type != VectorShapeType.Rectangle
-                   && type != VectorShapeType.Ellipse
-                   && type != VectorShapeType.Triangle;
+            return type != VectorShapeType.Ellipse;
         }
 
         private static bool IsTwoPointConstrainedShape(VectorShapeType type)
@@ -34634,6 +34632,36 @@ namespace AnonPDF
                     result.AddRange(points);
                     return result;
             }
+        }
+
+        private static bool ShouldConvertVectorShapeToRegionForRotation(VectorShapeType shapeType)
+        {
+            return shapeType == VectorShapeType.Rectangle || shapeType == VectorShapeType.Triangle;
+        }
+
+        private static bool ConvertVectorShapeToRegionForRotation(VectorShapeObject vectorShape)
+        {
+            if (vectorShape == null)
+            {
+                return false;
+            }
+
+            VectorShapeType shapeType = ParseVectorShapeType(vectorShape.ShapeType);
+            if (!ShouldConvertVectorShapeToRegionForRotation(shapeType))
+            {
+                return false;
+            }
+
+            List<PointF> renderPoints = BuildVectorShapeRenderPoints(shapeType, vectorShape.Points);
+            if (renderPoints.Count < 3)
+            {
+                return false;
+            }
+
+            vectorShape.ShapeType = VectorShapeType.Region.ToString();
+            vectorShape.Points = renderPoints;
+            vectorShape.UpdatedAtUtc = DateTime.UtcNow;
+            return true;
         }
 
         private static bool SupportsRasterClip(VectorShapeObject vectorShape)
@@ -36582,20 +36610,7 @@ namespace AnonPDF
             if (TryGetVectorRotationHandleRect(selectedVectorShape, out RectangleF handleRect, out _) && handleRect.Contains(location))
             {
                 BeginUndoCapture("Rotate shape");
-                vectorShapeToMove = null;
-                vectorShapeToAdjust = null;
-                vectorShapeToRotate = selectedVectorShape;
-                isMovingVectorShape = false;
-                isAdjustingVectorHandle = false;
-                isRotatingVectorShape = true;
-                vectorHandlePointIndex = -1;
-                vectorMouseActionInProgress = true;
-                vectorInteractionChanged = false;
-                vectorRotateInitialPoints = (selectedVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
-                vectorRotateCenterDoc = GetVectorShapeRotationCenterDoc(selectedVectorShape);
-                vectorRotationStartAngle = GetAngleDegrees(new PointF(vectorRotateCenterDoc.X * scaleFactor, vectorRotateCenterDoc.Y * scaleFactor), location);
-                this.Cursor = Cursors.Hand;
-                return true;
+                return BeginVectorShapeRotation(selectedVectorShape, location);
             }
 
             return false;
@@ -36646,6 +36661,34 @@ namespace AnonPDF
             }
 
             return false;
+        }
+
+        private bool BeginVectorShapeRotation(VectorShapeObject vectorShape, Point location)
+        {
+            if (vectorShape == null)
+            {
+                return false;
+            }
+
+            ConvertVectorShapeToRegionForRotation(vectorShape);
+            NormalizeVectorShape(vectorShape);
+
+            vectorShapeToMove = null;
+            vectorShapeToAdjust = null;
+            vectorShapeToScale = null;
+            vectorShapeToRotate = vectorShape;
+            isMovingVectorShape = false;
+            isAdjustingVectorHandle = false;
+            isScalingVectorShape = false;
+            isRotatingVectorShape = true;
+            vectorHandlePointIndex = -1;
+            vectorMouseActionInProgress = true;
+            vectorInteractionChanged = false;
+            vectorRotateInitialPoints = (vectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
+            vectorRotateCenterDoc = GetVectorShapeRotationCenterDoc(vectorShape);
+            vectorRotationStartAngle = GetAngleDegrees(new PointF(vectorRotateCenterDoc.X * scaleFactor, vectorRotateCenterDoc.Y * scaleFactor), location);
+            this.Cursor = Cursors.Hand;
+            return true;
         }
 
         private bool TryHandleSelectedRasterMouseDown(Point location)
@@ -36886,20 +36929,7 @@ namespace AnonPDF
                 if (TryGetVectorRotationHandleRect(selectedVectorShape, out RectangleF handleRect, out _) && handleRect.Contains(location))
                 {
                     BeginUndoCapture("Rotate shape");
-                    vectorShapeToMove = null;
-                    vectorShapeToAdjust = null;
-                    vectorShapeToRotate = selectedVectorShape;
-                    isMovingVectorShape = false;
-                    isAdjustingVectorHandle = false;
-                    isRotatingVectorShape = true;
-                    vectorHandlePointIndex = -1;
-                    vectorMouseActionInProgress = true;
-                    vectorInteractionChanged = false;
-                    vectorRotateInitialPoints = (selectedVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
-                    vectorRotateCenterDoc = GetVectorShapeRotationCenterDoc(selectedVectorShape);
-                    vectorRotationStartAngle = GetAngleDegrees(new PointF(vectorRotateCenterDoc.X * scaleFactor, vectorRotateCenterDoc.Y * scaleFactor), location);
-                    this.Cursor = Cursors.Hand;
-                    return true;
+                    return BeginVectorShapeRotation(selectedVectorShape, location);
                 }
 
                 if (IsPointNearVectorShape(selectedVectorShape, location))
@@ -36981,20 +37011,7 @@ namespace AnonPDF
             if (TryGetVectorRotationHandleRect(hitVectorShape, out RectangleF hitRotationHandleRect, out _) && hitRotationHandleRect.Contains(location))
             {
                 BeginUndoCapture("Rotate shape");
-                vectorShapeToMove = null;
-                vectorShapeToAdjust = null;
-                vectorShapeToRotate = hitVectorShape;
-                isMovingVectorShape = false;
-                isAdjustingVectorHandle = false;
-                isRotatingVectorShape = true;
-                vectorHandlePointIndex = -1;
-                vectorMouseActionInProgress = true;
-                vectorInteractionChanged = false;
-                vectorRotateInitialPoints = (hitVectorShape.Points ?? new List<PointF>()).Select(p => p).ToList();
-                vectorRotateCenterDoc = GetVectorShapeRotationCenterDoc(hitVectorShape);
-                vectorRotationStartAngle = GetAngleDegrees(new PointF(vectorRotateCenterDoc.X * scaleFactor, vectorRotateCenterDoc.Y * scaleFactor), location);
-                this.Cursor = Cursors.Hand;
-                return true;
+                return BeginVectorShapeRotation(hitVectorShape, location);
             }
 
             vectorShapeToMove = hitVectorShape;
