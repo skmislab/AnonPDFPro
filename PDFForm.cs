@@ -28097,6 +28097,9 @@ namespace AnonPDF
                 return;
             }
 
+            Rectangle viewportRectPx = GetPdfViewerVisibleViewportRectanglePx();
+            bool clipToViewport = !viewportRectPx.IsEmpty;
+
             List<CommentAnnotation> comments = commentAnnotations
                 .Where(c => c != null &&
                             c.PageNumber == currentPage &&
@@ -28155,6 +28158,18 @@ namespace AnonPDF
                         noteRectDoc.Y * scaleFactor,
                         noteRectDoc.Width * scaleFactor,
                         noteRectDoc.Height * scaleFactor);
+
+                    if (clipToViewport)
+                    {
+                        Rectangle highlightRectRounded = Rectangle.Round(highlightRect);
+                        Rectangle noteRectRounded = Rectangle.Round(noteRect);
+                        bool highlightVisible = highlightRectRounded.IntersectsWith(viewportRectPx);
+                        bool noteVisible = noteRectRounded.IntersectsWith(viewportRectPx);
+                        if (!highlightVisible && !noteVisible)
+                        {
+                            continue;
+                        }
+                    }
 
                     System.Drawing.Color highlightColor = GetCommentHighlightColor(comment);
                     System.Drawing.Color textColor = GetCommentTextColor(comment);
@@ -28257,6 +28272,41 @@ namespace AnonPDF
 
                 graphics.DrawImageUnscaled(tintedBitmap, rect.Location);
             }
+        }
+
+        private Rectangle GetPdfViewerVisibleViewportRectanglePx()
+        {
+            if (pdfViewer == null || !pdfViewer.Visible || pdfViewer.Width <= 0 || pdfViewer.Height <= 0)
+            {
+                return Rectangle.Empty;
+            }
+
+            if (!(pdfViewer.Parent is ScrollableControl scrollHost))
+            {
+                return new Rectangle(Point.Empty, pdfViewer.ClientSize);
+            }
+
+            int scrollX = 0;
+            int scrollY = 0;
+            try
+            {
+                scrollX = scrollHost.HorizontalScroll?.Visible == true ? scrollHost.HorizontalScroll.Value : 0;
+                scrollY = scrollHost.VerticalScroll?.Visible == true ? scrollHost.VerticalScroll.Value : 0;
+            }
+            catch
+            {
+                scrollX = 0;
+                scrollY = 0;
+            }
+
+            int width = Math.Min(pdfViewer.Width - scrollX, scrollHost.ClientSize.Width);
+            int height = Math.Min(pdfViewer.Height - scrollY, scrollHost.ClientSize.Height);
+            if (width <= 0 || height <= 0)
+            {
+                return Rectangle.Empty;
+            }
+
+            return new Rectangle(scrollX, scrollY, width, height);
         }
 
         private void DrawVectorLineEndingsOnPreview(
