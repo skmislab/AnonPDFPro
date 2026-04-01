@@ -89,6 +89,7 @@ namespace AnonPDF
         private string userPassword = "";
         private string userNewPassword = null;
         private bool isPrintInProgress = false;
+        private bool isApplicationClosing = false;
 
         private const string SignatureModeOriginal = "original";
         private const string SignatureModeRemove = "remove";
@@ -106,6 +107,9 @@ namespace AnonPDF
         private const int RasterDownsamplePhotoThresholdDpi = 220;
         private const int RasterDownsampleTextTargetDpi = 200;
         private const int RasterDownsamplePhotoTargetDpi = 150;
+        private const int PrintRenderMaxPixelCount = 24000000;
+        private const int PrintRenderMaxDimension = 8192;
+        private const int SelectionOverlayInvalidatePaddingPx = 6;
         private const string ShapeIconFontFileName = "materialdesignicons-subset.ttf";
         private const string ShapeIconFontLegacyFileName = "materialdesignicons-webfont.ttf";
         private const int LayersHeaderActiveIconCodePoint = 0xF043E;
@@ -251,6 +255,8 @@ namespace AnonPDF
         private const float SnapGridStep = 5f;
         private static readonly System.Drawing.Color GroupSelectionColor = System.Drawing.Color.DeepSkyBlue;
         private bool pagesListTooltipShownThisSession;
+        private bool thumbnailsTooltipShownThisSession;
+        private bool layersTooltipShownThisSession;
         private bool syncPageSelectionFromThumbnail;
         private bool syncThumbnailSelectionFromPage;
         private readonly Timer thumbnailViewportTimer;
@@ -263,7 +269,16 @@ namespace AnonPDF
         private string thumbnailGenerationSourcePdfPath = string.Empty;
         private string thumbnailCacheDocumentDirectory = string.Empty;
         private readonly Dictionary<int, Size> thumbnailContentSizeByPage = new Dictionary<int, Size>();
+        private readonly Dictionary<int, Bitmap> thumbnailBaseBitmapByPage = new Dictionary<int, Bitmap>();
+        private readonly Dictionary<int, string> thumbnailImageKeyByPage = new Dictionary<int, string>();
+        private readonly Dictionary<int, Bitmap> thumbnailRedactionOverlayByPage = new Dictionary<int, Bitmap>();
+        private readonly Dictionary<int, Bitmap> thumbnailTextOverlayByPage = new Dictionary<int, Bitmap>();
+        private readonly Dictionary<int, Bitmap> thumbnailArrowOverlayByPage = new Dictionary<int, Bitmap>();
+        private readonly Dictionary<int, Bitmap> thumbnailVectorOverlayByPage = new Dictionary<int, Bitmap>();
+        private int thumbnailImageVersionCounter;
         private int busyCursorDepth;
+        private bool holdBusyCursorUntilPdfViewerImageAssigned;
+        private bool releaseBusyCursorOnNextPdfViewerPaint;
         private bool isMiddleMousePanning;
         private bool isRightMousePanning;
         private Point middlePanStartCursorScreen;
@@ -1306,6 +1321,7 @@ namespace AnonPDF
             formSplitContainer.SplitterMoved += FormSplitContainer_SplitterMoved;
             ApplyRightPanelDividerFromSettings();
             autoFootnotesEnabled = Properties.Settings.Default.AutoFootnotesEnabled;
+            snapToGridEnabled = Properties.Settings.Default.SnapToGridEnabled;
             combineObjectsWithScanPagesEnabled = Properties.Settings.Default.CombineObjectsWithScanPagesEnabled;
             reducePdfFileSizeEnabled = Properties.Settings.Default.ReducePdfFileSizeEnabled;
             addObjectsByPageRotationEnabled = true;
@@ -1574,6 +1590,42 @@ namespace AnonPDF
             }
 
             ApplyBusyCursorState(false);
+        }
+
+        private void KeepBusyCursorUntilPdfViewerPaint()
+        {
+            if (busyCursorDepth <= 0 ||
+                holdBusyCursorUntilPdfViewerImageAssigned ||
+                releaseBusyCursorOnNextPdfViewerPaint)
+            {
+                return;
+            }
+
+            holdBusyCursorUntilPdfViewerImageAssigned = true;
+            BeginBusyCursor();
+        }
+
+        private void CompleteDeferredBusyCursorAfterPdfViewerPaint()
+        {
+            if (!releaseBusyCursorOnNextPdfViewerPaint)
+            {
+                return;
+            }
+
+            releaseBusyCursorOnNextPdfViewerPaint = false;
+            EndBusyCursor();
+        }
+
+        private void CancelDeferredBusyCursorForPdfViewerPaint()
+        {
+            if (!holdBusyCursorUntilPdfViewerImageAssigned && !releaseBusyCursorOnNextPdfViewerPaint)
+            {
+                return;
+            }
+
+            holdBusyCursorUntilPdfViewerImageAssigned = false;
+            releaseBusyCursorOnNextPdfViewerPaint = false;
+            EndBusyCursor();
         }
 
         private void ApplyBusyCursorState(bool enabled)
@@ -1934,6 +1986,7 @@ namespace AnonPDF
             }
 
             snapToGridEnabled = snapToGridToolStripMenuItem.Checked;
+            SaveSnapToGridUserSetting(snapToGridEnabled);
         }
 
         private void AddObjectsByPageRotationToolStripMenuItem_CheckedChanged(object sender, EventArgs e)
@@ -2043,6 +2096,7 @@ namespace AnonPDF
             void DeleteObjects(string sourceLayerId)
             {
                 redactionBlocks.RemoveAll(block => block != null && string.Equals(NormalizeLayerIdValue(block.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
+                ClearThumbnailRedactionOverlays();
                 commentAnnotations.RemoveAll(comment => comment != null && string.Equals(NormalizeLayerIdValue(comment.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
                 textAnnotations.RemoveAll(annotation => annotation != null && string.Equals(NormalizeLayerIdValue(annotation.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
                 rasterObjects.RemoveAll(rasterObject => rasterObject != null && string.Equals(NormalizeLayerIdValue(rasterObject.LayerId), sourceLayerId, StringComparison.OrdinalIgnoreCase));
@@ -2171,28 +2225,16 @@ namespace AnonPDF
             if (isVectorShapeCreationMode)
             {
                 pdfViewer.Cursor = Cursors.Cross;
-                if (!IsViewportPanningActive())
-                {
-                    this.Cursor = Cursors.Cross;
-                }
                 return;
             }
 
             if (isCommentCreationMode || IsRedactionSelectionModeEnabled())
             {
                 pdfViewer.Cursor = Cursors.IBeam;
-                if (!IsViewportPanningActive())
-                {
-                    this.Cursor = Cursors.IBeam;
-                }
                 return;
             }
 
             pdfViewer.Cursor = Cursors.Default;
-            if (!IsViewportPanningActive())
-            {
-                this.Cursor = Cursors.Default;
-            }
         }
 
         private void SyncPdfViewerCursorWithFormCursor()
@@ -4554,6 +4596,19 @@ namespace AnonPDF
             catch (Exception ex)
             {
                 LogDebug("Save auto footnotes user setting failed: " + ex.Message);
+            }
+        }
+
+        private void SaveSnapToGridUserSetting(bool enabled)
+        {
+            try
+            {
+                Properties.Settings.Default.SnapToGridEnabled = enabled;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Save snap-to-grid user setting failed: " + ex.Message);
             }
         }
 
@@ -8726,18 +8781,45 @@ namespace AnonPDF
 
         private void ToolTip1_Popup(object sender, PopupEventArgs e)
         {
-            if (e?.AssociatedControl != pagesListView)
+            if (e?.AssociatedControl == null)
             {
                 return;
             }
 
-            if (pagesListTooltipShownThisSession)
+            if (e.AssociatedControl == pagesListView)
             {
-                e.Cancel = true;
+                if (pagesListTooltipShownThisSession)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                pagesListTooltipShownThisSession = true;
                 return;
             }
 
-            pagesListTooltipShownThisSession = true;
+            if (e.AssociatedControl == thumbnailsListView)
+            {
+                if (thumbnailsTooltipShownThisSession)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                thumbnailsTooltipShownThisSession = true;
+                return;
+            }
+
+            if (e.AssociatedControl == layersPanelView)
+            {
+                if (layersTooltipShownThisSession)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+
+                layersTooltipShownThisSession = true;
+            }
         }
 
         private void SortLanguageMenuItems()
@@ -8975,6 +9057,7 @@ namespace AnonPDF
             try { toolTip1.SetToolTip(buttonRedactText, Resources.Tooltip_SavePdf); } catch { }
             try { toolTip1.SetToolTip(pagesListView, Resources.Tooltip_PagesList); } catch { }
             try { toolTip1.SetToolTip(thumbnailsListView, LocalizedText("Tooltip_PageThumbnails")); } catch { }
+            try { toolTip1.SetToolTip(layersPanelView, LocalizedText("Tooltip_LayersView")); } catch { }
             try { quickStartMenuItem.ShortcutKeys = Keys.None; } catch { }
 
             // Filter combo: localized items and colors
@@ -11131,7 +11214,7 @@ namespace AnonPDF
 
         private void RebuildThumbnailsForFilter(IReadOnlyList<int> pageNumbers)
         {
-            if (thumbnailsListView == null || thumbnailsImageList == null)
+            if (!CanUseThumbnailPanel())
             {
                 return;
             }
@@ -12794,7 +12877,15 @@ namespace AnonPDF
             return Path.Combine(tutorialDir, "tutorial.json");
         }
 
-        private void UpdateItemTag(ListViewItem item, int pageNumber, bool hasSelections, bool hasSearchResults, bool markedForDeletion, bool hasObjects = false)
+        private void UpdateItemTag(
+            ListViewItem item,
+            int pageNumber,
+            bool hasSelections,
+            bool hasSearchResults,
+            bool markedForDeletion,
+            bool hasObjects = false,
+            bool invalidateStaticThumbnailOverlays = true,
+            bool invalidateThumbnail = true)
         {
             bool hasRotation = pageRotationOffsets.ContainsKey(pageNumber);
             // Create new PageItemStatus object with new values
@@ -12813,7 +12904,10 @@ namespace AnonPDF
 
             // Refresh element
             item.ListView?.Invalidate(item.Bounds);
-            InvalidateThumbnailPage(pageNumber);
+            if (invalidateThumbnail)
+            {
+                InvalidateThumbnailPage(pageNumber, invalidateStaticOverlays: invalidateStaticThumbnailOverlays);
+            }
 
         }
 
@@ -12983,6 +13077,10 @@ namespace AnonPDF
         private void RenderTimer_Tick(object sender, EventArgs e)
         {
             renderTimer.Stop();
+            if (DebugLogEnabled)
+            {
+                LogDebug($"RenderTimerTick page={currentPage} visibleComments={(HasVisibleCommentsOnPage(currentPage) ? 1 : 0)}");
+            }
             if (pdf == null)
             {
                 return;
@@ -13852,6 +13950,7 @@ namespace AnonPDF
         {
             if (pdf == null || numPages == 0)
             {
+                CancelDeferredBusyCursorForPdfViewerPaint();
                 pdfViewer.Image = null;
                 return;
             }
@@ -13869,7 +13968,30 @@ namespace AnonPDF
             ClearRedactionPreviewOverlay();
             EnsureRedactionPreviewRectsForPage(pageNumber);
             EnsureCommentPreviewRectsForPage(pageNumber);
-            pdfViewer.Image = RenderOriginalPage(pageNumber);
+            DrawingImage renderedPage;
+            try
+            {
+                renderedPage = RenderOriginalPage(pageNumber);
+            }
+            catch
+            {
+                CancelDeferredBusyCursorForPdfViewerPaint();
+                throw;
+            }
+
+            pdfViewer.Image = renderedPage;
+            if (holdBusyCursorUntilPdfViewerImageAssigned)
+            {
+                holdBusyCursorUntilPdfViewerImageAssigned = false;
+                if (renderedPage != null)
+                {
+                    releaseBusyCursorOnNextPdfViewerPaint = true;
+                }
+                else
+                {
+                    EndBusyCursor();
+                }
+            }
             commentPreviewOverlayReady = false;
             renderTimer.Stop();
             if (HasVisibleCommentsOnPage(pageNumber))
@@ -14983,6 +15105,7 @@ namespace AnonPDF
 
 
                 PdfCleanUpTool cleanUpTool = new PdfCleanUpTool(pdfDoc);
+                bool useGraphicRedactionMode = IsGraphicRedactionModeEnabled();
                 var redactionVisualPdfBoundsByBlock = new Dictionary<RedactionBlock, RectangleF>();
                 // Group redaction blocks by pages
                 var blocksByPage = exportRedactionBlocks.GroupBy(b => b.PageNumber);
@@ -15004,27 +15127,21 @@ namespace AnonPDF
                             pdfCoordinates.Height
                         );
 
-                        iText.Kernel.Geom.Rectangle visualRectangle = cleanupRectangle;
-                        if (block.IsMarkerSelection)
-                        {
-                            visualRectangle = ExpandMarkerCleanupRectangleToTextBounds(
-                                pageWithSelections,
-                                cleanupRectangle,
-                                pageNum,
-                                rotation,
-                                "export-visual");
-
-                            cleanupRectangle = visualRectangle;
-                        }
-                        else
-                        {
-                            visualRectangle = ExpandMarkerCleanupRectangleToTextBounds(
-                                pageWithSelections,
-                                cleanupRectangle,
-                                pageNum,
-                                rotation,
-                                "export-visual-box");
-                        }
+                        iText.Kernel.Geom.Rectangle visualRectangle = useGraphicRedactionMode
+                            ? cleanupRectangle
+                            : block.IsMarkerSelection
+                                ? ExpandMarkerCleanupRectangleToTextBounds(
+                                    pageWithSelections,
+                                    cleanupRectangle,
+                                    pageNum,
+                                    rotation,
+                                    "export-visual")
+                                : ExpandMarkerCleanupRectangleToTextBounds(
+                                    pageWithSelections,
+                                    cleanupRectangle,
+                                    pageNum,
+                                    rotation,
+                                    "export-visual-box");
                         redactionVisualPdfBoundsByBlock[block] = ConvertToItTextRectangleF(visualRectangle);
 
                         PdfCleanUpLocation cleanUpLocation = new PdfCleanUpLocation(pageNum, cleanupRectangle, cleanUpColorWhite);
@@ -15307,6 +15424,11 @@ namespace AnonPDF
         private void ClearRedactionBlocks()
         {
             redactionBlocks.Clear();
+            ClearThumbnailRedactionOverlays();
+            for (int page = 1; page <= numPages; page++)
+            {
+                InvalidateThumbnailPage(page, invalidateStaticOverlays: false);
+            }
             ClearRedactionPreviewOverlay();
             pdfViewer.Invalidate();
             UpdateSelectionNavigationButtons();
@@ -15348,6 +15470,8 @@ namespace AnonPDF
             }
 
             redactionBlocks.RemoveAll(block => block.PageNumber == currentPage);
+            InvalidateThumbnailRedactionOverlay(currentPage);
+            InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
             projectWasChangedAfterLastSave = true;
             RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
 
@@ -15366,7 +15490,7 @@ namespace AnonPDF
                 if ((string)filterComboBox.SelectedItem == allComboItem)
                 {
                     ListViewItem currentItem = pagesListView.Items[currentPage - 1];
-                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
+                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false, invalidateThumbnail: false);
                     
                 }
                 else
@@ -17745,11 +17869,23 @@ namespace AnonPDF
                 int finalHeight = Math.Max(1, (int)Math.Round(viewHeight * fitScale));
                 int rawWidth = swapForOffset ? finalHeight : finalWidth;
                 int rawHeight = swapForOffset ? finalWidth : finalHeight;
+                Size safeBitmapSize = ClampPrintBitmapSize(rawWidth, rawHeight);
+                rawWidth = safeBitmapSize.Width;
+                rawHeight = safeBitmapSize.Height;
 
-                using (var pdfBitmap = new PDFiumBitmap(rawWidth, rawHeight, true))
+                if (DebugLogEnabled)
+                {
+                    long requestedPixels = (long)Math.Max(1, finalWidth) * Math.Max(1, finalHeight);
+                    long actualPixels = (long)rawWidth * rawHeight;
+                    LogDebug($"Print render page={pageNumber} rotation={rotationOffset} requested={finalWidth}x{finalHeight} raw={rawWidth}x{rawHeight} requestedPixels={requestedPixels} actualPixels={actualPixels}");
+                }
+
+                using (var pdfBitmap = new PDFiumBitmap(rawWidth, rawHeight, false))
                 {
                     pdfBitmap.FillRectangle(0, 0, rawWidth, rawHeight, 0xFFFFFFFF);
-                    page.Render(renderTarget: pdfBitmap, flags: RenderingFlags.Annotations);
+                    page.Render(
+                        renderTarget: pdfBitmap,
+                        flags: RenderingFlags.Annotations | RenderingFlags.Printing | RenderingFlags.LimitImageCache);
 
                     using (var ms = new MemoryStream())
                     {
@@ -17764,6 +17900,34 @@ namespace AnonPDF
                     }
                 }
             }
+        }
+
+        private static Size ClampPrintBitmapSize(int requestedWidth, int requestedHeight)
+        {
+            int width = Math.Max(1, requestedWidth);
+            int height = Math.Max(1, requestedHeight);
+            double scale = 1d;
+
+            int largestDimension = Math.Max(width, height);
+            if (largestDimension > PrintRenderMaxDimension)
+            {
+                scale = Math.Min(scale, (double)PrintRenderMaxDimension / largestDimension);
+            }
+
+            long pixelCount = (long)width * height;
+            if (pixelCount > PrintRenderMaxPixelCount)
+            {
+                scale = Math.Min(scale, Math.Sqrt((double)PrintRenderMaxPixelCount / pixelCount));
+            }
+
+            if (scale >= 1d)
+            {
+                return new Size(width, height);
+            }
+
+            int clampedWidth = Math.Max(1, (int)Math.Floor(width * scale));
+            int clampedHeight = Math.Max(1, (int)Math.Floor(height * scale));
+            return new Size(clampedWidth, clampedHeight);
         }
 
         private ZoomPanel GetZoomPanel()
@@ -21569,6 +21733,61 @@ namespace AnonPDF
             }
         }
 
+        private void UpdateCurrentSelectionOverlay(RectangleF selection)
+        {
+            RectangleF previousSelection = currentSelection;
+            if (previousSelection.Equals(selection))
+            {
+                return;
+            }
+
+            currentSelection = selection;
+            InvalidateSelectionOverlay(previousSelection, selection);
+        }
+
+        private void ClearCurrentSelectionOverlay()
+        {
+            UpdateCurrentSelectionOverlay(RectangleF.Empty);
+        }
+
+        private void InvalidateSelectionOverlay(RectangleF previousSelection, RectangleF nextSelection)
+        {
+            if (pdfViewer == null || pdfViewer.IsDisposed || !pdfViewer.IsHandleCreated)
+            {
+                return;
+            }
+
+            Rectangle invalidationBounds = Rectangle.Empty;
+            AppendSelectionInvalidationBounds(ref invalidationBounds, previousSelection);
+            AppendSelectionInvalidationBounds(ref invalidationBounds, nextSelection);
+            if (invalidationBounds.IsEmpty)
+            {
+                return;
+            }
+
+            invalidationBounds = Rectangle.Intersect(invalidationBounds, pdfViewer.ClientRectangle);
+            if (invalidationBounds.Width <= 0 || invalidationBounds.Height <= 0)
+            {
+                return;
+            }
+
+            pdfViewer.Invalidate(invalidationBounds);
+        }
+
+        private static void AppendSelectionInvalidationBounds(ref Rectangle invalidationBounds, RectangleF selection)
+        {
+            if (selection.Width <= 0f || selection.Height <= 0f)
+            {
+                return;
+            }
+
+            Rectangle selectionBounds = Rectangle.Ceiling(selection);
+            selectionBounds.Inflate(SelectionOverlayInvalidatePaddingPx, SelectionOverlayInvalidatePaddingPx);
+            invalidationBounds = invalidationBounds.IsEmpty
+                ? selectionBounds
+                : Rectangle.Union(invalidationBounds, selectionBounds);
+        }
+
         private bool TrySelectObjectsInMarquee(RectangleF marqueeScreenRect, bool additiveSelection)
         {
             if (marqueeScreenRect.Width <= 0f || marqueeScreenRect.Height <= 0f)
@@ -22055,8 +22274,7 @@ namespace AnonPDF
                     ClearGroupSelection();
                     ResetGroupMoveState();
                     isDrawing = true;
-                    currentSelection = new RectangleF(startPoint, Size.Empty);
-                    pdfViewer.Invalidate();
+                    UpdateCurrentSelectionOverlay(new RectangleF(startPoint, Size.Empty));
                     return;
                 }
 
@@ -22301,8 +22519,7 @@ namespace AnonPDF
                 {
                     BeginUndoCapture(markerRadioButton.Checked ? "Add marker selection" : "Add box selection");
                 }
-                currentSelection = new System.Drawing.RectangleF(startPoint, Size.Empty);
-                pdfViewer.Invalidate();
+                UpdateCurrentSelectionOverlay(new System.Drawing.RectangleF(startPoint, Size.Empty));
             }
         }
 
@@ -23060,8 +23277,7 @@ namespace AnonPDF
                     y = Math.Min(startPoint.Y, e.Y);
                     height = Math.Abs(e.Y - startPoint.Y);
                 }
-                currentSelection = new System.Drawing.RectangleF(x, y, width, height);
-                pdfViewer.Invalidate();
+                UpdateCurrentSelectionOverlay(new System.Drawing.RectangleF(x, y, width, height));
             } else if (isMoving && !isClickOnIcon)
             {
                 if (annotationToMove != null && !IsTextAnnotationEffectivelyLocked(annotationToMove))
@@ -23150,12 +23366,11 @@ namespace AnonPDF
                 CancelUndoCapture();
                 isDrawing = false;
                 isMarkerCtrlBoxMode = false;
-                currentSelection = RectangleF.Empty;
+                ClearCurrentSelectionOverlay();
                 if (!IsViewportPanningActive() && !isVectorShapeCreationMode && !isCommentCreationMode)
                 {
                     this.Cursor = Cursors.Default;
                 }
-                pdfViewer.Invalidate();
                 return;
             }
 
@@ -23178,7 +23393,7 @@ namespace AnonPDF
                 selectedVectorShape = null;
                 ResetGroupMoveState();
                 ResetCommentNoteMoveState();
-                currentSelection = RectangleF.Empty;
+                ClearCurrentSelectionOverlay();
                 isClickOnIcon = false;
                 clickedIconType = IconType.None;
                 annotationForIcon = null;
@@ -23582,6 +23797,7 @@ namespace AnonPDF
                         }
                         else if (markerRadioButton.Checked)
                         {
+                            Stopwatch addRedactionStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
                             renderTimer.Stop();
                             bool markerVerticalMode = !isMarkerCtrlBoxMode && currentSelection.Height > currentSelection.Width;
                             bool enoughWidth = markerVerticalMode
@@ -23597,6 +23813,8 @@ namespace AnonPDF
                                     currentPage,
                                     isMarkerSelection: markerModeForBlock);
                                 redactionBlocks.Add(createdBlock);
+                                InvalidateThumbnailRedactionOverlay(currentPage);
+                                InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
                                 TryComputeRedactionPreviewRects(createdBlock);
                                 
                                 
@@ -23606,7 +23824,7 @@ namespace AnonPDF
                                 if ((string)filterComboBox.SelectedItem == allComboItem)
                                 {
                                     ListViewItem currentItem = pagesListView.Items[currentPage - 1];
-                                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
+                                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false, invalidateThumbnail: false);
                                     pagesListView.Invalidate(currentItem.Bounds);
                                 }
                                 else
@@ -23621,15 +23839,23 @@ namespace AnonPDF
                                 UpdateSelectionNavigationButtons();
                                 renderTimer.Stop();
                                 renderTimer.Start();
+                                if (addRedactionStopwatch != null)
+                                {
+                                    addRedactionStopwatch.Stop();
+                                    LogDebug($"RedactionAdd page={currentPage} mode={(markerModeForBlock ? "marker" : "box")} blocksOnPage={redactionBlocks.Count(b => b.PageNumber == currentPage)} ms={addRedactionStopwatch.ElapsedMilliseconds}");
+                                }
                             }
                         }
                         else if (boxRadioButton.Checked)
                         {
+                            Stopwatch addRedactionStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
                             renderTimer.Stop();
                             if (isDrawing && currentSelection.Width > markerWidth * scaleFactor && currentSelection.Height > markerHeight * scaleFactor)
                             {
                                 var createdBlock = CreateRedactionBlockWithAutomaticClassification(rect, currentPage, isMarkerSelection: false);
                                 redactionBlocks.Add(createdBlock);
+                                InvalidateThumbnailRedactionOverlay(currentPage);
+                                InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
                                 TryComputeRedactionPreviewRects(createdBlock);
 
                                 
@@ -23638,7 +23864,7 @@ namespace AnonPDF
                                 if ((string)filterComboBox.SelectedItem == allComboItem)
                                 {
                                     ListViewItem currentItem = pagesListView.Items[currentPage - 1];
-                                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
+                                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false, invalidateThumbnail: false);
                                     pagesListView.Invalidate(currentItem.Bounds);
                                 }
                                 else
@@ -23654,6 +23880,11 @@ namespace AnonPDF
                                 UpdateSelectionNavigationButtons();
                                 renderTimer.Stop();
                                 renderTimer.Start();
+                                if (addRedactionStopwatch != null)
+                                {
+                                    addRedactionStopwatch.Stop();
+                                    LogDebug($"RedactionAdd page={currentPage} mode=box blocksOnPage={redactionBlocks.Count(b => b.PageNumber == currentPage)} ms={addRedactionStopwatch.ElapsedMilliseconds}");
+                                }
                             }
                         }
                         else if (!IsRedactionSelectionModeEnabled())
@@ -23691,12 +23922,11 @@ namespace AnonPDF
             }
             isDrawing = false;
             isMarkerCtrlBoxMode = false;
-            currentSelection = System.Drawing.Rectangle.Empty;
+            ClearCurrentSelectionOverlay();
             if (!isMovingCommentNote && !isResizingCommentNote)
             {
                 commentNoteToMove = null;
             }
-            pdfViewer.Invalidate();
 
 
             // Reset icon click flag
@@ -24300,7 +24530,7 @@ namespace AnonPDF
                 if ((string)filterComboBox.SelectedItem == allComboItem)
                 {
                     ListViewItem currentItem = pagesListView.Items[currentPage - 1];
-                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
+                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false, invalidateThumbnail: false);
                     pagesListView.Invalidate(currentItem.Bounds);
                 }
                 else
@@ -24334,7 +24564,7 @@ namespace AnonPDF
                 if ((string)filterComboBox.SelectedItem == allComboItem)
                 {
                     ListViewItem currentItem = pagesListView.Items[currentPage - 1];
-                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
+                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false);
                     pagesListView.Invalidate(currentItem.Bounds);
                 }
                 else
@@ -24420,7 +24650,7 @@ namespace AnonPDF
 
             ShowRedactPreview();
             pdfViewer.Invalidate();
-            InvalidateThumbnailPage(currentPage);
+            InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
         }
 
         private bool TryShowCommentContextMenu(Point location)
@@ -25106,6 +25336,11 @@ namespace AnonPDF
             block.PreviewTextRectsPdf = null;
         }
 
+        private bool IsGraphicRedactionModeEnabled()
+        {
+            return (safeModeCheckBox?.Checked ?? false) || pdfCleanUpToolError;
+        }
+
         private List<RectangleF> ComputeRedactionPreviewRects(
             iText.Kernel.Pdf.PdfPage page,
             RedactionBlock block,
@@ -25117,18 +25352,45 @@ namespace AnonPDF
             }
 
             RectangleF pdfCoords = ConvertToPdfCoordinates(block.Bounds, block.PageNumber, rotation);
+            if (IsGraphicRedactionModeEnabled())
+            {
+                return new List<RectangleF> { pdfCoords };
+            }
+
             iText.Kernel.Geom.Rectangle sourceRect = ConvertToItTextRectangle(pdfCoords);
-            List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetVisualLineRectsForBlock(
-                page,
-                sourceRect,
-                block.PageNumber,
-                rotation,
-                block.IsMarkerSelection ? "visual" : "box");
+            List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetPdfCleanUpPreviewRectsForBlock(page, sourceRect);
 
             return pdfLineRects
                 .Where(r => r != null && r.GetWidth() > 0f && r.GetHeight() > 0f)
                 .Select(ConvertToItTextRectangleF)
                 .ToList();
+        }
+
+        private List<iText.Kernel.Geom.Rectangle> GetPdfCleanUpPreviewRectsForBlock(
+            iText.Kernel.Pdf.PdfPage page,
+            iText.Kernel.Geom.Rectangle sourceRectangle)
+        {
+            if (page == null || sourceRectangle == null || sourceRectangle.GetWidth() <= 0f || sourceRectangle.GetHeight() <= 0f)
+            {
+                return new List<iText.Kernel.Geom.Rectangle>();
+            }
+
+            try
+            {
+                var strategy = new PdfCleanUpPreviewTextExtractionStrategy(
+                    new List<iText.Kernel.Geom.Rectangle> { sourceRectangle });
+                PdfTextExtractor.GetTextFromPage(page, strategy);
+                if (strategy.TryGetCleanedGlyphRectangles(out List<iText.Kernel.Geom.Rectangle> glyphRects))
+                {
+                    return glyphRects;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogDebug("PdfSweep preview rect extraction failed: " + ex.Message);
+            }
+
+            return new List<iText.Kernel.Geom.Rectangle>();
         }
 
         private void QueueRedactionPreviewRectsForPage(int pageNumber)
@@ -25258,6 +25520,8 @@ namespace AnonPDF
                 return;
             }
 
+            InvalidateThumbnailRedactionOverlay(currentPage);
+
             if (keepCurrentOverlay)
             {
                 try
@@ -25278,7 +25542,6 @@ namespace AnonPDF
 
             QueueRedactionPreviewRectsForPage(currentPage);
             pdfViewer.Invalidate();
-            InvalidateThumbnailPage(currentPage);
         }
 
         private bool TryApplyAutomaticFootnoteClassification(RedactionBlock block)
@@ -27275,6 +27538,8 @@ namespace AnonPDF
                 return;
             }
 
+            Stopwatch removeRedactionStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
+
             if (IsRedactionBlockEffectivelyLocked(blockToRemove))
             {
                 ShowLockedLayerInfo();
@@ -27287,6 +27552,8 @@ namespace AnonPDF
                 return;
             }
 
+            InvalidateThumbnailRedactionOverlay(blockToRemove.PageNumber);
+            InvalidateThumbnailPage(blockToRemove.PageNumber, invalidateStaticOverlays: false);
             RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
 
             PageItemStatus status = allPageStatuses[currentPage - 1];
@@ -27298,7 +27565,7 @@ namespace AnonPDF
                 if ((string)filterComboBox.SelectedItem == allComboItem)
                 {
                     ListViewItem currentItem = pagesListView.Items[currentPage - 1];
-                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
+                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false);
                     pagesListView.Invalidate(currentItem.Bounds);
                 }
                 else
@@ -27315,6 +27582,11 @@ namespace AnonPDF
             renderTimer.Stop();
             renderTimer.Start();
             pdfViewer.Invalidate();
+            if (removeRedactionStopwatch != null)
+            {
+                removeRedactionStopwatch.Stop();
+                LogDebug($"RedactionRemove page={currentPage} blocksOnPage={redactionBlocks.Count(b => b.PageNumber == currentPage)} ms={removeRedactionStopwatch.ElapsedMilliseconds}");
+            }
         }
 
         private void DrawVectorShapeOnPreview(Graphics graphics, VectorShapeObject vectorShape, bool multiSelectionActive)
@@ -28978,6 +29250,8 @@ namespace AnonPDF
                 }
             }
 
+            CompleteDeferredBusyCursorAfterPdfViewerPaint();
+
 
             TextLocation selectedSearchLocation = null;
             if (currentLocationIndex >= 0 && currentLocationIndex < searchLocations.Count)
@@ -29405,6 +29679,9 @@ namespace AnonPDF
 
             CancelThumbnailGeneration();
             thumbnailGenerationSourcePdfPath = inputPdfPath ?? string.Empty;
+            DisposeAllThumbnailBaseBitmaps();
+            ClearThumbnailRedactionOverlays();
+            ClearThumbnailStaticOverlays();
             thumbnailContentSizeByPage.Clear();
             PrepareThumbnailCacheForCurrentDocument();
             lock (thumbnailGenerationSync)
@@ -29443,6 +29720,7 @@ namespace AnonPDF
             CancelThumbnailGeneration();
             thumbnailGenerationSourcePdfPath = string.Empty;
             thumbnailCacheDocumentDirectory = string.Empty;
+            DisposeAllThumbnailBaseBitmaps();
 
             if (thumbnailsListView != null)
             {
@@ -29454,6 +29732,8 @@ namespace AnonPDF
                 thumbnailsImageList.Images.Clear();
             }
 
+            ClearThumbnailRedactionOverlays();
+            ClearThumbnailStaticOverlays();
             thumbnailContentSizeByPage.Clear();
             lock (thumbnailGenerationSync)
             {
@@ -29528,11 +29808,21 @@ namespace AnonPDF
             return Path.Combine(thumbnailCacheDocumentDirectory, fileName);
         }
 
-        private void InvalidateThumbnailPage(int pageNumber, bool regenerateBaseImage = false)
+        private void InvalidateThumbnailPage(
+            int pageNumber,
+            bool regenerateBaseImage = false,
+            bool invalidateStaticOverlays = true,
+            string staticOverlayReason = null,
+            [CallerMemberName] string callerName = null)
         {
             if (thumbnailsListView == null || pageNumber < 1 || pageNumber > numPages)
             {
                 return;
+            }
+
+            if (invalidateStaticOverlays)
+            {
+                InvalidateThumbnailStaticOverlays(pageNumber, string.IsNullOrWhiteSpace(staticOverlayReason) ? callerName : staticOverlayReason);
             }
 
             if (regenerateBaseImage)
@@ -29555,6 +29845,187 @@ namespace AnonPDF
             {
                 thumbnailsListView.Invalidate();
             }
+
+            if (DebugLogEnabled)
+            {
+                LogDebug($"ThumbnailInvalidate page={pageNumber} regenerateBase={regenerateBaseImage} itemFound={(item != null ? 1 : 0)}");
+            }
+        }
+
+        private static void DisposeThumbnailOverlay(Dictionary<int, Bitmap> cache, int pageNumber)
+        {
+            if (cache == null || pageNumber < 1)
+            {
+                return;
+            }
+
+            if (cache.TryGetValue(pageNumber, out Bitmap overlay))
+            {
+                cache.Remove(pageNumber);
+                overlay?.Dispose();
+            }
+        }
+
+        private static void DisposeAllThumbnailOverlays(Dictionary<int, Bitmap> cache)
+        {
+            if (cache == null)
+            {
+                return;
+            }
+
+            foreach (Bitmap overlay in cache.Values)
+            {
+                overlay?.Dispose();
+            }
+
+            cache.Clear();
+        }
+
+        private void DisposeAllThumbnailBaseBitmaps()
+        {
+            foreach (Bitmap bitmap in thumbnailBaseBitmapByPage.Values)
+            {
+                bitmap?.Dispose();
+            }
+
+            thumbnailBaseBitmapByPage.Clear();
+            thumbnailImageKeyByPage.Clear();
+        }
+
+        private void InvalidateThumbnailRedactionOverlay(int pageNumber)
+        {
+            DisposeThumbnailOverlay(thumbnailRedactionOverlayByPage, pageNumber);
+        }
+
+        private void InvalidateThumbnailStaticOverlays(int pageNumber, string reason = null)
+        {
+            if (DebugLogEnabled)
+            {
+                LogDebug($"ThumbnailStaticOverlayInvalidate page={pageNumber} reason={reason ?? "unspecified"}");
+            }
+            DisposeThumbnailOverlay(thumbnailTextOverlayByPage, pageNumber);
+            DisposeThumbnailOverlay(thumbnailArrowOverlayByPage, pageNumber);
+            DisposeThumbnailOverlay(thumbnailVectorOverlayByPage, pageNumber);
+        }
+
+        private void ClearThumbnailRedactionOverlays()
+        {
+            DisposeAllThumbnailOverlays(thumbnailRedactionOverlayByPage);
+        }
+
+        private void ClearThumbnailStaticOverlays()
+        {
+            DisposeAllThumbnailOverlays(thumbnailTextOverlayByPage);
+            DisposeAllThumbnailOverlays(thumbnailArrowOverlayByPage);
+            DisposeAllThumbnailOverlays(thumbnailVectorOverlayByPage);
+        }
+
+        private Bitmap GetOrCreateThumbnailRedactionOverlay(int pageNumber, DrawingRectangle contentRect)
+        {
+            if (pageNumber < 1 || contentRect.Width <= 0 || contentRect.Height <= 0)
+            {
+                return null;
+            }
+
+            ThumbnailTransform transform = CreateThumbnailTransform(pageNumber, contentRect);
+            if (!transform.IsValid)
+            {
+                return null;
+            }
+
+            if (thumbnailRedactionOverlayByPage.TryGetValue(pageNumber, out Bitmap cachedOverlay))
+            {
+                if (cachedOverlay != null &&
+                    cachedOverlay.Width == contentRect.Width &&
+                    cachedOverlay.Height == contentRect.Height)
+                {
+                    return cachedOverlay;
+                }
+
+                thumbnailRedactionOverlayByPage.Remove(pageNumber);
+                cachedOverlay?.Dispose();
+            }
+
+            var sw = DebugLogEnabled ? Stopwatch.StartNew() : null;
+            long bitmapAllocMs = 0;
+            long candidateCollectMs = 0;
+            long graphicsSetupMs = 0;
+            long convertRectMs = 0;
+            long drawRectMs = 0;
+
+            Stopwatch stageSw = DebugLogEnabled ? Stopwatch.StartNew() : null;
+            var overlayBitmap = new Bitmap(contentRect.Width, contentRect.Height, PixelFormat.Format32bppArgb);
+            if (stageSw != null)
+            {
+                stageSw.Stop();
+                bitmapAllocMs = stageSw.ElapsedMilliseconds;
+                stageSw.Restart();
+            }
+
+            List<RedactionBlock> pageBlocks = redactionBlocks
+                .Where(block => block != null && block.PageNumber == pageNumber && IsLayerVisible(block.LayerId))
+                .ToList();
+            if (stageSw != null)
+            {
+                stageSw.Stop();
+                candidateCollectMs = stageSw.ElapsedMilliseconds;
+                stageSw.Restart();
+            }
+
+            int renderedBlocks = 0;
+            using (Graphics overlayGraphics = Graphics.FromImage(overlayBitmap))
+            using (var fillBrush = new SolidBrush(System.Drawing.Color.FromArgb(110, 255, 0, 0)))
+            using (var borderPen = new Pen(System.Drawing.Color.FromArgb(220, 200, 0, 0), 1.2f))
+            {
+                overlayGraphics.Clear(System.Drawing.Color.Transparent);
+                if (stageSw != null)
+                {
+                    stageSw.Stop();
+                    graphicsSetupMs = stageSw.ElapsedMilliseconds;
+                    stageSw.Restart();
+                }
+
+                foreach (RedactionBlock block in pageBlocks)
+                {
+                    Stopwatch blockSw = DebugLogEnabled ? Stopwatch.StartNew() : null;
+                    RectangleF absoluteRect = ConvertDocumentRectToThumbnailRectangle(block.Bounds, transform);
+                    RectangleF localRect = new RectangleF(
+                        absoluteRect.X - contentRect.X,
+                        absoluteRect.Y - contentRect.Y,
+                        absoluteRect.Width,
+                        absoluteRect.Height);
+                    if (blockSw != null)
+                    {
+                        blockSw.Stop();
+                        convertRectMs += blockSw.ElapsedMilliseconds;
+                        blockSw.Restart();
+                    }
+                    if (localRect.Width <= 0f || localRect.Height <= 0f)
+                    {
+                        blockSw?.Stop();
+                        continue;
+                    }
+
+                    renderedBlocks++;
+                    overlayGraphics.FillRectangle(fillBrush, localRect);
+                    overlayGraphics.DrawRectangle(borderPen, localRect.X, localRect.Y, localRect.Width, localRect.Height);
+                    if (blockSw != null)
+                    {
+                        blockSw.Stop();
+                        drawRectMs += blockSw.ElapsedMilliseconds;
+                    }
+                }
+            }
+
+            thumbnailRedactionOverlayByPage[pageNumber] = overlayBitmap;
+            if (sw != null)
+            {
+                sw.Stop();
+                LogDebug(
+                    $"ThumbnailRedactionOverlayBuild page={pageNumber} blocks={renderedBlocks} size={contentRect.Width}x{contentRect.Height} " +
+                    $"ms={sw.ElapsedMilliseconds} alloc={bitmapAllocMs} collect={candidateCollectMs} graphics={graphicsSetupMs} convert={convertRectMs} draw={drawRectMs}");
+            }
+            return overlayBitmap;
         }
 
         private static bool TryLoadThumbnailBitmapFromCache(string cachePath, out Bitmap bitmap)
@@ -29637,7 +30108,9 @@ namespace AnonPDF
 
         private void EnsureThumbnailGeneration()
         {
-            if (!IsThumbnailsTabSelected() ||
+            if (isApplicationClosing ||
+                !CanUseThumbnailPanel() ||
+                !IsThumbnailsTabSelected() ||
                 pdf == null ||
                 numPages <= 0 ||
                 string.IsNullOrWhiteSpace(inputPdfPath) ||
@@ -29660,6 +30133,11 @@ namespace AnonPDF
 
         private void QueueVisibleThumbnailsForGeneration()
         {
+            if (isApplicationClosing || !CanUseThumbnailPanel(requireHandle: true))
+            {
+                return;
+            }
+
             var candidatePages = GetThumbnailPagesAroundViewport();
             if (candidatePages.Count == 0)
             {
@@ -29677,7 +30155,7 @@ namespace AnonPDF
         private List<int> GetThumbnailPagesAroundViewport()
         {
             var result = new List<int>();
-            if (thumbnailsListView == null || thumbnailsListView.Items.Count == 0)
+            if (!CanUseThumbnailPanel(requireHandle: true) || thumbnailsListView.Items.Count == 0)
             {
                 return result;
             }
@@ -29729,6 +30207,26 @@ namespace AnonPDF
             return result;
         }
 
+        private bool CanUseThumbnailPanel(bool requireHandle = false)
+        {
+            if (isApplicationClosing ||
+                IsDisposed ||
+                Disposing ||
+                thumbnailsListView == null ||
+                thumbnailsListView.IsDisposed ||
+                thumbnailsImageList == null)
+            {
+                return false;
+            }
+
+            if (requireHandle && !thumbnailsListView.IsHandleCreated)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
         private void QueueThumbnailPageForGeneration(int pageNumber)
         {
             if (pageNumber < 1 || pageNumber > numPages)
@@ -29738,8 +30236,10 @@ namespace AnonPDF
 
             lock (thumbnailGenerationSync)
             {
-                string key = $"thumb_{pageNumber}";
-                if (thumbnailRenderedPages.Contains(pageNumber) && !thumbnailsImageList.Images.ContainsKey(key))
+                string key = null;
+                thumbnailImageKeyByPage.TryGetValue(pageNumber, out key);
+                if (thumbnailRenderedPages.Contains(pageNumber) &&
+                    (string.IsNullOrEmpty(key) || !thumbnailsImageList.Images.ContainsKey(key)))
                 {
                     thumbnailRenderedPages.Remove(pageNumber);
                 }
@@ -29909,17 +30409,18 @@ namespace AnonPDF
                             }
 
                             var targetItem = FindThumbnailListItemByPageNumber(pageNumber);
-                            string key = $"thumb_{pageNumber}";
-                            if (thumbnailsImageList.Images.ContainsKey(key))
+
+                            if (thumbnailBaseBitmapByPage.TryGetValue(pageNumber, out Bitmap previousBase))
                             {
-                                thumbnailsImageList.Images.RemoveByKey(key);
+                                thumbnailBaseBitmapByPage.Remove(pageNumber);
+                                previousBase.Dispose();
                             }
 
-                            thumbnailsImageList.Images.Add(key, thumbBitmap);
-                            if (targetItem != null)
-                            {
-                                targetItem.ImageKey = key;
-                            }
+                            Bitmap baseThumbnail = new Bitmap(thumbBitmap);
+                            thumbnailBaseBitmapByPage[pageNumber] = baseThumbnail;
+                            Bitmap displayThumbnail = thumbBitmap;
+
+                            ReplaceThumbnailImage(pageNumber, displayThumbnail, targetItem);
                             thumbnailContentSizeByPage[pageNumber] = new Size(renderedWidth, renderedHeight);
                             lock (thumbnailGenerationSync)
                             {
@@ -29976,47 +30477,102 @@ namespace AnonPDF
             return bitmap;
         }
 
-        private RectangleF ConvertDocumentRectToThumbnailRectangle(RectangleF documentRect, int pageNumber, DrawingRectangle contentRect)
+        private void ReplaceThumbnailImage(int pageNumber, Bitmap image, ListViewItem item = null)
+        {
+            if (thumbnailsImageList == null || image == null || pageNumber < 1)
+            {
+                image?.Dispose();
+                return;
+            }
+
+            string oldKey = null;
+            thumbnailImageKeyByPage.TryGetValue(pageNumber, out oldKey);
+            string newKey = $"thumb_{pageNumber}_{++thumbnailImageVersionCounter}";
+            thumbnailsImageList.Images.Add(newKey, image);
+            thumbnailImageKeyByPage[pageNumber] = newKey;
+
+            if (item == null)
+            {
+                item = FindThumbnailListItemByPageNumber(pageNumber);
+            }
+
+            if (item != null)
+            {
+                item.ImageKey = newKey;
+            }
+
+            if (!string.IsNullOrEmpty(oldKey) && thumbnailsImageList.Images.ContainsKey(oldKey))
+            {
+                thumbnailsImageList.Images.RemoveByKey(oldKey);
+            }
+        }
+
+        private struct ThumbnailTransform
+        {
+            public bool IsValid;
+            public float OffsetX;
+            public float OffsetY;
+            public float ScaleX;
+            public float ScaleY;
+        }
+
+        private ThumbnailTransform CreateThumbnailTransform(int pageNumber, DrawingRectangle contentRect)
         {
             if (pdf == null || pageNumber < 1 || pageNumber > numPages || contentRect.Width <= 0 || contentRect.Height <= 0)
             {
-                return RectangleF.Empty;
+                return default(ThumbnailTransform);
             }
 
             var pageSize = GetPageSizeWithOffset(pageNumber);
             if (pageSize.Width <= 0f || pageSize.Height <= 0f)
             {
+                return default(ThumbnailTransform);
+            }
+
+            return new ThumbnailTransform
+            {
+                IsValid = true,
+                OffsetX = contentRect.X,
+                OffsetY = contentRect.Y,
+                ScaleX = contentRect.Width / pageSize.Width,
+                ScaleY = contentRect.Height / pageSize.Height
+            };
+        }
+
+        private static RectangleF ConvertDocumentRectToThumbnailRectangle(RectangleF documentRect, ThumbnailTransform transform)
+        {
+            if (!transform.IsValid)
+            {
                 return RectangleF.Empty;
             }
 
-            float scaleX = contentRect.Width / pageSize.Width;
-            float scaleY = contentRect.Height / pageSize.Height;
-
             return new RectangleF(
-                contentRect.X + (documentRect.X * scaleX),
-                contentRect.Y + (documentRect.Y * scaleY),
-                Math.Max(1f, documentRect.Width * scaleX),
-                Math.Max(1f, documentRect.Height * scaleY));
+                transform.OffsetX + (documentRect.X * transform.ScaleX),
+                transform.OffsetY + (documentRect.Y * transform.ScaleY),
+                Math.Max(1f, documentRect.Width * transform.ScaleX),
+                Math.Max(1f, documentRect.Height * transform.ScaleY));
+        }
+
+        private RectangleF ConvertDocumentRectToThumbnailRectangle(RectangleF documentRect, int pageNumber, DrawingRectangle contentRect)
+        {
+            return ConvertDocumentRectToThumbnailRectangle(documentRect, CreateThumbnailTransform(pageNumber, contentRect));
+        }
+
+        private static PointF ConvertDocumentPointToThumbnailPoint(PointF documentPoint, ThumbnailTransform transform)
+        {
+            if (!transform.IsValid)
+            {
+                return PointF.Empty;
+            }
+
+            return new PointF(
+                transform.OffsetX + (documentPoint.X * transform.ScaleX),
+                transform.OffsetY + (documentPoint.Y * transform.ScaleY));
         }
 
         private PointF ConvertDocumentPointToThumbnailPoint(PointF documentPoint, int pageNumber, DrawingRectangle contentRect)
         {
-            if (pdf == null || pageNumber < 1 || pageNumber > numPages || contentRect.Width <= 0 || contentRect.Height <= 0)
-            {
-                return PointF.Empty;
-            }
-
-            var pageSize = GetPageSizeWithOffset(pageNumber);
-            if (pageSize.Width <= 0f || pageSize.Height <= 0f)
-            {
-                return PointF.Empty;
-            }
-
-            float scaleX = contentRect.Width / pageSize.Width;
-            float scaleY = contentRect.Height / pageSize.Height;
-            return new PointF(
-                contentRect.X + (documentPoint.X * scaleX),
-                contentRect.Y + (documentPoint.Y * scaleY));
+            return ConvertDocumentPointToThumbnailPoint(documentPoint, CreateThumbnailTransform(pageNumber, contentRect));
         }
 
         private void DrawThumbnailRedactionOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
@@ -30026,12 +30582,19 @@ namespace AnonPDF
                 return;
             }
 
+            ThumbnailTransform transform = CreateThumbnailTransform(pageNumber, contentRect);
+            if (!transform.IsValid)
+            {
+                return;
+            }
+
+            Stopwatch overlayDrawStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
             using (var fillBrush = new SolidBrush(System.Drawing.Color.FromArgb(110, 255, 0, 0)))
             using (var borderPen = new Pen(System.Drawing.Color.FromArgb(220, 200, 0, 0), 1.2f))
             {
                 foreach (RedactionBlock block in redactionBlocks.Where(block => block != null && block.PageNumber == pageNumber && IsLayerVisible(block.LayerId)))
                 {
-                    RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(block.Bounds, pageNumber, contentRect);
+                    RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(block.Bounds, transform);
                     if (thumbnailRect.Width <= 0f || thumbnailRect.Height <= 0f)
                     {
                         continue;
@@ -30041,6 +30604,108 @@ namespace AnonPDF
                     graphics.DrawRectangle(borderPen, thumbnailRect.X, thumbnailRect.Y, thumbnailRect.Width, thumbnailRect.Height);
                 }
             }
+
+            if (overlayDrawStopwatch != null)
+            {
+                overlayDrawStopwatch.Stop();
+                if (overlayDrawStopwatch.ElapsedMilliseconds >= 30)
+                {
+                    LogDebug($"ThumbnailRedactionOverlayDraw page={pageNumber} size={contentRect.Width}x{contentRect.Height} direct={overlayDrawStopwatch.ElapsedMilliseconds}");
+                }
+            }
+        }
+
+        private Bitmap GetOrCreateThumbnailTextOverlay(int pageNumber, DrawingRectangle contentRect)
+        {
+            if (pageNumber < 1 || contentRect.Width <= 0 || contentRect.Height <= 0)
+            {
+                return null;
+            }
+
+            if (thumbnailTextOverlayByPage.TryGetValue(pageNumber, out Bitmap cachedOverlay))
+            {
+                if (cachedOverlay != null &&
+                    cachedOverlay.Width == contentRect.Width &&
+                    cachedOverlay.Height == contentRect.Height)
+                {
+                    return cachedOverlay;
+                }
+
+                thumbnailTextOverlayByPage.Remove(pageNumber);
+                cachedOverlay?.Dispose();
+            }
+
+            Bitmap overlayBitmap = new Bitmap(contentRect.Width, contentRect.Height, PixelFormat.Format32bppArgb);
+            using (Graphics overlayGraphics = Graphics.FromImage(overlayBitmap))
+            {
+                overlayGraphics.Clear(System.Drawing.Color.Transparent);
+                RenderThumbnailTextAnnotationOverlays(overlayGraphics, pageNumber, new DrawingRectangle(0, 0, contentRect.Width, contentRect.Height));
+            }
+
+            thumbnailTextOverlayByPage[pageNumber] = overlayBitmap;
+            return overlayBitmap;
+        }
+
+        private Bitmap GetOrCreateThumbnailArrowOverlay(int pageNumber, DrawingRectangle contentRect)
+        {
+            if (pageNumber < 1 || contentRect.Width <= 0 || contentRect.Height <= 0)
+            {
+                return null;
+            }
+
+            if (thumbnailArrowOverlayByPage.TryGetValue(pageNumber, out Bitmap cachedOverlay))
+            {
+                if (cachedOverlay != null &&
+                    cachedOverlay.Width == contentRect.Width &&
+                    cachedOverlay.Height == contentRect.Height)
+                {
+                    return cachedOverlay;
+                }
+
+                thumbnailArrowOverlayByPage.Remove(pageNumber);
+                cachedOverlay?.Dispose();
+            }
+
+            Bitmap overlayBitmap = new Bitmap(contentRect.Width, contentRect.Height, PixelFormat.Format32bppArgb);
+            using (Graphics overlayGraphics = Graphics.FromImage(overlayBitmap))
+            {
+                overlayGraphics.Clear(System.Drawing.Color.Transparent);
+                RenderThumbnailArrowOverlays(overlayGraphics, pageNumber, new DrawingRectangle(0, 0, contentRect.Width, contentRect.Height));
+            }
+
+            thumbnailArrowOverlayByPage[pageNumber] = overlayBitmap;
+            return overlayBitmap;
+        }
+
+        private Bitmap GetOrCreateThumbnailVectorOverlay(int pageNumber, DrawingRectangle contentRect)
+        {
+            if (pageNumber < 1 || contentRect.Width <= 0 || contentRect.Height <= 0)
+            {
+                return null;
+            }
+
+            if (thumbnailVectorOverlayByPage.TryGetValue(pageNumber, out Bitmap cachedOverlay))
+            {
+                if (cachedOverlay != null &&
+                    cachedOverlay.Width == contentRect.Width &&
+                    cachedOverlay.Height == contentRect.Height)
+                {
+                    return cachedOverlay;
+                }
+
+                thumbnailVectorOverlayByPage.Remove(pageNumber);
+                cachedOverlay?.Dispose();
+            }
+
+            Bitmap overlayBitmap = new Bitmap(contentRect.Width, contentRect.Height, PixelFormat.Format32bppArgb);
+            using (Graphics overlayGraphics = Graphics.FromImage(overlayBitmap))
+            {
+                overlayGraphics.Clear(System.Drawing.Color.Transparent);
+                RenderThumbnailVectorShapeOverlays(overlayGraphics, pageNumber, new DrawingRectangle(0, 0, contentRect.Width, contentRect.Height));
+            }
+
+            thumbnailVectorOverlayByPage[pageNumber] = overlayBitmap;
+            return overlayBitmap;
         }
 
         private void DrawThumbnailCommentOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
@@ -30050,12 +30715,18 @@ namespace AnonPDF
                 return;
             }
 
+            ThumbnailTransform transform = CreateThumbnailTransform(pageNumber, contentRect);
+            if (!transform.IsValid)
+            {
+                return;
+            }
+
             using (var fillBrush = new SolidBrush(System.Drawing.Color.FromArgb(145, 255, 235, 59)))
             using (var borderPen = new Pen(System.Drawing.Color.FromArgb(220, 184, 134, 11), 1.1f))
             {
                 foreach (CommentAnnotation comment in commentAnnotations.Where(comment => comment != null && comment.PageNumber == pageNumber && IsLayerVisible(comment.LayerId)))
                 {
-                    RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(comment.Bounds, pageNumber, contentRect);
+                    RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(comment.Bounds, transform);
                     if (thumbnailRect.Width <= 0f || thumbnailRect.Height <= 0f)
                     {
                         continue;
@@ -30067,12 +30738,22 @@ namespace AnonPDF
             }
         }
 
-        private void DrawThumbnailTextAnnotationOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
+        private void RenderThumbnailTextAnnotationOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
         {
             if (graphics == null || pageNumber < 1 || pageNumber > numPages)
             {
                 return;
             }
+
+            ThumbnailTransform transform = CreateThumbnailTransform(pageNumber, contentRect);
+            if (!transform.IsValid)
+            {
+                return;
+            }
+
+            var pageSize = GetPageSizeWithOffset(pageNumber);
+            float pageWidth = Math.Max(1f, pageSize.Width);
+            float widthScale = contentRect.Width / pageWidth;
 
             foreach (TextAnnotation annotation in textAnnotations.Where(annotation => annotation != null && annotation.PageNumber == pageNumber && IsLayerVisible(annotation.LayerId)))
             {
@@ -30090,7 +30771,7 @@ namespace AnonPDF
                     textBounds = frameBounds;
                 }
 
-                RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(textBounds, pageNumber, contentRect);
+                RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(textBounds, transform);
                 if (thumbnailRect.Width <= 0f || thumbnailRect.Height <= 0f)
                 {
                     continue;
@@ -30116,15 +30797,15 @@ namespace AnonPDF
                 if (annotation.HasLeaderArrow &&
                     TryGetAnnotationLeaderGeometryDoc(annotation, out PointF anchorPoint, out PointF endPoint, out PointF leftPoint, out PointF rightPoint, out PointF lineEndPoint))
                 {
-                    PointF anchorThumb = ConvertDocumentPointToThumbnailPoint(anchorPoint, pageNumber, contentRect);
-                    PointF endThumb = ConvertDocumentPointToThumbnailPoint(endPoint, pageNumber, contentRect);
-                    PointF leftThumb = ConvertDocumentPointToThumbnailPoint(leftPoint, pageNumber, contentRect);
-                    PointF rightThumb = ConvertDocumentPointToThumbnailPoint(rightPoint, pageNumber, contentRect);
-                    PointF lineEndThumb = ConvertDocumentPointToThumbnailPoint(lineEndPoint, pageNumber, contentRect);
+                    PointF anchorThumb = ConvertDocumentPointToThumbnailPoint(anchorPoint, transform);
+                    PointF endThumb = ConvertDocumentPointToThumbnailPoint(endPoint, transform);
+                    PointF leftThumb = ConvertDocumentPointToThumbnailPoint(leftPoint, transform);
+                    PointF rightThumb = ConvertDocumentPointToThumbnailPoint(rightPoint, transform);
+                    PointF lineEndThumb = ConvertDocumentPointToThumbnailPoint(lineEndPoint, transform);
 
                     float leaderThickness = Math.Max(
                         1f,
-                        Math.Min(2.2f, NormalizeLeaderLineWidth(annotation.LeaderLineWidth) * (contentRect.Width / Math.Max(1f, GetPageSizeWithOffset(pageNumber).Width))));
+                        Math.Min(2.2f, NormalizeLeaderLineWidth(annotation.LeaderLineWidth) * widthScale));
 
                     using (var leaderPen = new Pen(strokeColor, leaderThickness))
                     {
@@ -30141,9 +30822,29 @@ namespace AnonPDF
             }
         }
 
+        private void DrawThumbnailTextAnnotationOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
+        {
+            if (graphics == null || pageNumber < 1 || pageNumber > numPages)
+            {
+                return;
+            }
+
+            Bitmap overlayBitmap = GetOrCreateThumbnailTextOverlay(pageNumber, contentRect);
+            if (overlayBitmap != null)
+            {
+                graphics.DrawImageUnscaled(overlayBitmap, contentRect.X, contentRect.Y);
+            }
+        }
+
         private void DrawThumbnailRasterOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
         {
             if (graphics == null || pageNumber < 1 || pageNumber > numPages)
+            {
+                return;
+            }
+
+            ThumbnailTransform transform = CreateThumbnailTransform(pageNumber, contentRect);
+            if (!transform.IsValid)
             {
                 return;
             }
@@ -30154,7 +30855,7 @@ namespace AnonPDF
                 foreach (RasterObject rasterObject in rasterObjects.Where(rasterObject => rasterObject != null && rasterObject.PageNumber == pageNumber && IsLayerVisible(rasterObject.LayerId)))
                 {
                     RectangleF rasterBounds = GetRasterObjectDocFrameBounds(rasterObject);
-                    RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(rasterBounds, pageNumber, contentRect);
+                    RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(rasterBounds, transform);
                     if (thumbnailRect.Width <= 0f || thumbnailRect.Height <= 0f)
                     {
                         continue;
@@ -30165,18 +30866,28 @@ namespace AnonPDF
             }
         }
 
-        private void DrawThumbnailArrowOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
+        private void RenderThumbnailArrowOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
         {
             if (graphics == null || pageNumber < 1 || pageNumber > numPages)
             {
                 return;
             }
 
+            ThumbnailTransform transform = CreateThumbnailTransform(pageNumber, contentRect);
+            if (!transform.IsValid)
+            {
+                return;
+            }
+
+            var pageSize = GetPageSizeWithOffset(pageNumber);
+            float pageWidth = Math.Max(1f, pageSize.Width);
+            float widthScale = contentRect.Width / pageWidth;
+
             foreach (ArrowObject arrowObject in arrowObjects.Where(arrowObject => arrowObject != null && arrowObject.PageNumber == pageNumber && IsLayerVisible(arrowObject.LayerId)))
             {
-                PointF start = ConvertDocumentPointToThumbnailPoint(arrowObject.Start, pageNumber, contentRect);
-                PointF end = ConvertDocumentPointToThumbnailPoint(arrowObject.End, pageNumber, contentRect);
-                float thickness = Math.Max(1.1f, Math.Min(3.2f, NormalizeArrowThickness(arrowObject.Thickness) * (contentRect.Width / Math.Max(1f, GetPageSizeWithOffset(pageNumber).Width))));
+                PointF start = ConvertDocumentPointToThumbnailPoint(arrowObject.Start, transform);
+                PointF end = ConvertDocumentPointToThumbnailPoint(arrowObject.End, transform);
+                float thickness = Math.Max(1.1f, Math.Min(3.2f, NormalizeArrowThickness(arrowObject.Thickness) * widthScale));
                 System.Drawing.Color lineColor = GetArrowColor(arrowObject);
                 System.Drawing.Color borderColor = GetArrowBorderColor(arrowObject);
 
@@ -30197,8 +30908,8 @@ namespace AnonPDF
                     graphics.DrawLine(linePen, start, end);
                 }
 
-                float headLength = Math.Max(5f, Math.Min(14f, NormalizeArrowHeadLength(arrowObject.HeadLength) * (contentRect.Width / Math.Max(1f, GetPageSizeWithOffset(pageNumber).Width))));
-                float headWidth = Math.Max(4f, Math.Min(12f, NormalizeArrowHeadWidth(arrowObject.HeadWidth) * (contentRect.Width / Math.Max(1f, GetPageSizeWithOffset(pageNumber).Width))));
+                float headLength = Math.Max(5f, Math.Min(14f, NormalizeArrowHeadLength(arrowObject.HeadLength) * widthScale));
+                float headWidth = Math.Max(4f, Math.Min(12f, NormalizeArrowHeadWidth(arrowObject.HeadWidth) * widthScale));
                 if (TryBuildArrowHead(start, end, headLength, headWidth, out PointF leftPoint, out PointF rightPoint, out PointF lineEndPoint))
                 {
                     PointF[] headPoints = { end, leftPoint, rightPoint };
@@ -30218,18 +30929,42 @@ namespace AnonPDF
             }
         }
 
-        private void DrawThumbnailVectorShapeOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
+        private void DrawThumbnailArrowOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
         {
             if (graphics == null || pageNumber < 1 || pageNumber > numPages)
             {
                 return;
             }
 
+            Bitmap overlayBitmap = GetOrCreateThumbnailArrowOverlay(pageNumber, contentRect);
+            if (overlayBitmap != null)
+            {
+                graphics.DrawImageUnscaled(overlayBitmap, contentRect.X, contentRect.Y);
+            }
+        }
+
+        private void RenderThumbnailVectorShapeOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
+        {
+            if (graphics == null || pageNumber < 1 || pageNumber > numPages)
+            {
+                return;
+            }
+
+            ThumbnailTransform transform = CreateThumbnailTransform(pageNumber, contentRect);
+            if (!transform.IsValid)
+            {
+                return;
+            }
+
+            var pageSize = GetPageSizeWithOffset(pageNumber);
+            float pageWidth = Math.Max(1f, pageSize.Width);
+            float widthScale = contentRect.Width / pageWidth;
+
             foreach (VectorShapeObject vectorShape in vectorShapes.Where(vectorShape => vectorShape != null && vectorShape.PageNumber == pageNumber && IsLayerVisible(vectorShape.LayerId)))
             {
                 VectorShapeType shapeType = ParseVectorShapeType(vectorShape.ShapeType);
                 PointF[] renderPoints = BuildVectorShapeRenderPoints(shapeType, vectorShape.Points)
-                    .Select(point => ConvertDocumentPointToThumbnailPoint(point, pageNumber, contentRect))
+                    .Select(point => ConvertDocumentPointToThumbnailPoint(point, transform))
                     .ToArray();
                 if (renderPoints.Length < 2)
                 {
@@ -30241,7 +30976,7 @@ namespace AnonPDF
                 bool hasStroke = HasVisibleVectorColor(vectorShape.StrokeColorArgb);
                 System.Drawing.Color strokeColor = System.Drawing.Color.FromArgb(vectorShape.StrokeColorArgb);
                 System.Drawing.Color fillColor = System.Drawing.Color.FromArgb(vectorShape.FillColorArgb);
-                float strokeWidth = Math.Max(1f, Math.Min(3f, NormalizeVectorStrokeWidth(vectorShape.StrokeWidth) * (contentRect.Width / Math.Max(1f, GetPageSizeWithOffset(pageNumber).Width))));
+                float strokeWidth = Math.Max(1f, Math.Min(3f, NormalizeVectorStrokeWidth(vectorShape.StrokeWidth) * widthScale));
 
                 if (hasFill && closedShape)
                 {
@@ -30269,6 +31004,20 @@ namespace AnonPDF
                         }
                     }
                 }
+            }
+        }
+
+        private void DrawThumbnailVectorShapeOverlays(Graphics graphics, int pageNumber, DrawingRectangle contentRect)
+        {
+            if (graphics == null || pageNumber < 1 || pageNumber > numPages)
+            {
+                return;
+            }
+
+            Bitmap overlayBitmap = GetOrCreateThumbnailVectorOverlay(pageNumber, contentRect);
+            if (overlayBitmap != null)
+            {
+                graphics.DrawImageUnscaled(overlayBitmap, contentRect.X, contentRect.Y);
             }
         }
 
@@ -30416,6 +31165,12 @@ namespace AnonPDF
 
         private void ThumbnailViewportTimer_Tick(object sender, EventArgs e)
         {
+            if (isApplicationClosing || !CanUseThumbnailPanel())
+            {
+                thumbnailViewportTimer?.Stop();
+                return;
+            }
+
             if (!IsThumbnailsTabSelected())
             {
                 return;
@@ -30430,6 +31185,8 @@ namespace AnonPDF
             {
                 return;
             }
+
+            Stopwatch thumbnailDrawStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
 
             bool isSelected = e.Item.Selected;
             var theme = CurrentTheme;
@@ -30480,13 +31237,47 @@ namespace AnonPDF
 
             if (pageNumber >= 1)
             {
+                Stopwatch overlaysStopwatch = thumbnailDrawStopwatch != null ? Stopwatch.StartNew() : null;
+
                 DrawThumbnailRedactionOverlays(e.Graphics, pageNumber, contentRect);
+                long redactionMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
+
                 DrawThumbnailTextAnnotationOverlays(e.Graphics, pageNumber, contentRect);
+                long textMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
+
                 DrawThumbnailRasterOverlays(e.Graphics, pageNumber, contentRect);
+                long rasterMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
+
                 DrawThumbnailArrowOverlays(e.Graphics, pageNumber, contentRect);
+                long arrowMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
+
                 DrawThumbnailVectorShapeOverlays(e.Graphics, pageNumber, contentRect);
+                long vectorMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
+
                 DrawThumbnailCommentOverlays(e.Graphics, pageNumber, contentRect);
+                long commentMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
+
                 DrawThumbnailDeletionOverlay(e.Graphics, pageNumber, contentRect);
+                long deletionMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
+
+                if (overlaysStopwatch != null)
+                {
+                    overlaysStopwatch.Stop();
+                    if (overlaysStopwatch.ElapsedMilliseconds >= 30)
+                    {
+                        int redactionCount = redactionBlocks.Count(block => block != null && block.PageNumber == pageNumber && IsLayerVisible(block.LayerId));
+                        int textCount = textAnnotations.Count(annotation => annotation != null && annotation.PageNumber == pageNumber && IsLayerVisible(annotation.LayerId));
+                        int rasterCount = rasterObjects.Count(raster => raster != null && raster.PageNumber == pageNumber && IsLayerVisible(raster.LayerId));
+                        int arrowCount = arrowObjects.Count(arrow => arrow != null && arrow.PageNumber == pageNumber && IsLayerVisible(arrow.LayerId));
+                        int vectorCount = vectorShapes.Count(vector => vector != null && vector.PageNumber == pageNumber && IsLayerVisible(vector.LayerId));
+                        int commentCount = commentAnnotations.Count(comment => comment != null && comment.PageNumber == pageNumber && IsLayerVisible(comment.LayerId));
+                        LogDebug(
+                            $"ThumbnailDrawOverlays page={pageNumber} total={overlaysStopwatch.ElapsedMilliseconds} " +
+                            $"redaction={redactionMs} text={textMs - redactionMs} raster={rasterMs - textMs} arrow={arrowMs - rasterMs} " +
+                            $"vector={vectorMs - arrowMs} comment={commentMs - vectorMs} deletion={deletionMs - commentMs} " +
+                            $"counts=r{redactionCount}/t{textCount}/ra{rasterCount}/a{arrowCount}/v{vectorCount}/c{commentCount}");
+                    }
+                }
             }
 
             int fontHeight = (e.Item.Font ?? thumbnailsListView.Font).Height;
@@ -30523,6 +31314,16 @@ namespace AnonPDF
             {
                 ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds, itemTextColor, itemBackColor);
             }
+
+            if (thumbnailDrawStopwatch != null)
+            {
+                thumbnailDrawStopwatch.Stop();
+                if (thumbnailDrawStopwatch.ElapsedMilliseconds >= 30)
+                {
+                    int drawPageNumber = e.Item.Tag is int taggedDrawPage ? taggedDrawPage : -1;
+                    LogDebug($"ThumbnailDrawItem page={drawPageNumber} selected={(isSelected ? 1 : 0)} bounds={e.Bounds.Width}x{e.Bounds.Height} ms={thumbnailDrawStopwatch.ElapsedMilliseconds}");
+                }
+            }
         }
 
         private void ReloadRefreshCurrentPage()
@@ -30541,6 +31342,7 @@ namespace AnonPDF
             {
                 scaleFactor = maxScaleFactor;
             }
+            KeepBusyCursorUntilPdfViewerPaint();
             pagingTimer.Stop();
             pagingTimer.Start();
             SelectThumbnailItemForCurrentPage(ensureVisible: IsThumbnailsTabSelected());
@@ -32191,6 +32993,9 @@ namespace AnonPDF
 
         private void MainWindow_Closing(object sender, CancelEventArgs e)
         {
+            thumbnailViewportTimer?.Stop();
+            CancelThumbnailGeneration();
+
             if (!suppressCloseConfirmation)
             {
                 if (HasOpenedOrSavedProject() && HasUnsavedProjectContent())
@@ -32224,6 +33029,22 @@ namespace AnonPDF
                     }
                 }
             }
+
+            if (e.Cancel)
+            {
+                isApplicationClosing = false;
+                if (CanUseThumbnailPanel())
+                {
+                    if (IsThumbnailsTabSelected())
+                    {
+                        thumbnailViewportTimer?.Start();
+                        EnsureThumbnailGeneration();
+                    }
+                }
+                return;
+            }
+
+            isApplicationClosing = true;
 
             if (!e.Cancel)
             {
@@ -32679,7 +33500,7 @@ namespace AnonPDF
             {
                 isDrawing = false;
                 isMarkerCtrlBoxMode = false;
-                currentSelection = RectangleF.Empty;
+                ClearCurrentSelectionOverlay();
                 suppressNextLeftMouseUpAfterEscape = true;
                 cancelled = true;
                 drawingWasCancelled = true;
@@ -34455,7 +35276,6 @@ namespace AnonPDF
                     g.Clear(System.Drawing.Color.Transparent);
                     g.SmoothingMode = SmoothingMode.AntiAlias;
 
-                    float mid = tileSize / 2f;
                     PointF[] dotCenters =
                     {
                         new PointF(0f, 0f),
@@ -35867,6 +36687,10 @@ namespace AnonPDF
                     block != null &&
                     IsPageInDeleteRange(block.PageNumber) &&
                     string.Equals(block.DuplicateGroupId, normalizedGroupId, StringComparison.OrdinalIgnoreCase));
+                foreach (int changedPage in changedPages)
+                {
+                    InvalidateThumbnailRedactionOverlay(changedPage);
+                }
                 UpdateSelectionNavigationButtons();
             }
             if (changedPages.Contains(currentPage))
@@ -35998,6 +36822,7 @@ namespace AnonPDF
             {
                 var duplicateBlock = CloneRedactionBlockForPage(sourceBlock, targetPage, duplicateGroupId);
                 redactionBlocks.Add(duplicateBlock);
+                InvalidateThumbnailRedactionOverlay(targetPage);
                 TryComputeRedactionPreviewRects(duplicateBlock);
                 changedPages.Add(targetPage);
             }
@@ -40970,6 +41795,7 @@ namespace AnonPDF
             //Properties.Settings.Default.Save();
             if (safeModeCheckBox.Enabled)
             {
+                RefreshRedactionPreviewForCurrentPage();
                 renderTimer.Stop();
                 renderTimer.Start();
             }
@@ -44086,6 +44912,24 @@ namespace AnonPDF
             bool exportVisualContext = string.Equals(context, "export-visual", StringComparison.OrdinalIgnoreCase);
             bool exportVisualBoxContext = string.Equals(context, "export-visual-box", StringComparison.OrdinalIgnoreCase);
 
+            if (exportVisualContext)
+            {
+                var adjustedMarkerVisualRect = BuildMarkerExportVisualRectangle(page, sourceRectangle);
+                if (adjustedMarkerVisualRect != null)
+                {
+                    return adjustedMarkerVisualRect;
+                }
+            }
+
+            if (exportVisualBoxContext)
+            {
+                var adjustedBoxVisualRect = BuildBoxExportVisualRectangle(page, sourceRectangle, textBounds);
+                if (adjustedBoxVisualRect != null)
+                {
+                    return adjustedBoxVisualRect;
+                }
+            }
+
             float sourceTop = sourceRectangle.GetTop();
             float sourceBottom = sourceRectangle.GetBottom();
             float expandedTop;
@@ -44139,6 +44983,68 @@ namespace AnonPDF
             return adjusted;
         }
 
+        private iText.Kernel.Geom.Rectangle BuildBoxExportVisualRectangle(
+            iText.Kernel.Pdf.PdfPage page,
+            iText.Kernel.Geom.Rectangle sourceRectangle,
+            iText.Kernel.Geom.Rectangle textBounds)
+        {
+            if (page == null || sourceRectangle == null || textBounds == null)
+            {
+                return null;
+            }
+
+            float top = Math.Min(page.GetPageSize().GetTop(), sourceRectangle.GetTop());
+            float bottom = Math.Max(page.GetPageSize().GetBottom(), textBounds.GetBottom());
+            float height = top - bottom;
+            if (height <= 0f)
+            {
+                return null;
+            }
+
+            return new iText.Kernel.Geom.Rectangle(
+                sourceRectangle.GetLeft(),
+                bottom,
+                sourceRectangle.GetWidth(),
+                height);
+        }
+
+        private iText.Kernel.Geom.Rectangle BuildMarkerExportVisualRectangle(
+            iText.Kernel.Pdf.PdfPage page,
+            iText.Kernel.Geom.Rectangle sourceRectangle)
+        {
+            if (page == null || sourceRectangle == null)
+            {
+                return null;
+            }
+
+            if (!TryGetTextLineBoundsInRectangle(
+                page,
+                sourceRectangle,
+                out List<iText.Kernel.Geom.Rectangle> lineBounds,
+                bodyBoundsOnly: true,
+                expandDiacriticsForVisualBounds: false))
+            {
+                return null;
+            }
+
+            float top = lineBounds.Max(line => line.GetTop());
+            float bottom = lineBounds.Min(line => line.GetBottom());
+            var pageSize = page.GetPageSize();
+            top = Math.Min(pageSize.GetTop(), top);
+            bottom = Math.Max(pageSize.GetBottom(), bottom);
+            float height = top - bottom;
+            if (height <= 0f)
+            {
+                return null;
+            }
+
+            return new iText.Kernel.Geom.Rectangle(
+                sourceRectangle.GetLeft(),
+                bottom,
+                sourceRectangle.GetWidth(),
+                height);
+        }
+
         private List<iText.Kernel.Geom.Rectangle> GetVisualLineRectsForBlock(
             iText.Kernel.Pdf.PdfPage page,
             iText.Kernel.Geom.Rectangle sourceRectangle,
@@ -44156,9 +45062,61 @@ namespace AnonPDF
             CustomTextExtractionStrategy strategyRef = null;
             try
             {
+                bool markerVisualContext = string.Equals(context, "visual", StringComparison.OrdinalIgnoreCase);
                 strategyRef = new CustomTextExtractionStrategy(sourceRectangle);
                 PdfTextExtractor.GetTextFromPage(page, strategyRef);
-                strategyRef.TryGetPerLineBounds(out lineRects);
+                if (markerVisualContext)
+                {
+                    if (strategyRef.TryGetPerLineCoverage(out List<CustomTextExtractionStrategy.CoveredLineInfo> coveredLines))
+                    {
+                        if (coveredLines.Count > 1)
+                        {
+                            const float markerPreviewMinVerticalOverlapRatio = 0.12f;
+                            const float markerPreviewMinVerticalOverlapPts = 0.8f;
+                            const float markerPreviewMinGlyphRatio = 0.22f;
+                            const float markerPreviewMinWidthRatio = 0.18f;
+                            int dominantGlyphCount = coveredLines.Max(line => line.GlyphCount);
+                            float dominantWidth = coveredLines.Max(line => line.Bounds.GetWidth());
+
+                            coveredLines = coveredLines
+                                .Where(line =>
+                                {
+                                    float overlapBottom = Math.Max(line.Bounds.GetBottom(), sourceRectangle.GetBottom());
+                                    float overlapTop = Math.Min(line.Bounds.GetTop(), sourceRectangle.GetTop());
+                                    float overlapHeight = overlapTop - overlapBottom;
+                                    float minRequiredOverlap = Math.Max(
+                                        markerPreviewMinVerticalOverlapPts,
+                                        line.Bounds.GetHeight() * markerPreviewMinVerticalOverlapRatio);
+                                    if (overlapHeight >= minRequiredOverlap)
+                                    {
+                                        return true;
+                                    }
+
+                                    if (line.GlyphCount >= Math.Max(2, (int)Math.Ceiling(dominantGlyphCount * markerPreviewMinGlyphRatio)))
+                                    {
+                                        return true;
+                                    }
+
+                                    return dominantWidth > 0f &&
+                                        line.Bounds.GetWidth() >= dominantWidth * markerPreviewMinWidthRatio;
+                                })
+                                .ToList();
+
+                            if (coveredLines.Count == 0)
+                            {
+                                strategyRef.TryGetPerLineCoverage(out coveredLines);
+                            }
+                        }
+
+                        lineRects = coveredLines
+                            .Select(line => line.Bounds)
+                            .ToList();
+                    }
+                }
+                else
+                {
+                    strategyRef.TryGetPerLineBounds(out lineRects);
+                }
             }
             catch
             {
@@ -44214,24 +45172,97 @@ namespace AnonPDF
                 bool exportVisualMarker = string.Equals(context, "export-visual", StringComparison.OrdinalIgnoreCase);
                 bool exportVisualBox = string.Equals(context, "export-visual-box", StringComparison.OrdinalIgnoreCase);
                 bool bodyBoundsOnly = exportVisualMarker || exportVisualBox;
-                CustomTextExtractionStrategy strategy = new CustomTextExtractionStrategy(
+                if (!TryCreateTextExtractionStrategy(
+                    page,
                     rectangle,
+                    out CustomTextExtractionStrategy strategy,
                     expandDiacriticsForVisualBounds: !bodyBoundsOnly,
-                    bodyBoundsOnly: bodyBoundsOnly);
-                PdfTextExtractor.GetTextFromPage(page, strategy);
+                    bodyBoundsOnly: bodyBoundsOnly))
+                {
+                    return false;
+                }
+
                 bool commentMarkerContext = !string.IsNullOrWhiteSpace(context) &&
                     context.StartsWith("comment-marker", StringComparison.OrdinalIgnoreCase);
                 bool hasBounds = commentMarkerContext
                     ? strategy.TryGetCoveredBoundsForMarkerLine(out textBounds)
                     : exportVisualMarker
-                        ? strategy.TryGetCoveredBoundsForMarkerLineVisual(out textBounds)
+                        ? TryGetUnionBoundsFromLineRectangles(strategy, out textBounds)
                         : strategy.TryGetCoveredBounds(out textBounds);
                 return hasBounds;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 return false;
             }
+        }
+
+        private bool TryGetTextLineBoundsInRectangle(
+            iText.Kernel.Pdf.PdfPage page,
+            iText.Kernel.Geom.Rectangle rectangle,
+            out List<iText.Kernel.Geom.Rectangle> lineBounds,
+            bool bodyBoundsOnly,
+            bool expandDiacriticsForVisualBounds)
+        {
+            lineBounds = null;
+            if (!TryCreateTextExtractionStrategy(
+                page,
+                rectangle,
+                out CustomTextExtractionStrategy strategy,
+                expandDiacriticsForVisualBounds,
+                bodyBoundsOnly))
+            {
+                return false;
+            }
+
+            return strategy.TryGetPerLineBounds(out lineBounds);
+        }
+
+        private bool TryCreateTextExtractionStrategy(
+            iText.Kernel.Pdf.PdfPage page,
+            iText.Kernel.Geom.Rectangle rectangle,
+            out CustomTextExtractionStrategy strategy,
+            bool expandDiacriticsForVisualBounds,
+            bool bodyBoundsOnly)
+        {
+            strategy = null;
+            if (page == null || rectangle == null || rectangle.GetWidth() <= 0f || rectangle.GetHeight() <= 0f)
+            {
+                return false;
+            }
+
+            strategy = new CustomTextExtractionStrategy(
+                rectangle,
+                expandDiacriticsForVisualBounds: expandDiacriticsForVisualBounds,
+                bodyBoundsOnly: bodyBoundsOnly);
+            PdfTextExtractor.GetTextFromPage(page, strategy);
+            return true;
+        }
+
+        private static bool TryGetUnionBoundsFromLineRectangles(
+            CustomTextExtractionStrategy strategy,
+            out iText.Kernel.Geom.Rectangle bounds)
+        {
+            bounds = null;
+            if (strategy == null || !strategy.TryGetPerLineBounds(out List<iText.Kernel.Geom.Rectangle> rectangles) ||
+                rectangles == null || rectangles.Count == 0)
+            {
+                return false;
+            }
+
+            float minLeft = rectangles.Min(rect => rect.GetLeft());
+            float minBottom = rectangles.Min(rect => rect.GetBottom());
+            float maxRight = rectangles.Max(rect => rect.GetRight());
+            float maxTop = rectangles.Max(rect => rect.GetTop());
+            float width = maxRight - minLeft;
+            float height = maxTop - minBottom;
+            if (width <= 0f || height <= 0f)
+            {
+                return false;
+            }
+
+            bounds = new iText.Kernel.Geom.Rectangle(minLeft, minBottom, width, height);
+            return true;
         }
 
 
@@ -44278,6 +45309,7 @@ namespace AnonPDF
                     convertedResults.Any(cr => RectEquals(
                         ConvertToItTextRectangle(rb.Bounds),
                         ConvertToItTextRectangle(cr.ConvertedRect), 0.01f)));
+                InvalidateThumbnailRedactionOverlay(currentPage);
                 RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
             }
             else
@@ -44292,6 +45324,7 @@ namespace AnonPDF
                         cr.PageNumber,
                         isMarkerSelection: true);
                     redactionBlocks.Add(createdBlock);
+                    InvalidateThumbnailRedactionOverlay(cr.PageNumber);
                     TryComputeRedactionPreviewRects(createdBlock);
                 }
             }
@@ -48786,8 +49819,323 @@ namespace AnonPDF
 
 
 
+    class PdfCleanUpPreviewTextExtractionStrategy : ITextExtractionStrategy
+    {
+        private const float PreviewIntersectionEpsilon = 1e-4f;
+
+        private readonly IList<iText.Kernel.Geom.Rectangle> regions;
+        private readonly CleanUpProperties properties;
+        private readonly List<iText.Kernel.Geom.Rectangle> cleanedGlyphRectangles;
+
+        public PdfCleanUpPreviewTextExtractionStrategy(
+            IList<iText.Kernel.Geom.Rectangle> regions,
+            CleanUpProperties properties = null)
+        {
+            this.regions = regions ?? new List<iText.Kernel.Geom.Rectangle>();
+            this.properties = properties ?? new CleanUpProperties();
+            cleanedGlyphRectangles = new List<iText.Kernel.Geom.Rectangle>();
+        }
+
+        public void EventOccurred(IEventData data, EventType type)
+        {
+            if (!type.Equals(EventType.RENDER_TEXT) || !(data is TextRenderInfo renderInfo))
+            {
+                return;
+            }
+
+            if (properties.GetOverlapRatio() == null && IsTextNotToBeCleaned(renderInfo))
+            {
+                return;
+            }
+
+            foreach (TextRenderInfo glyphRenderInfo in renderInfo.GetCharacterRenderInfos())
+            {
+                if (!IsTextNotToBeCleaned(glyphRenderInfo))
+                {
+                    iText.Kernel.Geom.Rectangle glyphBounds = GetGlyphBoundingRectangle(glyphRenderInfo);
+                    if (glyphBounds != null && glyphBounds.GetWidth() > 0f && glyphBounds.GetHeight() > 0f)
+                    {
+                        cleanedGlyphRectangles.Add(glyphBounds);
+                    }
+                }
+            }
+        }
+
+        public string GetResultantText()
+        {
+            return string.Empty;
+        }
+
+        public string GetResultantText(ITextChunkLocation location)
+        {
+            return string.Empty;
+        }
+
+        public ICollection<EventType> GetSupportedEvents()
+        {
+            return new List<EventType> { EventType.RENDER_TEXT };
+        }
+
+        public bool TryGetCleanedGlyphRectangles(out List<iText.Kernel.Geom.Rectangle> glyphRects)
+        {
+            glyphRects = cleanedGlyphRectangles
+                .Where(rect => rect != null && rect.GetWidth() > 0f && rect.GetHeight() > 0f)
+                .ToList();
+            return glyphRects.Count > 0;
+        }
+
+        private bool IsTextNotToBeCleaned(TextRenderInfo renderInfo)
+        {
+            iText.Kernel.Geom.Point[] textRect = GetTextRectangle(renderInfo);
+            foreach (iText.Kernel.Geom.Rectangle region in regions)
+            {
+                iText.Kernel.Geom.Point[] redactRect = GetRectangleVertices(region);
+                if (CheckIfRectanglesIntersect(textRect, redactRect))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool CheckIfRectanglesIntersect(iText.Kernel.Geom.Point[] rect1, iText.Kernel.Geom.Point[] rect2)
+        {
+            var clipper = new iText.Kernel.Pdf.Canvas.Parser.ClipperLib.Clipper();
+            var clipperBridge = properties.GetOffsetProperties().CalculateOffsetMultiplierDynamically()
+                ? new iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipperBridge(rect1, rect2)
+                : new iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipperBridge();
+
+            if (!clipperBridge.AddPolygonToClipper(clipper, rect2, iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyType.CLIP))
+            {
+                if (!clipperBridge.AddPolygonToClipper(clipper, rect1, iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyType.SUBJECT))
+                {
+                    if (!clipperBridge.AddPolylineSubjectToClipper(clipper, rect2))
+                    {
+                        return false;
+                    }
+
+                    if (rect1.Length != rect2.Length)
+                    {
+                        return false;
+                    }
+
+                    iText.Kernel.Geom.Point startPoint = rect2[0];
+                    iText.Kernel.Geom.Point endPoint = rect2[0];
+                    for (int i = 1; i < rect2.Length; i++)
+                    {
+                        if (rect2[i].Distance(startPoint) > PreviewIntersectionEpsilon)
+                        {
+                            endPoint = rect2[i];
+                            break;
+                        }
+                    }
+
+                    foreach (iText.Kernel.Geom.Point point in rect1)
+                    {
+                        if (IsPointOnLineSegment(point, startPoint, endPoint, true))
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }
+
+            bool intersectionSubjectAdded = clipperBridge.AddPolygonToClipper(
+                clipper,
+                rect1,
+                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyType.SUBJECT);
+            if (intersectionSubjectAdded)
+            {
+                var paths = new List<List<iText.Kernel.Pdf.Canvas.Parser.ClipperLib.IntPoint>>();
+                clipper.Execute(
+                    iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipType.INTERSECTION,
+                    paths,
+                    iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyFillType.NON_ZERO,
+                    iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyFillType.NON_ZERO);
+                return CheckIfIntersectionOccurs(paths, rect1, false, clipperBridge);
+            }
+
+            intersectionSubjectAdded = clipperBridge.AddPolylineSubjectToClipper(clipper, rect1);
+            if (!intersectionSubjectAdded)
+            {
+                const double smallDiff = 0.01d;
+                var expandedRect1 = new iText.Kernel.Geom.Point[rect1.Length + 1];
+                Array.Copy(rect1, 0, expandedRect1, 0, rect1.Length);
+                expandedRect1[rect1.Length] = new iText.Kernel.Geom.Point(rect1[0].GetX() + smallDiff, rect1[0].GetY());
+                rect1 = expandedRect1;
+                intersectionSubjectAdded = clipperBridge.AddPolylineSubjectToClipper(clipper, rect1);
+                if (!intersectionSubjectAdded)
+                {
+                    return false;
+                }
+            }
+
+            var polyTree = new iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyTree();
+            clipper.Execute(
+                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipType.INTERSECTION,
+                polyTree,
+                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyFillType.NON_ZERO,
+                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyFillType.NON_ZERO);
+            return CheckIfIntersectionOccurs(
+                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.Clipper.PolyTreeToPaths(polyTree),
+                rect1,
+                true,
+                clipperBridge);
+        }
+
+        private bool CheckIfIntersectionOccurs(
+            List<List<iText.Kernel.Pdf.Canvas.Parser.ClipperLib.IntPoint>> paths,
+            iText.Kernel.Geom.Point[] rect1,
+            bool isDegenerate,
+            iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipperBridge clipperBridge)
+        {
+            if (paths == null || paths.Count == 0)
+            {
+                return false;
+            }
+
+            iText.Kernel.Pdf.Canvas.Parser.ClipperLib.IntRect intersectionRectangle =
+                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.Clipper.GetBounds(paths);
+            if (properties.GetOverlapRatio() == null)
+            {
+                return !CheckIfIntersectionRectangleDegenerate(intersectionRectangle, isDegenerate, clipperBridge);
+            }
+
+            double overlappedArea = CalculatePolygonArea(rect1);
+            double intersectionArea =
+                clipperBridge.LongRectCalculateHeight(intersectionRectangle) *
+                clipperBridge.LongRectCalculateWidth(intersectionRectangle);
+            double percentageOfOverlapping = intersectionArea / overlappedArea;
+            const float smallValueForRoundingErrors = 1e-5f;
+            return percentageOfOverlapping + smallValueForRoundingErrors > properties.GetOverlapRatio();
+        }
+
+        private static bool CheckIfIntersectionRectangleDegenerate(
+            iText.Kernel.Pdf.Canvas.Parser.ClipperLib.IntRect rect,
+            bool isIntersectSubjectDegenerate,
+            iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipperBridge clipperBridge)
+        {
+            float width = clipperBridge.LongRectCalculateWidth(rect);
+            float height = clipperBridge.LongRectCalculateHeight(rect);
+            return isIntersectSubjectDegenerate
+                ? (width < PreviewIntersectionEpsilon && height < PreviewIntersectionEpsilon)
+                : (width < PreviewIntersectionEpsilon || height < PreviewIntersectionEpsilon);
+        }
+
+        private static bool IsPointOnLineSegment(
+            iText.Kernel.Geom.Point currentPoint,
+            iText.Kernel.Geom.Point linePoint1,
+            iText.Kernel.Geom.Point linePoint2,
+            bool isBetweenLinePoints)
+        {
+            double dxc = currentPoint.GetX() - linePoint1.GetX();
+            double dyc = currentPoint.GetY() - linePoint1.GetY();
+            double dxl = linePoint2.GetX() - linePoint1.GetX();
+            double dyl = linePoint2.GetY() - linePoint1.GetY();
+            double cross = dxc * dyl - dyc * dxl;
+            if (Math.Abs(cross) <= PreviewIntersectionEpsilon)
+            {
+                if (!isBetweenLinePoints)
+                {
+                    return true;
+                }
+
+                if (Math.Abs(dxl) >= Math.Abs(dyl))
+                {
+                    return dxl > 0
+                        ? linePoint1.GetX() - PreviewIntersectionEpsilon <= currentPoint.GetX() &&
+                            currentPoint.GetX() <= linePoint2.GetX() + PreviewIntersectionEpsilon
+                        : linePoint2.GetX() - PreviewIntersectionEpsilon <= currentPoint.GetX() &&
+                            currentPoint.GetX() <= linePoint1.GetX() + PreviewIntersectionEpsilon;
+                }
+
+                return dyl > 0
+                    ? linePoint1.GetY() - PreviewIntersectionEpsilon <= currentPoint.GetY() &&
+                        currentPoint.GetY() <= linePoint2.GetY() + PreviewIntersectionEpsilon
+                    : linePoint2.GetY() - PreviewIntersectionEpsilon <= currentPoint.GetY() &&
+                        currentPoint.GetY() <= linePoint1.GetY() + PreviewIntersectionEpsilon;
+            }
+
+            return false;
+        }
+
+        private static iText.Kernel.Geom.Rectangle GetGlyphBoundingRectangle(TextRenderInfo renderInfo)
+        {
+            iText.Kernel.Geom.Point[] points = GetTextRectangle(renderInfo);
+            float minX = points.Min(point => (float)point.GetX());
+            float minY = points.Min(point => (float)point.GetY());
+            float maxX = points.Max(point => (float)point.GetX());
+            float maxY = points.Max(point => (float)point.GetY());
+            float width = maxX - minX;
+            float height = maxY - minY;
+            if (width <= 0f || height <= 0f)
+            {
+                return null;
+            }
+
+            return new iText.Kernel.Geom.Rectangle(minX, minY, width, height);
+        }
+
+        private static iText.Kernel.Geom.Point[] GetTextRectangle(TextRenderInfo renderInfo)
+        {
+            iText.Kernel.Geom.LineSegment ascent = renderInfo.GetAscentLine();
+            iText.Kernel.Geom.LineSegment descent = renderInfo.GetDescentLine();
+            return new[]
+            {
+                new iText.Kernel.Geom.Point(ascent.GetStartPoint().Get(0), ascent.GetStartPoint().Get(1)),
+                new iText.Kernel.Geom.Point(ascent.GetEndPoint().Get(0), ascent.GetEndPoint().Get(1)),
+                new iText.Kernel.Geom.Point(descent.GetEndPoint().Get(0), descent.GetEndPoint().Get(1)),
+                new iText.Kernel.Geom.Point(descent.GetStartPoint().Get(0), descent.GetStartPoint().Get(1))
+            };
+        }
+
+        private static iText.Kernel.Geom.Point[] GetRectangleVertices(iText.Kernel.Geom.Rectangle rect)
+        {
+            return new[]
+            {
+                new iText.Kernel.Geom.Point(rect.GetLeft(), rect.GetBottom()),
+                new iText.Kernel.Geom.Point(rect.GetRight(), rect.GetBottom()),
+                new iText.Kernel.Geom.Point(rect.GetRight(), rect.GetTop()),
+                new iText.Kernel.Geom.Point(rect.GetLeft(), rect.GetTop())
+            };
+        }
+
+        private static double CalculatePolygonArea(iText.Kernel.Geom.Point[] polygon)
+        {
+            if (polygon == null || polygon.Length < 3)
+            {
+                return 0d;
+            }
+
+            double area = 0d;
+            for (int i = 0; i < polygon.Length; i++)
+            {
+                iText.Kernel.Geom.Point current = polygon[i];
+                iText.Kernel.Geom.Point next = polygon[(i + 1) % polygon.Length];
+                area += (current.GetX() * next.GetY()) - (next.GetX() * current.GetY());
+            }
+
+            return Math.Abs(area) * 0.5d;
+        }
+    }
+
     class CustomTextExtractionStrategy : ITextExtractionStrategy
     {
+        public struct CoveredLineInfo
+        {
+            public iText.Kernel.Geom.Rectangle Bounds { get; }
+            public int GlyphCount { get; }
+
+            public CoveredLineInfo(iText.Kernel.Geom.Rectangle bounds, int glyphCount)
+            {
+                Bounds = bounds;
+                GlyphCount = glyphCount;
+            }
+        }
+
         private readonly iText.Kernel.Geom.Rectangle _targetRect;
         private readonly List<TextChunk> _textChunks;
         private readonly List<GlyphBounds> _coveredGlyphs;
@@ -48960,6 +50308,20 @@ namespace AnonPDF
         public bool TryGetPerLineBounds(out List<iText.Kernel.Geom.Rectangle> lineBounds)
         {
             lineBounds = null;
+            if (!TryGetPerLineCoverage(out List<CoveredLineInfo> coveredLines))
+            {
+                return false;
+            }
+
+            lineBounds = coveredLines
+                .Select(line => line.Bounds)
+                .ToList();
+            return lineBounds.Count > 0;
+        }
+
+        public bool TryGetPerLineCoverage(out List<CoveredLineInfo> coveredLines)
+        {
+            coveredLines = null;
             if (_coveredGlyphs.Count == 0)
             {
                 return false;
@@ -48979,7 +50341,7 @@ namespace AnonPDF
                 list.Add(glyph);
             }
 
-            lineBounds = new List<iText.Kernel.Geom.Rectangle>(lines.Count);
+            coveredLines = new List<CoveredLineInfo>(lines.Count);
             foreach (var entry in lines)
             {
                 float minX = float.MaxValue;
@@ -48998,11 +50360,13 @@ namespace AnonPDF
                 float height = maxY - minY;
                 if (width > 0f && height > 0f)
                 {
-                    lineBounds.Add(new iText.Kernel.Geom.Rectangle(minX, minY, width, height));
+                    coveredLines.Add(new CoveredLineInfo(
+                        new iText.Kernel.Geom.Rectangle(minX, minY, width, height),
+                        entry.Value.Count));
                 }
             }
 
-            return lineBounds.Count > 0;
+            return coveredLines.Count > 0;
         }
 
         public bool TryGetCoveredBoundsForMarkerLine(out iText.Kernel.Geom.Rectangle bounds)

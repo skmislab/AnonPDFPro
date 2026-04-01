@@ -1006,6 +1006,9 @@ Nochmal klicken, um Markierungen zu entfernen.</value>
   <data name="Tooltip_PageThumbnails" xml:space="preserve">
     <value>Eine Miniatur anklicken, um die Seite anzuzeigen.</value>
   </data>
+  <data name="Tooltip_LayersView" xml:space="preserve">
+    <value>Ein Ebenensymbol anklicken, um Sichtbarkeit, Sperre oder aktiven Status zu ändern.</value>
+  </data>
   <data name="About_Message" xml:space="preserve">
     <value>Anwendung: {0}
 Version: {1}

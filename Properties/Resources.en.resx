@@ -845,6 +845,9 @@ Click again to remove marks.</value>
   <data name="Tooltip_PageThumbnails" xml:space="preserve">
     <value>Click a thumbnail to display the page.</value>
   </data>
+  <data name="Tooltip_LayersView" xml:space="preserve">
+    <value>Click a layer icon to change its visibility, lock state, or active state.</value>
+  </data>
   <data name="Split_Success" xml:space="preserve">
     <value>PDF document has been split.</value>
   </data>

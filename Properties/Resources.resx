@@ -845,6 +845,9 @@ Ponowne kliknięcie usunie zaznaczenia.</value>
   <data name="Tooltip_PageThumbnails" xml:space="preserve">
     <value>Kliknij miniaturę, aby wyświetlić stronę.</value>
   </data>
+  <data name="Tooltip_LayersView" xml:space="preserve">
+    <value>Kliknij ikonę warstwy, aby zmienić jej widoczność, blokadę lub aktywność.</value>
+  </data>
   <data name="Split_Success" xml:space="preserve">
     <value>Dokument PDF został podzielony.</value>
   </data>
