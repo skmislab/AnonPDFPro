@@ -292,6 +292,7 @@ namespace AnonPDF
         private RasterObject rasterObjectToMove;
         private RasterObject rasterObjectToRotate;
         private RasterObject rasterObjectToResize;
+        private RedactionBlock redactionBlockToResize;
         private ArrowObject arrowObjectToMove;
         private ArrowObject arrowObjectToAdjust;
         private ArrowObject arrowObjectToScale;
@@ -319,6 +320,7 @@ namespace AnonPDF
         private TextLeaderAnchorKind textLeaderDragStartAnchorKind = TextLeaderAnchorKind.RightCenter;
         private PointF rasterMoveMouseOffset;
         private RectangleF rasterMoveStartBounds = RectangleF.Empty;
+        private RectangleF redactionResizeStartBounds = RectangleF.Empty;
         private RectangleF rasterRotateStartBounds = RectangleF.Empty;
         private readonly List<GroupMoveEntry> rasterMoveAttachedClipEntries = new List<GroupMoveEntry>();
         private readonly List<GroupMoveEntry> rasterRotateAttachedClipEntries = new List<GroupMoveEntry>();
@@ -342,6 +344,9 @@ namespace AnonPDF
         private readonly HashSet<string> selectedRasterObjectIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> selectedArrowObjectIds = new HashSet<string>(StringComparer.Ordinal);
         private readonly HashSet<string> selectedVectorShapeIds = new HashSet<string>(StringComparer.Ordinal);
+        private bool isResizingRedactionBlock;
+        private bool redactionResizeChanged;
+        private ObjectScaleHandleCorner redactionResizeHandleCorner = ObjectScaleHandleCorner.TopLeft;
         private Point objectSelectionCyclePoint = Point.Empty;
         private int objectSelectionCyclePage = -1;
         private float objectSelectionCycleScale = -1f;
@@ -7543,6 +7548,200 @@ namespace AnonPDF
             selectedRedactionBlock = null;
             ClearGroupSelection();
             UpdateObjectSelectionInfoLabel();
+        }
+
+        private void ResetRedactionResizeState()
+        {
+            isResizingRedactionBlock = false;
+            redactionResizeChanged = false;
+            redactionBlockToResize = null;
+            redactionResizeStartBounds = RectangleF.Empty;
+            redactionResizeHandleCorner = ObjectScaleHandleCorner.TopLeft;
+        }
+
+        private bool TryGetRedactionBlockAtPoint(Point location, out RedactionBlock hitBlock)
+        {
+            hitBlock = null;
+            if (pdf == null || currentPage <= 0 || currentPage > numPages)
+            {
+                return false;
+            }
+
+            float docX = location.X / scaleFactor;
+            float docY = location.Y / scaleFactor;
+            hitBlock = redactionBlocks
+                .Where(block => block != null &&
+                                block.PageNumber == currentPage &&
+                                IsLayerVisible(block.LayerId) &&
+                                block.Bounds.Contains(docX, docY))
+                .LastOrDefault();
+            return hitBlock != null;
+        }
+
+        private static RectangleF GetRedactionBlockScreenBounds(RedactionBlock block, float scale)
+        {
+            if (block == null || scale <= 0f)
+            {
+                return RectangleF.Empty;
+            }
+
+            return new RectangleF(
+                block.Bounds.X * scale,
+                block.Bounds.Y * scale,
+                block.Bounds.Width * scale,
+                block.Bounds.Height * scale);
+        }
+
+        private bool TryGetSelectedRedactionResizeHandleAtPoint(Point location, out ObjectScaleHandleCorner handleCorner)
+        {
+            handleCorner = ObjectScaleHandleCorner.TopLeft;
+            if (selectedRedactionBlock == null ||
+                selectedRedactionBlock.PageNumber != currentPage ||
+                selectedRedactionBlock.IsMarkerSelection ||
+                !IsLayerVisible(selectedRedactionBlock.LayerId) ||
+                IsRedactionBlockEffectivelyLocked(selectedRedactionBlock))
+            {
+                return false;
+            }
+
+            RectangleF screenBounds = GetRedactionBlockScreenBounds(selectedRedactionBlock, scaleFactor);
+            if (!TryGetObjectScaleHandleRects(screenBounds, out Dictionary<ObjectScaleHandleCorner, RectangleF> handles))
+            {
+                return false;
+            }
+
+            foreach (ObjectScaleHandleCorner candidate in new[] { ObjectScaleHandleCorner.TopLeft, ObjectScaleHandleCorner.BottomRight })
+            {
+                if (handles.TryGetValue(candidate, out RectangleF rect) && rect.Contains(location))
+                {
+                    handleCorner = candidate;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void DrawSelectedRedactionHandles(Graphics graphics)
+        {
+            if (graphics == null ||
+                selectedRedactionBlock == null ||
+                selectedRedactionBlock.PageNumber != currentPage ||
+                selectedRedactionBlock.IsMarkerSelection ||
+                !IsLayerVisible(selectedRedactionBlock.LayerId) ||
+                IsRedactionBlockEffectivelyLocked(selectedRedactionBlock))
+            {
+                return;
+            }
+
+            RectangleF screenBounds = GetRedactionBlockScreenBounds(selectedRedactionBlock, scaleFactor);
+            if (!TryGetObjectScaleHandleRects(screenBounds, out Dictionary<ObjectScaleHandleCorner, RectangleF> handles))
+            {
+                return;
+            }
+
+            using (var handleBrush = new SolidBrush(System.Drawing.Color.White))
+            using (var handlePen = new Pen(System.Drawing.Color.OrangeRed, 1.5f))
+            {
+                foreach (ObjectScaleHandleCorner corner in new[] { ObjectScaleHandleCorner.TopLeft, ObjectScaleHandleCorner.BottomRight })
+                {
+                    if (!handles.TryGetValue(corner, out RectangleF rect))
+                    {
+                        continue;
+                    }
+
+                    graphics.FillRectangle(handleBrush, rect);
+                    graphics.DrawRectangle(handlePen, rect.X, rect.Y, rect.Width, rect.Height);
+                }
+            }
+        }
+
+        private bool TryUpdateRedactionHoverCursor(Point location)
+        {
+            if (TryGetSelectedRedactionResizeHandleAtPoint(location, out ObjectScaleHandleCorner handleCorner))
+            {
+                pdfViewer.Cursor = GetCursorForObjectScaleHandle(handleCorner);
+                return true;
+            }
+
+            return false;
+        }
+
+        private void ApplyRedactionResizeFromMouse(Point location)
+        {
+            if (!isResizingRedactionBlock ||
+                redactionBlockToResize == null ||
+                redactionBlockToResize.PageNumber != currentPage ||
+                redactionBlockToResize.IsMarkerSelection ||
+                IsRedactionBlockEffectivelyLocked(redactionBlockToResize) ||
+                !HasPositiveSize(redactionResizeStartBounds))
+            {
+                return;
+            }
+
+            var pageSize = GetPageSizeWithOffset(redactionBlockToResize.PageNumber);
+            float minWidth = Math.Max(1f, markerWidth);
+            float minHeight = Math.Max(1f, markerHeight);
+            PointF mouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
+
+            if (snapToGridEnabled)
+            {
+                mouseDoc.X = SnapValueToGrid(mouseDoc.X, SnapGridStep);
+                mouseDoc.Y = SnapValueToGrid(mouseDoc.Y, SnapGridStep);
+            }
+
+            RectangleF bounds = redactionResizeStartBounds;
+            RectangleF updatedBounds;
+            if (redactionResizeHandleCorner == ObjectScaleHandleCorner.TopLeft)
+            {
+                float right = bounds.Right;
+                float bottom = bounds.Bottom;
+                float maxLeft = right - minWidth;
+                float maxTop = bottom - minHeight;
+                float newLeft = Math.Max(0f, Math.Min(maxLeft, mouseDoc.X));
+                float newTop = Math.Max(0f, Math.Min(maxTop, mouseDoc.Y));
+                updatedBounds = RectangleF.FromLTRB(newLeft, newTop, right, bottom);
+            }
+            else
+            {
+                float left = bounds.Left;
+                float top = bounds.Top;
+                float minRight = left + minWidth;
+                float minBottom = top + minHeight;
+                float newRight = Math.Max(minRight, mouseDoc.X);
+                float newBottom = Math.Max(minBottom, mouseDoc.Y);
+                if (pageSize.Width > 0f)
+                {
+                    newRight = Math.Min(pageSize.Width, newRight);
+                }
+                if (pageSize.Height > 0f)
+                {
+                    newBottom = Math.Min(pageSize.Height, newBottom);
+                }
+                updatedBounds = RectangleF.FromLTRB(left, top, newRight, newBottom);
+            }
+
+            if (pageSize.Width > 0f)
+            {
+                updatedBounds.Width = Math.Min(updatedBounds.Width, pageSize.Width - updatedBounds.X);
+            }
+            if (pageSize.Height > 0f)
+            {
+                updatedBounds.Height = Math.Min(updatedBounds.Height, pageSize.Height - updatedBounds.Y);
+            }
+
+            if (updatedBounds.Width <= 0f || updatedBounds.Height <= 0f)
+            {
+                return;
+            }
+
+            redactionBlockToResize.Bounds = updatedBounds;
+            redactionResizeChanged = redactionResizeChanged ||
+                                     Math.Abs(updatedBounds.X - redactionResizeStartBounds.X) > 0.001f ||
+                                     Math.Abs(updatedBounds.Y - redactionResizeStartBounds.Y) > 0.001f ||
+                                     Math.Abs(updatedBounds.Width - redactionResizeStartBounds.Width) > 0.001f ||
+                                     Math.Abs(updatedBounds.Height - redactionResizeStartBounds.Height) > 0.001f;
+            pdfViewer.Invalidate();
         }
 
         private bool SelectAllObjectsOnCurrentPage()
@@ -21315,6 +21514,7 @@ namespace AnonPDF
             isDrawing = false;
             isMarkerCtrlBoxMode = false;
             currentSelection = RectangleF.Empty;
+            ResetRedactionResizeState();
             suppressRedactionModeTracking = true;
             markerRadioButton.Checked = false;
             boxRadioButton.Checked = false;
@@ -21323,20 +21523,7 @@ namespace AnonPDF
 
         private bool TryRestoreRedactionSelectionModeFromHitBlock(Point location)
         {
-            if (pdf == null || currentPage <= 0 || currentPage > numPages)
-            {
-                return false;
-            }
-
-            float docX = location.X / scaleFactor;
-            float docY = location.Y / scaleFactor;
-            RedactionBlock hitBlock = redactionBlocks
-                .Where(block => block != null &&
-                                block.PageNumber == currentPage &&
-                                IsLayerVisible(block.LayerId) &&
-                                block.Bounds.Contains(docX, docY))
-                .LastOrDefault();
-            if (hitBlock == null)
+            if (!TryGetRedactionBlockAtPoint(location, out RedactionBlock hitBlock))
             {
                 return false;
             }
@@ -22034,6 +22221,7 @@ namespace AnonPDF
                 isMoving = false;
                 annotationToMove = null;
                 textMoveMouseOffset = PointF.Empty;
+                ResetRedactionResizeState();
                 ResetRasterInteractionState();
                 ResetArrowInteractionState();
                 ResetGroupMoveState();
@@ -22059,6 +22247,7 @@ namespace AnonPDF
                 isMoving = false;
                 annotationToMove = null;
                 textMoveMouseOffset = PointF.Empty;
+                ResetRedactionResizeState();
                 ResetRasterInteractionState();
                 ResetArrowInteractionState();
                 ResetVectorInteractionState();
@@ -22150,6 +22339,7 @@ namespace AnonPDF
             if (IsCurrentPageMarkedForDeletion() && (e.Button == MouseButtons.Left || e.Button == MouseButtons.Right))
             {
                 textMoveMouseOffset = PointF.Empty;
+                ResetRedactionResizeState();
                 ResetRasterInteractionState();
                 ResetArrowInteractionState();
                 ResetVectorInteractionState();
@@ -22188,7 +22378,6 @@ namespace AnonPDF
                 float docX = e.X / scaleFactor;
                 float docY = e.Y / scaleFactor;
                 bool commentHit = TryGetCommentAtPoint(e.Location, out CommentAnnotation hitComment, out RectangleF hitNoteRect);
-                selectedRedactionBlock = null;
 
                 if (!commentHit)
                 {
@@ -22310,6 +22499,26 @@ namespace AnonPDF
                     return;
                 }
 
+                if (TryGetSelectedRedactionResizeHandleAtPoint(e.Location, out ObjectScaleHandleCorner redactionHandleCorner))
+                {
+                    if (selectedRedactionBlock != null && EnsureCurrentPageEditable(true) && !IsRedactionBlockEffectivelyLocked(selectedRedactionBlock))
+                    {
+                        BeginUndoCapture("Resize selection");
+                        isResizingRedactionBlock = true;
+                        redactionResizeChanged = false;
+                        redactionBlockToResize = selectedRedactionBlock;
+                        redactionResizeStartBounds = selectedRedactionBlock.Bounds;
+                        redactionResizeHandleCorner = redactionHandleCorner;
+                        isDrawing = false;
+                        isMoving = false;
+                        annotationToMove = null;
+                        textMoveMouseOffset = PointF.Empty;
+                        this.Cursor = GetCursorForObjectScaleHandle(redactionHandleCorner);
+                        pdfViewer.Invalidate();
+                        return;
+                    }
+                }
+
                 if (TryRestoreRedactionSelectionModeFromHitBlock(e.Location))
                 {
                     ResetObjectSelectionCycle();
@@ -22331,12 +22540,9 @@ namespace AnonPDF
                     annotationToMove = null;
                     isMoving = false;
                     textMoveMouseOffset = PointF.Empty;
-                    isDrawing = true;
-                    if (IsRedactionSelectionModeEnabled())
-                    {
-                        BeginUndoCapture(markerRadioButton.Checked ? "Add marker selection" : "Add box selection");
-                    }
-                    UpdateCurrentSelectionOverlay(new RectangleF(startPoint, Size.Empty));
+                    isDrawing = false;
+                    currentSelection = RectangleF.Empty;
+                    UpdateCurrentSelectionOverlay(RectangleF.Empty);
                     pdfViewer.Invalidate();
                     return;
                 }
@@ -23269,7 +23475,10 @@ namespace AnonPDF
             {
                 if (isCommentCreationMode || IsRedactionSelectionModeEnabled())
                 {
-                    UpdatePdfViewerToolCursor();
+                    if (!TryUpdateRedactionHoverCursor(e.Location))
+                    {
+                        UpdatePdfViewerToolCursor();
+                    }
                 }
                 else
                 {
@@ -23294,7 +23503,8 @@ namespace AnonPDF
                             ? Cursors.SizeNWSE
                             : Cursors.SizeAll;
                     }
-                    else if (!TryUpdateGroupHoverCursor(e.Location, dpiX, dpiY) &&
+                    else if (!TryUpdateRedactionHoverCursor(e.Location) &&
+                        !TryUpdateGroupHoverCursor(e.Location, dpiX, dpiY) &&
                         !TryUpdateTextHoverCursor(e.Location, dpiX, dpiY) &&
                         !TryUpdateVectorHoverCursor(e.Location) &&
                         !TryUpdateArrowHoverCursor(e.Location) &&
@@ -23349,7 +23559,13 @@ namespace AnonPDF
                     height = Math.Abs(e.Y - startPoint.Y);
                 }
                 UpdateCurrentSelectionOverlay(new System.Drawing.RectangleF(x, y, width, height));
-            } else if (isMoving && !isClickOnIcon)
+            }
+            else if (isResizingRedactionBlock)
+            {
+                ApplyRedactionResizeFromMouse(e.Location);
+                return;
+            }
+            else if (isMoving && !isClickOnIcon)
             {
                 if (annotationToMove != null && !IsTextAnnotationEffectivelyLocked(annotationToMove))
                 {
@@ -23505,6 +23721,27 @@ namespace AnonPDF
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
                         commentNoteRectsDoc.Clear();
+                    }
+                    pdfViewer.Invalidate();
+                    return;
+                }
+
+                if (isResizingRedactionBlock)
+                {
+                    bool changed = redactionResizeChanged;
+                    RedactionBlock resizedBlock = redactionBlockToResize;
+                    ResetRedactionResizeState();
+                    this.Cursor = Cursors.Default;
+                    if (changed && resizedBlock != null)
+                    {
+                        TouchRedactionBlock(resizedBlock);
+                        InvalidateRedactionPreviewRects(resizedBlock);
+                        InvalidateThumbnailRedactionOverlay(resizedBlock.PageNumber);
+                        InvalidateThumbnailPage(resizedBlock.PageNumber, invalidateStaticOverlays: false);
+                        RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
+                        projectWasChangedAfterLastSave = true;
+                        saveProjectButton.Enabled = true;
+                        saveProjectMenuItem.Enabled = true;
                     }
                     pdfViewer.Invalidate();
                     return;
@@ -23884,6 +24121,7 @@ namespace AnonPDF
                                     currentPage,
                                     isMarkerSelection: markerModeForBlock);
                                 redactionBlocks.Add(createdBlock);
+                                selectedRedactionBlock = createdBlock;
                                 InvalidateThumbnailRedactionOverlay(currentPage);
                                 InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
                                 TryComputeRedactionPreviewRects(createdBlock);
@@ -23921,6 +24159,7 @@ namespace AnonPDF
                             {
                                 var createdBlock = CreateRedactionBlockWithAutomaticClassification(rect, currentPage, isMarkerSelection: false);
                                 redactionBlocks.Add(createdBlock);
+                                selectedRedactionBlock = createdBlock;
                                 InvalidateThumbnailRedactionOverlay(currentPage);
                                 InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
                                 TryComputeRedactionPreviewRects(createdBlock);
@@ -29097,6 +29336,13 @@ namespace AnonPDF
                     System.Drawing.RectangleF rect = new System.Drawing.RectangleF((block.Bounds.X * scaleFactor), (block.Bounds.Y * scaleFactor), (block.Bounds.Width * scaleFactor), (block.Bounds.Height * scaleFactor));
                     e.Graphics.FillRectangle(brush, rect);
                     DrawCornerDebugMarkersOnPreview(e.Graphics, rect);
+                    if (ReferenceEquals(selectedRedactionBlock, block) && !block.IsMarkerSelection)
+                    {
+                        using (var selectedPen = new Pen(System.Drawing.Color.OrangeRed, 1.5f))
+                        {
+                            e.Graphics.DrawRectangle(selectedPen, rect.X, rect.Y, rect.Width, rect.Height);
+                        }
+                    }
 
                     if (TryBuildFootnoteMarkerText(block, previewBasisNumberMap, out string badgeText))
                     {
@@ -29294,6 +29540,8 @@ namespace AnonPDF
                     }
                 }
             }
+
+            DrawSelectedRedactionHandles(e.Graphics);
 
             if (isDrawing && currentSelection.Width > 0 && currentSelection.Height > 0 &&
                 (isCommentCreationMode || IsRedactionSelectionModeEnabled()))
