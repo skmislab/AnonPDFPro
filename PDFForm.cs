@@ -152,6 +152,7 @@ namespace AnonPDF
         private TextAnnotation annotationToAdjustLeader = null;
         private TextAnnotation selectedTextAnnotation = null;
         private CommentAnnotation selectedCommentAnnotation = null;
+        private RedactionBlock selectedRedactionBlock = null;
         private int textRotationStartValue;
         private float textRotationStartAngle;
         private PointF textRotationStartCenterDoc = PointF.Empty;
@@ -3656,6 +3657,12 @@ namespace AnonPDF
                 selectedCommentAnnotation = null;
             }
 
+            if (selectedRedactionBlock != null &&
+                (selectedRedactionBlock.PageNumber != currentPage || !IsLayerVisible(selectedRedactionBlock.LayerId) || !redactionBlocks.Contains(selectedRedactionBlock)))
+            {
+                selectedRedactionBlock = null;
+            }
+
             if ((annotationToRotate != null && !IsLayerVisible(annotationToRotate.LayerId)) ||
                 (annotationToScale != null && !IsLayerVisible(annotationToScale.LayerId)) ||
                 (annotationToAdjustLeader != null && !IsLayerVisible(annotationToAdjustLeader.LayerId)))
@@ -5767,6 +5774,15 @@ namespace AnonPDF
             int selectedCount = selectedObjects.Count;
             if (selectedCount <= 0)
             {
+                if (selectedRedactionBlock != null &&
+                    selectedRedactionBlock.PageNumber == currentPage &&
+                    IsLayerVisible(selectedRedactionBlock.LayerId))
+                {
+                    string redactionLayerInfoText = GetSelectionInfoLayerText(new[] { GetSelectionInfoLayerId(selectedRedactionBlock) });
+                    string redactionTypeText = GetSelectionInfoObjectTypeText(selectedRedactionBlock);
+                    return AppendSelectionInfoLayerText(redactionLayerInfoText, redactionTypeText);
+                }
+
                 if (selectedCommentAnnotation == null ||
                     selectedCommentAnnotation.PageNumber != currentPage ||
                     !IsLayerVisible(selectedCommentAnnotation.LayerId))
@@ -5881,6 +5897,11 @@ namespace AnonPDF
                 case CommentAnnotation _:
                     return LocalizedText("Comment_DefaultText");
 
+                case RedactionBlock redactionBlock:
+                    return redactionBlock.IsMarkerSelection
+                        ? LocalizedText("UI_Radio_Marker")
+                        : LocalizedText("UI_Radio_Box");
+
                 case ArrowObject _:
                     switch (language)
                     {
@@ -5919,6 +5940,8 @@ namespace AnonPDF
                     return NormalizeLayerIdValue(rasterObject.LayerId);
                 case CommentAnnotation commentAnnotation:
                     return NormalizeLayerIdValue(commentAnnotation.LayerId);
+                case RedactionBlock redactionBlock:
+                    return NormalizeLayerIdValue(redactionBlock.LayerId);
                 case ArrowObject arrowObject:
                     return NormalizeLayerIdValue(arrowObject.LayerId);
                 case VectorShapeObject vectorShape:
@@ -7517,6 +7540,7 @@ namespace AnonPDF
             selectedArrowObject = null;
             selectedVectorShape = null;
             selectedCommentAnnotation = null;
+            selectedRedactionBlock = null;
             ClearGroupSelection();
             UpdateObjectSelectionInfoLabel();
         }
@@ -15425,6 +15449,7 @@ namespace AnonPDF
 
         private void ClearRedactionBlocks()
         {
+            selectedRedactionBlock = null;
             redactionBlocks.Clear();
             ClearThumbnailRedactionOverlays();
             for (int page = 1; page <= numPages; page++)
@@ -15471,6 +15496,10 @@ namespace AnonPDF
                 return;
             }
 
+            if (selectedRedactionBlock != null && selectedRedactionBlock.PageNumber == currentPage)
+            {
+                selectedRedactionBlock = null;
+            }
             redactionBlocks.RemoveAll(block => block.PageNumber == currentPage);
             InvalidateThumbnailRedactionOverlay(currentPage);
             InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
@@ -22159,6 +22188,7 @@ namespace AnonPDF
                 float docX = e.X / scaleFactor;
                 float docY = e.Y / scaleFactor;
                 bool commentHit = TryGetCommentAtPoint(e.Location, out CommentAnnotation hitComment, out RectangleF hitNoteRect);
+                selectedRedactionBlock = null;
 
                 if (!commentHit)
                 {
@@ -22277,6 +22307,37 @@ namespace AnonPDF
                     ResetGroupMoveState();
                     isDrawing = true;
                     UpdateCurrentSelectionOverlay(new RectangleF(startPoint, Size.Empty));
+                    return;
+                }
+
+                if (TryRestoreRedactionSelectionModeFromHitBlock(e.Location))
+                {
+                    ResetObjectSelectionCycle();
+                    ResetRasterInteractionState();
+                    ResetArrowInteractionState();
+                    ResetVectorInteractionState();
+                    ResetGroupMoveState();
+                    ClearRasterIconClickState();
+                    ClearArrowIconClickState();
+                    ClearVectorIconClickState();
+                    ClearAllObjectSelections();
+                    selectedRedactionBlock = redactionBlocks
+                        .Where(block => block != null &&
+                                        block.PageNumber == currentPage &&
+                                        IsLayerVisible(block.LayerId) &&
+                                        block.Bounds.Contains(docX, docY))
+                        .LastOrDefault();
+                    UpdateObjectSelectionInfoLabel();
+                    annotationToMove = null;
+                    isMoving = false;
+                    textMoveMouseOffset = PointF.Empty;
+                    isDrawing = true;
+                    if (IsRedactionSelectionModeEnabled())
+                    {
+                        BeginUndoCapture(markerRadioButton.Checked ? "Add marker selection" : "Add box selection");
+                    }
+                    UpdateCurrentSelectionOverlay(new RectangleF(startPoint, Size.Empty));
+                    pdfViewer.Invalidate();
                     return;
                 }
 
@@ -27552,6 +27613,11 @@ namespace AnonPDF
             if (!redactionBlocks.Remove(blockToRemove))
             {
                 return;
+            }
+
+            if (ReferenceEquals(selectedRedactionBlock, blockToRemove))
+            {
+                selectedRedactionBlock = null;
             }
 
             InvalidateThumbnailRedactionOverlay(blockToRemove.PageNumber);
