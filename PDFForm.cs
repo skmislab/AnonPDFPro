@@ -7510,6 +7510,17 @@ namespace AnonPDF
             UpdateObjectSelectionInfoLabel();
         }
 
+        private void ClearAllObjectSelections()
+        {
+            selectedTextAnnotation = null;
+            selectedRasterObject = null;
+            selectedArrowObject = null;
+            selectedVectorShape = null;
+            selectedCommentAnnotation = null;
+            ClearGroupSelection();
+            UpdateObjectSelectionInfoLabel();
+        }
+
         private bool SelectAllObjectsOnCurrentPage()
         {
             string activeLayer = GetResolvedActiveLayerId();
@@ -12734,11 +12745,6 @@ namespace AnonPDF
         private void DiagnosticModeMenuItem_CheckedChanged(object sender, EventArgs e)
         {
             diagnosticModeEnabled = diagnosticModeMenuItem.Checked;
-
-            if (diagnosticModeMenuItem.Checked)
-            {
-                LogDebug("=== Diagnostic mode enabled ===");
-            }
         }
 
         private bool ShowTutorial()
@@ -13077,10 +13083,6 @@ namespace AnonPDF
         private void RenderTimer_Tick(object sender, EventArgs e)
         {
             renderTimer.Stop();
-            if (DebugLogEnabled)
-            {
-                LogDebug($"RenderTimerTick page={currentPage} visibleComments={(HasVisibleCommentsOnPage(currentPage) ? 1 : 0)}");
-            }
             if (pdf == null)
             {
                 return;
@@ -22508,18 +22510,26 @@ namespace AnonPDF
                 ResetVectorInteractionState();
                 selectedRasterObject = null;
                 ResetRasterInteractionState();
-                selectedTextAnnotation = null;
+                ClearAllObjectSelections();
                 annotationToMove = null;
                 isMoving = false;
                 textMoveMouseOffset = PointF.Empty;
-                UpdateObjectSelectionInfoLabel();
-                TryRestoreRedactionSelectionModeFromHitBlock(e.Location);
+                bool restoredRedactionMode = TryRestoreRedactionSelectionModeFromHitBlock(e.Location);
+                if (!IsRedactionSelectionModeEnabled() && !restoredRedactionMode)
+                {
+                    isDrawing = false;
+                    currentSelection = RectangleF.Empty;
+                    UpdateCurrentSelectionOverlay(RectangleF.Empty);
+                    pdfViewer.Invalidate();
+                    return;
+                }
                 isDrawing = true;
                 if (IsRedactionSelectionModeEnabled())
                 {
                     BeginUndoCapture(markerRadioButton.Checked ? "Add marker selection" : "Add box selection");
                 }
                 UpdateCurrentSelectionOverlay(new System.Drawing.RectangleF(startPoint, Size.Empty));
+                pdfViewer.Invalidate();
             }
         }
 
@@ -23839,11 +23849,7 @@ namespace AnonPDF
                                 UpdateSelectionNavigationButtons();
                                 renderTimer.Stop();
                                 renderTimer.Start();
-                                if (addRedactionStopwatch != null)
-                                {
-                                    addRedactionStopwatch.Stop();
-                                    LogDebug($"RedactionAdd page={currentPage} mode={(markerModeForBlock ? "marker" : "box")} blocksOnPage={redactionBlocks.Count(b => b.PageNumber == currentPage)} ms={addRedactionStopwatch.ElapsedMilliseconds}");
-                                }
+                                addRedactionStopwatch?.Stop();
                             }
                         }
                         else if (boxRadioButton.Checked)
@@ -23880,11 +23886,7 @@ namespace AnonPDF
                                 UpdateSelectionNavigationButtons();
                                 renderTimer.Stop();
                                 renderTimer.Start();
-                                if (addRedactionStopwatch != null)
-                                {
-                                    addRedactionStopwatch.Stop();
-                                    LogDebug($"RedactionAdd page={currentPage} mode=box blocksOnPage={redactionBlocks.Count(b => b.PageNumber == currentPage)} ms={addRedactionStopwatch.ElapsedMilliseconds}");
-                                }
+                                addRedactionStopwatch?.Stop();
                             }
                         }
                         else if (!IsRedactionSelectionModeEnabled())
@@ -24564,7 +24566,7 @@ namespace AnonPDF
                 if ((string)filterComboBox.SelectedItem == allComboItem)
                 {
                     ListViewItem currentItem = pagesListView.Items[currentPage - 1];
-                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false);
+                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false, invalidateThumbnail: false);
                     pagesListView.Invalidate(currentItem.Bounds);
                 }
                 else
@@ -24643,7 +24645,7 @@ namespace AnonPDF
 
                     ShowRedactPreview();
                     pdfViewer.Invalidate();
-                    InvalidateThumbnailPage(currentPage);
+                    InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
                 }));
                 return;
             }
@@ -27565,7 +27567,7 @@ namespace AnonPDF
                 if ((string)filterComboBox.SelectedItem == allComboItem)
                 {
                     ListViewItem currentItem = pagesListView.Items[currentPage - 1];
-                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false);
+                    UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false, invalidateThumbnail: false);
                     pagesListView.Invalidate(currentItem.Bounds);
                 }
                 else
@@ -27582,11 +27584,7 @@ namespace AnonPDF
             renderTimer.Stop();
             renderTimer.Start();
             pdfViewer.Invalidate();
-            if (removeRedactionStopwatch != null)
-            {
-                removeRedactionStopwatch.Stop();
-                LogDebug($"RedactionRemove page={currentPage} blocksOnPage={redactionBlocks.Count(b => b.PageNumber == currentPage)} ms={removeRedactionStopwatch.ElapsedMilliseconds}");
-            }
+            removeRedactionStopwatch?.Stop();
         }
 
         private void DrawVectorShapeOnPreview(Graphics graphics, VectorShapeObject vectorShape, bool multiSelectionActive)
@@ -29845,11 +29843,6 @@ namespace AnonPDF
             {
                 thumbnailsListView.Invalidate();
             }
-
-            if (DebugLogEnabled)
-            {
-                LogDebug($"ThumbnailInvalidate page={pageNumber} regenerateBase={regenerateBaseImage} itemFound={(item != null ? 1 : 0)}");
-            }
         }
 
         private static void DisposeThumbnailOverlay(Dictionary<int, Bitmap> cache, int pageNumber)
@@ -29899,10 +29892,6 @@ namespace AnonPDF
 
         private void InvalidateThumbnailStaticOverlays(int pageNumber, string reason = null)
         {
-            if (DebugLogEnabled)
-            {
-                LogDebug($"ThumbnailStaticOverlayInvalidate page={pageNumber} reason={reason ?? "unspecified"}");
-            }
             DisposeThumbnailOverlay(thumbnailTextOverlayByPage, pageNumber);
             DisposeThumbnailOverlay(thumbnailArrowOverlayByPage, pageNumber);
             DisposeThumbnailOverlay(thumbnailVectorOverlayByPage, pageNumber);
@@ -29946,85 +29935,34 @@ namespace AnonPDF
                 cachedOverlay?.Dispose();
             }
 
-            var sw = DebugLogEnabled ? Stopwatch.StartNew() : null;
-            long bitmapAllocMs = 0;
-            long candidateCollectMs = 0;
-            long graphicsSetupMs = 0;
-            long convertRectMs = 0;
-            long drawRectMs = 0;
-
-            Stopwatch stageSw = DebugLogEnabled ? Stopwatch.StartNew() : null;
             var overlayBitmap = new Bitmap(contentRect.Width, contentRect.Height, PixelFormat.Format32bppArgb);
-            if (stageSw != null)
-            {
-                stageSw.Stop();
-                bitmapAllocMs = stageSw.ElapsedMilliseconds;
-                stageSw.Restart();
-            }
-
             List<RedactionBlock> pageBlocks = redactionBlocks
                 .Where(block => block != null && block.PageNumber == pageNumber && IsLayerVisible(block.LayerId))
                 .ToList();
-            if (stageSw != null)
-            {
-                stageSw.Stop();
-                candidateCollectMs = stageSw.ElapsedMilliseconds;
-                stageSw.Restart();
-            }
-
-            int renderedBlocks = 0;
             using (Graphics overlayGraphics = Graphics.FromImage(overlayBitmap))
             using (var fillBrush = new SolidBrush(System.Drawing.Color.FromArgb(110, 255, 0, 0)))
             using (var borderPen = new Pen(System.Drawing.Color.FromArgb(220, 200, 0, 0), 1.2f))
             {
                 overlayGraphics.Clear(System.Drawing.Color.Transparent);
-                if (stageSw != null)
-                {
-                    stageSw.Stop();
-                    graphicsSetupMs = stageSw.ElapsedMilliseconds;
-                    stageSw.Restart();
-                }
-
                 foreach (RedactionBlock block in pageBlocks)
                 {
-                    Stopwatch blockSw = DebugLogEnabled ? Stopwatch.StartNew() : null;
                     RectangleF absoluteRect = ConvertDocumentRectToThumbnailRectangle(block.Bounds, transform);
                     RectangleF localRect = new RectangleF(
                         absoluteRect.X - contentRect.X,
                         absoluteRect.Y - contentRect.Y,
                         absoluteRect.Width,
                         absoluteRect.Height);
-                    if (blockSw != null)
-                    {
-                        blockSw.Stop();
-                        convertRectMs += blockSw.ElapsedMilliseconds;
-                        blockSw.Restart();
-                    }
                     if (localRect.Width <= 0f || localRect.Height <= 0f)
                     {
-                        blockSw?.Stop();
                         continue;
                     }
 
-                    renderedBlocks++;
                     overlayGraphics.FillRectangle(fillBrush, localRect);
                     overlayGraphics.DrawRectangle(borderPen, localRect.X, localRect.Y, localRect.Width, localRect.Height);
-                    if (blockSw != null)
-                    {
-                        blockSw.Stop();
-                        drawRectMs += blockSw.ElapsedMilliseconds;
-                    }
                 }
             }
 
             thumbnailRedactionOverlayByPage[pageNumber] = overlayBitmap;
-            if (sw != null)
-            {
-                sw.Stop();
-                LogDebug(
-                    $"ThumbnailRedactionOverlayBuild page={pageNumber} blocks={renderedBlocks} size={contentRect.Width}x{contentRect.Height} " +
-                    $"ms={sw.ElapsedMilliseconds} alloc={bitmapAllocMs} collect={candidateCollectMs} graphics={graphicsSetupMs} convert={convertRectMs} draw={drawRectMs}");
-            }
             return overlayBitmap;
         }
 
@@ -30588,7 +30526,6 @@ namespace AnonPDF
                 return;
             }
 
-            Stopwatch overlayDrawStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
             using (var fillBrush = new SolidBrush(System.Drawing.Color.FromArgb(110, 255, 0, 0)))
             using (var borderPen = new Pen(System.Drawing.Color.FromArgb(220, 200, 0, 0), 1.2f))
             {
@@ -30602,15 +30539,6 @@ namespace AnonPDF
 
                     graphics.FillRectangle(fillBrush, thumbnailRect);
                     graphics.DrawRectangle(borderPen, thumbnailRect.X, thumbnailRect.Y, thumbnailRect.Width, thumbnailRect.Height);
-                }
-            }
-
-            if (overlayDrawStopwatch != null)
-            {
-                overlayDrawStopwatch.Stop();
-                if (overlayDrawStopwatch.ElapsedMilliseconds >= 30)
-                {
-                    LogDebug($"ThumbnailRedactionOverlayDraw page={pageNumber} size={contentRect.Width}x{contentRect.Height} direct={overlayDrawStopwatch.ElapsedMilliseconds}");
                 }
             }
         }
@@ -31186,8 +31114,6 @@ namespace AnonPDF
                 return;
             }
 
-            Stopwatch thumbnailDrawStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
-
             bool isSelected = e.Item.Selected;
             var theme = CurrentTheme;
             System.Drawing.Color itemBackColor = isSelected ? theme.SelectionBackColor : thumbnailsListView.BackColor;
@@ -31237,47 +31163,13 @@ namespace AnonPDF
 
             if (pageNumber >= 1)
             {
-                Stopwatch overlaysStopwatch = thumbnailDrawStopwatch != null ? Stopwatch.StartNew() : null;
-
                 DrawThumbnailRedactionOverlays(e.Graphics, pageNumber, contentRect);
-                long redactionMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
-
                 DrawThumbnailTextAnnotationOverlays(e.Graphics, pageNumber, contentRect);
-                long textMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
-
                 DrawThumbnailRasterOverlays(e.Graphics, pageNumber, contentRect);
-                long rasterMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
-
                 DrawThumbnailArrowOverlays(e.Graphics, pageNumber, contentRect);
-                long arrowMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
-
                 DrawThumbnailVectorShapeOverlays(e.Graphics, pageNumber, contentRect);
-                long vectorMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
-
                 DrawThumbnailCommentOverlays(e.Graphics, pageNumber, contentRect);
-                long commentMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
-
                 DrawThumbnailDeletionOverlay(e.Graphics, pageNumber, contentRect);
-                long deletionMs = overlaysStopwatch?.ElapsedMilliseconds ?? 0;
-
-                if (overlaysStopwatch != null)
-                {
-                    overlaysStopwatch.Stop();
-                    if (overlaysStopwatch.ElapsedMilliseconds >= 30)
-                    {
-                        int redactionCount = redactionBlocks.Count(block => block != null && block.PageNumber == pageNumber && IsLayerVisible(block.LayerId));
-                        int textCount = textAnnotations.Count(annotation => annotation != null && annotation.PageNumber == pageNumber && IsLayerVisible(annotation.LayerId));
-                        int rasterCount = rasterObjects.Count(raster => raster != null && raster.PageNumber == pageNumber && IsLayerVisible(raster.LayerId));
-                        int arrowCount = arrowObjects.Count(arrow => arrow != null && arrow.PageNumber == pageNumber && IsLayerVisible(arrow.LayerId));
-                        int vectorCount = vectorShapes.Count(vector => vector != null && vector.PageNumber == pageNumber && IsLayerVisible(vector.LayerId));
-                        int commentCount = commentAnnotations.Count(comment => comment != null && comment.PageNumber == pageNumber && IsLayerVisible(comment.LayerId));
-                        LogDebug(
-                            $"ThumbnailDrawOverlays page={pageNumber} total={overlaysStopwatch.ElapsedMilliseconds} " +
-                            $"redaction={redactionMs} text={textMs - redactionMs} raster={rasterMs - textMs} arrow={arrowMs - rasterMs} " +
-                            $"vector={vectorMs - arrowMs} comment={commentMs - vectorMs} deletion={deletionMs - commentMs} " +
-                            $"counts=r{redactionCount}/t{textCount}/ra{rasterCount}/a{arrowCount}/v{vectorCount}/c{commentCount}");
-                    }
-                }
             }
 
             int fontHeight = (e.Item.Font ?? thumbnailsListView.Font).Height;
@@ -31315,15 +31207,6 @@ namespace AnonPDF
                 ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds, itemTextColor, itemBackColor);
             }
 
-            if (thumbnailDrawStopwatch != null)
-            {
-                thumbnailDrawStopwatch.Stop();
-                if (thumbnailDrawStopwatch.ElapsedMilliseconds >= 30)
-                {
-                    int drawPageNumber = e.Item.Tag is int taggedDrawPage ? taggedDrawPage : -1;
-                    LogDebug($"ThumbnailDrawItem page={drawPageNumber} selected={(isSelected ? 1 : 0)} bounds={e.Bounds.Width}x{e.Bounds.Height} ms={thumbnailDrawStopwatch.ElapsedMilliseconds}");
-                }
-            }
         }
 
         private void ReloadRefreshCurrentPage()
@@ -31386,7 +31269,7 @@ namespace AnonPDF
                 //{
                     // only refresh this row
                     //ListViewItem currentItem = pagesListView.Items[currentPage - 1];
-                UpdateItemTag(selectedItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
+                UpdateItemTag(selectedItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateThumbnail: false);
                 //}
                 //else
                 //{

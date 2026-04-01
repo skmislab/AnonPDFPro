@@ -242,6 +242,18 @@ namespace AnonPDF.Properties {
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool SnapToGridEnabled {
+            get {
+                return ((bool)(this["SnapToGridEnabled"]));
+            }
+            set {
+                this["SnapToGridEnabled"] = value;
+            }
+        }
+        
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
         public bool AddObjectsByPageRotationEnabled {
             get {
                 return ((bool)(this["AddObjectsByPageRotationEnabled"]));
