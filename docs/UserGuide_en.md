@@ -124,7 +124,11 @@ To create a redaction area:
 
 > **5.** Release the mouse button to confirm the selection.
 
-> **6.** To remove an existing selection (for example, if you added it by accident), right-click inside the selection area.
+> **6.** A newly created `box` stays selected immediately. You can adjust its size using the top-left and bottom-right handles.
+
+> **7.** Clicking an existing selection selects it and shows a short note at the top of the view. It does not start drawing another selection inside the existing one.
+
+> **8.** To remove an existing selection (for example, if you added it by accident), right-click inside the selection area.
 
 ## 4.5 Preview pending redactions
 
@@ -225,7 +229,7 @@ When working with objects, you can also use:
 - In the shape dialog, the `Limit raster view` option is available for rectangles, ellipses, triangles, and regions.
 - This option is not used for redaction. It only limits the visible area of raster objects located below it on the same layer.
 - In the preview, the raster fragment inside the shape stays clear while the area outside is dimmed. In the final PDF only the area limited by the shape remains visible.
-- While creating multi-point shapes, the overlay shows a short instruction. The left mouse button adds another point and the right mouse button finishes drawing.
+- While creating multi-point shapes, the application shows a short instruction at the top of the view. The left mouse button adds another point and the right mouse button finishes drawing.
 
 Modifiers while editing objects:
 
@@ -263,6 +267,7 @@ The application supports working layers for redaction selections and objects.
 - Double-clicking a group name in the `Layers` tab lets you rename that group.
 - `Tools -> Layers` opens the full layer management window.
 - In the layer management window you can assign a layer to a group using the `Group` column.
+- In the layer management window, the `Export and print only visible layers` option overrides the `Export` column settings.
 - New selections and new objects are created on the currently active layer.
 - Pasted objects are created on the active layer and keep the source stacking order.
 - The `Work` layer is always on top and is not exported to the final PDF.

@@ -208,7 +208,7 @@ Für die Arbeit mit Objekten stehen außerdem zur Verfügung:
 - Im Formdialog steht für Rechteck, Ellipse, Dreieck und Region die Option `Rasteransicht begrenzen` zur Verfügung.
 - Diese Option dient nicht der Anonymisierung. Sie begrenzt nur den sichtbaren Bereich von Rasterobjekten, die darunter auf derselben Ebene liegen.
 - In der Vorschau bleibt der Rasterbereich innerhalb der Form klar sichtbar, während der Bereich außerhalb abgeblendet wird. Im finalen PDF bleibt nur der durch die Form begrenzte Bereich sichtbar.
-- Beim Erstellen von Mehrpunktformen zeigt das Overlay eine kurze Anleitung an. Die linke Maustaste fügt den nächsten Punkt hinzu, die rechte Maustaste beendet das Zeichnen.
+- Beim Erstellen von Mehrpunktformen zeigt die Anwendung oben im Arbeitsbereich eine kurze Anleitung an. Die linke Maustaste fügt den nächsten Punkt hinzu, die rechte Maustaste beendet das Zeichnen.
 
 Modifikatoren bei der Objektbearbeitung:
 
@@ -254,11 +254,14 @@ Die Anwendung unterstützt Arbeitsebenen für Markierungen und Objekte.
 - `Werkzeuge -> Ebenen` öffnet das vollständige Ebenenfenster.
 - Im Ebenendialog kann eine Ebene über die Spalte `Gruppe` einer Gruppe zugeordnet werden.
 - Neue Markierungen und neue Objekte werden auf der aktuell aktiven Ebene erstellt.
+- Ein neu erstellter `Box`-Ausschluss bleibt sofort ausgewählt. Seine Größe kann über die Griffe oben links und unten rechts korrigiert werden.
+- Ein Klick auf eine vorhandene Markierung wählt sie aus und zeigt oben im Arbeitsbereich eine kurze Information an. Dabei wird keine neue Markierung innerhalb der bestehenden erzeugt.
 - Eingefügte Objekte werden auf der aktiven Ebene erstellt und behalten die Stapelreihenfolge der Quelle.
 - Die Ebene `Robocza` liegt immer ganz oben und wird nicht in das finale PDF exportiert.
 - Mit ausgeblendeten Ebenen kann in der Vorschau nicht interagiert werden.
 - Gesperrte Ebenen blockieren Verschieben, Bearbeiten, Skalieren und Löschen von Objekten.
 - Beim Projektimport bleiben die Zuordnungen von Objekten zu Ebenen erhalten.
+- Im Ebenendialog überschreibt die Option `Nur sichtbare Ebenen exportieren und drucken` die Einstellungen aus der Spalte `Export`.
 
 # 7. Häufige Probleme und Hinweise
 

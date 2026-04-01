@@ -122,7 +122,11 @@ Aby utworzyć obszar redakcji:
 
 > 5\. Zwolnij przycisk myszy, aby zatwierdzić zaznaczenie.
 
-> 6\. Aby usunąć istniejące zaznaczenie (np. przypadkowo dodane), kliknij prawym przyciskiem myszy w jego obszarze.
+> 6\. Nowo utworzony `box` pozostaje od razu zaznaczony. Możesz skorygować jego rozmiar uchwytami w lewym górnym i prawym dolnym rogu.
+
+> 7\. Kliknięcie na istniejącym zaznaczeniu wybiera je i pokazuje krótką informację u góry widoku. Nie rozpoczyna tworzenia kolejnego zaznaczenia wewnątrz już istniejącego.
+
+> 8\. Aby usunąć istniejące zaznaczenie (np. przypadkowo dodane), kliknij prawym przyciskiem myszy w jego obszarze.
 
 ## 4.5 Podgląd po zmianach
 
@@ -225,7 +229,7 @@ Podczas pracy z obiektami dostępne są także:
 - W dialogu kształtów dla prostokąta, elipsy, trójkąta i regionu dostępna jest opcja `Ogranicz widok rastra`.
 - Opcja nie służy do anonimizacji. Ogranicza tylko widoczny obszar rastrów znajdujących się pod kształtem na tej samej warstwie.
 - W podglądzie fragment rastra wewnątrz kształtu pozostaje wyraźny, a obszar poza nim jest przygaszony. W finalnym PDF pozostaje tylko obszar ograniczony kształtem.
-- Podczas rysowania kształtów wielopunktowych aplikacja pokazuje w overlayu krótką instrukcję. Lewy przycisk myszy dodaje kolejny punkt, a prawy kończy rysowanie.
+- Podczas rysowania kształtów wielopunktowych aplikacja pokazuje u góry widoku krótką instrukcję. Lewy przycisk myszy dodaje kolejny punkt, a prawy kończy rysowanie.
 
 Modyfikatory podczas pracy z obiektami:
 
@@ -263,6 +267,7 @@ Aplikacja obsługuje warstwy robocze dla anonimizacji i obiektów.
 - Dwuklik na nazwie grupy w panelu `Warstwy` pozwala zmienić nazwę grupy.
 - `Narzędzia -> Warstwy` lub skrót `CTRL + L` otwierają pełne okno zarządzania warstwami.
 - W oknie zarządzania warstwami można przypisać warstwę do grupy przez kolumnę `Grupa`.
+- W oknie zarządzania warstwami opcja `Eksportuj i drukuj tylko widoczne warstwy` nadpisuje ustawienia z kolumny `Eksport`.
 - Nowe zaznaczenia i nowe obiekty powstają na aktualnie aktywnej warstwie.
 - Wklejane obiekty trafiają na aktywną warstwę, z zachowaniem kolejności nakładania ze źródła.
 - Warstwa `Robocza` jest zawsze najwyżej i nie trafia do finalnego PDF.
