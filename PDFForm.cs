@@ -366,7 +366,7 @@ namespace AnonPDF
         private readonly HashSet<string> selectedVectorShapeIds = new HashSet<string>(StringComparer.Ordinal);
         private bool isResizingRedactionBlock;
         private bool redactionResizeChanged;
-        private ObjectScaleHandleCorner redactionResizeHandleCorner = ObjectScaleHandleCorner.TopLeft;
+        private RasterResizeHandleType redactionResizeHandle = RasterResizeHandleType.None;
         private Point objectSelectionCyclePoint = Point.Empty;
         private int objectSelectionCyclePage = -1;
         private float objectSelectionCycleScale = -1f;
@@ -7668,7 +7668,7 @@ namespace AnonPDF
             redactionResizeChanged = false;
             redactionBlockToResize = null;
             redactionResizeStartBounds = RectangleF.Empty;
-            redactionResizeHandleCorner = ObjectScaleHandleCorner.TopLeft;
+            redactionResizeHandle = RasterResizeHandleType.None;
         }
 
         private bool TryGetRedactionBlockAtPoint(Point location, out RedactionBlock hitBlock)
@@ -7704,29 +7704,84 @@ namespace AnonPDF
                 block.Bounds.Height * scale);
         }
 
-        private bool TryGetSelectedRedactionResizeHandleAtPoint(Point location, out ObjectScaleHandleCorner handleCorner)
+        private static bool IsMarkerRedactionVertical(RedactionBlock block)
         {
-            handleCorner = ObjectScaleHandleCorner.TopLeft;
+            if (block == null)
+            {
+                return false;
+            }
+
+            return block.Bounds.Height > block.Bounds.Width;
+        }
+
+        private bool TryGetRedactionResizeHandleRects(RedactionBlock block, out Dictionary<RasterResizeHandleType, RectangleF> handles)
+        {
+            handles = null;
+            if (block == null)
+            {
+                return false;
+            }
+
+            RectangleF screenBounds = GetRedactionBlockScreenBounds(block, scaleFactor);
+            if (screenBounds.Width <= 0f || screenBounds.Height <= 0f)
+            {
+                return false;
+            }
+
+            if (block.IsMarkerSelection)
+            {
+                bool markerVertical = IsMarkerRedactionVertical(block);
+                handles = new Dictionary<RasterResizeHandleType, RectangleF>
+                {
+                    [markerVertical ? RasterResizeHandleType.Top : RasterResizeHandleType.Left] = BuildHandleRect(
+                        markerVertical
+                            ? new PointF(screenBounds.Left + (screenBounds.Width / 2f), screenBounds.Top)
+                            : new PointF(screenBounds.Left, screenBounds.Top + (screenBounds.Height / 2f)),
+                        RasterResizeHandleSize),
+                    [markerVertical ? RasterResizeHandleType.Bottom : RasterResizeHandleType.Right] = BuildHandleRect(
+                        markerVertical
+                            ? new PointF(screenBounds.Left + (screenBounds.Width / 2f), screenBounds.Bottom)
+                            : new PointF(screenBounds.Right, screenBounds.Top + (screenBounds.Height / 2f)),
+                        RasterResizeHandleSize)
+                };
+                return true;
+            }
+
+            handles = new Dictionary<RasterResizeHandleType, RectangleF>
+            {
+                [RasterResizeHandleType.TopLeft] = BuildHandleRect(new PointF(screenBounds.Left, screenBounds.Top), RasterResizeHandleSize),
+                [RasterResizeHandleType.BottomRight] = BuildHandleRect(new PointF(screenBounds.Right, screenBounds.Bottom), RasterResizeHandleSize)
+            };
+            return true;
+        }
+
+        private bool TryGetSelectedRedactionResizeHandleAtPoint(Point location, out RasterResizeHandleType handle)
+        {
+            handle = RasterResizeHandleType.None;
             if (selectedRedactionBlock == null ||
                 selectedRedactionBlock.PageNumber != currentPage ||
-                selectedRedactionBlock.IsMarkerSelection ||
                 !IsLayerVisible(selectedRedactionBlock.LayerId) ||
                 IsRedactionBlockEffectivelyLocked(selectedRedactionBlock))
             {
                 return false;
             }
 
-            RectangleF screenBounds = GetRedactionBlockScreenBounds(selectedRedactionBlock, scaleFactor);
-            if (!TryGetObjectScaleHandleRects(screenBounds, out Dictionary<ObjectScaleHandleCorner, RectangleF> handles))
+            if (!TryGetRedactionResizeHandleRects(selectedRedactionBlock, out Dictionary<RasterResizeHandleType, RectangleF> handles))
             {
                 return false;
             }
 
-            foreach (ObjectScaleHandleCorner candidate in new[] { ObjectScaleHandleCorner.TopLeft, ObjectScaleHandleCorner.BottomRight })
+            RasterResizeHandleType[] candidateHandles = selectedRedactionBlock.IsMarkerSelection
+                ? (IsMarkerRedactionVertical(selectedRedactionBlock)
+                    ? new[] { RasterResizeHandleType.Top, RasterResizeHandleType.Bottom }
+                    : new[] { RasterResizeHandleType.Left, RasterResizeHandleType.Right })
+                : new[] { RasterResizeHandleType.TopLeft, RasterResizeHandleType.BottomRight };
+
+            foreach (RasterResizeHandleType candidate in candidateHandles)
             {
                 if (handles.TryGetValue(candidate, out RectangleF rect) && rect.Contains(location))
                 {
-                    handleCorner = candidate;
+                    handle = candidate;
                     return true;
                 }
             }
@@ -7739,15 +7794,13 @@ namespace AnonPDF
             if (graphics == null ||
                 selectedRedactionBlock == null ||
                 selectedRedactionBlock.PageNumber != currentPage ||
-                selectedRedactionBlock.IsMarkerSelection ||
                 !IsLayerVisible(selectedRedactionBlock.LayerId) ||
                 IsRedactionBlockEffectivelyLocked(selectedRedactionBlock))
             {
                 return;
             }
 
-            RectangleF screenBounds = GetRedactionBlockScreenBounds(selectedRedactionBlock, scaleFactor);
-            if (!TryGetObjectScaleHandleRects(screenBounds, out Dictionary<ObjectScaleHandleCorner, RectangleF> handles))
+            if (!TryGetRedactionResizeHandleRects(selectedRedactionBlock, out Dictionary<RasterResizeHandleType, RectangleF> handles))
             {
                 return;
             }
@@ -7755,9 +7808,15 @@ namespace AnonPDF
             using (var handleBrush = new SolidBrush(System.Drawing.Color.White))
             using (var handlePen = new Pen(System.Drawing.Color.OrangeRed, 1.5f))
             {
-                foreach (ObjectScaleHandleCorner corner in new[] { ObjectScaleHandleCorner.TopLeft, ObjectScaleHandleCorner.BottomRight })
+                RasterResizeHandleType[] handleOrder = selectedRedactionBlock.IsMarkerSelection
+                    ? (IsMarkerRedactionVertical(selectedRedactionBlock)
+                        ? new[] { RasterResizeHandleType.Top, RasterResizeHandleType.Bottom }
+                        : new[] { RasterResizeHandleType.Left, RasterResizeHandleType.Right })
+                    : new[] { RasterResizeHandleType.TopLeft, RasterResizeHandleType.BottomRight };
+
+                foreach (RasterResizeHandleType handle in handleOrder)
                 {
-                    if (!handles.TryGetValue(corner, out RectangleF rect))
+                    if (!handles.TryGetValue(handle, out RectangleF rect))
                     {
                         continue;
                     }
@@ -7770,9 +7829,9 @@ namespace AnonPDF
 
         private bool TryUpdateRedactionHoverCursor(Point location)
         {
-            if (TryGetSelectedRedactionResizeHandleAtPoint(location, out ObjectScaleHandleCorner handleCorner))
+            if (TryGetSelectedRedactionResizeHandleAtPoint(location, out RasterResizeHandleType handle))
             {
-                pdfViewer.Cursor = GetCursorForObjectScaleHandle(handleCorner);
+                pdfViewer.Cursor = GetCursorForRasterResizeHandle(handle, 0);
                 return true;
             }
 
@@ -7784,7 +7843,6 @@ namespace AnonPDF
             if (!isResizingRedactionBlock ||
                 redactionBlockToResize == null ||
                 redactionBlockToResize.PageNumber != currentPage ||
-                redactionBlockToResize.IsMarkerSelection ||
                 IsRedactionBlockEffectivelyLocked(redactionBlockToResize) ||
                 !HasPositiveSize(redactionResizeStartBounds))
             {
@@ -7804,33 +7862,78 @@ namespace AnonPDF
 
             RectangleF bounds = redactionResizeStartBounds;
             RectangleF updatedBounds;
-            if (redactionResizeHandleCorner == ObjectScaleHandleCorner.TopLeft)
+            switch (redactionResizeHandle)
             {
-                float right = bounds.Right;
-                float bottom = bounds.Bottom;
-                float maxLeft = right - minWidth;
-                float maxTop = bottom - minHeight;
-                float newLeft = Math.Max(0f, Math.Min(maxLeft, mouseDoc.X));
-                float newTop = Math.Max(0f, Math.Min(maxTop, mouseDoc.Y));
-                updatedBounds = RectangleF.FromLTRB(newLeft, newTop, right, bottom);
-            }
-            else
-            {
-                float left = bounds.Left;
-                float top = bounds.Top;
-                float minRight = left + minWidth;
-                float minBottom = top + minHeight;
-                float newRight = Math.Max(minRight, mouseDoc.X);
-                float newBottom = Math.Max(minBottom, mouseDoc.Y);
-                if (pageSize.Width > 0f)
-                {
-                    newRight = Math.Min(pageSize.Width, newRight);
-                }
-                if (pageSize.Height > 0f)
-                {
-                    newBottom = Math.Min(pageSize.Height, newBottom);
-                }
-                updatedBounds = RectangleF.FromLTRB(left, top, newRight, newBottom);
+                case RasterResizeHandleType.TopLeft:
+                    {
+                        float right = bounds.Right;
+                        float bottom = bounds.Bottom;
+                        float maxLeft = right - minWidth;
+                        float maxTop = bottom - minHeight;
+                        float newLeft = Math.Max(0f, Math.Min(maxLeft, mouseDoc.X));
+                        float newTop = Math.Max(0f, Math.Min(maxTop, mouseDoc.Y));
+                        updatedBounds = RectangleF.FromLTRB(newLeft, newTop, right, bottom);
+                        break;
+                    }
+                case RasterResizeHandleType.BottomRight:
+                    {
+                        float left = bounds.Left;
+                        float top = bounds.Top;
+                        float minRight = left + minWidth;
+                        float minBottom = top + minHeight;
+                        float newRight = Math.Max(minRight, mouseDoc.X);
+                        float newBottom = Math.Max(minBottom, mouseDoc.Y);
+                        if (pageSize.Width > 0f)
+                        {
+                            newRight = Math.Min(pageSize.Width, newRight);
+                        }
+                        if (pageSize.Height > 0f)
+                        {
+                            newBottom = Math.Min(pageSize.Height, newBottom);
+                        }
+                        updatedBounds = RectangleF.FromLTRB(left, top, newRight, newBottom);
+                        break;
+                    }
+                case RasterResizeHandleType.Left:
+                    {
+                        float right = bounds.Right;
+                        float maxLeft = right - minWidth;
+                        float newLeft = Math.Max(0f, Math.Min(maxLeft, mouseDoc.X));
+                        updatedBounds = RectangleF.FromLTRB(newLeft, bounds.Top, right, bounds.Bottom);
+                        break;
+                    }
+                case RasterResizeHandleType.Right:
+                    {
+                        float minRight = bounds.Left + minWidth;
+                        float newRight = Math.Max(minRight, mouseDoc.X);
+                        if (pageSize.Width > 0f)
+                        {
+                            newRight = Math.Min(pageSize.Width, newRight);
+                        }
+                        updatedBounds = RectangleF.FromLTRB(bounds.Left, bounds.Top, newRight, bounds.Bottom);
+                        break;
+                    }
+                case RasterResizeHandleType.Top:
+                    {
+                        float bottom = bounds.Bottom;
+                        float maxTop = bottom - minHeight;
+                        float newTop = Math.Max(0f, Math.Min(maxTop, mouseDoc.Y));
+                        updatedBounds = RectangleF.FromLTRB(bounds.Left, newTop, bounds.Right, bottom);
+                        break;
+                    }
+                case RasterResizeHandleType.Bottom:
+                    {
+                        float minBottom = bounds.Top + minHeight;
+                        float newBottom = Math.Max(minBottom, mouseDoc.Y);
+                        if (pageSize.Height > 0f)
+                        {
+                            newBottom = Math.Min(pageSize.Height, newBottom);
+                        }
+                        updatedBounds = RectangleF.FromLTRB(bounds.Left, bounds.Top, bounds.Right, newBottom);
+                        break;
+                    }
+                default:
+                    return;
             }
 
             if (pageSize.Width > 0f)
@@ -14826,6 +14929,17 @@ namespace AnonPDF
             if (selectedTextAnnotation != null && selectedTextAnnotation.PageNumber == currentPage)
             {
                 return DeleteTextObjectWithConfirmation(selectedTextAnnotation);
+            }
+
+            if (selectedRedactionBlock != null && selectedRedactionBlock.PageNumber == currentPage)
+            {
+                if (!EnsureCurrentPageEditable(true))
+                {
+                    return true;
+                }
+
+                RemoveRedactionBlock(selectedRedactionBlock);
+                return true;
             }
 
             if (GetGroupSelectionCount() > 0)
@@ -26784,7 +26898,7 @@ namespace AnonPDF
                     return;
                 }
 
-                if (TryGetSelectedRedactionResizeHandleAtPoint(e.Location, out ObjectScaleHandleCorner redactionHandleCorner))
+                if (TryGetSelectedRedactionResizeHandleAtPoint(e.Location, out RasterResizeHandleType redactionHandle))
                 {
                     if (selectedRedactionBlock != null && EnsureCurrentPageEditable(true) && !IsRedactionBlockEffectivelyLocked(selectedRedactionBlock))
                     {
@@ -26793,12 +26907,12 @@ namespace AnonPDF
                         redactionResizeChanged = false;
                         redactionBlockToResize = selectedRedactionBlock;
                         redactionResizeStartBounds = selectedRedactionBlock.Bounds;
-                        redactionResizeHandleCorner = redactionHandleCorner;
+                        redactionResizeHandle = redactionHandle;
                         isDrawing = false;
                         isMoving = false;
                         annotationToMove = null;
                         textMoveMouseOffset = PointF.Empty;
-                        this.Cursor = GetCursorForObjectScaleHandle(redactionHandleCorner);
+                        this.Cursor = GetCursorForRasterResizeHandle(redactionHandle, 0);
                         pdfViewer.Invalidate();
                         return;
                     }
@@ -32321,6 +32435,8 @@ namespace AnonPDF
                 selectedRedactionBlock = null;
             }
 
+            UpdateObjectSelectionInfoLabel();
+
             InvalidateThumbnailRedactionOverlay(blockToRemove.PageNumber);
             InvalidateThumbnailPage(blockToRemove.PageNumber, invalidateStaticOverlays: false);
             RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
@@ -34228,7 +34344,7 @@ namespace AnonPDF
                     System.Drawing.RectangleF rect = new System.Drawing.RectangleF((block.Bounds.X * scaleFactor), (block.Bounds.Y * scaleFactor), (block.Bounds.Width * scaleFactor), (block.Bounds.Height * scaleFactor));
                     e.Graphics.FillRectangle(brush, rect);
                     DrawCornerDebugMarkersOnPreview(e.Graphics, rect);
-                    if (ReferenceEquals(selectedRedactionBlock, block) && !block.IsMarkerSelection)
+                    if (ReferenceEquals(selectedRedactionBlock, block))
                     {
                         using (var selectedPen = new Pen(System.Drawing.Color.OrangeRed, 1.5f))
                         {
