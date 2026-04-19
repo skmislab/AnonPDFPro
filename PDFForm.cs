@@ -14070,6 +14070,30 @@ namespace AnonPDF
             }
         }
 
+        private static void LogOcrDiagnostic(string message, bool force = false)
+        {
+            if (!force)
+            {
+                LogDebug(message);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return;
+            }
+
+            try
+            {
+                string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {message}{Environment.NewLine}";
+                File.AppendAllText(DebugLogPath, line);
+            }
+            catch
+            {
+                // Ignore logging failures.
+            }
+        }
+
         private void OpenDiagnosticLogIfEnabled()
         {
             if (!DebugLogEnabled)
@@ -29690,14 +29714,19 @@ namespace AnonPDF
                     {
                         if (bmp != null)
                         {
-                            extractedText = OcrFromBitmap(bmp);
+                            string diagnosticContext =
+                                $"context-menu;page={block.PageNumber};marker={block.IsMarkerSelection};bounds={FormatRectFInvariant(block.Bounds)}";
+                            extractedText = OcrFromBitmap(bmp, diagnosticContext);
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                LogDebug("Copy redaction block to clipboard failed: " + ex.Message);
+                LogOcrDiagnostic(
+                    $"Copy redaction block failed page={block.PageNumber} marker={block.IsMarkerSelection} " +
+                    $"bounds={FormatRectFInvariant(block.Bounds)} type={ex.GetType().FullName} msg={ex.Message} stack={ex}",
+                    force: true);
             }
 
             if (string.IsNullOrWhiteSpace(extractedText))
@@ -30079,7 +30108,14 @@ namespace AnonPDF
             }
 
             iText.Kernel.Geom.Rectangle sourceRect = ConvertToItTextRectangle(pdfCoords);
-            List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetPdfCleanUpPreviewRectsForBlock(page, sourceRect);
+            List<iText.Kernel.Geom.Rectangle> pdfLineRects = block.IsMarkerSelection
+                ? GetVisualLineRectsForBlock(
+                    page,
+                    sourceRect,
+                    block.PageNumber,
+                    rotation,
+                    "visual")
+                : GetPdfCleanUpPreviewRectsForBlock(page, sourceRect);
 
             return pdfLineRects
                 .Where(r => r != null && r.GetWidth() > 0f && r.GetHeight() > 0f)
@@ -30087,6 +30123,10 @@ namespace AnonPDF
                 .ToList();
         }
 
+        // TODO(remove): legacy preview path introduced to mirror pdfSweep glyph matching.
+        // Marker preview was moved back to GetVisualLineRectsForBlock after regressions
+        // (for example missing Polish diacritics like the upper stroke on "Ś").
+        // Remove this method after box preview is migrated to the unified visual-bounds path.
         private List<iText.Kernel.Geom.Rectangle> GetPdfCleanUpPreviewRectsForBlock(
             iText.Kernel.Pdf.PdfPage page,
             iText.Kernel.Geom.Rectangle sourceRectangle)
@@ -50548,61 +50588,9 @@ namespace AnonPDF
             CustomTextExtractionStrategy strategyRef = null;
             try
             {
-                bool markerVisualContext = string.Equals(context, "visual", StringComparison.OrdinalIgnoreCase);
                 strategyRef = new CustomTextExtractionStrategy(sourceRectangle);
                 PdfTextExtractor.GetTextFromPage(page, strategyRef);
-                if (markerVisualContext)
-                {
-                    if (strategyRef.TryGetPerLineCoverage(out List<CustomTextExtractionStrategy.CoveredLineInfo> coveredLines))
-                    {
-                        if (coveredLines.Count > 1)
-                        {
-                            const float markerPreviewMinVerticalOverlapRatio = 0.12f;
-                            const float markerPreviewMinVerticalOverlapPts = 0.8f;
-                            const float markerPreviewMinGlyphRatio = 0.22f;
-                            const float markerPreviewMinWidthRatio = 0.18f;
-                            int dominantGlyphCount = coveredLines.Max(line => line.GlyphCount);
-                            float dominantWidth = coveredLines.Max(line => line.Bounds.GetWidth());
-
-                            coveredLines = coveredLines
-                                .Where(line =>
-                                {
-                                    float overlapBottom = Math.Max(line.Bounds.GetBottom(), sourceRectangle.GetBottom());
-                                    float overlapTop = Math.Min(line.Bounds.GetTop(), sourceRectangle.GetTop());
-                                    float overlapHeight = overlapTop - overlapBottom;
-                                    float minRequiredOverlap = Math.Max(
-                                        markerPreviewMinVerticalOverlapPts,
-                                        line.Bounds.GetHeight() * markerPreviewMinVerticalOverlapRatio);
-                                    if (overlapHeight >= minRequiredOverlap)
-                                    {
-                                        return true;
-                                    }
-
-                                    if (line.GlyphCount >= Math.Max(2, (int)Math.Ceiling(dominantGlyphCount * markerPreviewMinGlyphRatio)))
-                                    {
-                                        return true;
-                                    }
-
-                                    return dominantWidth > 0f &&
-                                        line.Bounds.GetWidth() >= dominantWidth * markerPreviewMinWidthRatio;
-                                })
-                                .ToList();
-
-                            if (coveredLines.Count == 0)
-                            {
-                                strategyRef.TryGetPerLineCoverage(out coveredLines);
-                            }
-                        }
-
-                        lineRects = coveredLines
-                            .Select(line => line.Bounds)
-                            .ToList();
-                    }
-                }
-                else
-                {
-                    strategyRef.TryGetPerLineBounds(out lineRects);
-                }
+                strategyRef.TryGetPerLineBounds(out lineRects);
             }
             catch
             {
@@ -50857,83 +50845,139 @@ namespace AnonPDF
                    Math.Abs(h1 - h2) < tolerance;
         }
 
-        public Bitmap ExtractBitmapFromRectangle(int pageNumber, RectangleF boxPdfCoords)
+        private static string GetOcrTessDataSummary(string tessDataPath)
         {
-            // Render page to bitmap in high resolution
-            var page = pdf.Pages[pageNumber - 1];
-
-            float dpi = 300; // or more if OCR should be accurate
-            int bmpWidth = (int)(page.Width * dpi / 72f);
-            int bmpHeight = (int)(page.Height * dpi / 72f);
-            
-
-
-            using (var bmp = new PDFiumSharp.PDFiumBitmap(bmpWidth, bmpHeight, true))
+            if (string.IsNullOrWhiteSpace(tessDataPath))
             {
-                bmp.FillRectangle(0, 0, bmpWidth, bmpHeight, 0xFFFFFFFF);
-                page.Render(renderTarget: bmp, flags: PDFiumSharp.Enums.RenderingFlags.Annotations);
+                return "<empty>";
+            }
 
-                using (var ms = new MemoryStream())
+            try
+            {
+                if (!Directory.Exists(tessDataPath))
                 {
-                    bmp.Save(ms);
-                    ms.Position = 0;
-                    var pageBitmap = new Bitmap(DrawingImage.FromStream(ms));
-                    ApplyRotationOffset(pageBitmap, GetRotationOffset(pageNumber));
-
-                    // Scale the selection box to bitmap coordinates
-                    Rectangle cropRect = new Rectangle(
-                        (int)(boxPdfCoords.X * dpi / 72f),
-                        (int)(boxPdfCoords.Y * dpi / 72f),
-                        (int)(boxPdfCoords.Width * dpi / 72f),
-                        (int)(boxPdfCoords.Height * dpi / 72f)
-                    );
-                    // Correction: clip cropRect to bitmap bounds
-                    
-
-                    
-
-                    cropRect.Intersect(new Rectangle(0, 0, pageBitmap.Width, pageBitmap.Height));
-
-                    if (cropRect.Width <= 0 || cropRect.Height <= 0)
-                    {
-                        MessageBox.Show(this, string.Format(Resources.Err_Crop_OutsideBitmap, cropRect), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        return null;
-                    }
-
-
-                    return pageBitmap.Clone(cropRect, pageBitmap.PixelFormat);
+                    return "<missing-dir>";
                 }
+
+                string[] trainedDataFiles = Directory.GetFiles(tessDataPath, "*.traineddata")
+                    .Select(Path.GetFileName)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                return trainedDataFiles.Length > 0
+                    ? string.Join(",", trainedDataFiles)
+                    : "<no-traineddata>";
+            }
+            catch (Exception ex)
+            {
+                return "<err:" + ex.GetType().Name + ">";
             }
         }
 
-        public string OcrFromBitmap(Bitmap bitmap)
+        public Bitmap ExtractBitmapFromRectangle(int pageNumber, RectangleF boxPdfCoords)
         {
-            string result = string.Empty;
-            
             try
             {
-                // Convert Bitmap to Pix.Image by saving to a MemoryStream
+                var page = pdf.Pages[pageNumber - 1];
+                float dpi = 300f;
+                int bmpWidth = (int)(page.Width * dpi / 72f);
+                int bmpHeight = (int)(page.Height * dpi / 72f);
+
+                LogOcrDiagnostic(
+                    $"OCR crop start page={pageNumber} pdfBounds={FormatRectFInvariant(boxPdfCoords)} " +
+                    $"pageSize={{W={page.Width:0.###},H={page.Height:0.###}}} renderDpi={dpi:0.###} " +
+                    $"bitmapSize={bmpWidth}x{bmpHeight}");
+
+                using (var bmp = new PDFiumSharp.PDFiumBitmap(bmpWidth, bmpHeight, true))
+                {
+                    bmp.FillRectangle(0, 0, bmpWidth, bmpHeight, 0xFFFFFFFF);
+                    page.Render(renderTarget: bmp, flags: PDFiumSharp.Enums.RenderingFlags.Annotations);
+
+                    using (var ms = new MemoryStream())
+                    {
+                        bmp.Save(ms);
+                        ms.Position = 0;
+                        using (var pageBitmap = new Bitmap(DrawingImage.FromStream(ms)))
+                        {
+                            ApplyRotationOffset(pageBitmap, GetRotationOffset(pageNumber));
+
+                            Rectangle cropRect = new Rectangle(
+                                (int)(boxPdfCoords.X * dpi / 72f),
+                                (int)(boxPdfCoords.Y * dpi / 72f),
+                                (int)(boxPdfCoords.Width * dpi / 72f),
+                                (int)(boxPdfCoords.Height * dpi / 72f)
+                            );
+
+                            Rectangle originalCropRect = cropRect;
+                            cropRect.Intersect(new Rectangle(0, 0, pageBitmap.Width, pageBitmap.Height));
+
+                            LogOcrDiagnostic(
+                                $"OCR crop resolved page={pageNumber} originalCrop={originalCropRect} clippedCrop={cropRect} " +
+                                $"pageBitmap={pageBitmap.Width}x{pageBitmap.Height} pixelFormat={pageBitmap.PixelFormat}");
+
+                            if (cropRect.Width <= 0 || cropRect.Height <= 0)
+                            {
+                                MessageBox.Show(this, string.Format(Resources.Err_Crop_OutsideBitmap, cropRect), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                return null;
+                            }
+
+                            return pageBitmap.Clone(cropRect, pageBitmap.PixelFormat);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                LogOcrDiagnostic(
+                    $"OCR crop failed page={pageNumber} pdfBounds={FormatRectFInvariant(boxPdfCoords)} " +
+                    $"type={ex.GetType().FullName} msg={ex.Message} stack={ex}",
+                    force: true);
+                MessageBox.Show(this, string.Format(Resources.Err_OCR, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return null;
+            }
+        }
+
+        public string OcrFromBitmap(Bitmap bitmap, string diagnosticContext = null)
+        {
+            string result = string.Empty;
+
+            try
+            {
+                if (bitmap == null)
+                {
+                    LogOcrDiagnostic($"OCR skipped null-bitmap context={diagnosticContext ?? "-"}");
+                    return string.Empty;
+                }
+
+                string exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                string exeDir = System.IO.Path.GetDirectoryName(exePath);
+                string tessDataPath = System.IO.Path.Combine(exeDir, "tessdata");
+
+                LogOcrDiagnostic(
+                    $"OCR start context={diagnosticContext ?? "-"} bitmap={bitmap.Width}x{bitmap.Height} " +
+                    $"pixelFormat={bitmap.PixelFormat} dpi={bitmap.HorizontalResolution:0.###}x{bitmap.VerticalResolution:0.###} " +
+                    $"is64BitProcess={Environment.Is64BitProcess} os='{Environment.OSVersion}' " +
+                    $"exeDir='{exeDir}' tessdata='{tessDataPath}' tessdataExists={Directory.Exists(tessDataPath)} " +
+                    $"traineddata={GetOcrTessDataSummary(tessDataPath)}");
+
                 using (var ms = new MemoryStream())
                 {
-
-                    
-
                     bitmap.Save(ms, ImageFormat.Png);
                     ms.Position = 0;
-                    
-                    
+                    LogOcrDiagnostic(
+                        $"OCR bitmap serialized context={diagnosticContext ?? "-"} bytes={ms.Length}");
+
                     using (var pixImage = TesseractOCR.Pix.Image.LoadFromMemory(ms))
                     {
-                        // Resolve tessdata path relative to the executable
-                        string exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                        string exeDir = System.IO.Path.GetDirectoryName(exePath);
-                        string tessDataPath = System.IO.Path.Combine(exeDir, "tessdata");
-                        // Initialize OCR engine
+                        LogOcrDiagnostic($"OCR pix loaded context={diagnosticContext ?? "-"}");
                         using (var engine = new Engine(tessDataPath, TesseractOCR.Enums.Language.Polish, TesseractOCR.Enums.EngineMode.Default))
                         {
+                            LogOcrDiagnostic($"OCR engine initialized context={diagnosticContext ?? "-"} language=Polish mode=Default");
                             using (var page = engine.Process(pixImage))
                             {
-                                result = page.Text;
+                                result = page.Text ?? string.Empty;
+                                LogOcrDiagnostic(
+                                    $"OCR finished context={diagnosticContext ?? "-"} resultLength={result.Length}");
                             }
                         }
                     }
@@ -50941,8 +50985,12 @@ namespace AnonPDF
             }
             catch (Exception ex)
             {
-                // Error handling
+                LogOcrDiagnostic(
+                    $"OCR failed context={diagnosticContext ?? "-"} " +
+                    $"type={ex.GetType().FullName} msg={ex.Message} stack={ex}",
+                    force: true);
                 MessageBox.Show(this, string.Format(Resources.Err_OCR, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return string.Empty;
             }
             return result.Trim();
         }
@@ -50999,24 +51047,53 @@ namespace AnonPDF
 
             List<string> allExtractedTexts = new List<string>();
 
-            foreach (var block in blocks)
+            for (int blockIndex = 0; blockIndex < blocks.Count; blockIndex++)
             {
-                // Bounds are already in PDF coordinates
-                string text = ExtractTextFromRectangle(inputPdfPath, block);
-
-                // If text is empty, try OCR
-                if (string.IsNullOrWhiteSpace(text))
+                RedactionBlock block = blocks[blockIndex];
+                try
                 {
-                    using (Bitmap bmp = ExtractBitmapFromRectangle(block.PageNumber, block.Bounds))
+                    LogOcrDiagnostic(
+                        $"Copy selection start index={blockIndex} page={block.PageNumber} marker={block.IsMarkerSelection} " +
+                        $"bounds={FormatRectFInvariant(block.Bounds)} layer={NormalizeLayerIdValue(block.LayerId)}");
+
+                    string text = ExtractTextFromRectangle(inputPdfPath, block);
+                    LogOcrDiagnostic(
+                        $"Copy selection extracted text index={blockIndex} page={block.PageNumber} textLength={(text ?? string.Empty).Length}");
+
+                    if (string.IsNullOrWhiteSpace(text))
                     {
-                        if (bmp != null)
+                        using (Bitmap bmp = ExtractBitmapFromRectangle(block.PageNumber, block.Bounds))
                         {
-                            text = OcrFromBitmap(bmp);
+                            if (bmp != null)
+                            {
+                                string diagnosticContext =
+                                    $"copy-index={blockIndex};page={block.PageNumber};marker={block.IsMarkerSelection};bounds={FormatRectFInvariant(block.Bounds)}";
+                                text = OcrFromBitmap(bmp, diagnosticContext);
+                            }
+                            else
+                            {
+                                LogOcrDiagnostic(
+                                    $"Copy selection OCR skipped null crop index={blockIndex} page={block.PageNumber} " +
+                                    $"bounds={FormatRectFInvariant(block.Bounds)}",
+                                    force: true);
+                            }
                         }
                     }
-                }
 
-                allExtractedTexts.Add(text.Trim());
+                    text = text ?? string.Empty;
+                    allExtractedTexts.Add(text.Trim());
+                    LogOcrDiagnostic(
+                        $"Copy selection done index={blockIndex} page={block.PageNumber} finalTextLength={text.Trim().Length}");
+                }
+                catch (Exception ex)
+                {
+                    LogOcrDiagnostic(
+                        $"Copy selection failed index={blockIndex} page={block.PageNumber} marker={block.IsMarkerSelection} " +
+                        $"bounds={FormatRectFInvariant(block.Bounds)} type={ex.GetType().FullName} msg={ex.Message} stack={ex}",
+                        force: true);
+                    allExtractedTexts.Add(string.Empty);
+                    MessageBox.Show(this, string.Format(Resources.Err_OCR, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
             }
 
             // Concatenate all results with two CRLF characters
@@ -55633,6 +55710,22 @@ namespace AnonPDF
             float minY = points.Min(point => (float)point.GetY());
             float maxX = points.Max(point => (float)point.GetX());
             float maxY = points.Max(point => (float)point.GetY());
+
+            string glyphText = renderInfo?.GetText();
+            if (!string.IsNullOrEmpty(glyphText) && glyphText.Length == 1 && maxY > minY)
+            {
+                string nfd = glyphText[0].ToString().Normalize(System.Text.NormalizationForm.FormD);
+                for (int ni = 1; ni < nfd.Length; ni++)
+                {
+                    int cp = (int)nfd[ni];
+                    if (cp >= 0x0300 && cp <= 0x0315)
+                    {
+                        maxY += (maxY - minY) * 0.20f;
+                        break;
+                    }
+                }
+            }
+
             float width = maxX - minX;
             float height = maxY - minY;
             if (width <= 0f || height <= 0f)
