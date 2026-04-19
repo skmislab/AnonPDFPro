@@ -16,6 +16,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Principal;
 using System.Security.Cryptography;
+using iText.Html2pdf;
 using iText.Kernel.Pdf;
 using iText.PdfCleanup;
 using iText.Forms.Fields;
@@ -46,6 +47,7 @@ using System.Net.Http;
 using iText.IO.Font;
 using iText.Kernel.Font;
 using iText.Layout;
+using iText.StyledXmlParser.Resolver.Font;
 using TesseractOCR;
 using System.Data.SqlClient;
 using System.Drawing.Drawing2D;
@@ -80,6 +82,7 @@ namespace AnonPDF
         private string serviceEndDate = "";
         private static System.Timers.Timer maintenanceCheckTimer;
         private static bool exitScheduled = false;
+        private ToolStripMenuItem saveCurrentViewMenuItem;
         private string inputPdfPath = "";
         private string inputProjectPath = "";
         private int currentPage = 1;
@@ -110,6 +113,9 @@ namespace AnonPDF
         private const int PrintRenderMaxPixelCount = 24000000;
         private const int PrintRenderMaxDimension = 8192;
         private const int SelectionOverlayInvalidatePaddingPx = 6;
+        private const string RichTextLayoutCacheVersion = "rich-layout-v9";
+        private const string RichTextPreviewCacheVersion = "rich-preview-v23";
+        private static readonly bool DisableRichTextPreviewCachesForDiagnostics = false;
         private const string ShapeIconFontFileName = "materialdesignicons-subset.ttf";
         private const string ShapeIconFontLegacyFileName = "materialdesignicons-webfont.ttf";
         private const int LayersHeaderActiveIconCodePoint = 0xF043E;
@@ -146,11 +152,25 @@ namespace AnonPDF
         private bool isRotatingTextAnnotation;
         private bool isDraggingTextLeaderHandle;
         private bool textRotationInteractionChanged;
+        private bool richTextInteractionPreviewArmed;
         private TextAnnotation annotationToMove = null;
         private TextAnnotation annotationToScale = null;
         private TextAnnotation annotationToRotate = null;
         private TextAnnotation annotationToAdjustLeader = null;
         private TextAnnotation selectedTextAnnotation = null;
+        private SizeF textMoveStartContentSize = SizeF.Empty;
+        private SizeF textTransformStartContentSize = SizeF.Empty;
+        private Bitmap activeTextInteractionPreviewBitmap;
+        private Rectangle activeTextInteractionPreviewSourceRect = Rectangle.Empty;
+        private string activeTextInteractionPreviewKey;
+        private bool activeTextInteractionPreviewIncludesFrame;
+        private readonly object richPreviewWarmSync = new object();
+        private readonly Queue<RichPreviewWarmRequest> richPreviewWarmQueue = new Queue<RichPreviewWarmRequest>();
+        private readonly HashSet<string> pendingRichPreviewWarmKeys = new HashSet<string>(StringComparer.Ordinal);
+        private int richPreviewWarmGeneration;
+        private bool richPreviewWarmWorkerActive;
+        private bool richPreviewWarmBusyRequestPending;
+        private bool richPreviewWarmBusyCursorVisible;
         private CommentAnnotation selectedCommentAnnotation = null;
         private RedactionBlock selectedRedactionBlock = null;
         private int textRotationStartValue;
@@ -1281,6 +1301,9 @@ namespace AnonPDF
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, ref PARAFORMAT2 lParam);
+
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
@@ -1289,6 +1312,40 @@ namespace AnonPDF
         private const int LVM_FIRST = 0x1000;
         private const int LVM_SCROLL = LVM_FIRST + 20;
         private const int LVM_SETICONSPACING = LVM_FIRST + 53;
+        private const int EM_SETPARAFORMAT = 0x447;
+        private const uint PFM_SPACEBEFORE = 0x00000040;
+        private const uint PFM_SPACEAFTER = 0x00000080;
+        private const uint PFM_LINESPACING = 0x00000100;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PARAFORMAT2
+        {
+            public uint cbSize;
+            public uint dwMask;
+            public ushort wNumbering;
+            public ushort wReserved;
+            public int dxStartIndent;
+            public int dxRightIndent;
+            public int dxOffset;
+            public ushort wAlignment;
+            public short cTabCount;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)]
+            public int[] rgxTabs;
+            public int dySpaceBefore;
+            public int dySpaceAfter;
+            public int dyLineSpacing;
+            public short sStyle;
+            public byte bLineSpacingRule;
+            public byte bOutlineLevel;
+            public ushort wShadingWeight;
+            public ushort wShadingStyle;
+            public ushort wNumberingStart;
+            public ushort wNumberingStyle;
+            public ushort wNumberingTab;
+            public ushort wBorderSpace;
+            public ushort wBorderWidth;
+            public ushort wBorders;
+        }
 
         public PDFForm(SplashForm splash = null)
         {
@@ -1343,6 +1400,7 @@ namespace AnonPDF
             LoadPreferredTheme();
             ApplyTheme();
             this.HandleCreated += (_, __) => ApplyTitleBarColor();
+            InitializeSaveCurrentViewMenuItem();
 
             // Apply preferred UI culture if set; otherwise use environment (OS) culture
             var prefCulture = Properties.Settings.Default.PreferredUICulture;
@@ -1620,6 +1678,60 @@ namespace AnonPDF
 
             releaseBusyCursorOnNextPdfViewerPaint = false;
             EndBusyCursor();
+        }
+
+        private void BeginBusyCursorUntilNextPdfViewerPaint()
+        {
+            BeginBusyCursor();
+            releaseBusyCursorOnNextPdfViewerPaint = true;
+        }
+
+        private void RequestBusyCursorForNextRichPreviewWarm()
+        {
+            lock (richPreviewWarmSync)
+            {
+                richPreviewWarmBusyRequestPending = true;
+            }
+        }
+
+        private void ClearRichPreviewWarmBusyState()
+        {
+            bool shouldEndBusyCursor = false;
+            lock (richPreviewWarmSync)
+            {
+                richPreviewWarmBusyRequestPending = false;
+                if (richPreviewWarmBusyCursorVisible)
+                {
+                    richPreviewWarmBusyCursorVisible = false;
+                    shouldEndBusyCursor = true;
+                }
+            }
+
+            if (!shouldEndBusyCursor)
+            {
+                return;
+            }
+
+            if (IsHandleCreated)
+            {
+                try
+                {
+                    BeginInvoke((Action)(() =>
+                    {
+                        if (!IsDisposed)
+                        {
+                            EndBusyCursor();
+                        }
+                    }));
+                }
+                catch
+                {
+                }
+            }
+            else if (!IsDisposed)
+            {
+                EndBusyCursor();
+            }
         }
 
         private void CancelDeferredBusyCursorForPdfViewerPaint()
@@ -9190,6 +9302,10 @@ namespace AnonPDF
             diagnosticModeMenuItem.Text = Resources.Menu_Help_DiagnosticMode;
             aboutMenuItem.Text = Resources.Menu_Help_About;
             showLicenseToolStripMenuItem.Text = LocalizedText("Menu_Help_Licenses");
+            if (saveCurrentViewMenuItem != null)
+            {
+                saveCurrentViewMenuItem.Text = GetSaveCurrentViewMenuText();
+            }
 
             // Common buttons (partial coverage)
             try { buttonRedactText.Text = Resources.UI_Button_SavePdf; } catch { }
@@ -9577,6 +9693,232 @@ namespace AnonPDF
             return RotateSize(GetRichAnnotationContentSize(plainText, richText, fallbackFont), rotation);
         }
 
+        private static string BuildRichContentCacheKey(string plainText, string richText, Font fallbackFont)
+        {
+            string fontPart = fallbackFont == null
+                ? string.Empty
+                : string.Join("|",
+                    fallbackFont.FontFamily?.Name ?? string.Empty,
+                    fallbackFont.SizeInPoints.ToString("0.###", CultureInfo.InvariantCulture),
+                    ((int)fallbackFont.Style).ToString(CultureInfo.InvariantCulture),
+                    ((int)fallbackFont.Unit).ToString(CultureInfo.InvariantCulture));
+
+            return string.Join("||",
+                plainText ?? string.Empty,
+                richText ?? string.Empty,
+                fontPart);
+        }
+
+        private static string BuildRichContentCacheKey(
+            string plainText,
+            string richText,
+            Font fallbackFont,
+            System.Windows.Forms.HorizontalAlignment alignment)
+        {
+            return string.Join("||",
+                BuildRichContentCacheKey(plainText, richText, fallbackFont),
+                ((int)alignment).ToString(CultureInfo.InvariantCulture));
+        }
+
+        private string BuildRichPreviewBitmapCacheKey(TextAnnotation annotation, int widthPx, int heightPx, float fontScale, bool trimVertical)
+        {
+            if (annotation == null)
+            {
+                return string.Empty;
+            }
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}|{1}|{2}|{3}|{4}|{5:0.###}|{6}|{7}|{8}",
+                RichTextPreviewCacheVersion,
+                BuildRichContentCacheKey(annotation.AnnotationText, annotation.AnnotationRichText, annotation.AnnotationFont, annotation.AnnotationAlignment),
+                annotation.AnnotationColor.ToArgb(),
+                (int)annotation.AnnotationAlignment,
+                widthPx,
+                fontScale,
+                heightPx,
+                annotation.Id ?? string.Empty,
+                trimVertical ? 1 : 0);
+        }
+
+        private string BuildActiveTextInteractionPreviewKey(
+            TextAnnotation annotation,
+            int previewWidth,
+            int previewHeight,
+            float fontScale,
+            bool trimVertical)
+        {
+            if (annotation == null)
+            {
+                return string.Empty;
+            }
+
+            string fontPart = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}|{1:0.###}|{2}|{3}",
+                annotation.AnnotationFont?.FontFamily?.Name ?? textScaleStartFontFamily?.Name ?? string.Empty,
+                annotation.AnnotationFont?.Size ?? textScaleStartFontSize,
+                (int)(annotation.AnnotationFont?.Style ?? textScaleStartFontStyle),
+                (int)(annotation.AnnotationFont?.Unit ?? textScaleStartFontUnit));
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|interaction",
+                RichTextPreviewCacheVersion,
+                annotation.Id ?? string.Empty,
+                annotation.AnnotationColor.ToArgb(),
+                (int)annotation.AnnotationAlignment,
+                string.Concat(annotation.AnnotationText ?? string.Empty, "\n", annotation.AnnotationRichText ?? string.Empty),
+                fontPart,
+                previewWidth,
+                string.Format(CultureInfo.InvariantCulture, "{0}|{1:0.###}", previewHeight, fontScale),
+                trimVertical ? 1 : 0);
+        }
+
+        private sealed class RichPreviewWarmRequest
+        {
+            public TextAnnotation Annotation { get; set; }
+            public string CacheKey { get; set; }
+            public int WidthPx { get; set; }
+            public int HeightPx { get; set; }
+            public float FontScale { get; set; }
+            public bool TrimVertical { get; set; }
+            public string PlainText { get; set; }
+            public string RichText { get; set; }
+            public string FontFamilyName { get; set; }
+            public float FontSize { get; set; }
+            public FontStyle FontStyle { get; set; }
+            public GraphicsUnit FontUnit { get; set; }
+            public System.Drawing.Color DefaultTextColor { get; set; }
+            public System.Windows.Forms.HorizontalAlignment Alignment { get; set; }
+            public int Generation { get; set; }
+        }
+
+        private static SizeF GetRichAnnotationContentSize(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return SizeF.Empty;
+            }
+
+            string cacheKey = BuildRichContentCacheKey(
+                annotation.AnnotationText,
+                annotation.AnnotationRichText,
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment);
+            if (!string.IsNullOrEmpty(cacheKey) &&
+                string.Equals(annotation.RichContentSizeCacheKey, cacheKey, StringComparison.Ordinal) &&
+                annotation.RichContentSizeCacheValue.Width > 0f &&
+                annotation.RichContentSizeCacheValue.Height > 0f)
+            {
+                return annotation.RichContentSizeCacheValue;
+            }
+
+            RefreshRichContentSizeCache(annotation);
+            return annotation.RichContentSizeCacheValue;
+        }
+
+        private static bool TryGetApproximateRichContentSizeFromBounds(TextAnnotation annotation, out SizeF contentSize)
+        {
+            contentSize = SizeF.Empty;
+            if (annotation == null)
+            {
+                return false;
+            }
+
+            RectangleF bounds = annotation.AnnotationBounds;
+            if (bounds.Width <= 0f || bounds.Height <= 0f)
+            {
+                return false;
+            }
+
+            int rotation = NormalizeRotation(annotation.AnnotationRotation);
+            SizeF unrotatedOuterSize;
+            if (rotation == 0 || rotation == 180)
+            {
+                unrotatedOuterSize = new SizeF(bounds.Width, bounds.Height);
+            }
+            else if (rotation == 90 || rotation == 270)
+            {
+                unrotatedOuterSize = new SizeF(bounds.Height, bounds.Width);
+            }
+            else
+            {
+                float radians = (float)(rotation * Math.PI / 180.0);
+                float a = Math.Abs((float)Math.Cos(radians));
+                float b = Math.Abs((float)Math.Sin(radians));
+                float determinant = (a * a) - (b * b);
+
+                if (Math.Abs(determinant) < 0.2f)
+                {
+                    return false;
+                }
+
+                float solvedWidth = ((bounds.Width * a) - (bounds.Height * b)) / determinant;
+                float solvedHeight = ((bounds.Height * a) - (bounds.Width * b)) / determinant;
+                if (float.IsNaN(solvedWidth) || float.IsInfinity(solvedWidth) ||
+                    float.IsNaN(solvedHeight) || float.IsInfinity(solvedHeight) ||
+                    solvedWidth <= 0.5f || solvedHeight <= 0.5f)
+                {
+                    return false;
+                }
+
+                unrotatedOuterSize = new SizeF(solvedWidth, solvedHeight);
+            }
+
+            float padding = GetAnnotationFramePadding(annotation);
+            contentSize = new SizeF(
+                Math.Max(1f, unrotatedOuterSize.Width - (2f * padding)),
+                Math.Max(1f, unrotatedOuterSize.Height - (2f * padding)));
+            return true;
+        }
+
+        private static void RefreshRichContentSizeCache(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return;
+            }
+
+            string cacheKey = BuildRichContentCacheKey(
+                annotation.AnnotationText,
+                annotation.AnnotationRichText,
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment);
+            SizeF measured = GetRichAnnotationContentSize(annotation.AnnotationText, annotation.AnnotationRichText, annotation.AnnotationFont);
+            annotation.RichContentSizeCacheKey = cacheKey;
+            annotation.RichContentSizeCacheValue = measured;
+        }
+
+        private static SizeF GetCheapRichAnnotationContentSize(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return SizeF.Empty;
+            }
+
+            Font fallbackFont = annotation.AnnotationFont ?? SystemFonts.DefaultFont;
+            string content = annotation.AnnotationText ?? string.Empty;
+            string normalizedContent = content.Replace("\r\n", "\n").Replace("\r", "\n");
+            int lineCount = Math.Max(1, normalizedContent.Split(new[] { '\n' }, StringSplitOptions.None).Length);
+            SizeF baseSize = GetAnnotationPlainContentSize(content, fallbackFont);
+
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                Size measureProbe = new Size(int.MaxValue, int.MaxValue);
+                TextFormatFlags textFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+                float referenceLineHeight = Math.Max(
+                    fallbackFont.GetHeight(g),
+                    TextRenderer.MeasureText(g, "ĄŻŚŃĘgjpqy", fallbackFont, measureProbe, textFlags).Height);
+                float expectedRichHeight = Math.Max(1f, (referenceLineHeight * 1.2f) * lineCount);
+                float safetyWidth = Math.Max(2f, fallbackFont.Size * 0.08f);
+                float safetyHeight = Math.Max(2f, fallbackFont.GetHeight(g) * 0.06f);
+                return new SizeF(
+                    Math.Max(1f, baseSize.Width + safetyWidth),
+                    Math.Max(1f, Math.Max(baseSize.Height, expectedRichHeight) + safetyHeight));
+            }
+        }
+
         private static SizeF GetRichAnnotationContentSize(string plainText, string richText, Font fallbackFont)
         {
             if (fallbackFont == null)
@@ -9612,10 +9954,72 @@ namespace AnonPDF
 
                 // Add one character (width) and one line (height), scaled by current font.
                 float extraWidth = g.MeasureString("M", fallbackFont, int.MaxValue, format).Width;
-                float extraHeight = fallbackFont.GetHeight(g);
+                float fallbackHeight = fallbackFont.GetHeight(g);
                 SizeF paddedSize = new SizeF(
                     Math.Max(1f, baseSize.Width + extraWidth),
-                    Math.Max(1f, baseSize.Height + extraHeight));
+                    Math.Max(1f, baseSize.Height + fallbackHeight));
+
+                try
+                {
+                    using (var richTextBox = new RichTextBox())
+                    {
+                        richTextBox.BorderStyle = BorderStyle.None;
+                        richTextBox.ScrollBars = RichTextBoxScrollBars.None;
+                        richTextBox.Multiline = true;
+                        richTextBox.WordWrap = false;
+                        richTextBox.DetectUrls = false;
+                        richTextBox.ReadOnly = true;
+                        richTextBox.Font = fallbackFont;
+                        richTextBox.ForeColor = System.Drawing.Color.Black;
+                        richTextBox.BackColor = System.Drawing.Color.White;
+                        richTextBox.Size = new Size(
+                            Math.Max(1, (int)Math.Ceiling(paddedSize.Width)),
+                            Math.Max(1, (int)Math.Ceiling(paddedSize.Height)));
+                        richTextBox.Location = Point.Empty;
+
+                        bool richLoaded = false;
+                        if (!string.IsNullOrWhiteSpace(richText))
+                        {
+                            try
+                            {
+                                richTextBox.Rtf = richText;
+                                richLoaded = true;
+                            }
+                            catch
+                            {
+                                richLoaded = false;
+                            }
+                        }
+
+                        if (!richLoaded)
+                        {
+                            richTextBox.Text = content;
+                        }
+
+                        richTextBox.CreateControl();
+                        ApplyGlobalRichFont(richTextBox, fallbackFont);
+                        ApplyRichParagraphAlignment(richTextBox, System.Windows.Forms.HorizontalAlignment.Left);
+                        ApplyCompactRichLineSpacing(richTextBox, fallbackFont);
+                        richTextBox.ZoomFactor = 1f;
+
+                        RectangleF inkBounds = MeasureRichInkBounds(
+                            richTextBox,
+                            paddedSize.Width,
+                            paddedSize.Height);
+                        if (!inkBounds.IsEmpty)
+                        {
+                            float richBottomReserve = Math.Max(4f, fallbackHeight * 0.2f);
+                            float richHorizontalReserve = Math.Max(3f, extraWidth * 0.18f);
+                            return new SizeF(
+                                Math.Max(1f, Math.Max(baseSize.Width, inkBounds.Right + richHorizontalReserve)),
+                                Math.Max(1f, inkBounds.Height + richBottomReserve));
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
                 return paddedSize;
             }
         }
@@ -9715,6 +10119,28 @@ namespace AnonPDF
             return NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
         }
 
+        private static float GetAnnotationInnerFrameMargin(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return 0f;
+            }
+
+            return NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
+        }
+
+        private static float GetAnnotationBorderWidthScreenPx(float borderWidth, float scaleFactor, float dpiX, float dpiY)
+        {
+            float normalizedBorderWidth = NormalizeAnnotationBorderWidth(borderWidth);
+            if (normalizedBorderWidth <= 0f || scaleFactor <= 0f)
+            {
+                return 0f;
+            }
+
+            float effectiveDpi = Math.Max(1f, (dpiX + dpiY) * 0.5f);
+            return normalizedBorderWidth * scaleFactor * 72f / effectiveDpi;
+        }
+
         private static SizeF GetAnnotationOuterSizeFromContent(SizeF contentSize, float borderWidth, float frameMargin, int rotation)
         {
             float padding = NormalizeAnnotationBorderWidth(borderWidth) + NormalizeAnnotationFrameMargin(frameMargin);
@@ -9724,23 +10150,298 @@ namespace AnonPDF
             return RotateSize(outerUnrotated, rotation);
         }
 
-        private static SizeF GetAnnotationContentSize(TextAnnotation annotation)
+        private SizeF GetAnnotationContentSize(TextAnnotation annotation)
         {
             if (annotation == null)
             {
                 return SizeF.Empty;
             }
 
-            return IsRichTextMode(annotation)
-                ? GetRichAnnotationContentSize(annotation.AnnotationText, annotation.AnnotationRichText, annotation.AnnotationFont)
-                : GetAnnotationPlainContentSize(annotation.AnnotationText, annotation.AnnotationFont);
+            if (!IsRichTextMode(annotation))
+            {
+                return GetAnnotationPlainContentSize(annotation.AnnotationText, annotation.AnnotationFont);
+            }
+
+            if (DisableRichTextPreviewCachesForDiagnostics)
+            {
+                return GetRenderedRichAnnotationContentSize(annotation);
+            }
+
+            string cacheKey = BuildRichContentCacheKey(
+                annotation.AnnotationText,
+                annotation.AnnotationRichText,
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment);
+            if (annotation.HasCachedRichContentSize &&
+                string.Equals(annotation.CachedRichContentSizeKey, cacheKey, StringComparison.Ordinal))
+            {
+                return annotation.CachedRichContentSize;
+            }
+
+            SizeF contentSize = GetRenderedRichAnnotationContentSize(annotation);
+            annotation.CachedRichContentSizeKey = cacheKey;
+            annotation.CachedRichContentSize = contentSize;
+            annotation.HasCachedRichContentSize = true;
+            return contentSize;
         }
 
-        private static SizeF MeasureRichInkBounds(RichTextBox richTextBox, float minWidthPx, float minHeightPx)
+        private SizeF GetRenderedRichAnnotationContentSize(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return SizeF.Empty;
+            }
+
+            SizeF measuredSize = GetRichAnnotationContentSize(
+                annotation.AnnotationText,
+                annotation.AnnotationRichText,
+                annotation.AnnotationFont);
+            if (!TryBuildSharedRichLayout(annotation, out SharedRichLayoutResult sharedRichLayout) ||
+                sharedRichLayout == null)
+            {
+                return measuredSize;
+            }
+
+            float logicalToPtX = 72f / 96f;
+            float logicalToPtY = 72f / 96f;
+            float contentWidthPx = Math.Max(1f, measuredSize.Width);
+            float contentHeightPx = Math.Max(1f, measuredSize.Height);
+
+            for (int attempt = 0; attempt < 4; attempt++)
+            {
+                float contentWidthPt = contentWidthPx * logicalToPtX;
+                float contentHeightPt = contentHeightPx * logicalToPtY;
+                if (!TryGetCachedRichHtmlPdfRenderResult(
+                        annotation,
+                        contentWidthPt,
+                        contentHeightPt,
+                        0f,
+                        0f,
+                        contentWidthPt,
+                        contentHeightPt,
+                        sharedRichLayout,
+                        out RichHtmlPdfRenderResult renderResult) ||
+                    renderResult == null)
+                {
+                    break;
+                }
+
+                RectangleF frameRect = renderResult.FrameRectTopDownPt;
+                bool touchesRightEdge = frameRect.Right >= renderResult.TargetWidthPt - 0.25f;
+                bool touchesBottomEdge = frameRect.Bottom >= renderResult.TargetHeightPt - 0.25f;
+                if ((touchesRightEdge || touchesBottomEdge) && attempt < 3)
+                {
+                    if (touchesRightEdge)
+                    {
+                        contentWidthPx += Math.Max(8f, annotation.AnnotationFont.Size * 0.5f);
+                    }
+
+                    if (touchesBottomEdge)
+                    {
+                        contentHeightPx += Math.Max(6f, annotation.AnnotationFont.Size * 0.45f);
+                    }
+
+                    continue;
+                }
+
+                return new SizeF(
+                    Math.Max(1f, (frameRect.Width / logicalToPtX) + 1f),
+                    Math.Max(1f, (frameRect.Height / logicalToPtY) + 2f));
+            }
+
+            return measuredSize;
+        }
+
+        private void EnsureRichAnnotationBoundsSynchronized(TextAnnotation annotation)
+        {
+            if (annotation == null ||
+                !IsRichTextMode(annotation) ||
+                (annotation == annotationToScale && isScalingTextAnnotation) ||
+                (annotation == annotationToRotate && isRotatingTextAnnotation) ||
+                (annotation == annotationToAdjustLeader && isDraggingTextLeaderHandle) ||
+                (annotation == annotationToMove && isMoving))
+            {
+                return;
+            }
+
+            SizeF contentSize = GetAnnotationContentSize(annotation);
+            SizeF outerSize = GetAnnotationOuterSizeFromContent(
+                contentSize,
+                annotation.AnnotationBorderWidth,
+                annotation.AnnotationFrameMargin,
+                annotation.AnnotationRotation);
+
+            RectangleF bounds = annotation.AnnotationBounds;
+            if (Math.Abs(bounds.Width - outerSize.Width) < 0.5f &&
+                Math.Abs(bounds.Height - outerSize.Height) < 0.5f)
+            {
+                return;
+            }
+
+            annotation.AnnotationBounds = new RectangleF(
+                bounds.X,
+                bounds.Y,
+                outerSize.Width,
+                outerSize.Height);
+        }
+
+        private SizeF GetFastTextAnnotationContentSize(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return SizeF.Empty;
+            }
+
+            if (!IsRichTextMode(annotation))
+            {
+                return GetAnnotationContentSize(annotation);
+            }
+
+            string cacheKey = BuildRichContentCacheKey(
+                annotation.AnnotationText,
+                annotation.AnnotationRichText,
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment);
+            if (annotation.HasCachedRichContentSize &&
+                string.Equals(annotation.CachedRichContentSizeKey, cacheKey, StringComparison.Ordinal))
+            {
+                return annotation.CachedRichContentSize;
+            }
+
+            if (TryGetApproximateRichContentSizeFromBounds(annotation, out SizeF approximateContentSize))
+            {
+                return approximateContentSize;
+            }
+
+            return GetAnnotationContentSize(annotation);
+        }
+
+        private SizeF GetInteractiveAwareAnnotationContentSize(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return SizeF.Empty;
+            }
+
+            if (annotation == annotationToScale &&
+                isScalingTextAnnotation &&
+                !textTransformStartContentSize.IsEmpty &&
+                textScaleStartFontSize > 0.0001f &&
+                annotation.AnnotationFont != null)
+            {
+                if (!textRotationInteractionChanged)
+                {
+                    return textTransformStartContentSize;
+                }
+
+                float liveScale = Math.Max(0.05f, annotation.AnnotationFont.Size / textScaleStartFontSize);
+                return new SizeF(
+                    Math.Max(1f, textTransformStartContentSize.Width * liveScale),
+                    Math.Max(1f, textTransformStartContentSize.Height * liveScale));
+            }
+
+            if ((annotation == annotationToRotate && isRotatingTextAnnotation) ||
+                (annotation == annotationToAdjustLeader && isDraggingTextLeaderHandle) ||
+                (annotation == annotationToMove && isMoving))
+            {
+                SizeF interactionSize = annotation == annotationToMove ? textMoveStartContentSize : textTransformStartContentSize;
+                if (!interactionSize.IsEmpty)
+                {
+                    return interactionSize;
+                }
+            }
+
+            return GetFastTextAnnotationContentSize(annotation);
+        }
+
+        private void ClearActiveTextInteractionPreview()
+        {
+            activeTextInteractionPreviewKey = null;
+            activeTextInteractionPreviewBitmap?.Dispose();
+            activeTextInteractionPreviewBitmap = null;
+            activeTextInteractionPreviewSourceRect = Rectangle.Empty;
+            activeTextInteractionPreviewIncludesFrame = false;
+            richTextInteractionPreviewArmed = false;
+        }
+
+        private bool IsRichTextPreviewInteractionActive(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return false;
+            }
+
+            if (!richTextInteractionPreviewArmed)
+            {
+                return false;
+            }
+
+            if ((annotation == annotationToScale && isScalingTextAnnotation) ||
+                (annotation == annotationToRotate && isRotatingTextAnnotation) ||
+                (annotation == annotationToAdjustLeader && isDraggingTextLeaderHandle))
+            {
+                return textRotationInteractionChanged;
+            }
+
+            return false;
+        }
+
+        private SizeF GetLiveAnnotationContentSize(TextAnnotation annotation)
+        {
+            return GetInteractiveAwareAnnotationContentSize(annotation);
+        }
+
+        private bool ShouldLogRichResizeDiagnostics()
+        {
+            return DebugLogEnabled &&
+                   isScalingTextAnnotation &&
+                   annotationToScale != null &&
+                   IsRichTextMode(annotationToScale);
+        }
+
+        private void RepairRichAnnotationBoundsIfNeeded(TextAnnotation annotation)
+        {
+            if (annotation == null || !IsRichTextMode(annotation))
+            {
+                return;
+            }
+
+            RectangleF bounds = annotation.AnnotationBounds;
+            if (bounds.Width <= 0f || bounds.Height <= 0f)
+            {
+                return;
+            }
+
+            SizeF contentSize = GetCheapRichAnnotationContentSize(annotation);
+            if (contentSize.IsEmpty)
+            {
+                return;
+            }
+
+            SizeF outerSize = GetAnnotationOuterSizeFromContent(
+                contentSize,
+                annotation.AnnotationBorderWidth,
+                annotation.AnnotationFrameMargin,
+                annotation.AnnotationRotation);
+
+            if (bounds.Width + 0.5f >= outerSize.Width &&
+                bounds.Height + 0.5f >= outerSize.Height)
+            {
+                return;
+            }
+
+            annotation.AnnotationBounds = new RectangleF(
+                bounds.X,
+                bounds.Y,
+                Math.Max(bounds.Width, outerSize.Width),
+                Math.Max(bounds.Height, outerSize.Height));
+        }
+
+        private static RectangleF MeasureRichInkBounds(RichTextBox richTextBox, float minWidthPx, float minHeightPx)
         {
             if (richTextBox == null)
             {
-                return SizeF.Empty;
+                return RectangleF.Empty;
             }
 
             int width = Math.Max(1, (int)Math.Ceiling(minWidthPx) + 8);
@@ -9776,6 +10477,8 @@ namespace AnonPDF
                     richTextBox.Size = previousSize;
                 }
 
+                int minX = width;
+                int minY = height;
                 int maxX = -1;
                 int maxY = -1;
                 for (int y = 0; y < height; y++)
@@ -9787,6 +10490,8 @@ namespace AnonPDF
                         int alpha = 255 - (((cw.R - cb.R) + (cw.G - cb.G) + (cw.B - cb.B)) / 3);
                         if (alpha > 0)
                         {
+                            if (x < minX) minX = x;
+                            if (y < minY) minY = y;
                             if (x > maxX) maxX = x;
                             if (y > maxY) maxY = y;
                         }
@@ -9795,11 +10500,2365 @@ namespace AnonPDF
 
                 if (maxX < 0 || maxY < 0)
                 {
-                    return SizeF.Empty;
+                    return RectangleF.Empty;
                 }
 
-                return new SizeF(maxX + 1f, maxY + 1f);
+                return RectangleF.FromLTRB(minX, minY, maxX + 1f, maxY + 1f);
             }
+        }
+
+        private static bool TryGetNonTransparentBounds(Bitmap bitmap, out Rectangle bounds)
+        {
+            bounds = Rectangle.Empty;
+            if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0)
+            {
+                return false;
+            }
+
+            int left = -1;
+            int right = -1;
+            int top = -1;
+            int bottom = -1;
+
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                for (int y = 0; y < bitmap.Height; y++)
+                {
+                    if (bitmap.GetPixel(x, y).A > 0)
+                    {
+                        left = x;
+                        break;
+                    }
+                }
+
+                if (left >= 0)
+                {
+                    break;
+                }
+            }
+
+            if (left < 0)
+            {
+                return false;
+            }
+
+            for (int x = bitmap.Width - 1; x >= left; x--)
+            {
+                for (int y = 0; y < bitmap.Height; y++)
+                {
+                    if (bitmap.GetPixel(x, y).A > 0)
+                    {
+                        right = x;
+                        break;
+                    }
+                }
+
+                if (right >= 0)
+                {
+                    break;
+                }
+            }
+
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    if (bitmap.GetPixel(x, y).A > 0)
+                    {
+                        top = y;
+                        break;
+                    }
+                }
+
+                if (top >= 0)
+                {
+                    break;
+                }
+            }
+
+            if (top < 0)
+            {
+                return false;
+            }
+
+            for (int y = bitmap.Height - 1; y >= top; y--)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    if (bitmap.GetPixel(x, y).A > 0)
+                    {
+                        bottom = y;
+                        break;
+                    }
+                }
+
+                if (bottom >= 0)
+                {
+                    break;
+                }
+            }
+
+            if (bottom < top)
+            {
+                return false;
+            }
+
+            bounds = Rectangle.FromLTRB(left, top, right + 1, bottom + 1);
+            return bounds.Width > 0 && bounds.Height > 0;
+        }
+
+        private static bool TryGetNonTransparentBounds(Bitmap bitmap, out Rectangle bounds, byte minAlpha)
+        {
+            bounds = Rectangle.Empty;
+            if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0)
+            {
+                return false;
+            }
+
+            int minX = bitmap.Width;
+            int minY = bitmap.Height;
+            int maxX = -1;
+            int maxY = -1;
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    if (bitmap.GetPixel(x, y).A < minAlpha)
+                    {
+                        continue;
+                    }
+
+                    if (x < minX) minX = x;
+                    if (y < minY) minY = y;
+                    if (x > maxX) maxX = x;
+                    if (y > maxY) maxY = y;
+                }
+            }
+
+            if (maxX < 0 || maxY < 0)
+            {
+                return false;
+            }
+
+            bounds = Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
+            return bounds.Width > 0 && bounds.Height > 0;
+        }
+
+        private bool TryGetCachedRichHtmlPdfRenderResult(
+            TextAnnotation annotation,
+            float contentWidthPt,
+            float contentHeightPt,
+            float framePaddingXPt,
+            float framePaddingYPt,
+            float layoutWidthPt,
+            float layoutHeightPt,
+            SharedRichLayoutResult prebuiltLayout,
+            out RichHtmlPdfRenderResult result)
+        {
+            result = null;
+            if (annotation == null)
+            {
+                return false;
+            }
+
+            Stopwatch profileStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
+
+            string contentKey = BuildRichContentCacheKey(
+                annotation.AnnotationText,
+                annotation.AnnotationRichText,
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment);
+            string cacheKey = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}|cw={1:0.###}|ch={2:0.###}|fpx={3:0.###}|fpy={4:0.###}|lw={5:0.###}|lh={6:0.###}",
+                contentKey,
+                contentWidthPt,
+                contentHeightPt,
+                framePaddingXPt,
+                framePaddingYPt,
+                layoutWidthPt,
+                layoutHeightPt);
+
+            if (!DisableRichTextPreviewCachesForDiagnostics &&
+                string.Equals(annotation.CachedRichHtmlRenderKey, cacheKey, StringComparison.Ordinal) &&
+                annotation.CachedRichHtmlRenderPdfBytes != null &&
+                annotation.CachedRichHtmlRenderPdfBytes.Length > 0 &&
+                annotation.CachedRichHtmlRenderSourceWidthPt > 0f &&
+                annotation.CachedRichHtmlRenderSourceHeightPt > 0f &&
+                annotation.CachedRichHtmlRenderTargetWidthPt > 0f &&
+                annotation.CachedRichHtmlRenderTargetHeightPt > 0f &&
+                annotation.CachedRichHtmlRenderFrameRectTopDownPt.Width > 0f &&
+                annotation.CachedRichHtmlRenderFrameRectTopDownPt.Height > 0f)
+            {
+                result = new RichHtmlPdfRenderResult
+                {
+                    PdfBytes = annotation.CachedRichHtmlRenderPdfBytes,
+                    SourceWidthPt = annotation.CachedRichHtmlRenderSourceWidthPt,
+                    SourceHeightPt = annotation.CachedRichHtmlRenderSourceHeightPt,
+                    TargetWidthPt = annotation.CachedRichHtmlRenderTargetWidthPt,
+                    TargetHeightPt = annotation.CachedRichHtmlRenderTargetHeightPt,
+                    FrameRectTopDownPt = annotation.CachedRichHtmlRenderFrameRectTopDownPt
+                };
+                profileStopwatch?.Stop();
+                if (profileStopwatch != null)
+                {
+                    LogDebug(
+                        $"ProfileRichHtmlRender hit annotation={annotation.Id ?? "-"} ms={profileStopwatch.ElapsedMilliseconds} " +
+                        $"targetPt={result.TargetWidthPt:0.###}x{result.TargetHeightPt:0.###}");
+                }
+
+                return true;
+            }
+
+            if (!TryBuildRichHtmlPdfRenderResult(
+                    annotation,
+                    contentWidthPt,
+                    contentHeightPt,
+                    framePaddingXPt,
+                    framePaddingYPt,
+                    layoutWidthPt,
+                    layoutHeightPt,
+                    prebuiltLayout,
+                    out result) ||
+                result == null)
+            {
+                return false;
+            }
+
+            if (!DisableRichTextPreviewCachesForDiagnostics)
+            {
+                annotation.CachedRichHtmlRenderKey = cacheKey;
+                annotation.CachedRichHtmlRenderPdfBytes = result.PdfBytes;
+                annotation.CachedRichHtmlRenderFrameRectTopDownPt = result.FrameRectTopDownPt;
+                annotation.CachedRichHtmlRenderSourceWidthPt = result.SourceWidthPt;
+                annotation.CachedRichHtmlRenderSourceHeightPt = result.SourceHeightPt;
+                annotation.CachedRichHtmlRenderTargetWidthPt = result.TargetWidthPt;
+                annotation.CachedRichHtmlRenderTargetHeightPt = result.TargetHeightPt;
+            }
+
+            profileStopwatch?.Stop();
+            if (profileStopwatch != null)
+            {
+                LogDebug(
+                    $"ProfileRichHtmlRender miss annotation={annotation.Id ?? "-"} ms={profileStopwatch.ElapsedMilliseconds} " +
+                    $"targetPt={result.TargetWidthPt:0.###}x{result.TargetHeightPt:0.###}");
+            }
+
+            return true;
+        }
+
+        private static Rectangle ConvertFrameRectTopDownPtToPixelRect(
+            RectangleF frameRectTopDownPt,
+            float sourceWidthPt,
+            float sourceHeightPt,
+            int renderWidthPx,
+            int renderHeightPx)
+        {
+            if (sourceWidthPt <= 0f || sourceHeightPt <= 0f || renderWidthPx <= 0 || renderHeightPx <= 0)
+            {
+                return Rectangle.Empty;
+            }
+
+            float scaleX = renderWidthPx / sourceWidthPt;
+            float scaleY = renderHeightPx / sourceHeightPt;
+            int left = Math.Max(0, (int)Math.Floor(frameRectTopDownPt.Left * scaleX));
+            int top = Math.Max(0, (int)Math.Floor(frameRectTopDownPt.Top * scaleY));
+            int right = Math.Min(renderWidthPx, (int)Math.Ceiling(frameRectTopDownPt.Right * scaleX));
+            int bottom = Math.Min(renderHeightPx, (int)Math.Ceiling(frameRectTopDownPt.Bottom * scaleY));
+            if (right <= left)
+            {
+                right = Math.Min(renderWidthPx, left + 1);
+            }
+
+            if (bottom <= top)
+            {
+                bottom = Math.Min(renderHeightPx, top + 1);
+            }
+
+            return Rectangle.FromLTRB(left, top, right, bottom);
+        }
+
+        private static Bitmap RenderPdfBytesToOpaqueBitmap(byte[] pdfBytes, int widthPx, int heightPx, uint backgroundArgb)
+        {
+            if (pdfBytes == null || pdfBytes.Length == 0 || widthPx <= 0 || heightPx <= 0)
+            {
+                return null;
+            }
+
+            try
+            {
+                using (var previewPdf = new PDFiumSharp.PdfDocument(data: pdfBytes, password: string.Empty))
+                {
+                    if (previewPdf.Pages.Count <= 0)
+                    {
+                        return null;
+                    }
+
+                    var page = previewPdf.Pages[0];
+                    using (var bmp = new PDFiumBitmap(widthPx, heightPx, true))
+                    {
+                        bmp.FillRectangle(0, 0, widthPx, heightPx, backgroundArgb);
+                        page.Render(renderTarget: bmp, flags: PDFiumSharp.Enums.RenderingFlags.Annotations);
+                        using (MemoryStream ms = new MemoryStream())
+                        {
+                            bmp.Save(ms);
+                            ms.Position = 0;
+                            return new Bitmap(DrawingImage.FromStream(ms));
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static Bitmap BuildTransparentBitmapFromOpaquePair(
+            Bitmap blackBitmap,
+            Bitmap whiteBitmap,
+            Rectangle cropRect,
+            System.Drawing.Color backgroundColor)
+        {
+            if (blackBitmap == null ||
+                whiteBitmap == null ||
+                cropRect.Width <= 0 ||
+                cropRect.Height <= 0)
+            {
+                return null;
+            }
+
+            var bitmap = new Bitmap(cropRect.Width, cropRect.Height, PixelFormat.Format32bppArgb);
+            for (int y = 0; y < cropRect.Height; y++)
+            {
+                int sourceY = cropRect.Top + y;
+                for (int x = 0; x < cropRect.Width; x++)
+                {
+                    int sourceX = cropRect.Left + x;
+                    System.Drawing.Color cb = blackBitmap.GetPixel(sourceX, sourceY);
+                    System.Drawing.Color cw = whiteBitmap.GetPixel(sourceX, sourceY);
+
+                    int alphaR = 255 - (cw.R - cb.R);
+                    int alphaG = 255 - (cw.G - cb.G);
+                    int alphaB = 255 - (cw.B - cb.B);
+                    int alpha = Math.Max(0, Math.Min(255, (alphaR + alphaG + alphaB) / 3));
+                    if (alpha <= 3)
+                    {
+                        bitmap.SetPixel(x, y, backgroundColor.A > 0 ? backgroundColor : System.Drawing.Color.Transparent);
+                        continue;
+                    }
+
+                    int r = Math.Max(0, Math.Min(255, (cb.R * 255) / Math.Max(1, alpha)));
+                    int g = Math.Max(0, Math.Min(255, (cb.G * 255) / Math.Max(1, alpha)));
+                    int b = Math.Max(0, Math.Min(255, (cb.B * 255) / Math.Max(1, alpha)));
+                    System.Drawing.Color sourceColor = System.Drawing.Color.FromArgb(alpha, r, g, b);
+                    if (backgroundColor.A <= 0)
+                    {
+                        bitmap.SetPixel(x, y, sourceColor);
+                        continue;
+                    }
+
+                    float srcAlpha = sourceColor.A / 255f;
+                    float dstAlpha = backgroundColor.A / 255f;
+                    float outAlpha = srcAlpha + (dstAlpha * (1f - srcAlpha));
+                    if (outAlpha <= 0f)
+                    {
+                        bitmap.SetPixel(x, y, System.Drawing.Color.Transparent);
+                        continue;
+                    }
+
+                    float srcWeight = srcAlpha / outAlpha;
+                    float dstWeight = (dstAlpha * (1f - srcAlpha)) / outAlpha;
+                    int outR = Math.Max(0, Math.Min(255, (int)Math.Round((sourceColor.R * srcWeight) + (backgroundColor.R * dstWeight))));
+                    int outG = Math.Max(0, Math.Min(255, (int)Math.Round((sourceColor.G * srcWeight) + (backgroundColor.G * dstWeight))));
+                    int outB = Math.Max(0, Math.Min(255, (int)Math.Round((sourceColor.B * srcWeight) + (backgroundColor.B * dstWeight))));
+                    bitmap.SetPixel(
+                        x,
+                        y,
+                        System.Drawing.Color.FromArgb(
+                            Math.Max(0, Math.Min(255, (int)Math.Round(outAlpha * 255f))),
+                            outR,
+                            outG,
+                            outB));
+                }
+            }
+
+            return bitmap;
+        }
+
+        private static string EncodeRichHtmlText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            string encoded = WebUtility.HtmlEncode(text);
+            encoded = encoded.Replace("\t", "&#160;&#160;&#160;&#160;");
+            encoded = encoded.Replace(" ", "&#160;");
+            return encoded;
+        }
+
+        private static string FormatCssColor(System.Drawing.Color color)
+        {
+            return $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+        }
+
+        private static void AppendRichHtmlRun(System.Text.StringBuilder html, RichPdfTextRun run)
+        {
+            if (html == null || run == null || string.IsNullOrEmpty(run.Text))
+            {
+                return;
+            }
+
+            string content = EncodeRichHtmlText(run.Text);
+            if (string.IsNullOrEmpty(content))
+            {
+                return;
+            }
+
+            if (run.Style.HasFlag(FontStyle.Underline))
+            {
+                content = $"<u>{content}</u>";
+            }
+
+            if (run.Style.HasFlag(FontStyle.Italic))
+            {
+                content = $"<em>{content}</em>";
+            }
+
+            if (run.Style.HasFlag(FontStyle.Bold))
+            {
+                content = $"<strong>{content}</strong>";
+            }
+
+            if (run.Color.ToArgb() != System.Drawing.Color.Black.ToArgb())
+            {
+                content = $"<span style=\"color:{FormatCssColor(run.Color)};\">{content}</span>";
+            }
+
+            html.Append(content);
+        }
+
+        private static string BuildRichHtmlRegularOnlySnippet(
+            List<List<RichPdfTextRun>> lines,
+            Font baseFont,
+            System.Windows.Forms.HorizontalAlignment alignment,
+            float lineHeightPx,
+            bool includeSymbolFont)
+        {
+            if (baseFont == null)
+            {
+                return string.Empty;
+            }
+
+            string textAlign = alignment == System.Windows.Forms.HorizontalAlignment.Right
+                ? "right"
+                : alignment == System.Windows.Forms.HorizontalAlignment.Center
+                    ? "center"
+                    : "left";
+            string stretchCss = baseFont.FontFamily.Name.IndexOf("Condensed", StringComparison.OrdinalIgnoreCase) >= 0
+                ? "font-stretch:condensed;"
+                : string.Empty;
+            float cssLineHeightPx = lineHeightPx > 0f
+                ? lineHeightPx
+                : baseFont.Size * (96f / 72f) * 1.2f;
+            var html = new System.Text.StringBuilder();
+            html.Append("<style>");
+            html.Append(".probe{margin:0;padding:0;");
+            html.Append($"font-family:'{EncodeRichHtmlText(baseFont.FontFamily.Name)}'");
+            if (includeSymbolFont)
+            {
+                html.Append(",'Segoe UI Symbol'");
+            }
+
+            html.Append($";font-size:{baseFont.Size.ToString("0.###", CultureInfo.InvariantCulture)}pt;");
+            html.Append($"line-height:{cssLineHeightPx.ToString("0.###", CultureInfo.InvariantCulture)}px;");
+            html.Append($"text-align:{textAlign};color:#000;font-synthesis:weight style;{stretchCss}}}");
+            html.Append(".line{margin:0;padding:0;white-space:pre;}");
+            html.Append(".probe strong{font-weight:700;}");
+            html.Append(".probe em{font-style:italic;}");
+            html.Append("</style>");
+            html.Append("<div class=\"probe\">");
+
+            foreach (List<RichPdfTextRun> line in lines ?? Enumerable.Empty<List<RichPdfTextRun>>())
+            {
+                html.Append("<div class=\"line\">");
+                bool hasRun = false;
+                foreach (RichPdfTextRun run in line ?? Enumerable.Empty<RichPdfTextRun>())
+                {
+                    if (run == null || string.IsNullOrEmpty(run.Text))
+                    {
+                        continue;
+                    }
+
+                    AppendRichHtmlRun(html, run);
+                    hasRun = true;
+                }
+
+                if (!hasRun)
+                {
+                    html.Append("&#160;");
+                }
+
+                html.Append("</div>");
+            }
+
+            html.Append("</div>");
+            return html.ToString();
+        }
+
+        private bool TryMeasureRichHtmlFrameRectTopDown(
+            byte[] pdfBytes,
+            float sourceWidthPt,
+            float sourceHeightPt,
+            out RectangleF frameRectTopDownPt)
+        {
+            frameRectTopDownPt = RectangleF.Empty;
+            if (pdfBytes == null || pdfBytes.Length == 0 || sourceWidthPt <= 0f || sourceHeightPt <= 0f)
+            {
+                return false;
+            }
+
+            try
+            {
+                using (var previewPdf = new PDFiumSharp.PdfDocument(data: pdfBytes, password: string.Empty))
+                {
+                    if (previewPdf.Pages.Count <= 0)
+                    {
+                        return false;
+                    }
+
+                    var page = previewPdf.Pages[0];
+                    float renderScale = 3f;
+                    int width = Math.Max(1, (int)Math.Ceiling(page.Width * renderScale));
+                    int height = Math.Max(1, (int)Math.Ceiling(page.Height * renderScale));
+                    Rectangle fullPageCrop = new Rectangle(0, 0, width, height);
+                    using (Bitmap blackBitmap = RenderPdfBytesToOpaqueBitmap(pdfBytes, width, height, 0xFF000000))
+                    using (Bitmap whiteBitmap = RenderPdfBytesToOpaqueBitmap(pdfBytes, width, height, 0xFFFFFFFF))
+                    using (Bitmap alphaBitmap = BuildTransparentBitmapFromOpaquePair(
+                        blackBitmap,
+                        whiteBitmap,
+                        fullPageCrop,
+                        System.Drawing.Color.Transparent))
+                    {
+                        if (alphaBitmap == null)
+                        {
+                            return false;
+                        }
+
+                        if (!TryGetNonTransparentBounds(alphaBitmap, out Rectangle bounds, minAlpha: 4))
+                        {
+                            return false;
+                        }
+
+                        float scaleX = alphaBitmap.Width > 0 ? alphaBitmap.Width / sourceWidthPt : 1f;
+                        float scaleY = alphaBitmap.Height > 0 ? alphaBitmap.Height / sourceHeightPt : 1f;
+                        frameRectTopDownPt = new RectangleF(
+                            bounds.X / scaleX,
+                            bounds.Y / scaleY,
+                            bounds.Width / scaleX,
+                            bounds.Height / scaleY);
+                        return frameRectTopDownPt.Width > 0f && frameRectTopDownPt.Height > 0f;
+                    }
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryBuildRichHtmlPdfRenderResult(
+            TextAnnotation annotation,
+            float contentWidthPt,
+            float contentHeightPt,
+            float framePaddingXPt,
+            float framePaddingYPt,
+            float layoutWidthPt,
+            float layoutHeightPt,
+            SharedRichLayoutResult prebuiltLayout,
+            out RichHtmlPdfRenderResult result)
+        {
+            result = null;
+            if (annotation == null ||
+                annotation.AnnotationFont == null ||
+                contentWidthPt <= 0f ||
+                contentHeightPt <= 0f ||
+                layoutWidthPt <= 0f ||
+                layoutHeightPt <= 0f)
+            {
+                return false;
+            }
+
+            List<List<RichPdfTextRun>> lines;
+            try
+            {
+                lines = ExtractRenderableRichTextRuns(
+                    annotation.AnnotationText,
+                    annotation.AnnotationRichText,
+                    annotation.AnnotationFont);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (lines == null || lines.Count == 0)
+            {
+                return false;
+            }
+
+            string regularFontPath = GetFontFilePathFromRegistry(annotation.AnnotationFont.FontFamily.Name, FontStyle.Regular);
+            if (string.IsNullOrWhiteSpace(regularFontPath) || !File.Exists(regularFontPath))
+            {
+                return false;
+            }
+
+            string symbolFontPath = GetFontFilePathFromRegistry("Segoe UI Symbol", FontStyle.Regular);
+            SharedRichLayoutResult layout = prebuiltLayout
+                ?? BuildSharedRichLayout(lines, annotation.AnnotationFont, annotation.AnnotationAlignment);
+            if (layout == null)
+            {
+                return false;
+            }
+
+            string htmlSnippet = BuildRichHtmlRegularOnlySnippet(
+                lines,
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment,
+                layout.LineHeight,
+                !string.IsNullOrWhiteSpace(symbolFontPath) && File.Exists(symbolFontPath));
+            if (string.IsNullOrWhiteSpace(htmlSnippet))
+            {
+                return false;
+            }
+
+            try
+            {
+                byte[] pdfBytes;
+                float htmlVerticalSlackPt = Math.Max(
+                    2f,
+                    Math.Max(annotation.AnnotationFont.Size * 0.35f, layout.LineHeight * (72f / 96f) * 0.2f));
+                float sourceWidthPt = Math.Max(1f, layoutWidthPt);
+                float sourceHeightPt = Math.Max(1f, layoutHeightPt + htmlVerticalSlackPt);
+                var converterProperties = new ConverterProperties();
+                var fontProvider = new BasicFontProvider(false, false, true);
+                fontProvider.AddFont(regularFontPath);
+                if (!string.IsNullOrWhiteSpace(symbolFontPath) && File.Exists(symbolFontPath))
+                {
+                    fontProvider.AddFont(symbolFontPath);
+                }
+
+                converterProperties.SetFontProvider(fontProvider);
+
+                using (MemoryStream pdfStream = new MemoryStream())
+                {
+                    using (var writer = new PdfWriter(pdfStream))
+                    using (var tempPdfDoc = new iText.Kernel.Pdf.PdfDocument(writer))
+                    {
+                        var pageSize = new KernelGeom.PageSize(sourceWidthPt, sourceHeightPt);
+                        var page = tempPdfDoc.AddNewPage(pageSize);
+                        var canvasRect = new KernelGeom.Rectangle(
+                            Math.Max(0f, framePaddingXPt),
+                            Math.Max(0f, framePaddingYPt),
+                            Math.Max(1f, contentWidthPt),
+                            Math.Max(1f, contentHeightPt + htmlVerticalSlackPt));
+                        using (var canvas = new Canvas(page, canvasRect))
+                        {
+                            foreach (iText.Layout.Element.IElement element in HtmlConverter.ConvertToElements(htmlSnippet, converterProperties))
+                            {
+                                if (element is iText.Layout.Element.IBlockElement blockElement)
+                                {
+                                    canvas.Add(blockElement);
+                                }
+                            }
+                        }
+                    }
+
+                    pdfBytes = pdfStream.ToArray();
+                }
+
+                if (!TryMeasureRichHtmlFrameRectTopDown(pdfBytes, sourceWidthPt, sourceHeightPt, out RectangleF sourceFrameRectTopDownPt))
+                {
+                    return false;
+                }
+
+                float frameScaleX = sourceWidthPt > 0f ? layoutWidthPt / sourceWidthPt : 1f;
+                float frameScaleY = sourceHeightPt > 0f ? layoutHeightPt / sourceHeightPt : 1f;
+                RectangleF targetFrameRectTopDownPt = new RectangleF(
+                    sourceFrameRectTopDownPt.X * frameScaleX,
+                    sourceFrameRectTopDownPt.Y * frameScaleY,
+                    sourceFrameRectTopDownPt.Width * frameScaleX,
+                    sourceFrameRectTopDownPt.Height * frameScaleY);
+
+                result = new RichHtmlPdfRenderResult
+                {
+                    PdfBytes = pdfBytes,
+                    FrameRectTopDownPt = targetFrameRectTopDownPt,
+                    SourceWidthPt = sourceWidthPt,
+                    SourceHeightPt = sourceHeightPt,
+                    TargetWidthPt = layoutWidthPt,
+                    TargetHeightPt = layoutHeightPt
+                };
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private bool TryRenderRichHtmlPdfToPage(
+            iText.Kernel.Pdf.PdfDocument targetPdfDoc,
+            iText.Kernel.Pdf.Canvas.PdfCanvas targetCanvas,
+            TextAnnotation annotation,
+            RichHtmlPdfRenderResult renderResult,
+            int rotation,
+            bool baseRotationBaked,
+            RectangleF scaledAnnotationBounds,
+            float rotCos,
+            float rotSin,
+            PointF rotationOffset)
+        {
+            if (targetPdfDoc == null ||
+                targetCanvas == null ||
+                annotation == null ||
+                renderResult?.PdfBytes == null ||
+                renderResult.PdfBytes.Length == 0 ||
+                renderResult.SourceWidthPt <= 0f ||
+                renderResult.SourceHeightPt <= 0f ||
+                renderResult.TargetWidthPt <= 0f ||
+                renderResult.TargetHeightPt <= 0f)
+            {
+                return false;
+            }
+
+            PointF ConvertLocalTargetPointToPdf(float localTargetX, float localTargetY)
+            {
+                float localTopDownY = renderResult.TargetHeightPt - localTargetY;
+                float tx = (localTargetX * rotCos) - (localTopDownY * rotSin) + rotationOffset.X;
+                float ty = (localTargetX * rotSin) + (localTopDownY * rotCos) + rotationOffset.Y;
+                PointF viewPoint = new PointF(
+                    scaledAnnotationBounds.X + tx,
+                    scaledAnnotationBounds.Y + ty);
+                return ConvertPointToPdfCoordinates(viewPoint, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+            }
+
+            try
+            {
+                using (MemoryStream pdfStream = new MemoryStream(renderResult.PdfBytes, writable: false))
+                using (var sourcePdfDoc = new iText.Kernel.Pdf.PdfDocument(new PdfReader(pdfStream)))
+                {
+                    iText.Kernel.Pdf.PdfPage sourcePage = sourcePdfDoc.GetPage(1);
+                    PdfFormXObject formXObject = sourcePage.CopyAsFormXObject(targetPdfDoc);
+
+                    PointF originPdf = ConvertLocalTargetPointToPdf(0f, 0f);
+                    PointF xAxisPdf = ConvertLocalTargetPointToPdf(renderResult.TargetWidthPt, 0f);
+                    PointF yAxisPdf = ConvertLocalTargetPointToPdf(0f, renderResult.TargetHeightPt);
+                    float a = (xAxisPdf.X - originPdf.X) / renderResult.SourceWidthPt;
+                    float b = (xAxisPdf.Y - originPdf.Y) / renderResult.SourceWidthPt;
+                    float c = (yAxisPdf.X - originPdf.X) / renderResult.SourceHeightPt;
+                    float d = (yAxisPdf.Y - originPdf.Y) / renderResult.SourceHeightPt;
+
+                    targetCanvas.SaveState();
+                    targetCanvas.AddXObjectWithTransformationMatrix(
+                        formXObject,
+                        a,
+                        b,
+                        c,
+                        d,
+                        originPdf.X,
+                        originPdf.Y);
+                    targetCanvas.RestoreState();
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static Rectangle BuildRichBitmapSourceRect(Bitmap richBitmap)
+        {
+            if (richBitmap == null || richBitmap.Width <= 0 || richBitmap.Height <= 0)
+            {
+                return Rectangle.Empty;
+            }
+
+            Rectangle sourceRect = new Rectangle(0, 0, richBitmap.Width, richBitmap.Height);
+            if (TryGetNonTransparentBounds(richBitmap, out Rectangle richInkBounds))
+            {
+                const int horizontalInkSafetyPx = 1;
+                int left = Math.Max(0, richInkBounds.Left - horizontalInkSafetyPx);
+                int right = Math.Min(richBitmap.Width, richInkBounds.Right + horizontalInkSafetyPx);
+                sourceRect = new Rectangle(
+                    left,
+                    0,
+                    Math.Max(1, right - left),
+                    richBitmap.Height);
+            }
+
+            return sourceRect;
+        }
+
+        private Rectangle GetCachedRichBitmapSourceRect(TextAnnotation annotation, Bitmap richBitmap, bool useInteractionPlaceholder)
+        {
+            if (richBitmap == null)
+            {
+                return Rectangle.Empty;
+            }
+
+            if (useInteractionPlaceholder)
+            {
+                if (activeTextInteractionPreviewSourceRect.Width > 0 && activeTextInteractionPreviewSourceRect.Height > 0)
+                {
+                    return activeTextInteractionPreviewSourceRect;
+                }
+
+                activeTextInteractionPreviewSourceRect = BuildRichBitmapSourceRect(richBitmap);
+                return activeTextInteractionPreviewSourceRect;
+            }
+
+            if (annotation != null &&
+                ReferenceEquals(annotation.CachedRichPreviewBitmap, richBitmap) &&
+                annotation.HasCachedRichPreviewSourceRect &&
+                annotation.CachedRichPreviewSourceRect.Width > 0 &&
+                annotation.CachedRichPreviewSourceRect.Height > 0)
+            {
+                return annotation.CachedRichPreviewSourceRect;
+            }
+
+            Rectangle sourceRect = BuildRichBitmapSourceRect(richBitmap);
+            if (annotation != null && ReferenceEquals(annotation.CachedRichPreviewBitmap, richBitmap))
+            {
+                annotation.CachedRichPreviewSourceRect = sourceRect;
+                annotation.HasCachedRichPreviewSourceRect = sourceRect.Width > 0 && sourceRect.Height > 0;
+            }
+
+            return sourceRect;
+        }
+
+        private static RectangleF BuildRichBitmapLayoutRect(
+            TextAnnotation annotation,
+            Rectangle sourceRect,
+            float contentWidth,
+            float contentHeight,
+            float bitmapToLayoutScale,
+            float alignmentOffset)
+        {
+            float naturalWidth = Math.Max(1f, sourceRect.Width * bitmapToLayoutScale);
+            float naturalHeight = Math.Max(1f, sourceRect.Height * bitmapToLayoutScale);
+            float drawWidth = Math.Min(Math.Max(1f, contentWidth), naturalWidth);
+            float drawHeight = Math.Min(Math.Max(1f, contentHeight), naturalHeight);
+            float drawX = 0f;
+
+            switch (annotation?.AnnotationAlignment ?? System.Windows.Forms.HorizontalAlignment.Left)
+            {
+                case System.Windows.Forms.HorizontalAlignment.Center:
+                    drawX += Math.Max(0f, (contentWidth - drawWidth) / 2f);
+                    break;
+                case System.Windows.Forms.HorizontalAlignment.Right:
+                    drawX += Math.Max(0f, contentWidth - drawWidth);
+                    break;
+            }
+
+            return new RectangleF(
+                drawX - alignmentOffset,
+                0f,
+                drawWidth,
+                drawHeight);
+        }
+
+        private static Bitmap CropBitmap(Bitmap source, Rectangle sourceRect)
+        {
+            if (source == null || sourceRect.Width <= 0 || sourceRect.Height <= 0)
+            {
+                return null;
+            }
+
+            if (sourceRect.X <= 0 &&
+                sourceRect.Y <= 0 &&
+                sourceRect.Width >= source.Width &&
+                sourceRect.Height >= source.Height)
+            {
+                return (Bitmap)source.Clone();
+            }
+
+            var cropped = new Bitmap(sourceRect.Width, sourceRect.Height, PixelFormat.Format32bppArgb);
+            using (Graphics graphics = Graphics.FromImage(cropped))
+            {
+                graphics.Clear(System.Drawing.Color.Transparent);
+                graphics.DrawImage(
+                    source,
+                    new Rectangle(0, 0, cropped.Width, cropped.Height),
+                    sourceRect,
+                    GraphicsUnit.Pixel);
+            }
+
+            return cropped;
+        }
+
+        private bool TryRenderSharedRichLayoutToPdf(
+            iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
+            TextAnnotation annotation,
+            SharedRichLayoutResult layout,
+            int rotation,
+            bool baseRotationBaked,
+            RectangleF scaledAnnotationBounds,
+            float framePaddingXPt,
+            float framePaddingYPt,
+            float contentWidthPt,
+            float contentHeightPt,
+            float rotCos,
+            float rotSin,
+            PointF rotationOffset,
+            float cos,
+            float sin)
+        {
+            if (pdfCanvas == null || annotation == null || annotation.AnnotationFont == null || layout == null)
+            {
+                return false;
+            }
+
+            string symbolFontPath = GetFontFilePathFromRegistry("Segoe UI Symbol", FontStyle.Regular);
+            PdfFont symbolFont = null;
+            if (!string.IsNullOrWhiteSpace(symbolFontPath))
+            {
+                try
+                {
+                    symbolFont = PdfFontFactory.CreateFont(symbolFontPath, PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                }
+                catch
+                {
+                    symbolFont = null;
+                }
+            }
+
+            var pdfFontCache = new Dictionary<FontStyle, PdfFont>();
+            PdfFont GetPdfFont(FontStyle style)
+            {
+                FontStyle resolvedStyle = GetRichPdfFontStyle(style);
+                if (!pdfFontCache.TryGetValue(resolvedStyle, out PdfFont cachedFont))
+                {
+                    string fontPath = GetFontFilePathFromRegistry(annotation.AnnotationFont.FontFamily.Name, resolvedStyle);
+                    if (string.IsNullOrWhiteSpace(fontPath))
+                    {
+                        fontPath = GetFontFilePathFromRegistry(annotation.AnnotationFont.FontFamily.Name, FontStyle.Regular);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(fontPath))
+                    {
+                        return null;
+                    }
+
+                    cachedFont = PdfFontFactory.CreateFont(fontPath, PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                    pdfFontCache[resolvedStyle] = cachedFont;
+                }
+
+                return cachedFont;
+            }
+
+            float scaleX = contentWidthPt / Math.Max(1f, layout.ContentWidth);
+            float scaleY = contentHeightPt / Math.Max(1f, layout.ContentHeight);
+            float fontSizePt = annotation.AnnotationFont.Size;
+            float referenceInkHeightPt = Math.Max(
+                0.1f,
+                (layout.ReferenceInkHeight > 0f ? layout.ReferenceInkHeight : layout.LineHeight) * scaleY);
+
+            pdfCanvas.SaveState();
+            pdfCanvas.BeginText();
+            var underlineSegments = new List<(PointF StartView, PointF EndView, System.Drawing.Color Color, float WidthPt)>();
+
+            foreach (SharedRichLayoutLine line in layout.Lines)
+            {
+                float targetLineWidthPt = Math.Max(0.1f, line.Width * scaleX);
+                float localX = framePaddingXPt + ((line.Runs.Count > 0 ? line.Runs[0].X : 0f) * scaleX);
+                float localTopY = framePaddingYPt + (line.Y * scaleY);
+
+                float linePdfWidthPt = 0f;
+                float linePdfAscentPt = 0f;
+                float linePdfDescentPt = 0f;
+                var pdfRuns = new List<(string Text, PdfFont Font, System.Drawing.Color Color, bool Underline, float WidthPt)>();
+
+                foreach (SharedRichLayoutRun run in line.Runs)
+                {
+                    PdfFont preferredFont = GetPdfFont(run.Style);
+                    if (preferredFont == null)
+                    {
+                        pdfCanvas.EndText();
+                        pdfCanvas.RestoreState();
+                        return false;
+                    }
+
+                    foreach ((string Text, PdfFont Font) glyphRun in SplitRichTextByGlyphCoverage(run.Text, preferredFont, symbolFont))
+                    {
+                        if (string.IsNullOrEmpty(glyphRun.Text) || glyphRun.Font == null)
+                        {
+                            continue;
+                        }
+
+                        float widthPt = glyphRun.Font.GetWidth(glyphRun.Text, fontSizePt);
+                        float ascentPt = glyphRun.Font.GetAscent(glyphRun.Text, fontSizePt);
+                        float descentPt = glyphRun.Font.GetDescent(glyphRun.Text, fontSizePt);
+                        pdfRuns.Add((glyphRun.Text, glyphRun.Font, run.Color, run.Underline, widthPt));
+                        linePdfWidthPt += widthPt;
+                        linePdfAscentPt = Math.Max(linePdfAscentPt, ascentPt);
+                        linePdfDescentPt = Math.Min(linePdfDescentPt, descentPt);
+                    }
+                }
+
+                float horizontalScaling = 100f;
+                if (linePdfWidthPt > 0.01f)
+                {
+                    horizontalScaling = Math.Max(1f, Math.Min(1000f, (targetLineWidthPt / linePdfWidthPt) * 100f));
+                }
+
+                float pdfInkHeightPt = Math.Max(0.1f, linePdfAscentPt - linePdfDescentPt);
+                float verticalScaling = Math.Max(0.1f, Math.Min(4f, referenceInkHeightPt / pdfInkHeightPt));
+                float localBaseY = localTopY + (linePdfAscentPt * verticalScaling);
+                float rotatedX = localX * rotCos - localBaseY * rotSin + rotationOffset.X;
+                float rotatedY = localX * rotSin + localBaseY * rotCos + rotationOffset.Y;
+                PointF baselineView = new PointF(
+                    scaledAnnotationBounds.X + rotatedX,
+                    scaledAnnotationBounds.Y + rotatedY);
+                PointF baselinePdf = ConvertPointToPdfCoordinates(baselineView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+
+                pdfCanvas.SetTextMatrix(cos, sin * verticalScaling, -sin, cos * verticalScaling, baselinePdf.X, baselinePdf.Y);
+                pdfCanvas.SetHorizontalScaling(horizontalScaling);
+                float lineScaleFactor = horizontalScaling / 100f;
+                float runOffsetPt = 0f;
+
+                foreach (var run in pdfRuns)
+                {
+                    pdfCanvas.SetFontAndSize(run.Font, fontSizePt);
+                    pdfCanvas.SetFillColor(new DeviceRgb(run.Color.R, run.Color.G, run.Color.B));
+                    pdfCanvas.ShowText(run.Text);
+
+                    if (run.Underline)
+                    {
+                        float underlineOffsetPt = Math.Max(0.6f, fontSizePt * 0.12f) * verticalScaling;
+                        float lineThicknessPt = Math.Max(0.4f, fontSizePt * 0.05f) * verticalScaling;
+                        float startX = localX + runOffsetPt;
+                        float endX = startX + (run.WidthPt * lineScaleFactor);
+                        float underlineY = localBaseY + underlineOffsetPt;
+                        PointF startView = new PointF(
+                            scaledAnnotationBounds.X + (startX * rotCos - underlineY * rotSin + rotationOffset.X),
+                            scaledAnnotationBounds.Y + (startX * rotSin + underlineY * rotCos + rotationOffset.Y));
+                        PointF endView = new PointF(
+                            scaledAnnotationBounds.X + (endX * rotCos - underlineY * rotSin + rotationOffset.X),
+                            scaledAnnotationBounds.Y + (endX * rotSin + underlineY * rotCos + rotationOffset.Y));
+                        underlineSegments.Add((startView, endView, run.Color, lineThicknessPt));
+                    }
+
+                    runOffsetPt += run.WidthPt * lineScaleFactor;
+                }
+            }
+
+            pdfCanvas.EndText();
+            pdfCanvas.RestoreState();
+
+            foreach (var underline in underlineSegments)
+            {
+                PointF startPdf = ConvertPointToPdfCoordinates(underline.StartView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                PointF endPdf = ConvertPointToPdfCoordinates(underline.EndView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                pdfCanvas.SaveState();
+                pdfCanvas.SetStrokeColor(new DeviceRgb(underline.Color.R, underline.Color.G, underline.Color.B));
+                pdfCanvas.SetLineWidth(Math.Max(0.1f, underline.WidthPt));
+                pdfCanvas.MoveTo(startPdf.X, startPdf.Y);
+                pdfCanvas.LineTo(endPdf.X, endPdf.Y);
+                pdfCanvas.Stroke();
+                pdfCanvas.RestoreState();
+            }
+
+            return true;
+        }
+
+        private static List<(string Text, PdfFont Font)> SplitRichTextByGlyphCoverage(string text, PdfFont preferredFont, PdfFont fallbackFont)
+        {
+            var runs = new List<(string Text, PdfFont Font)>();
+            if (string.IsNullOrEmpty(text))
+            {
+                return runs;
+            }
+
+            PdfFont currentFont = preferredFont;
+            var buffer = new System.Text.StringBuilder();
+            foreach (char ch in text)
+            {
+                int code = ch;
+                PdfFont nextFont = preferredFont;
+                if (preferredFont != null && !preferredFont.ContainsGlyph(code) &&
+                    fallbackFont != null && fallbackFont.ContainsGlyph(code))
+                {
+                    nextFont = fallbackFont;
+                }
+
+                if (!ReferenceEquals(nextFont, currentFont) && buffer.Length > 0)
+                {
+                    runs.Add((buffer.ToString(), currentFont));
+                    buffer.Clear();
+                }
+
+                currentFont = nextFont;
+                buffer.Append(ch);
+            }
+
+            if (buffer.Length > 0)
+            {
+                runs.Add((buffer.ToString(), currentFont));
+            }
+
+            return runs;
+        }
+
+        private bool TryRenderRichTextAnnotationAsTextToPdf(
+            iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
+            TextAnnotation annotation,
+            int rotation,
+            bool baseRotationBaked,
+            RectangleF scaledAnnotationBounds,
+            float framePaddingXPt,
+            float framePaddingYPt,
+            float contentWidthPt,
+            float contentHeightPt,
+            float rotCos,
+            float rotSin,
+            PointF rotationOffset,
+            float cos,
+            float sin,
+            float dpiX,
+            float dpiY,
+            float lineHeightPt,
+            float gdiAscentPt,
+            SharedRichLayoutResult prebuiltLayout = null)
+        {
+            void LogRichPdfExport(string message)
+            {
+                if (!DebugLogEnabled)
+                {
+                    return;
+                }
+
+                try
+                {
+                    string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} RichPdfExport {(annotation?.Id ?? "-")} {message}{Environment.NewLine}";
+                    File.AppendAllText(DebugLogPath, line);
+                }
+                catch
+                {
+                }
+            }
+
+            if (pdfCanvas == null || annotation == null || annotation.AnnotationFont == null)
+            {
+                LogRichPdfExport("skip reason=invalid-input");
+                return false;
+            }
+
+            List<List<RichPdfTextRun>> lines;
+            try
+            {
+                lines = ExtractRenderableRichTextRuns(annotation.AnnotationText, annotation.AnnotationRichText, annotation.AnnotationFont);
+            }
+            catch
+            {
+                LogRichPdfExport("skip reason=extract-runs-failed");
+                return false;
+            }
+
+            if (lines == null || lines.Count == 0)
+            {
+                LogRichPdfExport("skip reason=no-lines");
+                return false;
+            }
+
+            if (!CanRenderRichTextAsPdfText(
+                annotation.AnnotationFont,
+                lines.SelectMany(line => line ?? Enumerable.Empty<RichPdfTextRun>()).Select(run => run.Style)))
+            {
+                LogRichPdfExport($"skip reason=font-face-fallback family={annotation.AnnotationFont.FontFamily.Name}");
+                return false;
+            }
+
+            try
+            {
+                SharedRichLayoutResult sharedLayout = prebuiltLayout
+                    ?? BuildSharedRichLayout(lines, annotation.AnnotationFont, annotation.AnnotationAlignment);
+                if (sharedLayout != null &&
+                    sharedLayout.Lines.Count > 0 &&
+                    TryRenderSharedRichLayoutToPdf(
+                        pdfCanvas,
+                        annotation,
+                        sharedLayout,
+                        rotation,
+                        baseRotationBaked,
+                        scaledAnnotationBounds,
+                        framePaddingXPt,
+                        framePaddingYPt,
+                        contentWidthPt,
+                        contentHeightPt,
+                        rotCos,
+                        rotSin,
+                        rotationOffset,
+                        cos,
+                        sin))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            string symbolFontPath = GetFontFilePathFromRegistry("Segoe UI Symbol", FontStyle.Regular);
+            PdfFont symbolFont = null;
+            if (!string.IsNullOrWhiteSpace(symbolFontPath))
+            {
+                try
+                {
+                    symbolFont = PdfFontFactory.CreateFont(symbolFontPath, PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                }
+                catch
+                {
+                    symbolFont = null;
+                }
+            }
+
+            var pdfFontCache = new Dictionary<FontStyle, PdfFont>();
+            PdfFont GetPdfFont(FontStyle style)
+            {
+                FontStyle resolvedStyle = GetRichPdfFontStyle(style);
+                if (!pdfFontCache.TryGetValue(resolvedStyle, out PdfFont cachedFont))
+                {
+                    string fontPath = GetFontFilePathFromRegistry(annotation.AnnotationFont.FontFamily.Name, resolvedStyle);
+                    if (string.IsNullOrWhiteSpace(fontPath))
+                    {
+                        fontPath = GetFontFilePathFromRegistry(annotation.AnnotationFont.FontFamily.Name, FontStyle.Regular);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(fontPath))
+                    {
+                        LogRichPdfExport($"skip reason=missing-font style={resolvedStyle}");
+                        return null;
+                    }
+
+                    cachedFont = PdfFontFactory.CreateFont(fontPath, PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                    pdfFontCache[resolvedStyle] = cachedFont;
+                }
+
+                return cachedFont;
+            }
+
+            float fontSizePt = annotation.AnnotationFont.Size;
+            var linePdfWidthsPt = new List<float>();
+            var lineGdiWidthsPt = new List<float>();
+            var linePdfRuns = new List<List<(string Text, PdfFont Font, System.Drawing.Color Color, bool Underline, float WidthPt)>>();
+            float maxLinePdfWidthPt = 0f;
+            float maxLineGdiWidthPt = 0f;
+
+            using (Graphics g = pdfViewer.CreateGraphics())
+            using (StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone())
+            {
+                format.FormatFlags |= StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces;
+                format.Trimming = StringTrimming.None;
+
+                foreach (List<RichPdfTextRun> line in lines)
+                {
+                    float linePdfWidthPt = 0f;
+                    float lineGdiWidthPt = 0f;
+                    var pdfRuns = new List<(string Text, PdfFont Font, System.Drawing.Color Color, bool Underline, float WidthPt)>();
+                    foreach (RichPdfTextRun run in line)
+                    {
+                        if (run == null || string.IsNullOrEmpty(run.Text))
+                        {
+                            continue;
+                        }
+
+                        PdfFont preferredFont = GetPdfFont(run.Style);
+                        if (preferredFont == null)
+                        {
+                            return false;
+                        }
+
+                        foreach ((string Text, PdfFont Font) glyphRun in SplitRichTextByGlyphCoverage(run.Text, preferredFont, symbolFont))
+                        {
+                            if (string.IsNullOrEmpty(glyphRun.Text) || glyphRun.Font == null)
+                            {
+                                continue;
+                            }
+
+                            float glyphWidthPt = glyphRun.Font.GetWidth(glyphRun.Text, fontSizePt);
+                            pdfRuns.Add((glyphRun.Text, glyphRun.Font, run.Color, run.Style.HasFlag(FontStyle.Underline), glyphWidthPt));
+                            linePdfWidthPt += glyphWidthPt;
+                        }
+
+                        FontStyle gdiStyle = GetRichPdfFontStyle(run.Style);
+                        using (Font gdiRunFont = new Font(annotation.AnnotationFont.FontFamily, annotation.AnnotationFont.Size, gdiStyle, GraphicsUnit.Point))
+                        {
+                            SizeF runSize = g.MeasureString(run.Text, gdiRunFont, int.MaxValue, format);
+                            lineGdiWidthPt += runSize.Width * (72f / dpiX);
+                        }
+                    }
+
+                    linePdfRuns.Add(pdfRuns);
+                    linePdfWidthsPt.Add(linePdfWidthPt);
+                    lineGdiWidthsPt.Add(lineGdiWidthPt);
+                    maxLinePdfWidthPt = Math.Max(maxLinePdfWidthPt, linePdfWidthPt);
+                    maxLineGdiWidthPt = Math.Max(maxLineGdiWidthPt, lineGdiWidthPt);
+                }
+            }
+
+            float horizontalScaling = 100f;
+            if (maxLinePdfWidthPt > 0.01f && maxLineGdiWidthPt > 0.01f)
+            {
+                horizontalScaling = Math.Max(1f, Math.Min(1000f, (maxLineGdiWidthPt / maxLinePdfWidthPt) * 100f));
+            }
+
+            LogRichPdfExport(
+                $"render lines={linePdfRuns.Count} contentPt={contentWidthPt:0.###}x{contentHeightPt:0.###} fontPt={fontSizePt:0.###} " +
+                $"lineHeightPt={lineHeightPt:0.###} ascentPt={gdiAscentPt:0.###}");
+
+            pdfCanvas.SaveState();
+            pdfCanvas.BeginText();
+            var underlineSegments = new List<(PointF StartView, PointF EndView, System.Drawing.Color Color, float WidthPt)>();
+
+            for (int lineIndex = 0; lineIndex < linePdfRuns.Count; lineIndex++)
+            {
+                var runs = linePdfRuns[lineIndex];
+                float linePdfWidthPt = lineIndex < linePdfWidthsPt.Count ? linePdfWidthsPt[lineIndex] : 0f;
+                float targetLineWidthPt = Math.Max(0.1f, Math.Min(contentWidthPt, lineIndex < lineGdiWidthsPt.Count ? lineGdiWidthsPt[lineIndex] : linePdfWidthPt));
+                float localX = 0f;
+                switch (annotation.AnnotationAlignment)
+                {
+                    case System.Windows.Forms.HorizontalAlignment.Center:
+                        localX = Math.Max(0f, (contentWidthPt - targetLineWidthPt) / 2f);
+                        break;
+                    case System.Windows.Forms.HorizontalAlignment.Right:
+                        localX = Math.Max(0f, contentWidthPt - targetLineWidthPt);
+                        break;
+                }
+
+                float localY = lineIndex * lineHeightPt;
+                float localBaseX = framePaddingXPt + localX;
+                float localBaseY = framePaddingYPt + localY + gdiAscentPt;
+                float rotatedX = localBaseX * rotCos - localBaseY * rotSin + rotationOffset.X;
+                float rotatedY = localBaseX * rotSin + localBaseY * rotCos + rotationOffset.Y;
+                PointF baselineView = new PointF(
+                    scaledAnnotationBounds.X + rotatedX,
+                    scaledAnnotationBounds.Y + rotatedY);
+                PointF baselinePdf = ConvertPointToPdfCoordinates(baselineView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+
+                pdfCanvas.SetTextMatrix(cos, sin, -sin, cos, baselinePdf.X, baselinePdf.Y);
+                pdfCanvas.SetHorizontalScaling(horizontalScaling);
+                float lineScaleFactor = horizontalScaling / 100f;
+
+                float runOffsetPt = 0f;
+                foreach (var run in runs)
+                {
+                    if (string.IsNullOrEmpty(run.Text) || run.Font == null)
+                    {
+                        continue;
+                    }
+
+                    pdfCanvas.SetFontAndSize(run.Font, fontSizePt);
+                    pdfCanvas.SetFillColor(new DeviceRgb(run.Color.R, run.Color.G, run.Color.B));
+                    pdfCanvas.ShowText(run.Text);
+
+                    if (run.Underline)
+                    {
+                        float underlineOffsetPt = Math.Max(0.6f, fontSizePt * 0.12f);
+                        float lineThicknessPt = Math.Max(0.4f, fontSizePt * 0.05f);
+                        float startX = framePaddingXPt + localX + runOffsetPt;
+                        float scaledRunWidthPt = run.WidthPt * lineScaleFactor;
+                        float endX = startX + scaledRunWidthPt;
+                        float underlineY = framePaddingYPt + localY + gdiAscentPt + underlineOffsetPt;
+
+                        PointF startView = new PointF(
+                            scaledAnnotationBounds.X + (startX * rotCos - underlineY * rotSin + rotationOffset.X),
+                            scaledAnnotationBounds.Y + (startX * rotSin + underlineY * rotCos + rotationOffset.Y));
+                        PointF endView = new PointF(
+                            scaledAnnotationBounds.X + (endX * rotCos - underlineY * rotSin + rotationOffset.X),
+                            scaledAnnotationBounds.Y + (endX * rotSin + underlineY * rotCos + rotationOffset.Y));
+                        underlineSegments.Add((startView, endView, run.Color, lineThicknessPt));
+                    }
+
+                    runOffsetPt += run.WidthPt * lineScaleFactor;
+                }
+            }
+
+            pdfCanvas.EndText();
+            pdfCanvas.RestoreState();
+
+            foreach (var underline in underlineSegments)
+            {
+                PointF startPdf = ConvertPointToPdfCoordinates(underline.StartView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                PointF endPdf = ConvertPointToPdfCoordinates(underline.EndView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                pdfCanvas.SaveState();
+                pdfCanvas.SetStrokeColor(new DeviceRgb(underline.Color.R, underline.Color.G, underline.Color.B));
+                pdfCanvas.SetLineWidth(Math.Max(0.1f, underline.WidthPt));
+                pdfCanvas.MoveTo(startPdf.X, startPdf.Y);
+                pdfCanvas.LineTo(endPdf.X, endPdf.Y);
+                pdfCanvas.Stroke();
+                pdfCanvas.RestoreState();
+            }
+
+            return true;
+        }
+
+        private static bool IsRichInkAlpha(int alpha)
+        {
+            return alpha >= 24;
+        }
+
+        private static bool TryGetNonTransparentVerticalBounds(Bitmap bitmap, out Rectangle bounds)
+        {
+            bounds = Rectangle.Empty;
+            if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0)
+            {
+                return false;
+            }
+
+            int top = -1;
+            int bottom = -1;
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                if (HasMeaningfulRichInkRow(bitmap, y))
+                {
+                    top = y;
+                    break;
+                }
+            }
+
+            if (top < 0)
+            {
+                return false;
+            }
+
+            for (int y = bitmap.Height - 1; y >= top; y--)
+            {
+                if (HasMeaningfulRichInkRow(bitmap, y))
+                {
+                    bottom = y;
+                    break;
+                }
+            }
+
+            if (bottom < top)
+            {
+                return false;
+            }
+
+            bounds = new Rectangle(0, top, bitmap.Width, (bottom - top) + 1);
+            return bounds.Height > 0;
+        }
+
+        private static bool HasMeaningfulRichInkRow(Bitmap bitmap, int y)
+        {
+            if (bitmap == null || y < 0 || y >= bitmap.Height)
+            {
+                return false;
+            }
+
+            int inkPixels = 0;
+            int minInkPixels = Math.Max(2, Math.Min(6, bitmap.Width / 200));
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                System.Drawing.Color pixel = bitmap.GetPixel(x, y);
+                if (!IsMeaningfulRichInkPixel(pixel))
+                {
+                    continue;
+                }
+
+                inkPixels++;
+                if (inkPixels >= minInkPixels)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsMeaningfulRichInkPixel(System.Drawing.Color pixel)
+        {
+            if (!IsRichInkAlpha(pixel.A))
+            {
+                return false;
+            }
+
+            int visibleR = 255 - (((255 - pixel.R) * pixel.A) / 255);
+            int visibleG = 255 - (((255 - pixel.G) * pixel.A) / 255);
+            int visibleB = 255 - (((255 - pixel.B) * pixel.A) / 255);
+            return visibleR < 240 || visibleG < 240 || visibleB < 240;
+        }
+
+        private static bool TryGetNonWhiteBounds(Bitmap bitmap, out Rectangle bounds, byte whiteThreshold = 250)
+        {
+            bounds = Rectangle.Empty;
+            if (bitmap == null || bitmap.Width <= 0 || bitmap.Height <= 0)
+            {
+                return false;
+            }
+
+            int minX = bitmap.Width;
+            int minY = bitmap.Height;
+            int maxX = -1;
+            int maxY = -1;
+            for (int y = 0; y < bitmap.Height; y++)
+            {
+                for (int x = 0; x < bitmap.Width; x++)
+                {
+                    System.Drawing.Color pixel = bitmap.GetPixel(x, y);
+                    if (pixel.A <= 0)
+                    {
+                        continue;
+                    }
+
+                    if (pixel.R >= whiteThreshold &&
+                        pixel.G >= whiteThreshold &&
+                        pixel.B >= whiteThreshold)
+                    {
+                        continue;
+                    }
+
+                    if (x < minX) minX = x;
+                    if (y < minY) minY = y;
+                    if (x > maxX) maxX = x;
+                    if (y > maxY) maxY = y;
+                }
+            }
+
+            if (maxX < 0 || maxY < 0)
+            {
+                return false;
+            }
+
+            bounds = Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
+            return bounds.Width > 0 && bounds.Height > 0;
+        }
+
+        private sealed class SharedRichLayoutRun
+        {
+            public string Text { get; set; }
+            public FontStyle Style { get; set; }
+            public System.Drawing.Color Color { get; set; }
+            public float X { get; set; }
+            public float Width { get; set; }
+            public bool Underline { get; set; }
+        }
+
+        private sealed class SharedRichLayoutLine
+        {
+            public List<SharedRichLayoutRun> Runs { get; } = new List<SharedRichLayoutRun>();
+            public float Y { get; set; }
+            public float Width { get; set; }
+            public float AdvanceWidth { get; set; }
+            public float LeftOverhang { get; set; }
+            public float RightOverhang { get; set; }
+            public float MeasuredRightEdge { get; set; }
+            public float InkTop { get; set; }
+            public float InkBottom { get; set; }
+        }
+
+        private sealed class SharedRichLayoutResult
+        {
+            public List<SharedRichLayoutLine> Lines { get; } = new List<SharedRichLayoutLine>();
+            public float ContentWidth { get; set; }
+            public float ContentHeight { get; set; }
+            public float LineHeight { get; set; }
+            public float Ascent { get; set; }
+            public float ReferenceInkTop { get; set; }
+            public float ReferenceInkHeight { get; set; }
+        }
+
+        private sealed class RichHtmlPdfRenderResult
+        {
+            public byte[] PdfBytes { get; set; }
+            public RectangleF FrameRectTopDownPt { get; set; }
+            public float SourceWidthPt { get; set; }
+            public float SourceHeightPt { get; set; }
+            public float TargetWidthPt { get; set; }
+            public float TargetHeightPt { get; set; }
+        }
+
+        private sealed class RichPdfTextRun
+        {
+            public string Text { get; set; }
+            public FontStyle Style { get; set; }
+            public System.Drawing.Color Color { get; set; }
+        }
+
+        private static RectangleF BuildRichPreviewInkLocalFrameRectFromBitmap(
+            Bitmap richBitmap,
+            Rectangle sourceRect,
+            float contentWidth,
+            float contentHeight,
+            float framePaddingX,
+            float framePaddingY,
+            float layoutWidth,
+            float layoutHeight)
+        {
+            if (richBitmap == null ||
+                sourceRect.Width <= 0 ||
+                sourceRect.Height <= 0 ||
+                !TryGetNonTransparentBounds(richBitmap, out Rectangle inkBounds))
+            {
+                return new RectangleF(0f, 0f, layoutWidth, layoutHeight);
+            }
+
+            float normalizedLeft = (inkBounds.Left - sourceRect.Left) / (float)Math.Max(1, sourceRect.Width);
+            float normalizedRight = (inkBounds.Right - sourceRect.Left) / (float)Math.Max(1, sourceRect.Width);
+            float normalizedTop = inkBounds.Top / (float)Math.Max(1, richBitmap.Height);
+            float normalizedBottom = inkBounds.Bottom / (float)Math.Max(1, richBitmap.Height);
+
+            float inkLeft = framePaddingX + (Math.Max(0f, normalizedLeft) * contentWidth);
+            float inkTop = framePaddingY + (Math.Max(0f, normalizedTop) * contentHeight);
+            float inkRight = framePaddingX + (Math.Min(1f, normalizedRight) * contentWidth);
+            float inkBottom = framePaddingY + (Math.Min(1f, normalizedBottom) * contentHeight);
+
+            RectangleF localFrameRect = RectangleF.FromLTRB(
+                Math.Max(0f, inkLeft - framePaddingX),
+                Math.Max(0f, inkTop - framePaddingY),
+                Math.Min(layoutWidth, inkRight + framePaddingX),
+                Math.Min(layoutHeight, inkBottom + framePaddingY));
+
+            if (localFrameRect.Width <= 0.5f || localFrameRect.Height <= 0.5f)
+            {
+                return new RectangleF(0f, 0f, layoutWidth, layoutHeight);
+            }
+
+            return localFrameRect;
+        }
+
+        private static Bitmap ComposeRichInteractionSnapshotBitmap(
+            Bitmap richBitmap,
+            Rectangle richSourceRect,
+            float contentWidthPx,
+            float contentHeightPx,
+            float framePaddingX,
+            float framePaddingY,
+            RectangleF interactionFrameLocalRect,
+            System.Drawing.Color backgroundColor,
+            System.Drawing.Color borderColor,
+            float borderWidthPx)
+        {
+            if (richBitmap == null)
+            {
+                return null;
+            }
+
+            int layoutWidthPx = Math.Max(1, (int)Math.Ceiling(Math.Max(1f, contentWidthPx + (2f * framePaddingX))));
+            int layoutHeightPx = Math.Max(1, (int)Math.Ceiling(Math.Max(1f, contentHeightPx + (2f * framePaddingY))));
+            Rectangle safeSourceRect = richSourceRect.Width > 0 && richSourceRect.Height > 0
+                ? richSourceRect
+                : new Rectangle(0, 0, richBitmap.Width, richBitmap.Height);
+
+            var composed = new Bitmap(layoutWidthPx, layoutHeightPx, PixelFormat.Format32bppArgb);
+            using (Graphics graphics = Graphics.FromImage(composed))
+            {
+                graphics.Clear(System.Drawing.Color.Transparent);
+                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+
+                RectangleF fullRect = new RectangleF(0f, 0f, layoutWidthPx, layoutHeightPx);
+                RectangleF frameRect = interactionFrameLocalRect.Width > 0.5f && interactionFrameLocalRect.Height > 0.5f
+                    ? RectangleF.FromLTRB(
+                        Math.Max(0f, interactionFrameLocalRect.Left),
+                        Math.Max(0f, interactionFrameLocalRect.Top),
+                        Math.Min(fullRect.Right, interactionFrameLocalRect.Right),
+                        Math.Min(fullRect.Bottom, interactionFrameLocalRect.Bottom))
+                    : fullRect;
+                if (backgroundColor.A > 0)
+                {
+                    using (SolidBrush backgroundBrush = new SolidBrush(backgroundColor))
+                    {
+                        graphics.FillRectangle(backgroundBrush, frameRect);
+                    }
+                }
+
+                using (ImageAttributes richImageAttributes = new ImageAttributes())
+                {
+                    richImageAttributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+                    graphics.DrawImage(
+                        richBitmap,
+                        new[]
+                        {
+                            new PointF(framePaddingX, framePaddingY),
+                            new PointF(framePaddingX + Math.Max(1f, contentWidthPx), framePaddingY),
+                            new PointF(framePaddingX, framePaddingY + Math.Max(1f, contentHeightPx))
+                        },
+                        safeSourceRect,
+                        GraphicsUnit.Pixel,
+                        richImageAttributes);
+                }
+
+                if (borderWidthPx > 0f && borderColor.A > 0)
+                {
+                    using (Pen borderPen = new Pen(borderColor, Math.Max(1f, borderWidthPx)))
+                    {
+                        borderPen.Alignment = PenAlignment.Inset;
+                        borderPen.LineJoin = LineJoin.Miter;
+                        graphics.DrawRectangle(
+                            borderPen,
+                            frameRect.X,
+                            frameRect.Y,
+                            Math.Max(1f, frameRect.Width - 1f),
+                            Math.Max(1f, frameRect.Height - 1f));
+                    }
+                }
+            }
+
+            return composed;
+        }
+
+        private static float GetStableRichPreviewRenderScale(TextAnnotation annotation, SizeF contentSize)
+        {
+            float fontSize = annotation?.AnnotationFont?.Size ?? SystemFonts.DefaultFont.Size;
+            float preferredScale;
+            if (fontSize <= 6f)
+            {
+                preferredScale = 6f;
+            }
+            else if (fontSize <= 10f)
+            {
+                preferredScale = 5f;
+            }
+            else if (fontSize <= 18f)
+            {
+                preferredScale = 4f;
+            }
+            else
+            {
+                preferredScale = 3f;
+            }
+
+            const float maxRenderDimensionPx = 4096f;
+            const float maxRenderPixelCount = 10000000f;
+            float width = Math.Max(1f, contentSize.Width);
+            float height = Math.Max(1f, contentSize.Height);
+            float scale = preferredScale;
+            scale = Math.Min(scale, maxRenderDimensionPx / width);
+            scale = Math.Min(scale, maxRenderDimensionPx / height);
+            scale = Math.Min(scale, (float)Math.Sqrt(maxRenderPixelCount / Math.Max(1f, width * height)));
+            return Math.Max(1f, scale);
+        }
+
+        private static void GetStableRichPreviewRenderParameters(
+            TextAnnotation annotation,
+            SizeF contentSize,
+            out int renderWidthPx,
+            out int renderHeightPx,
+            out float renderScale)
+        {
+            renderScale = GetStableRichPreviewRenderScale(annotation, contentSize);
+            renderWidthPx = Math.Max(1, (int)Math.Ceiling(Math.Max(1f, contentSize.Width) * renderScale));
+            renderHeightPx = Math.Max(1, (int)Math.Ceiling(Math.Max(1f, contentSize.Height) * renderScale));
+        }
+
+        private Bitmap GetRichTextPreviewBitmap(
+            TextAnnotation annotation,
+            int widthPx,
+            int heightPx,
+            float fontScale,
+            bool useInteractionPlaceholder,
+            float interactionSnapshotContentWidthPx = 0f,
+            float interactionSnapshotContentHeightPx = 0f,
+            float interactionFramePaddingX = 0f,
+            float interactionFramePaddingY = 0f,
+            RectangleF interactionFrameLocalRect = default(RectangleF),
+            bool trimVertical = true)
+        {
+            if (annotation == null || widthPx <= 0 || heightPx <= 0)
+            {
+                return null;
+            }
+
+            if (DisableRichTextPreviewCachesForDiagnostics)
+            {
+                return RenderRichTextToBitmap(
+                    annotation,
+                    widthPx,
+                    heightPx,
+                    System.Drawing.Color.Transparent,
+                    fontScale);
+            }
+
+            if (useInteractionPlaceholder)
+            {
+                string expectedRenderedInteractionKey = BuildActiveTextInteractionPreviewKey(annotation, widthPx, heightPx, fontScale, trimVertical);
+                string expectedCloneInteractionKey = string.Concat(annotation.CachedRichPreviewBitmapKey ?? string.Empty, "|interaction-clone");
+                if (activeTextInteractionPreviewBitmap != null &&
+                    !string.IsNullOrEmpty(activeTextInteractionPreviewKey) &&
+                    !string.Equals(activeTextInteractionPreviewKey, expectedRenderedInteractionKey, StringComparison.Ordinal) &&
+                    !string.Equals(activeTextInteractionPreviewKey, expectedCloneInteractionKey, StringComparison.Ordinal))
+                {
+                    activeTextInteractionPreviewBitmap.Dispose();
+                    activeTextInteractionPreviewBitmap = null;
+                    activeTextInteractionPreviewSourceRect = Rectangle.Empty;
+                    activeTextInteractionPreviewIncludesFrame = false;
+                    activeTextInteractionPreviewKey = null;
+                }
+
+                if (activeTextInteractionPreviewBitmap == null)
+                {
+                    Bitmap interactionSourceBitmap = null;
+                    Rectangle interactionSourceRect = Rectangle.Empty;
+                    bool clonedDisplayedPreview = false;
+                    if (annotation.CachedRichPreviewBitmap != null)
+                    {
+                        try
+                        {
+                            interactionSourceBitmap = (Bitmap)annotation.CachedRichPreviewBitmap.Clone();
+                            interactionSourceRect =
+                                annotation.HasCachedRichPreviewSourceRect &&
+                                annotation.CachedRichPreviewSourceRect.Width > 0 &&
+                                annotation.CachedRichPreviewSourceRect.Height > 0
+                                    ? annotation.CachedRichPreviewSourceRect
+                                    : BuildRichBitmapSourceRect(interactionSourceBitmap);
+                            activeTextInteractionPreviewKey = string.Concat(annotation.CachedRichPreviewBitmapKey ?? string.Empty, "|interaction-clone");
+                            clonedDisplayedPreview = interactionSourceBitmap != null;
+                        }
+                        catch
+                        {
+                            interactionSourceBitmap?.Dispose();
+                            interactionSourceBitmap = null;
+                            interactionSourceRect = Rectangle.Empty;
+                            activeTextInteractionPreviewKey = null;
+                            clonedDisplayedPreview = false;
+                        }
+                    }
+
+                    if (!clonedDisplayedPreview)
+                    {
+                        const int interactionMaxDimension = 320;
+                        float scale = Math.Min(
+                            1f,
+                            Math.Min(
+                                interactionMaxDimension / (float)Math.Max(1, widthPx),
+                                interactionMaxDimension / (float)Math.Max(1, heightPx)));
+                        int previewWidth = Math.Max(1, (int)Math.Ceiling(widthPx * scale));
+                        int previewHeight = Math.Max(1, (int)Math.Ceiling(heightPx * scale));
+                        float previewFontScale = Math.Max(0.1f, fontScale * scale);
+                        string interactionKey = BuildActiveTextInteractionPreviewKey(annotation, previewWidth, previewHeight, previewFontScale, trimVertical);
+
+                        interactionSourceBitmap = RenderRichTextToBitmap(
+                            annotation,
+                            previewWidth,
+                            previewHeight,
+                            System.Drawing.Color.Transparent,
+                            previewFontScale);
+                        activeTextInteractionPreviewKey = interactionKey;
+                        interactionSourceRect = BuildRichBitmapSourceRect(interactionSourceBitmap);
+                    }
+
+                    if (interactionSourceBitmap != null)
+                    {
+                        RectangleF effectiveInteractionFrameLocalRect = interactionFrameLocalRect;
+                        if (effectiveInteractionFrameLocalRect.Width <= 0.5f || effectiveInteractionFrameLocalRect.Height <= 0.5f)
+                        {
+                            float snapshotLayoutWidth = Math.Max(1f, Math.Max(1f, interactionSnapshotContentWidthPx > 0f ? interactionSnapshotContentWidthPx : widthPx) + (2f * interactionFramePaddingX));
+                            float snapshotLayoutHeight = Math.Max(1f, Math.Max(1f, interactionSnapshotContentHeightPx > 0f ? interactionSnapshotContentHeightPx : heightPx) + (2f * interactionFramePaddingY));
+                            effectiveInteractionFrameLocalRect = BuildRichPreviewInkLocalFrameRectFromBitmap(
+                                interactionSourceBitmap,
+                                interactionSourceRect,
+                                Math.Max(1f, interactionSnapshotContentWidthPx > 0f ? interactionSnapshotContentWidthPx : widthPx),
+                                Math.Max(1f, interactionSnapshotContentHeightPx > 0f ? interactionSnapshotContentHeightPx : heightPx),
+                                interactionFramePaddingX,
+                                interactionFramePaddingY,
+                                snapshotLayoutWidth,
+                                snapshotLayoutHeight);
+                        }
+
+                        activeTextInteractionPreviewBitmap = ComposeRichInteractionSnapshotBitmap(
+                            interactionSourceBitmap,
+                            interactionSourceRect,
+                            Math.Max(1f, interactionSnapshotContentWidthPx > 0f ? interactionSnapshotContentWidthPx : widthPx),
+                            Math.Max(1f, interactionSnapshotContentHeightPx > 0f ? interactionSnapshotContentHeightPx : heightPx),
+                            interactionFramePaddingX,
+                            interactionFramePaddingY,
+                            effectiveInteractionFrameLocalRect,
+                            GetAnnotationBackgroundColor(annotation),
+                            GetAnnotationBorderColor(annotation),
+                            Math.Max(1f, NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) * Math.Max(0.1f, fontScale)));
+                        activeTextInteractionPreviewSourceRect = activeTextInteractionPreviewBitmap != null
+                            ? new Rectangle(0, 0, activeTextInteractionPreviewBitmap.Width, activeTextInteractionPreviewBitmap.Height)
+                            : Rectangle.Empty;
+                        activeTextInteractionPreviewIncludesFrame = activeTextInteractionPreviewBitmap != null;
+                        interactionSourceBitmap.Dispose();
+                    }
+                }
+
+                return activeTextInteractionPreviewBitmap;
+            }
+
+            string cacheKey = BuildRichPreviewBitmapCacheKey(annotation, widthPx, heightPx, fontScale, trimVertical);
+            if (!string.Equals(annotation.CachedRichPreviewBitmapKey, cacheKey, StringComparison.Ordinal) ||
+                annotation.CachedRichPreviewBitmap == null)
+            {
+                QueueAsyncRichTextPreviewWarm(annotation, widthPx, heightPx, fontScale, trimVertical);
+                return annotation.CachedRichPreviewBitmap;
+            }
+
+            return annotation.CachedRichPreviewBitmap;
+        }
+
+        private void PrimeActiveTextInteractionPreview(TextAnnotation annotation, float dpiX, float dpiY, SizeF contentSize)
+        {
+            if (annotation == null ||
+                !IsRichTextMode(annotation) ||
+                contentSize.IsEmpty)
+            {
+                return;
+            }
+
+            int previewWidthPx = Math.Max(1, (int)Math.Ceiling(Math.Max(1f, contentSize.Width * scaleFactor * 72f / Math.Max(1f, dpiX))));
+            int previewHeightPx = Math.Max(1, (int)Math.Ceiling(Math.Max(1f, contentSize.Height * scaleFactor * 72f / Math.Max(1f, dpiY))));
+            float previewFontScale = Math.Max(0.1f, scaleFactor * 72f / Math.Max(1f, dpiY));
+            float framePaddingX = (NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin)) * scaleFactor * 72f / Math.Max(1f, dpiX);
+            float framePaddingY = (NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin)) * scaleFactor * 72f / Math.Max(1f, dpiY);
+            RectangleF interactionFrameLocalRect = RectangleF.Empty;
+            float contentWidthPx = Math.Max(1f, contentSize.Width * scaleFactor * 72f / Math.Max(1f, dpiX));
+            float contentHeightPx = Math.Max(1f, contentSize.Height * scaleFactor * 72f / Math.Max(1f, dpiY));
+            float layoutWidthPx = contentWidthPx + (2f * framePaddingX);
+            float layoutHeightPx = contentHeightPx + (2f * framePaddingY);
+            if (annotation.CachedRichPreviewBitmap != null)
+            {
+                Rectangle sourceRect =
+                    annotation.HasCachedRichPreviewSourceRect &&
+                    annotation.CachedRichPreviewSourceRect.Width > 0 &&
+                    annotation.CachedRichPreviewSourceRect.Height > 0
+                        ? annotation.CachedRichPreviewSourceRect
+                        : BuildRichBitmapSourceRect(annotation.CachedRichPreviewBitmap);
+                if (sourceRect.Width > 0 && sourceRect.Height > 0)
+                {
+                    interactionFrameLocalRect = BuildRichPreviewInkLocalFrameRectFromBitmap(
+                        annotation.CachedRichPreviewBitmap,
+                        sourceRect,
+                        contentWidthPx,
+                        contentHeightPx,
+                        framePaddingX,
+                        framePaddingY,
+                        layoutWidthPx,
+                        layoutHeightPx);
+                }
+            }
+
+            GetRichTextPreviewBitmap(
+                annotation,
+                previewWidthPx,
+                previewHeightPx,
+                previewFontScale,
+                useInteractionPlaceholder: true,
+                interactionSnapshotContentWidthPx: contentWidthPx,
+                interactionSnapshotContentHeightPx: contentHeightPx,
+                interactionFramePaddingX: framePaddingX,
+                interactionFramePaddingY: framePaddingY,
+                interactionFrameLocalRect: interactionFrameLocalRect,
+                trimVertical: true);
+        }
+
+        private bool TryGetSelectedTextAnnotationOverlayScreenBounds(TextAnnotation annotation, float dpiX, float dpiY, out RectangleF bounds)
+        {
+            bounds = RectangleF.Empty;
+            if (annotation == null || annotation.PageNumber != currentPage)
+            {
+                return false;
+            }
+
+            if (!TryGetTextAnnotationVisualScreenBounds(annotation, dpiX, dpiY, out RectangleF visualBounds))
+            {
+                return false;
+            }
+
+            bounds = visualBounds;
+            if (ReferenceEquals(selectedTextAnnotation, annotation) && GetGroupSelectionCount() == 0 && IsLayerVisible(annotation.LayerId))
+            {
+                float handlePad = Math.Max(RasterResizeHandleSize, SelectionOverlayInvalidatePaddingPx);
+                RectangleF selectionBounds = visualBounds;
+                selectionBounds.Inflate(handlePad, handlePad);
+                bounds = RectangleF.Union(bounds, selectionBounds);
+
+                if (TryGetTextLeaderHandleRect(annotation, dpiX, dpiY, out RectangleF leaderHandleRect))
+                {
+                    bounds = RectangleF.Union(bounds, leaderHandleRect);
+                }
+
+                if (!IsTextAnnotationEffectivelyLocked(annotation) &&
+                    TryGetAnnotationRotationHandleRect(annotation, dpiX, dpiY, out RectangleF rotationHandleRect, out PointF connectorPoint))
+                {
+                    bounds = RectangleF.Union(bounds, rotationHandleRect);
+                    RectangleF connectorBounds = RectangleF.FromLTRB(
+                        Math.Min(connectorPoint.X, rotationHandleRect.X + (rotationHandleRect.Width / 2f)),
+                        Math.Min(connectorPoint.Y, rotationHandleRect.Y + (rotationHandleRect.Height / 2f)),
+                        Math.Max(connectorPoint.X, rotationHandleRect.X + (rotationHandleRect.Width / 2f)),
+                        Math.Max(connectorPoint.Y, rotationHandleRect.Y + (rotationHandleRect.Height / 2f)));
+                    connectorBounds.Inflate(2f, 2f);
+                    bounds = RectangleF.Union(bounds, connectorBounds);
+                }
+            }
+
+            return bounds.Width > 0f && bounds.Height > 0f;
+        }
+
+        private void InvalidateRichTextAnnotationPreview(TextAnnotation annotation, RectangleF previousOverlayBounds = default(RectangleF))
+        {
+            if (annotation == null ||
+                pdfViewer == null ||
+                pdfViewer.IsDisposed ||
+                annotation.PageNumber != currentPage)
+            {
+                return;
+            }
+
+            try
+            {
+                using (Graphics graphics = pdfViewer.CreateGraphics())
+                {
+                    if (TryGetSelectedTextAnnotationOverlayScreenBounds(annotation, graphics.DpiX, graphics.DpiY, out RectangleF visualBounds))
+                    {
+                        InvalidateSelectionOverlay(previousOverlayBounds, visualBounds);
+                        return;
+                    }
+                }
+            }
+            catch
+            {
+            }
+
+            pdfViewer.Invalidate();
+        }
+
+        private bool TryCaptureTextAnnotationOverlayScreenBounds(TextAnnotation annotation, out RectangleF bounds)
+        {
+            bounds = RectangleF.Empty;
+            if (annotation == null ||
+                pdfViewer == null ||
+                pdfViewer.IsDisposed ||
+                !pdfViewer.IsHandleCreated)
+            {
+                return false;
+            }
+
+            try
+            {
+                using (Graphics graphics = pdfViewer.CreateGraphics())
+                {
+                    return TryGetSelectedTextAnnotationOverlayScreenBounds(annotation, graphics.DpiX, graphics.DpiY, out bounds);
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void InvalidateTextAnnotationOverlayTransition(TextAnnotation annotation, RectangleF previousOverlayBounds = default(RectangleF))
+        {
+            if (annotation == null ||
+                pdfViewer == null ||
+                pdfViewer.IsDisposed)
+            {
+                return;
+            }
+
+            if (TryCaptureTextAnnotationOverlayScreenBounds(annotation, out RectangleF currentOverlayBounds))
+            {
+                InvalidateSelectionOverlay(previousOverlayBounds, currentOverlayBounds);
+                return;
+            }
+
+            if (!previousOverlayBounds.IsEmpty)
+            {
+                InvalidateSelectionOverlay(previousOverlayBounds, RectangleF.Empty);
+                return;
+            }
+
+            pdfViewer.Invalidate();
+        }
+
+        private void InvalidatePendingRichPreviewWarmWork()
+        {
+            ClearRichPreviewWarmBusyState();
+            lock (richPreviewWarmSync)
+            {
+                richPreviewWarmGeneration++;
+                richPreviewWarmQueue.Clear();
+                pendingRichPreviewWarmKeys.Clear();
+                richPreviewWarmBusyRequestPending = false;
+            }
+        }
+
+        private void QueueAsyncRichTextPreviewWarm(
+            TextAnnotation annotation,
+            int widthPx,
+            int heightPx,
+            float fontScale,
+            bool trimVertical = true)
+        {
+            if (annotation == null ||
+                !IsRichTextMode(annotation) ||
+                widthPx <= 0 ||
+                heightPx <= 0 ||
+                IsDisposed)
+            {
+                return;
+            }
+
+            string cacheKey = BuildRichPreviewBitmapCacheKey(annotation, widthPx, heightPx, fontScale, trimVertical);
+            if (string.IsNullOrWhiteSpace(cacheKey))
+            {
+                return;
+            }
+
+            Font sourceFont = annotation.AnnotationFont ?? this.Font;
+            int currentGeneration;
+            bool shouldShowBusyCursor = false;
+            bool shouldStartWorker = false;
+
+            lock (richPreviewWarmSync)
+            {
+                if ((string.Equals(annotation.CachedRichPreviewBitmapKey, cacheKey, StringComparison.Ordinal) &&
+                     annotation.CachedRichPreviewBitmap != null) ||
+                    !pendingRichPreviewWarmKeys.Add(cacheKey))
+                {
+                    return;
+                }
+
+                currentGeneration = richPreviewWarmGeneration;
+                bool shouldAutoShowBusyCursor = annotation.CachedRichPreviewBitmap == null;
+                if ((richPreviewWarmBusyRequestPending || shouldAutoShowBusyCursor) && !richPreviewWarmBusyCursorVisible)
+                {
+                    richPreviewWarmBusyRequestPending = false;
+                    richPreviewWarmBusyCursorVisible = true;
+                    shouldShowBusyCursor = true;
+                }
+
+                richPreviewWarmQueue.Enqueue(new RichPreviewWarmRequest
+                {
+                    Annotation = annotation,
+                    CacheKey = cacheKey,
+                    WidthPx = Math.Max(1, widthPx),
+                    HeightPx = Math.Max(1, heightPx),
+                    FontScale = fontScale,
+                    TrimVertical = trimVertical,
+                    PlainText = annotation.AnnotationText ?? string.Empty,
+                    RichText = annotation.AnnotationRichText ?? string.Empty,
+                    FontFamilyName = sourceFont.FontFamily?.Name ?? this.Font.FontFamily.Name,
+                    FontSize = sourceFont.Size,
+                    FontStyle = sourceFont.Style,
+                    FontUnit = sourceFont.Unit,
+                    DefaultTextColor = annotation.AnnotationColor,
+                    Alignment = annotation.AnnotationAlignment,
+                    Generation = currentGeneration
+                });
+
+                shouldStartWorker = !richPreviewWarmWorkerActive;
+                if (shouldStartWorker)
+                {
+                    richPreviewWarmWorkerActive = true;
+                }
+            }
+
+            if (shouldShowBusyCursor)
+            {
+                try
+                {
+                    if (!IsDisposed)
+                    {
+                        BeginBusyCursor();
+                    }
+                }
+                catch
+                {
+                    lock (richPreviewWarmSync)
+                    {
+                        richPreviewWarmBusyCursorVisible = false;
+                    }
+                }
+            }
+
+            if (!shouldStartWorker)
+            {
+                return;
+            }
+
+            Font BuildRequestFont(RichPreviewWarmRequest request)
+            {
+                try
+                {
+                    return new Font(request.FontFamilyName, request.FontSize, request.FontStyle, request.FontUnit);
+                }
+                catch
+                {
+                    return new Font(this.Font.FontFamily, request.FontSize, request.FontStyle, request.FontUnit);
+                }
+            }
+
+            var warmThread = new System.Threading.Thread(() =>
+            {
+                while (true)
+                {
+                    RichPreviewWarmRequest request = null;
+                    lock (richPreviewWarmSync)
+                    {
+                        if (richPreviewWarmQueue.Count == 0)
+                        {
+                            richPreviewWarmWorkerActive = false;
+                            richPreviewWarmBusyRequestPending = false;
+                            bool shouldEndBusyCursor = richPreviewWarmBusyCursorVisible;
+                            richPreviewWarmBusyCursorVisible = false;
+                            if (shouldEndBusyCursor)
+                            {
+                                try
+                                {
+                                    BeginInvoke((Action)(() =>
+                                    {
+                                        if (!IsDisposed)
+                                        {
+                                            EndBusyCursor();
+                                        }
+                                    }));
+                                }
+                                catch
+                                {
+                                }
+                            }
+                            return;
+                        }
+
+                        request = richPreviewWarmQueue.Dequeue();
+                    }
+
+                    if (request == null)
+                    {
+                        continue;
+                    }
+
+                    if (request.Generation != richPreviewWarmGeneration ||
+                        request.Annotation == null ||
+                        IsDisposed)
+                    {
+                        lock (richPreviewWarmSync)
+                        {
+                            pendingRichPreviewWarmKeys.Remove(request.CacheKey);
+                        }
+                        continue;
+                    }
+
+                    Bitmap renderedBitmap = null;
+                    using (Font baseFont = BuildRequestFont(request))
+                    {
+                        int renderWidthPx = Math.Max(1, request.WidthPx);
+                        int renderHeightPx = request.TrimVertical
+                            ? Math.Max(request.HeightPx, request.HeightPx + Math.Max(8, (int)Math.Ceiling(request.HeightPx * 0.75f)))
+                            : Math.Max(1, request.HeightPx);
+
+                        try
+                        {
+                            TryRenderRichTextToBitmapWithWpf(
+                                request.PlainText,
+                                request.RichText,
+                                baseFont,
+                                request.DefaultTextColor,
+                                request.Alignment,
+                                renderWidthPx,
+                                renderHeightPx,
+                                System.Drawing.Color.Transparent,
+                                request.FontScale,
+                                request.TrimVertical,
+                                out renderedBitmap);
+                        }
+                        catch
+                        {
+                            renderedBitmap?.Dispose();
+                            renderedBitmap = null;
+                        }
+                    }
+
+                    void ApplyWarmResult()
+                    {
+                        lock (richPreviewWarmSync)
+                        {
+                            pendingRichPreviewWarmKeys.Remove(request.CacheKey);
+                        }
+
+                        if (IsDisposed ||
+                            request.Generation != richPreviewWarmGeneration)
+                        {
+                            renderedBitmap?.Dispose();
+                            return;
+                        }
+
+                        string currentKey = BuildRichPreviewBitmapCacheKey(
+                            request.Annotation,
+                            request.WidthPx,
+                            request.HeightPx,
+                            request.FontScale,
+                            request.TrimVertical);
+                        if (!string.Equals(currentKey, request.CacheKey, StringComparison.Ordinal) || renderedBitmap == null)
+                        {
+                            renderedBitmap?.Dispose();
+                            return;
+                        }
+
+                        RectangleF previousOverlayBounds = RectangleF.Empty;
+                        if (pdfViewer != null && !pdfViewer.IsDisposed)
+                        {
+                            try
+                            {
+                                using (Graphics graphics = pdfViewer.CreateGraphics())
+                                {
+                                    TryGetSelectedTextAnnotationOverlayScreenBounds(request.Annotation, graphics.DpiX, graphics.DpiY, out previousOverlayBounds);
+                                }
+                            }
+                            catch
+                            {
+                            }
+                        }
+
+                        Bitmap previousBitmap = request.Annotation.CachedRichPreviewBitmap;
+                        request.Annotation.CachedRichPreviewBitmap = renderedBitmap;
+                        request.Annotation.CachedRichPreviewBitmapKey = request.CacheKey;
+                        request.Annotation.CachedRichPreviewSourceRect = BuildRichBitmapSourceRect(renderedBitmap);
+                        request.Annotation.HasCachedRichPreviewSourceRect =
+                            request.Annotation.CachedRichPreviewSourceRect.Width > 0 &&
+                            request.Annotation.CachedRichPreviewSourceRect.Height > 0;
+                        request.Annotation.CachedRichPreviewFrameKey = null;
+                        request.Annotation.CachedRichPreviewFrameLocalPx = RectangleF.Empty;
+                        request.Annotation.HasCachedRichPreviewFrameLocalPx = false;
+                        previousBitmap?.Dispose();
+
+                        InvalidateRichTextAnnotationPreview(request.Annotation, previousOverlayBounds);
+                    }
+
+                    if (IsHandleCreated)
+                    {
+                        try
+                        {
+                            BeginInvoke((Action)ApplyWarmResult);
+                        }
+                        catch
+                        {
+                            renderedBitmap?.Dispose();
+                            lock (richPreviewWarmSync)
+                            {
+                                pendingRichPreviewWarmKeys.Remove(request.CacheKey);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        ApplyWarmResult();
+                    }
+                }
+            });
+
+            warmThread.SetApartmentState(System.Threading.ApartmentState.STA);
+            warmThread.IsBackground = true;
+            warmThread.Start();
         }
 
         private static void ApplyGlobalRichFont(RichTextBox richTextBox, Font baseFont)
@@ -9848,6 +12907,88 @@ namespace AnonPDF
             }
         }
 
+        internal static void ApplyCompactRichLineSpacing(RichTextBox richTextBox, Font baseFont)
+        {
+            if (richTextBox == null || !richTextBox.IsHandleCreated || baseFont == null || richTextBox.TextLength <= 0)
+            {
+                return;
+            }
+
+            int selectionStart = richTextBox.SelectionStart;
+            int selectionLength = richTextBox.SelectionLength;
+            IntPtr paraPtr = IntPtr.Zero;
+
+            try
+            {
+                richTextBox.SelectAll();
+
+                var para = new PARAFORMAT2
+                {
+                    cbSize = (uint)Marshal.SizeOf(typeof(PARAFORMAT2)),
+                    dwMask = PFM_SPACEBEFORE | PFM_SPACEAFTER | PFM_LINESPACING,
+                    rgxTabs = new int[32],
+                    dySpaceBefore = 0,
+                    dySpaceAfter = 0,
+                    bLineSpacingRule = 3,
+                    dyLineSpacing = Math.Max(1, (int)Math.Round(baseFont.SizeInPoints * 20f * 1.18f))
+                };
+
+                paraPtr = Marshal.AllocHGlobal((int)para.cbSize);
+                Marshal.StructureToPtr(para, paraPtr, false);
+                SendMessage(richTextBox.Handle, EM_SETPARAFORMAT, IntPtr.Zero, paraPtr);
+            }
+            finally
+            {
+                if (paraPtr != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(paraPtr);
+                }
+
+                richTextBox.Select(selectionStart, selectionLength);
+            }
+        }
+
+        private static void ApplyConsistentRichLineSpacing(RichTextBox richTextBox, Font baseFont)
+        {
+            if (richTextBox == null || baseFont == null || richTextBox.TextLength <= 0 || !richTextBox.IsHandleCreated)
+            {
+                return;
+            }
+
+            float lineHeightPx = GetConsistentRichLineHeightPx(baseFont);
+            if (lineHeightPx <= 0f)
+            {
+                return;
+            }
+
+            int selectionStart = richTextBox.SelectionStart;
+            int selectionLength = richTextBox.SelectionLength;
+            try
+            {
+                using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+                {
+                    int lineSpacingTwips = Math.Max(1, (int)Math.Round(lineHeightPx * 1440f / g.DpiY));
+                    var paragraphFormat = new PARAFORMAT2
+                    {
+                        cbSize = (uint)Marshal.SizeOf(typeof(PARAFORMAT2)),
+                        dwMask = PFM_LINESPACING | PFM_SPACEBEFORE | PFM_SPACEAFTER,
+                        dySpaceBefore = 0,
+                        dySpaceAfter = 0,
+                        dyLineSpacing = lineSpacingTwips,
+                        bLineSpacingRule = 4,
+                        rgxTabs = new int[32]
+                    };
+
+                    richTextBox.SelectAll();
+                    SendMessage(richTextBox.Handle, EM_SETPARAFORMAT, (IntPtr)0, ref paragraphFormat);
+                }
+            }
+            finally
+            {
+                richTextBox.Select(selectionStart, selectionLength);
+            }
+        }
+
         private static void NormalizeRichParagraphAlignmentLeft(RichTextBox richTextBox)
         {
             if (richTextBox == null || richTextBox.TextLength <= 0)
@@ -9861,6 +13002,10 @@ namespace AnonPDF
             {
                 richTextBox.SelectAll();
                 richTextBox.SelectionAlignment = System.Windows.Forms.HorizontalAlignment.Left;
+                richTextBox.SelectionIndent = 0;
+                richTextBox.SelectionRightIndent = 0;
+                richTextBox.SelectionHangingIndent = 0;
+                richTextBox.SelectionTabs = Array.Empty<int>();
             }
             finally
             {
@@ -9879,8 +13024,27 @@ namespace AnonPDF
             int selectionLength = richTextBox.SelectionLength;
             try
             {
-                richTextBox.SelectAll();
-                richTextBox.SelectionAlignment = alignment;
+                int lineCount = Math.Max(1, richTextBox.Lines?.Length ?? 0);
+                for (int lineIndex = 0; lineIndex < lineCount; lineIndex++)
+                {
+                    int start = richTextBox.GetFirstCharIndexFromLine(lineIndex);
+                    if (start < 0)
+                    {
+                        continue;
+                    }
+
+                    int nextStart = lineIndex < lineCount - 1
+                        ? richTextBox.GetFirstCharIndexFromLine(lineIndex + 1)
+                        : richTextBox.TextLength;
+                    if (nextStart < start)
+                    {
+                        nextStart = richTextBox.TextLength;
+                    }
+
+                    int length = Math.Max(1, nextStart - start);
+                    richTextBox.Select(start, length);
+                    richTextBox.SelectionAlignment = alignment;
+                }
             }
             finally
             {
@@ -9891,6 +13055,769 @@ namespace AnonPDF
         private static float GetRichAlignmentOffset(float dpiX, System.Windows.Forms.HorizontalAlignment alignment)
         {
             return 0f;
+        }
+
+        private static string SummarizeRichParagraphGeometryTags(string rtf)
+        {
+            if (string.IsNullOrWhiteSpace(rtf))
+            {
+                return "empty";
+            }
+
+            try
+            {
+                int qr = Regex.Matches(rtf, @"\\qr", RegexOptions.CultureInvariant).Count;
+                int qc = Regex.Matches(rtf, @"\\qc", RegexOptions.CultureInvariant).Count;
+                int li = Regex.Matches(rtf, @"\\li-?\d+", RegexOptions.CultureInvariant).Count;
+                int ri = Regex.Matches(rtf, @"\\ri-?\d+", RegexOptions.CultureInvariant).Count;
+                int fi = Regex.Matches(rtf, @"\\fi-?\d+", RegexOptions.CultureInvariant).Count;
+                int tx = Regex.Matches(rtf, @"\\tx-?\d+", RegexOptions.CultureInvariant).Count;
+                return $"qr={qr} qc={qc} li={li} ri={ri} fi={fi} tx={tx}";
+            }
+            catch
+            {
+                return "summary-failed";
+            }
+        }
+
+        internal static string NormalizeRichTextParagraphAlignmentRtf(string rtf)
+        {
+            if (string.IsNullOrWhiteSpace(rtf))
+            {
+                return rtf;
+            }
+
+            try
+            {
+                using (var richTextBox = new RichTextBox())
+                {
+                    richTextBox.BorderStyle = BorderStyle.None;
+                    richTextBox.ScrollBars = RichTextBoxScrollBars.None;
+                    richTextBox.Multiline = true;
+                    richTextBox.WordWrap = false;
+                    richTextBox.DetectUrls = false;
+                    richTextBox.ReadOnly = true;
+                    richTextBox.Rtf = rtf;
+                    richTextBox.CreateControl();
+                    NormalizeRichParagraphAlignmentLeft(richTextBox);
+                    string normalizedRtf = richTextBox.Rtf;
+                    if (DebugLogEnabled)
+                    {
+                        LogDebug(
+                            $"RichNormalize before={SummarizeRichParagraphGeometryTags(rtf)} " +
+                            $"afterRtf={SummarizeRichParagraphGeometryTags(normalizedRtf)}");
+                    }
+
+                    return normalizedRtf;
+                }
+            }
+            catch
+            {
+                return rtf;
+            }
+        }
+
+        internal static string BuildRenderableRichTextRtf(string plainText, string richText, Font baseFont)
+        {
+            if (baseFont == null)
+            {
+                baseFont = SystemFonts.DefaultFont;
+            }
+
+            try
+            {
+                using (var richTextBox = new RichTextBox())
+                {
+                    richTextBox.BorderStyle = BorderStyle.None;
+                    richTextBox.ScrollBars = RichTextBoxScrollBars.None;
+                    richTextBox.Multiline = true;
+                    richTextBox.WordWrap = false;
+                    richTextBox.DetectUrls = false;
+                    richTextBox.ReadOnly = true;
+                    richTextBox.Font = baseFont;
+                    richTextBox.ForeColor = System.Drawing.Color.Black;
+                    richTextBox.BackColor = System.Drawing.Color.White;
+
+                    string normalizedRichText = NormalizeRichTextParagraphAlignmentRtf(richText);
+                    bool richLoaded = false;
+                    if (!string.IsNullOrWhiteSpace(normalizedRichText))
+                    {
+                        try
+                        {
+                            richTextBox.Rtf = normalizedRichText;
+                            richLoaded = true;
+                        }
+                        catch
+                        {
+                            richLoaded = false;
+                        }
+                    }
+
+                    if (!richLoaded)
+                    {
+                        richTextBox.Text = plainText ?? string.Empty;
+                    }
+
+                    richTextBox.CreateControl();
+                    NormalizeRichParagraphAlignmentLeft(richTextBox);
+                    ApplyGlobalRichFont(richTextBox, baseFont);
+                    ApplyConsistentRichLineSpacing(richTextBox, baseFont);
+                    return richTextBox.Rtf;
+                }
+            }
+            catch
+            {
+                return NormalizeRichTextParagraphAlignmentRtf(richText);
+            }
+        }
+
+        private static FontStyle GetRichMeasurementFontStyle(FontStyle style)
+        {
+            FontStyle sanitized = style & ~FontStyle.Strikeout;
+            if ((sanitized & FontStyle.Bold) == FontStyle.Bold && (sanitized & FontStyle.Italic) == FontStyle.Italic)
+            {
+                return FontStyle.Bold | FontStyle.Italic;
+            }
+
+            if ((sanitized & FontStyle.Bold) == FontStyle.Bold)
+            {
+                return FontStyle.Bold;
+            }
+
+            if ((sanitized & FontStyle.Italic) == FontStyle.Italic)
+            {
+                return FontStyle.Italic;
+            }
+
+            return FontStyle.Regular;
+        }
+
+        private static List<List<RichPdfTextRun>> ExtractRenderableRichTextRuns(string plainText, string richText, Font baseFont)
+        {
+            var lines = new List<List<RichPdfTextRun>> { new List<RichPdfTextRun>() };
+            string renderableRichText = BuildRenderableRichTextRtf(plainText, richText, baseFont);
+
+            using (var richTextBox = new RichTextBox())
+            {
+                richTextBox.BorderStyle = BorderStyle.None;
+                richTextBox.ScrollBars = RichTextBoxScrollBars.None;
+                richTextBox.Multiline = true;
+                richTextBox.WordWrap = false;
+                richTextBox.DetectUrls = false;
+                richTextBox.ReadOnly = true;
+                richTextBox.Font = baseFont ?? SystemFonts.DefaultFont;
+                richTextBox.ForeColor = System.Drawing.Color.Black;
+
+                bool richLoaded = false;
+                if (!string.IsNullOrWhiteSpace(renderableRichText))
+                {
+                    try
+                    {
+                        richTextBox.Rtf = renderableRichText;
+                        richLoaded = true;
+                    }
+                    catch
+                    {
+                        richLoaded = false;
+                    }
+                }
+
+                if (!richLoaded)
+                {
+                    richTextBox.Text = plainText ?? string.Empty;
+                }
+
+                richTextBox.CreateControl();
+
+                List<RichPdfTextRun> currentLine = lines[0];
+                RichPdfTextRun currentRun = null;
+                string text = richTextBox.Text ?? string.Empty;
+                for (int i = 0; i < text.Length; i++)
+                {
+                    char ch = text[i];
+                    if (ch == '\r')
+                    {
+                        continue;
+                    }
+
+                    if (ch == '\n')
+                    {
+                        currentLine = new List<RichPdfTextRun>();
+                        lines.Add(currentLine);
+                        currentRun = null;
+                        continue;
+                    }
+
+                    richTextBox.Select(i, 1);
+                    Font selectionFont = richTextBox.SelectionFont ?? baseFont ?? SystemFonts.DefaultFont;
+                    System.Drawing.Color selectionColor = richTextBox.SelectionColor.IsEmpty
+                        ? System.Drawing.Color.Black
+                        : richTextBox.SelectionColor;
+                    FontStyle style = selectionFont.Style;
+
+                    if (currentRun != null &&
+                        currentRun.Style == style &&
+                        currentRun.Color.ToArgb() == selectionColor.ToArgb())
+                    {
+                        currentRun.Text += ch;
+                    }
+                    else
+                    {
+                        currentRun = new RichPdfTextRun
+                        {
+                            Text = ch.ToString(),
+                            Style = style,
+                            Color = selectionColor
+                        };
+                        currentLine.Add(currentRun);
+                    }
+                }
+            }
+
+            return lines;
+        }
+
+        private static SharedRichLayoutResult BuildSharedRichLayout(
+            List<List<RichPdfTextRun>> runsPerLine,
+            Font baseFont,
+            System.Windows.Forms.HorizontalAlignment alignment)
+        {
+            var result = new SharedRichLayoutResult();
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                Size measureProbe = new Size(int.MaxValue, int.MaxValue);
+                TextFormatFlags textFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+                Rectangle referenceInkBounds = MeasureSharedRichReferenceLineInkBounds(baseFont);
+                float fallbackLineHeight = Math.Max(
+                    baseFont.GetHeight(g),
+                    TextRenderer.MeasureText(g, "ĄŻŚŃĘgjpqy", baseFont, measureProbe, textFlags).Height);
+                float referenceInkHeight = !referenceInkBounds.IsEmpty
+                    ? Math.Max(1f, referenceInkBounds.Height)
+                    : Math.Max(1f, fallbackLineHeight);
+                float referenceInkTop = !referenceInkBounds.IsEmpty
+                    ? referenceInkBounds.Top
+                    : 0f;
+                float lineGap = Math.Max(1f, referenceInkHeight * 0.20f);
+                result.ReferenceInkTop = referenceInkTop;
+                result.ReferenceInkHeight = referenceInkHeight;
+                result.LineHeight = referenceInkHeight + lineGap;
+                FontFamily family = baseFont.FontFamily;
+                int ascentDesignUnits = family.GetCellAscent(baseFont.Style);
+                int emHeight = family.GetEmHeight(baseFont.Style);
+                result.Ascent = emHeight > 0
+                    ? baseFont.Size * g.DpiY / 72f * ascentDesignUnits / emHeight
+                    : baseFont.GetHeight(g) * 0.8f;
+
+                float maxWidth = 1f;
+                var measuredLines = new List<List<(RichPdfTextRun Run, float Width)>>();
+                foreach (List<RichPdfTextRun> line in runsPerLine)
+                {
+                    var measuredRuns = new List<(RichPdfTextRun Run, float Width)>();
+                    float lineWidth = 0f;
+                    foreach (RichPdfTextRun run in line)
+                    {
+                        if (run == null || string.IsNullOrEmpty(run.Text))
+                        {
+                            continue;
+                        }
+
+                        FontStyle textStyle = run.Style & ~FontStyle.Underline;
+                        using (Font runFont = new Font(baseFont.FontFamily, baseFont.Size, textStyle, GraphicsUnit.Point))
+                        {
+                            float width = TextRenderer.MeasureText(g, run.Text, runFont, measureProbe, textFlags).Width;
+                            measuredRuns.Add((run, width));
+                            lineWidth += width;
+                        }
+                    }
+
+                    measuredLines.Add(measuredRuns);
+                    maxWidth = Math.Max(maxWidth, lineWidth);
+                }
+
+                result.ContentWidth = (float)Math.Ceiling(maxWidth);
+                result.ContentHeight = (float)Math.Ceiling(result.LineHeight * Math.Max(1, runsPerLine.Count));
+
+                var provisionalLines = new List<SharedRichLayoutLine>();
+                var lineInkBounds = new List<Rectangle>();
+                float maxAlignedWidth = 1f;
+                for (int lineIndex = 0; lineIndex < measuredLines.Count; lineIndex++)
+                {
+                    List<(RichPdfTextRun Run, float Width)> measuredRuns = measuredLines[lineIndex];
+                    var lineLayout = new SharedRichLayoutLine
+                    {
+                        Y = lineIndex * result.LineHeight,
+                        Width = measuredRuns.Sum(item => item.Width),
+                        AdvanceWidth = measuredRuns.Sum(item => item.Width)
+                    };
+
+                    float runX = 0f;
+                    foreach ((RichPdfTextRun run, float width) in measuredRuns)
+                    {
+                        lineLayout.Runs.Add(new SharedRichLayoutRun
+                        {
+                            Text = run.Text,
+                            Style = run.Style,
+                            Color = run.Color,
+                            X = runX,
+                            Width = width,
+                            Underline = run.Style.HasFlag(FontStyle.Underline)
+                        });
+                        runX += width;
+                    }
+
+                    Rectangle inkBounds = MeasureSharedRichLineInkBounds(lineLayout, baseFont, result.LineHeight);
+                    lineLayout.LeftOverhang = Math.Max(0f, -inkBounds.Left);
+                    lineLayout.RightOverhang = Math.Max(0f, inkBounds.Right - lineLayout.AdvanceWidth);
+                    lineLayout.MeasuredRightEdge = inkBounds.Right;
+                    lineLayout.InkTop = inkBounds.Top;
+                    lineLayout.InkBottom = inkBounds.Bottom;
+                    provisionalLines.Add(lineLayout);
+                    lineInkBounds.Add(inkBounds);
+                    maxAlignedWidth = Math.Max(maxAlignedWidth, lineLayout.AdvanceWidth + lineLayout.RightOverhang);
+                }
+
+                result.ContentWidth = (float)Math.Ceiling(maxAlignedWidth);
+                for (int lineIndex = 0; lineIndex < provisionalLines.Count; lineIndex++)
+                {
+                    SharedRichLayoutLine lineLayout = provisionalLines[lineIndex];
+                    Rectangle inkBounds = lineInkBounds[lineIndex];
+                    float shiftX = lineLayout.LeftOverhang;
+                    switch (alignment)
+                    {
+                        case System.Windows.Forms.HorizontalAlignment.Center:
+                            shiftX = ((result.ContentWidth - (lineLayout.AdvanceWidth + lineLayout.RightOverhang - lineLayout.LeftOverhang)) / 2f) + lineLayout.LeftOverhang;
+                            break;
+                        case System.Windows.Forms.HorizontalAlignment.Right:
+                            shiftX = result.ContentWidth - lineLayout.MeasuredRightEdge;
+                            break;
+                    }
+
+                    lineLayout.Width = Math.Max(inkBounds.Width, lineLayout.AdvanceWidth + lineLayout.RightOverhang);
+                    foreach (SharedRichLayoutRun run in lineLayout.Runs)
+                    {
+                        run.X += shiftX;
+                    }
+
+                    result.Lines.Add(lineLayout);
+                }
+
+                Rectangle layoutBounds = MeasureSharedRichLayoutBounds(result, baseFont);
+                if (!layoutBounds.IsEmpty)
+                {
+                    foreach (SharedRichLayoutLine line in result.Lines)
+                    {
+                        line.Y -= layoutBounds.Top;
+                        foreach (SharedRichLayoutRun run in line.Runs)
+                        {
+                            run.X -= layoutBounds.Left;
+                        }
+                    }
+
+                    result.ContentWidth = Math.Max(1f, layoutBounds.Width);
+                    result.ContentHeight = Math.Max(1f, layoutBounds.Height);
+                }
+            }
+
+            return result;
+        }
+
+        private static Rectangle MeasureSharedRichReferenceLineInkBounds(Font baseFont)
+        {
+            if (baseFont == null)
+            {
+                return Rectangle.Empty;
+            }
+
+            const string sampleText = "ĄŻŚŃĘÓąćęłńóśźżgjpqy";
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                Size measureProbe = new Size(int.MaxValue, int.MaxValue);
+                TextFormatFlags textFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+                FontStyle sampleStyle = GetRichMeasurementFontStyle(baseFont.Style) & ~FontStyle.Underline;
+                using (Font sampleFont = new Font(baseFont.FontFamily, baseFont.Size, sampleStyle, GraphicsUnit.Point))
+                {
+                    float sampleWidth = TextRenderer.MeasureText(g, sampleText, sampleFont, measureProbe, textFlags).Width;
+                    float sampleLineHeight = Math.Max(
+                        sampleFont.GetHeight(g),
+                        TextRenderer.MeasureText(g, sampleText, sampleFont, measureProbe, textFlags).Height);
+                    var sampleLine = new SharedRichLayoutLine
+                    {
+                        Width = sampleWidth,
+                        AdvanceWidth = sampleWidth
+                    };
+                    sampleLine.Runs.Add(new SharedRichLayoutRun
+                    {
+                        Text = sampleText,
+                        Style = sampleStyle,
+                        Color = System.Drawing.Color.Black,
+                        X = 0f,
+                        Width = sampleWidth,
+                        Underline = false
+                    });
+
+                    return MeasureSharedRichLineInkBounds(sampleLine, sampleFont, sampleLineHeight);
+                }
+            }
+        }
+
+        private static Rectangle MeasureSharedRichLineInkBounds(SharedRichLayoutLine line, Font baseFont, float lineHeight)
+        {
+            const int sharedRichMeasurePaddingLeftPx = 8;
+            const int sharedRichMeasureRunRightPaddingPx = 12;
+            int width = Math.Max(1, (int)Math.Ceiling(line.Runs.Sum(run => run.Width)) + 32);
+            int height = Math.Max(1, (int)Math.Ceiling(lineHeight) + 16);
+            using (var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(System.Drawing.Color.White);
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                TextFormatFlags textFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+                foreach (SharedRichLayoutRun run in line.Runs)
+                {
+                    FontStyle textStyle = run.Style & ~FontStyle.Underline;
+                    using (Font runFont = new Font(baseFont.FontFamily, baseFont.Size, textStyle, GraphicsUnit.Point))
+                    {
+                        int x = (int)Math.Round(run.X) + sharedRichMeasurePaddingLeftPx;
+                        Rectangle rect = new Rectangle(x, 4, (int)Math.Ceiling(run.Width) + sharedRichMeasureRunRightPaddingPx, height - 8);
+                        TextRenderer.DrawText(g, run.Text, runFont, rect, run.Color, textFlags);
+                    }
+                }
+
+                if (TryGetNonWhiteBounds(bitmap, out Rectangle bounds))
+                {
+                    bounds.Offset(-sharedRichMeasurePaddingLeftPx, 0);
+                    return bounds;
+                }
+
+                return new Rectangle(0, 0, Math.Max(1, width - 16), Math.Max(1, (int)Math.Ceiling(lineHeight)));
+            }
+        }
+
+        private static Rectangle MeasureSharedRichLayoutBounds(SharedRichLayoutResult layout, Font baseFont)
+        {
+            const int sharedRichMeasurePaddingLeftPx = 8;
+            const int sharedRichMeasurePaddingTopPx = 8;
+            const int sharedRichMeasureRunRightPaddingPx = 12;
+            int width = Math.Max(1, (int)Math.Ceiling(layout.Lines.SelectMany(l => l.Runs).DefaultIfEmpty().Max(r => r?.X + r?.Width ?? 0f)) + 32);
+            int height = Math.Max(1, (int)Math.Ceiling(layout.Lines.DefaultIfEmpty().Max(l => (l?.Y ?? 0f) + layout.LineHeight)) + 32);
+            using (var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb))
+            using (Graphics g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(System.Drawing.Color.White);
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                TextFormatFlags textFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+                foreach (SharedRichLayoutLine line in layout.Lines)
+                {
+                    foreach (SharedRichLayoutRun run in line.Runs)
+                    {
+                        FontStyle textStyle = run.Style & ~FontStyle.Underline;
+                        using (Font runFont = new Font(baseFont.FontFamily, baseFont.Size, textStyle, GraphicsUnit.Point))
+                        {
+                            int x = (int)Math.Round(run.X) + sharedRichMeasurePaddingLeftPx;
+                            int y = (int)Math.Round(line.Y) + sharedRichMeasurePaddingTopPx;
+                            Rectangle rect = new Rectangle(
+                                x,
+                                y,
+                                (int)Math.Ceiling(run.Width) + sharedRichMeasureRunRightPaddingPx,
+                                (int)Math.Ceiling(layout.LineHeight) + 8);
+                            TextRenderer.DrawText(g, run.Text, runFont, rect, run.Color, textFlags);
+
+                            if (run.Underline)
+                            {
+                                float underlineOffset = Math.Max(1f, baseFont.Size * g.DpiY / 72f * 0.12f);
+                                float underlineY = y + layout.Ascent + underlineOffset;
+                                using (Pen underlinePen = new Pen(run.Color, Math.Max(1f, baseFont.Size * g.DpiY / 72f * 0.05f)))
+                                {
+                                    underlinePen.EndCap = LineCap.Flat;
+                                    underlinePen.StartCap = LineCap.Flat;
+                                    g.DrawLine(underlinePen, x, underlineY, x + run.Width, underlineY);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (TryGetNonWhiteBounds(bitmap, out Rectangle bounds))
+                {
+                    bounds.Offset(-sharedRichMeasurePaddingLeftPx, -sharedRichMeasurePaddingTopPx);
+                    return bounds;
+                }
+
+                return Rectangle.Empty;
+            }
+        }
+
+        private static float GetConsistentRichLineHeightPx(Font baseFont)
+        {
+            if (baseFont == null)
+            {
+                return 0f;
+            }
+
+            Rectangle referenceInkBounds = MeasureSharedRichReferenceLineInkBounds(baseFont);
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                Size measureProbe = new Size(int.MaxValue, int.MaxValue);
+                TextFormatFlags textFlags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+                float fallbackLineHeight = Math.Max(
+                    baseFont.GetHeight(g),
+                    TextRenderer.MeasureText(g, "ĄŻŚŃĘgjpqy", baseFont, measureProbe, textFlags).Height);
+                float referenceInkHeight = !referenceInkBounds.IsEmpty
+                    ? Math.Max(1f, referenceInkBounds.Height)
+                    : Math.Max(1f, fallbackLineHeight);
+                float lineGap = Math.Max(1f, referenceInkHeight * 0.20f);
+                return referenceInkHeight + lineGap;
+            }
+        }
+
+        private bool TryBuildSharedRichLayout(TextAnnotation annotation, out SharedRichLayoutResult layout)
+        {
+            layout = null;
+            if (annotation == null || annotation.AnnotationFont == null || !IsRichTextMode(annotation))
+            {
+                return false;
+            }
+
+            try
+            {
+                List<List<RichPdfTextRun>> runs = ExtractRenderableRichTextRuns(
+                    annotation.AnnotationText,
+                    annotation.AnnotationRichText,
+                    annotation.AnnotationFont);
+                if (runs == null || runs.Count == 0)
+                {
+                    return false;
+                }
+
+                layout = BuildSharedRichLayout(runs, annotation.AnnotationFont, annotation.AnnotationAlignment);
+                return layout != null && layout.Lines.Count > 0;
+            }
+            catch
+            {
+                layout = null;
+                return false;
+            }
+        }
+
+        private static System.Windows.Media.Color ToWpfColor(System.Drawing.Color color)
+        {
+            return System.Windows.Media.Color.FromArgb(color.A, color.R, color.G, color.B);
+        }
+
+        private static Bitmap ConvertWpfRenderTargetToBitmap(MediaRenderTargetBitmap renderTarget)
+        {
+            if (renderTarget == null)
+            {
+                return null;
+            }
+
+            var encoder = new MediaPngBitmapEncoder();
+            encoder.Frames.Add(MediaBitmapFrame.Create(renderTarget));
+            using (var stream = new MemoryStream())
+            {
+                encoder.Save(stream);
+                stream.Position = 0;
+                using (var temp = new Bitmap(stream))
+                {
+                    return new Bitmap(temp);
+                }
+            }
+        }
+
+        private static void NormalizeWpfRichDocument(
+            System.Windows.Documents.FlowDocument document,
+            Font baseFont,
+            System.Windows.Forms.HorizontalAlignment alignment,
+            double lineHeight)
+        {
+            if (document == null || baseFont == null)
+            {
+                return;
+            }
+
+            System.Windows.TextAlignment textAlignment;
+            switch (alignment)
+            {
+                case System.Windows.Forms.HorizontalAlignment.Center:
+                    textAlignment = System.Windows.TextAlignment.Center;
+                    break;
+                case System.Windows.Forms.HorizontalAlignment.Right:
+                    textAlignment = System.Windows.TextAlignment.Right;
+                    break;
+                default:
+                    textAlignment = System.Windows.TextAlignment.Left;
+                    break;
+            }
+
+            var range = new System.Windows.Documents.TextRange(document.ContentStart, document.ContentEnd);
+            range.ApplyPropertyValue(
+                System.Windows.Documents.TextElement.FontFamilyProperty,
+                new System.Windows.Media.FontFamily(baseFont.FontFamily.Name));
+            range.ApplyPropertyValue(
+                System.Windows.Documents.TextElement.FontSizeProperty,
+                (double)baseFont.Size);
+
+            foreach (System.Windows.Documents.Block block in document.Blocks)
+            {
+                if (block is System.Windows.Documents.Paragraph paragraph)
+                {
+                    paragraph.TextAlignment = textAlignment;
+                    paragraph.Margin = new System.Windows.Thickness(0);
+                    paragraph.Padding = new System.Windows.Thickness(0);
+                    paragraph.LineStackingStrategy = System.Windows.LineStackingStrategy.BlockLineHeight;
+                    paragraph.LineHeight = lineHeight;
+                }
+            }
+        }
+
+        private static bool TryRenderRichTextToBitmapWithWpf(
+            string plainText,
+            string richText,
+            Font baseFont,
+            System.Drawing.Color defaultTextColor,
+            System.Windows.Forms.HorizontalAlignment alignment,
+            int widthPx,
+            int heightPx,
+            System.Drawing.Color backgroundColor,
+            float fontScale,
+            bool trimVertical,
+            out Bitmap bitmap)
+        {
+            bitmap = null;
+            if (baseFont == null || widthPx <= 0 || heightPx <= 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                string renderableRichText = BuildRenderableRichTextRtf(plainText, richText, baseFont);
+                float scaledFontSize = Math.Max(0.1f, baseFont.Size * Math.Max(0.1f, fontScale));
+                using (var scaledFont = new Font(baseFont.FontFamily, scaledFontSize, baseFont.Style, GraphicsUnit.Point))
+                {
+                    const double leftInsetPx = 0d;
+                    const double rightInsetPx = 0d;
+
+                    var richTextBox = new System.Windows.Controls.RichTextBox
+                    {
+                        BorderThickness = new System.Windows.Thickness(0),
+                        Padding = new System.Windows.Thickness(leftInsetPx, 0, rightInsetPx, 0),
+                        IsReadOnly = true,
+                        IsDocumentEnabled = false,
+                        Focusable = false,
+                        Background = new System.Windows.Media.SolidColorBrush(ToWpfColor(backgroundColor)),
+                        Foreground = new System.Windows.Media.SolidColorBrush(ToWpfColor(defaultTextColor)),
+                        Width = Math.Max(1, widthPx),
+                        Height = Math.Max(1, heightPx),
+                        HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled,
+                        VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled
+                    };
+
+                    System.Windows.TextAlignment textAlignment;
+                    switch (alignment)
+                    {
+                        case System.Windows.Forms.HorizontalAlignment.Center:
+                            textAlignment = System.Windows.TextAlignment.Center;
+                            break;
+                        case System.Windows.Forms.HorizontalAlignment.Right:
+                            textAlignment = System.Windows.TextAlignment.Right;
+                            break;
+                        default:
+                            textAlignment = System.Windows.TextAlignment.Left;
+                            break;
+                    }
+
+                    var document = new System.Windows.Documents.FlowDocument
+                    {
+                        PagePadding = new System.Windows.Thickness(0),
+                        ColumnGap = 0,
+                        ColumnWidth = double.PositiveInfinity,
+                        FontFamily = new System.Windows.Media.FontFamily(scaledFont.FontFamily.Name),
+                        FontSize = scaledFont.Size,
+                        TextAlignment = textAlignment,
+                        LineStackingStrategy = System.Windows.LineStackingStrategy.BlockLineHeight,
+                        PageWidth = Math.Max(1d, widthPx - leftInsetPx - rightInsetPx),
+                        PageHeight = Math.Max(1, heightPx)
+                    };
+                    document.LineHeight = Math.Max(1d, GetConsistentRichLineHeightPx(scaledFont));
+                    richTextBox.Document = document;
+
+                    if (!string.IsNullOrWhiteSpace(renderableRichText))
+                    {
+                        using (var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(renderableRichText)))
+                        {
+                            var range = new System.Windows.Documents.TextRange(document.ContentStart, document.ContentEnd);
+                            range.Load(stream, System.Windows.DataFormats.Rtf);
+                        }
+                    }
+                    else
+                    {
+                        document.Blocks.Clear();
+                        document.Blocks.Add(new System.Windows.Documents.Paragraph(new System.Windows.Documents.Run(plainText ?? string.Empty)));
+                    }
+
+                    NormalizeWpfRichDocument(document, scaledFont, alignment, document.LineHeight);
+
+                    richTextBox.Measure(new System.Windows.Size(widthPx, heightPx));
+                    richTextBox.Arrange(new System.Windows.Rect(0, 0, widthPx, heightPx));
+                    richTextBox.UpdateLayout();
+
+                    var renderTarget = new MediaRenderTargetBitmap(
+                        Math.Max(1, widthPx),
+                        Math.Max(1, heightPx),
+                        96,
+                        96,
+                        MediaPixelFormats.Pbgra32);
+                    renderTarget.Render(richTextBox);
+
+                    Bitmap renderedBitmap = ConvertWpfRenderTargetToBitmap(renderTarget);
+                    if (renderedBitmap == null)
+                    {
+                        return false;
+                    }
+
+                    if (!trimVertical ||
+                        !TryGetNonTransparentVerticalBounds(renderedBitmap, out Rectangle verticalBounds))
+                    {
+                        bitmap = renderedBitmap;
+                        return bitmap != null;
+                    }
+
+                    const int richVerticalTrimTopPaddingPx = 0;
+                    const int richVerticalTrimBottomPaddingPx = 4;
+                    int expandedTop = Math.Max(0, verticalBounds.Top - richVerticalTrimTopPaddingPx);
+                    int expandedBottom = Math.Min(renderedBitmap.Height, verticalBounds.Bottom + richVerticalTrimBottomPaddingPx);
+                    Rectangle paddedVerticalBounds = Rectangle.FromLTRB(
+                        0,
+                        expandedTop,
+                        renderedBitmap.Width,
+                        Math.Max(expandedTop + 1, expandedBottom));
+
+                    var trimmedBitmap = new Bitmap(
+                        renderedBitmap.Width,
+                        Math.Max(1, paddedVerticalBounds.Height),
+                        PixelFormat.Format32bppArgb);
+                    using (Graphics graphics = Graphics.FromImage(trimmedBitmap))
+                    {
+                        graphics.Clear(System.Drawing.Color.Transparent);
+                        graphics.DrawImage(
+                            renderedBitmap,
+                            new Rectangle(0, 0, trimmedBitmap.Width, trimmedBitmap.Height),
+                            paddedVerticalBounds,
+                            GraphicsUnit.Pixel);
+                    }
+
+                    renderedBitmap.Dispose();
+                    bitmap = trimmedBitmap;
+                    return true;
+                }
+            }
+            catch
+            {
+                bitmap?.Dispose();
+                bitmap = null;
+                return false;
+            }
         }
 
         private static PointF GetRotationOffsetForBounds(int rotation, float width, float height)
@@ -9952,6 +13879,15 @@ namespace AnonPDF
             annotation.AnnotationRichText = dlg.IsRichTextMode ? dlg.AnnotationRichText : null;
             annotation.AnnotationAlignment = dlg.AnnotationAlignment;
             annotation.AnnotationRotation = dlg.AnnotationRotation;
+            if (dlg.IsRichTextMode)
+            {
+                RefreshRichContentSizeCache(annotation);
+            }
+            else
+            {
+                annotation.RichContentSizeCacheKey = null;
+                annotation.RichContentSizeCacheValue = SizeF.Empty;
+            }
             annotation.AnnotationBounds = new RectangleF(
                 annotation.AnnotationBounds.X,
                 annotation.AnnotationBounds.Y,
@@ -13327,6 +17263,10 @@ namespace AnonPDF
                 return;
             }
             DisplayPdfPage(currentPage);
+            if (HasVisibleRichTextAnnotationsOnPage(currentPage))
+            {
+                RequestBusyCursorForNextRichPreviewWarm();
+            }
             ApplyPendingWheelPageAnchor();
             ApplyPendingViewScrollRestore();
         }
@@ -13348,6 +17288,10 @@ namespace AnonPDF
                 // Render page using new scale.
                 // DisplayPdfPage should set pdfViewer.Image and pdfViewer.Size according to scaleFactor.
                 DisplayPdfPage(currentPage);
+                if (HasVisibleRichTextAnnotationsOnPage(currentPage))
+                {
+                    RequestBusyCursorForNextRichPreviewWarm();
+                }
 
                 // Set scrollbars so that the document point (pendingDocCoordX, pendingDocCoordY)
                 // ends up in the center of the visible area.
@@ -14171,12 +18115,206 @@ namespace AnonPDF
             maxScaleFactor = Math.Max(minScaleFactor * 3, 3.2f);
         }
 
+        private string GetSaveCurrentViewMenuText()
+        {
+            return LocalizedText("Menu_SaveCurrentView");
+        }
+
+        private void InitializeSaveCurrentViewMenuItem()
+        {
+            if (menuFileItem == null || saveCurrentViewMenuItem != null)
+            {
+                return;
+            }
+
+            saveCurrentViewMenuItem = new ToolStripMenuItem
+            {
+                Name = "saveCurrentViewMenuItem",
+                Enabled = false,
+                Text = GetSaveCurrentViewMenuText()
+            };
+            saveCurrentViewMenuItem.Click += SaveCurrentViewMenuItem_Click;
+
+            int insertIndex = toolStripMenuItemPrintSeparator != null
+                ? menuFileItem.DropDownItems.IndexOf(toolStripMenuItemPrintSeparator)
+                : -1;
+            if (insertIndex >= 0)
+            {
+                menuFileItem.DropDownItems.Insert(insertIndex, saveCurrentViewMenuItem);
+            }
+            else
+            {
+                menuFileItem.DropDownItems.Add(saveCurrentViewMenuItem);
+            }
+        }
+
+        private void UpdateSaveCurrentViewMenuState()
+        {
+            if (saveCurrentViewMenuItem == null)
+            {
+                return;
+            }
+
+            saveCurrentViewMenuItem.Enabled =
+                pdf != null &&
+                numPages > 0 &&
+                currentPage >= 1 &&
+                currentPage <= numPages &&
+                pdfViewer?.Image != null;
+        }
+
+        private Bitmap CaptureCurrentViewBitmap()
+        {
+            if (pdfViewer == null || pdfViewer.Image == null)
+            {
+                return null;
+            }
+
+            Stopwatch profileStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
+
+            Rectangle sourceViewportRect = GetPdfViewerVisibleViewportRectanglePx();
+            if (sourceViewportRect.IsEmpty || sourceViewportRect.Width <= 0 || sourceViewportRect.Height <= 0)
+            {
+                Size fallbackSize = pdfViewer.ClientSize;
+                if (fallbackSize.Width <= 0 || fallbackSize.Height <= 0)
+                {
+                    fallbackSize = pdfViewer.Image.Size;
+                }
+
+                sourceViewportRect = new Rectangle(Point.Empty, fallbackSize);
+            }
+
+            Rectangle imageBounds = new Rectangle(Point.Empty, pdfViewer.Image.Size);
+            sourceViewportRect.Intersect(imageBounds);
+            if (sourceViewportRect.Width <= 0 || sourceViewportRect.Height <= 0)
+            {
+                return null;
+            }
+
+            int targetWidth = sourceViewportRect.Width;
+            int targetHeight = sourceViewportRect.Height;
+            System.Drawing.Color backgroundColor = pdfViewer.BackColor;
+            if (pdfViewer.Parent is ScrollableControl scrollHost && scrollHost.ClientSize.Width > 0 && scrollHost.ClientSize.Height > 0)
+            {
+                targetWidth = scrollHost.ClientSize.Width;
+                targetHeight = scrollHost.ClientSize.Height;
+                backgroundColor = scrollHost.BackColor;
+            }
+
+            var bitmap = new Bitmap(Math.Max(1, targetWidth), Math.Max(1, targetHeight), PixelFormat.Format32bppArgb);
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(backgroundColor);
+                graphics.DrawImage(
+                    pdfViewer.Image,
+                    new Rectangle(0, 0, sourceViewportRect.Width, sourceViewportRect.Height),
+                    sourceViewportRect,
+                    GraphicsUnit.Pixel);
+
+                GraphicsState state = graphics.Save();
+                graphics.SetClip(new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+                graphics.TranslateTransform(-sourceViewportRect.X, -sourceViewportRect.Y);
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+
+                OnPaint(pdfViewer, new PaintEventArgs(graphics, sourceViewportRect));
+                graphics.Restore(state);
+            }
+
+            profileStopwatch?.Stop();
+            if (profileStopwatch != null)
+            {
+                LogDebug(
+                    $"ProfileCurrentViewCapture ms={profileStopwatch.ElapsedMilliseconds} " +
+                    $"viewport={sourceViewportRect.Width}x{sourceViewportRect.Height} target={bitmap.Width}x{bitmap.Height}");
+            }
+
+            return bitmap;
+        }
+
+        private void SaveCurrentViewToFile(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                throw new ArgumentException(LocalizedText("Err_OutputPathRequired"), nameof(filePath));
+            }
+
+            Stopwatch profileStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
+            using (Bitmap bitmap = CaptureCurrentViewBitmap())
+            {
+                if (bitmap == null)
+                {
+                    throw new InvalidOperationException(LocalizedText("Err_CurrentViewUnavailable"));
+                }
+
+                string extension = Path.GetExtension(filePath)?.ToLowerInvariant();
+                ImageFormat format = extension == ".bmp" ? ImageFormat.Bmp : ImageFormat.Png;
+                bitmap.Save(filePath, format);
+            }
+
+            profileStopwatch?.Stop();
+            if (profileStopwatch != null)
+            {
+                LogDebug($"ProfileSaveCurrentView ms={profileStopwatch.ElapsedMilliseconds} output='{filePath}'");
+            }
+        }
+
+        private void SaveCurrentViewMenuItem_Click(object sender, EventArgs e)
+        {
+            if (pdfViewer == null || pdfViewer.Image == null)
+            {
+                return;
+            }
+
+            string baseName = !string.IsNullOrWhiteSpace(inputPdfPath)
+                ? Path.GetFileNameWithoutExtension(inputPdfPath)
+                : LocalizedText("FileName_CurrentViewBase");
+            string initialDirectory = !string.IsNullOrWhiteSpace(inputPdfPath) && File.Exists(inputPdfPath)
+                ? Path.GetDirectoryName(inputPdfPath)
+                : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+            if (string.IsNullOrWhiteSpace(initialDirectory) || !Directory.Exists(initialDirectory))
+            {
+                initialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+            }
+
+            using (SaveFileDialog saveDialog = new SaveFileDialog())
+            {
+                saveDialog.Filter = LocalizedText("Dialog_Filter_SaveCurrentViewImage");
+                saveDialog.DefaultExt = "png";
+                saveDialog.AddExtension = true;
+                saveDialog.OverwritePrompt = true;
+                saveDialog.InitialDirectory = initialDirectory;
+                saveDialog.Title = LocalizedText("Dialog_Title_SaveCurrentView");
+                saveDialog.FileName = LocalizedFormat("FileName_CurrentViewPattern", baseName, currentPage);
+                if (saveDialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    SaveCurrentViewToFile(saveDialog.FileName);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show(
+                        this,
+                        string.Format(Resources.Err_Save, ex.Message),
+                        Resources.Title_Error,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+        }
+
         private void DisplayPdfPage(int pageNumber)
         {
             if (pdf == null || numPages == 0)
             {
                 CancelDeferredBusyCursorForPdfViewerPaint();
                 pdfViewer.Image = null;
+                UpdateSaveCurrentViewMenuState();
                 return;
             }
 
@@ -14205,6 +18343,7 @@ namespace AnonPDF
             }
 
             pdfViewer.Image = renderedPage;
+            UpdateSaveCurrentViewMenuState();
             if (holdBusyCursorUntilPdfViewerImageAssigned)
             {
                 holdBusyCursorUntilPdfViewerImageAssigned = false;
@@ -14216,6 +18355,10 @@ namespace AnonPDF
                 {
                     EndBusyCursor();
                 }
+            }
+            if (renderedPage != null && HasVisibleRichTextAnnotationsOnPage(pageNumber))
+            {
+                RequestBusyCursorForNextRichPreviewWarm();
             }
             commentPreviewOverlayReady = false;
             renderTimer.Stop();
@@ -14458,6 +18601,146 @@ namespace AnonPDF
             }
 
             return File.Exists(fontFile) ? fontFile : null;
+        }
+
+        private static FontStyle GetRichPdfFontStyle(FontStyle style)
+        {
+            FontStyle resolved = FontStyle.Regular;
+            if (style.HasFlag(FontStyle.Bold))
+            {
+                resolved |= FontStyle.Bold;
+            }
+
+            if (style.HasFlag(FontStyle.Italic))
+            {
+                resolved |= FontStyle.Italic;
+            }
+
+            return resolved;
+        }
+
+        private static bool HasFontWidthVariantToken(string fontFamilyName)
+        {
+            if (string.IsNullOrWhiteSpace(fontFamilyName))
+            {
+                return false;
+            }
+
+            string normalized = NormalizeFontName(fontFamilyName);
+            string baseNormalized = NormalizeFontName(RemoveWidthTokens(fontFamilyName));
+            return !string.Equals(normalized, baseNormalized, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static List<(string DisplayName, string FileValue)> GetFontRegistryEntries()
+        {
+            var entries = new List<(string DisplayName, string FileValue)>();
+
+            void ReadFontsKey(Microsoft.Win32.RegistryKey root)
+            {
+                using (var regKey = root.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"))
+                {
+                    if (regKey == null)
+                    {
+                        return;
+                    }
+
+                    foreach (string valueName in regKey.GetValueNames())
+                    {
+                        object value = regKey.GetValue(valueName);
+                        if (value == null)
+                        {
+                            continue;
+                        }
+
+                        entries.Add((valueName, value.ToString()));
+                    }
+                }
+            }
+
+            ReadFontsKey(Microsoft.Win32.Registry.LocalMachine);
+            ReadFontsKey(Microsoft.Win32.Registry.CurrentUser);
+            return entries;
+        }
+
+        private static bool HasExactFontRegistryFace(string fontFamilyName, FontStyle style)
+        {
+            if (string.IsNullOrWhiteSpace(fontFamilyName))
+            {
+                return false;
+            }
+
+            string targetNormalized = NormalizeFontName(fontFamilyName);
+            FontStyle requestedStyle = GetRichPdfFontStyle(style);
+            bool wantsBold = requestedStyle.HasFlag(FontStyle.Bold);
+            bool wantsItalic = requestedStyle.HasFlag(FontStyle.Italic);
+
+            foreach ((string displayName, string _) in GetFontRegistryEntries())
+            {
+                string regNormalized = NormalizeFontName(displayName);
+                if (string.IsNullOrWhiteSpace(regNormalized))
+                {
+                    continue;
+                }
+
+                bool exactFamilyMatch = requestedStyle == FontStyle.Regular
+                    ? string.Equals(regNormalized, targetNormalized, StringComparison.OrdinalIgnoreCase)
+                    : regNormalized.StartsWith(targetNormalized + " ", StringComparison.OrdinalIgnoreCase);
+                if (!exactFamilyMatch)
+                {
+                    continue;
+                }
+
+                string regLower = regNormalized.ToLowerInvariant();
+                bool hasBold = regLower.Contains("bold");
+                bool hasItalic = regLower.Contains("italic") || regLower.Contains("oblique");
+
+                if (requestedStyle == FontStyle.Regular)
+                {
+                    return true;
+                }
+
+                if (hasBold == wantsBold && hasItalic == wantsItalic)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool CanRenderRichTextAsPdfText(Font baseFont, IEnumerable<FontStyle> styles)
+        {
+            if (baseFont == null)
+            {
+                return false;
+            }
+
+            FontStyle baseStyle = GetRichPdfFontStyle(baseFont.Style);
+            if (HasFontWidthVariantToken(baseFont.FontFamily.Name) &&
+                !HasExactFontRegistryFace(baseFont.FontFamily.Name, baseStyle))
+            {
+                return false;
+            }
+
+            if (styles == null)
+            {
+                return true;
+            }
+
+            foreach (FontStyle style in styles.Select(GetRichPdfFontStyle).Distinct())
+            {
+                if (style == FontStyle.Regular)
+                {
+                    continue;
+                }
+
+                if (!HasExactFontRegistryFace(baseFont.FontFamily.Name, style))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static List<string> WrapTextToWidth(PdfFont font, string text, float fontSize, float maxWidth)
@@ -16527,6 +20810,7 @@ namespace AnonPDF
             zoomPending = false;
 
             pdfViewer.Image = null;
+            UpdateSaveCurrentViewMenuState();
             pdfViewer.SizeMode = PictureBoxSizeMode.Normal;
             ZoomPanel panel = mainAppSplitContainer.Panel2.Controls[0] as ZoomPanel;
             if (panel is ZoomPanel)
@@ -19701,6 +23985,7 @@ namespace AnonPDF
             foreach (TextAnnotation annotation in texts)
             {
                 EnsureTextAnnotationTimestamps(annotation);
+                RepairRichAnnotationBoundsIfNeeded(annotation);
             }
 
             List<RasterObject> rasters = (projectData.RasterObjects ?? new List<RasterObject>())
@@ -22781,15 +27066,7 @@ namespace AnonPDF
                 annotationToMove = null;
                 isMoving = false;
                 textMoveMouseOffset = PointF.Empty;
-                bool restoredRedactionMode = TryRestoreRedactionSelectionModeFromHitBlock(e.Location);
-                if (!IsRedactionSelectionModeEnabled() && !restoredRedactionMode)
-                {
-                    isDrawing = false;
-                    currentSelection = RectangleF.Empty;
-                    UpdateCurrentSelectionOverlay(RectangleF.Empty);
-                    pdfViewer.Invalidate();
-                    return;
-                }
+                TryRestoreRedactionSelectionModeFromHitBlock(e.Location);
                 isDrawing = true;
                 if (IsRedactionSelectionModeEnabled())
                 {
@@ -23017,7 +27294,7 @@ namespace AnonPDF
                 int previousRotation = NormalizeRotation(annotationToRotate.AnnotationRotation);
                 annotationToRotate.AnnotationRotation = updatedRotation;
                 SizeF contentSize = IsRichTextMode(annotationToRotate)
-                    ? GetRichAnnotationContentSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationRichText, annotationToRotate.AnnotationFont)
+                    ? GetRichAnnotationContentSize(annotationToRotate)
                     : GetAnnotationPlainContentSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationFont);
                 SizeF rotatedSize = GetAnnotationOuterSizeFromContent(
                     contentSize,
@@ -23843,9 +28120,26 @@ namespace AnonPDF
                     return;
                 }
 
-                if (isScalingTextAnnotation)
+            if (isScalingTextAnnotation)
+            {
+                bool changed = textRotationInteractionChanged;
+                TextAnnotation scaledAnnotation = annotationToScale;
+                bool waitForRichFinalize = changed && scaledAnnotation != null && IsRichTextMode(scaledAnnotation);
+                if (waitForRichFinalize)
                 {
-                    bool changed = textRotationInteractionChanged;
+                    BeginBusyCursorUntilNextPdfViewerPaint();
+                }
+
+                try
+                {
+                    if (changed && scaledAnnotation != null && scaledAnnotation.HasLeaderArrow)
+                    {
+                        scaledAnnotation.LeaderAnchorKind = GetClosestTextLeaderAnchorKind(scaledAnnotation, scaledAnnotation.LeaderEndPoint);
+                    }
+                    if (changed && scaledAnnotation != null && IsRichTextMode(scaledAnnotation))
+                    {
+                        RefreshRichContentSizeCache(scaledAnnotation);
+                    }
                     ResetTextRotationInteractionState();
                     this.Cursor = Cursors.Default;
                     if (changed)
@@ -23858,6 +28152,16 @@ namespace AnonPDF
                     pdfViewer.Invalidate();
                     return;
                 }
+                catch
+                {
+                    if (waitForRichFinalize)
+                    {
+                        CancelDeferredBusyCursorForPdfViewerPaint();
+                    }
+
+                    throw;
+                }
+            }
 
                 if (isDraggingTextLeaderHandle)
                 {
@@ -24193,6 +28497,7 @@ namespace AnonPDF
                         {
                             bool additiveSelection = (Control.ModifierKeys & Keys.Control) == Keys.Control;
                             TrySelectObjectsInMarquee(currentSelection, additiveSelection);
+                            pdfViewer.Invalidate();
                         }
                     }
                 }
@@ -26118,6 +30423,8 @@ namespace AnonPDF
                 return;
             }
 
+            bool isRichAnnotation = IsRichTextMode(annotation);
+
             iText.Kernel.Pdf.PdfPage page = pdfDoc.GetPage(annotation.PageNumber);
             var pdfCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page);
 
@@ -26134,6 +30441,7 @@ namespace AnonPDF
             bool baseRotationBaked = pagesWithBakedRotation != null && pagesWithBakedRotation.Contains(annotation.PageNumber);
             int rotation = baseRotationBaked ? GetRotationOffset(annotation.PageNumber) : GetEffectiveRotationDegrees(annotation.PageNumber);
             int annotationRotation = NormalizeRotation(annotation.AnnotationRotation);
+            float pdfTopInsetPt = Math.Max(0.6f, fontSize * 0.06f);
 
             float dpiX;
             float dpiY;
@@ -26174,12 +30482,14 @@ namespace AnonPDF
                 annotation.AnnotationBounds.Y,
                 annotation.AnnotationBounds.Width * scaleX,
                 annotation.AnnotationBounds.Height * scaleY);
-            float framePaddingXPt = GetAnnotationFramePadding(annotation) * scaleX;
-            float framePaddingYPt = GetAnnotationFramePadding(annotation) * scaleY;
+            float framePaddingXPt = GetAnnotationInnerFrameMargin(annotation) * scaleX;
+            float framePaddingYPt = GetAnnotationInnerFrameMargin(annotation) * scaleY;
             System.Drawing.Color annotationBorderColor = GetAnnotationBorderColor(annotation);
             float annotationBorderWidthPt = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) * scaleX;
             float maxGdiWidthPt = 0f;
             float maxPdfWidth = 0f;
+            float maxPdfAscentPt = 0f;
+            float minPdfDescentPt = 0f;
             var lineRuns = new List<List<(string Text, PdfFont Font)>>();
 
             List<(string Text, PdfFont Font)> BuildRuns(string line)
@@ -26228,6 +30538,8 @@ namespace AnonPDF
                 foreach (var run in runs)
                 {
                     linePdfWidth += run.Font.GetWidth(run.Text, fontSize);
+                    maxPdfAscentPt = Math.Max(maxPdfAscentPt, run.Font.GetAscent(run.Text, fontSize));
+                    minPdfDescentPt = Math.Min(minPdfDescentPt, run.Font.GetDescent(run.Text, fontSize));
                 }
 
                 if (lineGdiWidth > maxGdiWidthPt)
@@ -26237,12 +30549,27 @@ namespace AnonPDF
                 }
             }
 
-            SizeF contentSize = GetAnnotationContentSize(annotation);
+            float pdfInkHeightPt = Math.Max(0f, maxPdfAscentPt - minPdfDescentPt);
+            if (pdfInkHeightPt > 0.01f)
+            {
+                lineHeightPt = Math.Max(lineHeightPt, pdfInkHeightPt);
+                gdiAscentPt = Math.Max(gdiAscentPt, maxPdfAscentPt);
+            }
+
+            if (DebugLogEnabled)
+            {
+                LogDebug(
+                    $"TextPdfMetrics annotation={annotation.Id ?? "-"} font={annotation.AnnotationFont?.FontFamily?.Name}@{fontSize:0.###} " +
+                    $"gdiAscentPt={gdiAscentPt:0.###} pdfAscentPt={maxPdfAscentPt:0.###} pdfDescentPt={minPdfDescentPt:0.###} lineHeightPt={lineHeightPt:0.###} rich={isRichAnnotation}");
+            }
+
+            SizeF contentSize = isRichAnnotation
+                ? GetFastTextAnnotationContentSize(annotation)
+                : GetInteractiveAwareAnnotationContentSize(annotation);
             float contentWidthPt = contentSize.Width * scaleX;
             float contentHeightPt = contentSize.Height * scaleY;
             float layoutWidth = contentWidthPt + (2f * framePaddingXPt);
             float layoutHeight = contentHeightPt + (2f * framePaddingYPt);
-            bool isRichAnnotation = IsRichTextMode(annotation);
             if (isRichAnnotation)
             {
                 contentWidthPt = Math.Max(1f, contentWidthPt);
@@ -26266,8 +30593,33 @@ namespace AnonPDF
             System.Drawing.Color annotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
             System.Drawing.Color leaderLineColor = GetEffectiveTextLeaderLineColor(annotation);
             float leaderLineWidthPt = Math.Max(0.5f, GetEffectiveTextLeaderLineWidth(annotation) * ((scaleX + scaleY) / 2f));
+            SharedRichLayoutResult sharedRichLayout = null;
+            RichHtmlPdfRenderResult richHtmlRender = null;
+            float richFrameTopShiftPt = 0f;
+            if (isRichAnnotation &&
+                TryBuildSharedRichLayout(annotation, out sharedRichLayout) &&
+                sharedRichLayout != null)
+            {
+                if (!TryBuildRichHtmlPdfRenderResult(
+                    annotation,
+                    contentWidthPt,
+                    contentHeightPt,
+                    framePaddingXPt,
+                    framePaddingYPt,
+                    layoutWidth,
+                    layoutHeight,
+                    sharedRichLayout,
+                    out richHtmlRender))
+                {
+                    float compositeInkTop = sharedRichLayout.Lines.Count > 0
+                        ? sharedRichLayout.Lines.Min(line => line.Y + line.InkTop)
+                        : sharedRichLayout.ReferenceInkTop;
+                    float referenceInkTop = Math.Max(0f, sharedRichLayout.ReferenceInkTop);
+                    richFrameTopShiftPt = Math.Max(0f, (compositeInkTop - referenceInkTop) * scaleY);
+                }
+            }
 
-            PointF TransformFramePoint(float x, float y)
+            PointF TransformLocalPoint(float x, float y)
             {
                 float tx = (x * rotCos) - (y * rotSin) + rotationOffset.X;
                 float ty = (x * rotSin) + (y * rotCos) + rotationOffset.Y;
@@ -26276,13 +30628,41 @@ namespace AnonPDF
                     scaledAnnotationBounds.Y + ty);
             }
 
-            PointF[] viewCorners = new[]
+            PointF TransformFramePoint(float x, float y)
             {
-                TransformFramePoint(0f, 0f),
-                TransformFramePoint(layoutWidth, 0f),
-                TransformFramePoint(layoutWidth, layoutHeight),
-                TransformFramePoint(0f, layoutHeight)
-            };
+                return TransformLocalPoint(x, y - richFrameTopShiftPt);
+            }
+
+            RectangleF viewLocalFrameRect;
+            PointF[] viewCorners;
+            if (richHtmlRender != null)
+            {
+                RectangleF frameRect = richHtmlRender.FrameRectTopDownPt;
+                frameRect = RectangleF.FromLTRB(
+                    Math.Max(0f, frameRect.Left - framePaddingXPt),
+                    Math.Max(0f, frameRect.Top - framePaddingYPt),
+                    Math.Min(layoutWidth, frameRect.Right + framePaddingXPt),
+                    Math.Min(layoutHeight, frameRect.Bottom + framePaddingYPt));
+                viewLocalFrameRect = frameRect;
+                viewCorners = new[]
+                {
+                    TransformLocalPoint(viewLocalFrameRect.Left, viewLocalFrameRect.Top),
+                    TransformLocalPoint(viewLocalFrameRect.Right, viewLocalFrameRect.Top),
+                    TransformLocalPoint(viewLocalFrameRect.Right, viewLocalFrameRect.Bottom),
+                    TransformLocalPoint(viewLocalFrameRect.Left, viewLocalFrameRect.Bottom)
+                };
+            }
+            else
+            {
+                viewLocalFrameRect = new RectangleF(0f, 0f, layoutWidth, layoutHeight);
+                viewCorners = new[]
+                {
+                    TransformFramePoint(viewLocalFrameRect.Left, viewLocalFrameRect.Top),
+                    TransformFramePoint(viewLocalFrameRect.Right, viewLocalFrameRect.Top),
+                    TransformFramePoint(viewLocalFrameRect.Right, viewLocalFrameRect.Bottom),
+                    TransformFramePoint(viewLocalFrameRect.Left, viewLocalFrameRect.Bottom)
+                };
+            }
 
             if (annotation.HasLeaderArrow)
             {
@@ -26369,7 +30749,20 @@ namespace AnonPDF
 
             if (annotationBorderColor.A > 0 && annotationBorderWidthPt > 0f)
             {
-                PointF[] pdfCorners = viewCorners
+                float borderOutsetPt = annotationBorderWidthPt * 0.5f;
+                RectangleF borderLocalFrameRect = RectangleF.FromLTRB(
+                    viewLocalFrameRect.Left - borderOutsetPt,
+                    viewLocalFrameRect.Top - borderOutsetPt,
+                    viewLocalFrameRect.Right + borderOutsetPt,
+                    viewLocalFrameRect.Bottom + borderOutsetPt);
+
+                PointF[] pdfCorners = new[]
+                    {
+                        TransformLocalPoint(borderLocalFrameRect.Left, borderLocalFrameRect.Top),
+                        TransformLocalPoint(borderLocalFrameRect.Right, borderLocalFrameRect.Top),
+                        TransformLocalPoint(borderLocalFrameRect.Right, borderLocalFrameRect.Bottom),
+                        TransformLocalPoint(borderLocalFrameRect.Left, borderLocalFrameRect.Bottom)
+                    }
                     .Select(point => ConvertPointToPdfCoordinates(point, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked))
                     .ToArray();
 
@@ -26387,6 +30780,51 @@ namespace AnonPDF
 
             if (isRichAnnotation)
             {
+                if (richHtmlRender != null &&
+                    TryRenderRichHtmlPdfToPage(
+                        pdfDoc,
+                        pdfCanvas,
+                        annotation,
+                        richHtmlRender,
+                        rotation,
+                        baseRotationBaked,
+                        scaledAnnotationBounds,
+                        rotCos,
+                        rotSin,
+                        rotationOffset))
+                {
+                    return;
+                }
+
+                if (TryRenderRichTextAnnotationAsTextToPdf(
+                    pdfCanvas,
+                    annotation,
+                    rotation,
+                    baseRotationBaked,
+                    scaledAnnotationBounds,
+                    framePaddingXPt,
+                    framePaddingYPt,
+                    contentWidthPt,
+                    contentHeightPt,
+                    rotCos,
+                    rotSin,
+                    rotationOffset,
+                    cos,
+                    sin,
+                    dpiX,
+                    dpiY,
+                    lineHeightPt,
+                    gdiAscentPt + pdfTopInsetPt,
+                    sharedRichLayout))
+                {
+                    return;
+                }
+
+                if (DebugLogEnabled)
+                {
+                    LogDebug($"RichPdfExportFallback annotation={annotation.Id ?? "-"}");
+                }
+
                 float richDpiX;
                 float richDpiY;
                 using (Graphics gRich = Graphics.FromHwnd(IntPtr.Zero))
@@ -26395,44 +30833,68 @@ namespace AnonPDF
                     richDpiY = gRich.DpiY;
                 }
 
-                int bitmapWidth = Math.Max(1, (int)Math.Ceiling(contentWidthPt * (richDpiX / 72f) * 2f));
-                int bitmapHeight = Math.Max(1, (int)Math.Ceiling(contentHeightPt * (richDpiY / 72f) * 2f));
+                float richPreviewFontScale = Math.Max(0.1f, 72f / richDpiY);
+                int bitmapWidth = Math.Max(1, (int)Math.Ceiling(contentSize.Width));
+                int bitmapHeight = Math.Max(1, (int)Math.Ceiling(contentSize.Height));
                 float richAlignmentOffset = GetRichAlignmentOffset(richDpiX, annotation.AnnotationAlignment);
-                using (Bitmap richBitmap = RenderRichTextToBitmap(annotation, bitmapWidth, bitmapHeight, System.Drawing.Color.Transparent, 2f))
-                using (var pngStream = new MemoryStream())
+                Bitmap richBitmap = GetRichTextPreviewBitmap(
+                    annotation,
+                    bitmapWidth,
+                    bitmapHeight,
+                    richPreviewFontScale,
+                    useInteractionPlaceholder: false);
+                if (richBitmap != null)
                 {
-                    richBitmap.Save(pngStream, ImageFormat.Png);
-                    var imageData = iText.IO.Image.ImageDataFactory.Create(pngStream.ToArray());
+                    Rectangle richSourceRect = BuildRichBitmapSourceRect(richBitmap);
+                    RectangleF richLayoutRect = BuildRichBitmapLayoutRect(
+                        annotation,
+                        richSourceRect,
+                        contentWidthPt,
+                        contentHeightPt,
+                        72f / richDpiX,
+                        richAlignmentOffset);
 
-                    PointF TransformCorner(float x, float y)
+                    using (Bitmap croppedRichBitmap = CropBitmap(richBitmap, richSourceRect))
+                    using (var pngStream = new MemoryStream())
                     {
-                        float localX = x - richAlignmentOffset + framePaddingXPt;
-                        float localY = y + framePaddingYPt;
-                        float tx = (localX * rotCos) - (localY * rotSin) + rotationOffset.X;
-                        float ty = (localX * rotSin) + (localY * rotCos) + rotationOffset.Y;
-                        return new PointF(
-                            scaledAnnotationBounds.X + tx,
-                            scaledAnnotationBounds.Y + ty);
+                        if (croppedRichBitmap == null)
+                        {
+                            return;
+                        }
+
+                        croppedRichBitmap.Save(pngStream, ImageFormat.Png);
+                        var imageData = iText.IO.Image.ImageDataFactory.Create(pngStream.ToArray());
+
+                        PointF TransformCorner(float x, float y)
+                        {
+                            float localX = x + framePaddingXPt;
+                            float localY = y + framePaddingYPt;
+                            float tx = (localX * rotCos) - (localY * rotSin) + rotationOffset.X;
+                            float ty = (localX * rotSin) + (localY * rotCos) + rotationOffset.Y;
+                            return new PointF(
+                                scaledAnnotationBounds.X + tx,
+                                scaledAnnotationBounds.Y + ty);
+                        }
+
+                        PointF topLeftView = TransformCorner(richLayoutRect.Left, richLayoutRect.Top);
+                        PointF topRightView = TransformCorner(richLayoutRect.Right, richLayoutRect.Top);
+                        PointF bottomLeftView = TransformCorner(richLayoutRect.Left, richLayoutRect.Bottom);
+                        PointF bottomRightView = TransformCorner(richLayoutRect.Right, richLayoutRect.Bottom);
+
+                        PointF topLeftPdf = ConvertPointToPdfCoordinates(topLeftView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                        PointF topRightPdf = ConvertPointToPdfCoordinates(topRightView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                        PointF bottomLeftPdf = ConvertPointToPdfCoordinates(bottomLeftView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+                        PointF bottomRightPdf = ConvertPointToPdfCoordinates(bottomRightView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
+
+                        float a = bottomRightPdf.X - bottomLeftPdf.X;
+                        float b = bottomRightPdf.Y - bottomLeftPdf.Y;
+                        float c = topLeftPdf.X - bottomLeftPdf.X;
+                        float d = topLeftPdf.Y - bottomLeftPdf.Y;
+                        float e = bottomLeftPdf.X;
+                        float f = bottomLeftPdf.Y;
+
+                        pdfCanvas.AddImageWithTransformationMatrix(imageData, a, b, c, d, e, f, false);
                     }
-
-                    PointF topLeftView = TransformCorner(0f, 0f);
-                    PointF topRightView = TransformCorner(contentWidthPt, 0f);
-                    PointF bottomLeftView = TransformCorner(0f, contentHeightPt);
-                    PointF bottomRightView = TransformCorner(contentWidthPt, contentHeightPt);
-
-                    PointF topLeftPdf = ConvertPointToPdfCoordinates(topLeftView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
-                    PointF topRightPdf = ConvertPointToPdfCoordinates(topRightView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
-                    PointF bottomLeftPdf = ConvertPointToPdfCoordinates(bottomLeftView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
-                    PointF bottomRightPdf = ConvertPointToPdfCoordinates(bottomRightView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
-
-                    float a = bottomRightPdf.X - bottomLeftPdf.X;
-                    float b = bottomRightPdf.Y - bottomLeftPdf.Y;
-                    float c = topLeftPdf.X - bottomLeftPdf.X;
-                    float d = topLeftPdf.Y - bottomLeftPdf.Y;
-                    float e = bottomLeftPdf.X;
-                    float f = bottomLeftPdf.Y;
-
-                    pdfCanvas.AddImageWithTransformationMatrix(imageData, a, b, c, d, e, f, false);
                 }
 
                 return;
@@ -26466,7 +30928,7 @@ namespace AnonPDF
 
                 float localY = i * lineHeightPt;
                 float localBaseX = framePaddingXPt + localX;
-                float localBaseY = framePaddingYPt + localY + gdiAscentPt;
+                float localBaseY = framePaddingYPt + localY + gdiAscentPt + pdfTopInsetPt;
                 float rotatedX = localBaseX * rotCos - localBaseY * rotSin + rotationOffset.X;
                 float rotatedY = localBaseX * rotSin + localBaseY * rotCos + rotationOffset.Y;
                 PointF baselineView = new PointF(
@@ -28426,9 +32888,20 @@ namespace AnonPDF
                 return;
             }
 
+            bool logRichResize = ShouldLogRichResizeDiagnostics() && ReferenceEquals(annotation, annotationToScale);
+            Stopwatch drawStopwatch = logRichResize ? Stopwatch.StartNew() : null;
+
+            if (!IsRichTextMode(annotation))
+            {
+                EnsureRichAnnotationBoundsSynchronized(annotation);
+            }
+
             var state = graphics.Save();
+            Bitmap richPreviewBitmap = null;
+            bool disposeRichPreviewBitmap = false;
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+            graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
 
             try
             {
@@ -28440,23 +32913,66 @@ namespace AnonPDF
                 );
 
                 bool isSelectedAnnotation = IsTextAnnotationSelected(annotation);
-                PointF[] textFrameCorners = null;
-                bool hasTextFrame = TryGetAnnotationTextFrameGeometry(
-                    annotation,
-                    graphics.DpiX,
-                    graphics.DpiY,
-                    out textFrameCorners,
-                    out _,
-                    out _,
-                    out _);
                 System.Drawing.Color annotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
                 System.Drawing.Color annotationBorderColor = GetAnnotationBorderColor(annotation);
                 System.Drawing.Color leaderLineColor = GetEffectiveTextLeaderLineColor(annotation);
                 bool isRich = IsRichTextMode(annotation);
                 float annotationBorderWidth = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth);
+                float annotationBorderWidthPx = GetAnnotationBorderWidthScreenPx(annotation.AnnotationBorderWidth, scaleFactor, graphics.DpiX, graphics.DpiY);
                 float annotationFrameMargin = NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
                 float framePaddingX = (annotationBorderWidth + annotationFrameMargin) * scaleFactor * 72f / graphics.DpiX;
                 float framePaddingY = (annotationBorderWidth + annotationFrameMargin) * scaleFactor * 72f / graphics.DpiY;
+                int annotationRotation = NormalizeRotation(annotation.AnnotationRotation);
+                SizeF contentSize = GetInteractiveAwareAnnotationContentSize(annotation);
+                float contentWidth = contentSize.Width * scaleFactor * 72f / graphics.DpiX;
+                float contentHeight = contentSize.Height * scaleFactor * 72f / graphics.DpiY;
+                int richPreviewWidthPx = Math.Max(1, (int)Math.Ceiling(Math.Max(1f, contentWidth)));
+                int richPreviewHeightPx = Math.Max(1, (int)Math.Ceiling(Math.Max(1f, contentHeight)));
+                float richPreviewFontScale = Math.Max(0.1f, scaleFactor * 72f / graphics.DpiY);
+                bool useInteractionPlaceholder = isRich && IsRichTextPreviewInteractionActive(annotation);
+                float interactionSnapshotContentWidthPx = contentWidth;
+                float interactionSnapshotContentHeightPx = contentHeight;
+                float interactionSnapshotFramePaddingX = framePaddingX;
+                float interactionSnapshotFramePaddingY = framePaddingY;
+                RectangleF interactionSnapshotFrameLocalRect = RectangleF.Empty;
+                if (useInteractionPlaceholder &&
+                    annotation == annotationToScale &&
+                    isScalingTextAnnotation &&
+                    !textTransformStartContentSize.IsEmpty)
+                {
+                    interactionSnapshotContentWidthPx = textTransformStartContentSize.Width * scaleFactor * 72f / graphics.DpiX;
+                    interactionSnapshotContentHeightPx = textTransformStartContentSize.Height * scaleFactor * 72f / graphics.DpiY;
+                    interactionSnapshotFramePaddingX = (textScaleStartBorderWidth + textScaleStartFrameMargin) * scaleFactor * 72f / graphics.DpiX;
+                    interactionSnapshotFramePaddingY = (textScaleStartBorderWidth + textScaleStartFrameMargin) * scaleFactor * 72f / graphics.DpiY;
+                    TryGetRichPreviewInkLocalFrameRectForContentSize(annotation, graphics.DpiX, graphics.DpiY, contentSize, out interactionSnapshotFrameLocalRect);
+                }
+                if (isRich)
+                {
+                    richPreviewBitmap = GetRichTextPreviewBitmap(
+                        annotation,
+                        richPreviewWidthPx,
+                        richPreviewHeightPx,
+                        richPreviewFontScale,
+                        useInteractionPlaceholder,
+                        interactionSnapshotContentWidthPx,
+                        interactionSnapshotContentHeightPx,
+                        interactionSnapshotFramePaddingX,
+                        interactionSnapshotFramePaddingY,
+                        interactionSnapshotFrameLocalRect,
+                        trimVertical: true);
+                    disposeRichPreviewBitmap = DisableRichTextPreviewCachesForDiagnostics && richPreviewBitmap != null;
+                }
+
+                PointF[] textFrameCorners = null;
+                bool hasTextFrame = TryGetAnnotationTextFrameGeometryForContentSize(
+                    annotation,
+                    graphics.DpiX,
+                    graphics.DpiY,
+                    contentSize,
+                    out textFrameCorners,
+                    out _,
+                    out _,
+                    out _);
 
                 if (annotation.HasLeaderArrow &&
                     TryGetAnnotationLeaderGeometry(annotation, graphics.DpiX, graphics.DpiY, out PointF leaderAnchor, out PointF leaderEnd, out PointF leaderLeft, out PointF leaderRight, out PointF leaderLineEnd))
@@ -28505,7 +33021,9 @@ namespace AnonPDF
                     }
                 }
 
-                if (hasTextFrame && annotationBackgroundColor.A > 0)
+                bool interactionSnapshotIncludesFrame = useInteractionPlaceholder && activeTextInteractionPreviewIncludesFrame;
+
+                if (!interactionSnapshotIncludesFrame && hasTextFrame && annotationBackgroundColor.A > 0)
                 {
                     using (SolidBrush backgroundBrush = new SolidBrush(annotationBackgroundColor))
                     {
@@ -28520,7 +33038,7 @@ namespace AnonPDF
                         return;
                     }
 
-                    using (Pen borderPen = new Pen(annotationBorderColor, Math.Max(1f, annotationBorderWidth * scaleFactor)))
+                    using (Pen borderPen = new Pen(annotationBorderColor, Math.Max(1f, annotationBorderWidthPx)))
                     {
                         borderPen.Alignment = PenAlignment.Inset;
                         borderPen.LineJoin = LineJoin.Miter;
@@ -28548,6 +33066,30 @@ namespace AnonPDF
                     }
                 }
 
+                void DrawRichLoadingPlaceholder()
+                {
+                    RectangleF placeholderRect = hasTextFrame
+                        ? RectangleF.FromLTRB(
+                            textFrameCorners.Min(point => point.X),
+                            textFrameCorners.Min(point => point.Y),
+                            textFrameCorners.Max(point => point.X),
+                            textFrameCorners.Max(point => point.Y))
+                        : new RectangleF(rect.X, rect.Y, Math.Max(1f, rect.Width), Math.Max(1f, rect.Height));
+                    if (placeholderRect.Width <= 2f || placeholderRect.Height <= 2f)
+                    {
+                        return;
+                    }
+
+                    using Font placeholderFont = new Font("Segoe UI Symbol", Math.Max(10f, Math.Min(24f, Math.Min(placeholderRect.Width, placeholderRect.Height) * 0.32f)), FontStyle.Regular, GraphicsUnit.Pixel);
+                    using SolidBrush placeholderBrush = new SolidBrush(System.Drawing.Color.FromArgb(160, 90, 90, 90));
+                    using StringFormat placeholderFormat = new StringFormat
+                    {
+                        Alignment = StringAlignment.Center,
+                        LineAlignment = StringAlignment.Center
+                    };
+                    graphics.DrawString("\u231B", placeholderFont, placeholderBrush, placeholderRect, placeholderFormat);
+                }
+
                 StringAlignment align;
                 switch (annotation.AnnotationAlignment)
                 {
@@ -28571,43 +33113,155 @@ namespace AnonPDF
                 stringFormat.FormatFlags = StringFormatFlags.NoWrap;
                 stringFormat.Trimming = StringTrimming.None;
 
+                PointF[] BuildDestinationParallelogram(float x, float y, float width, float height)
+                {
+                    return new[]
+                    {
+                        new PointF(x, y),
+                        new PointF(x + width, y),
+                        new PointF(x, y + height)
+                    };
+                }
+
                 float dpiCorrection = 72f / graphics.DpiY;
-                int annotationRotation = NormalizeRotation(annotation.AnnotationRotation);
-                SizeF contentSize = GetAnnotationContentSize(annotation);
-                float contentWidth = contentSize.Width * scaleFactor * 72f / graphics.DpiX;
-                float contentHeight = contentSize.Height * scaleFactor * 72f / graphics.DpiY;
                 float layoutWidth = contentWidth + (2f * framePaddingX);
                 float layoutHeight = contentHeight + (2f * framePaddingY);
 
+                DrawTextFrameOverlay();
+
                 if (isRich)
                 {
-                    int bitmapWidth = Math.Max(1, (int)Math.Ceiling(contentWidth * (graphics.DpiX / 72f)));
-                    int bitmapHeight = Math.Max(1, (int)Math.Ceiling(contentHeight * (graphics.DpiY / 72f)));
-                    float richAlignmentOffset = GetRichAlignmentOffset(graphics.DpiX, annotation.AnnotationAlignment);
-                    using (Bitmap richBitmap = RenderRichTextToBitmap(
-                        annotation,
-                        bitmapWidth,
-                        bitmapHeight,
-                        System.Drawing.Color.Transparent,
-                        Math.Max(0.1f, scaleFactor)))
+                    if (!interactionSnapshotIncludesFrame)
                     {
+                        DrawAnnotationBorder();
+                    }
+
+                    if (richPreviewBitmap != null)
+                    {
+                        Bitmap richBitmap = richPreviewBitmap;
+                        richPreviewBitmap = null;
                         float rotationRadians = (float)(annotationRotation * Math.PI / 180.0);
                         float rotCos = (float)Math.Cos(rotationRadians);
                         float rotSin = (float)Math.Sin(rotationRadians);
                         PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
                         float offsetX = rotationOffset.X;
                         float offsetY = rotationOffset.Y;
+                        Rectangle richSourceRect = GetCachedRichBitmapSourceRect(annotation, richBitmap, useInteractionPlaceholder);
+                        using ImageAttributes richImageAttributes = new ImageAttributes();
+                        richImageAttributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+                        RectangleF richLayoutRect = interactionSnapshotIncludesFrame
+                            ? new RectangleF(0f, 0f, Math.Max(1f, layoutWidth), Math.Max(1f, layoutHeight))
+                            : new RectangleF(0f, 0f, Math.Max(1f, contentWidth), Math.Max(1f, contentHeight));
 
-                        var textState = graphics.Save();
-                        graphics.Transform = new System.Drawing.Drawing2D.Matrix(
-                            rotCos, rotSin, -rotSin, rotCos,
-                            rect.X + offsetX, rect.Y + offsetY);
-                        graphics.DrawImage(richBitmap, new RectangleF(framePaddingX - richAlignmentOffset, framePaddingY, contentWidth, contentHeight));
-                        graphics.Restore(textState);
+                        if (annotationRotation == 0)
+                        {
+                            graphics.DrawImage(
+                                richBitmap,
+                                BuildDestinationParallelogram(
+                                    rect.X + (interactionSnapshotIncludesFrame ? 0f : framePaddingX) + richLayoutRect.X,
+                                    rect.Y + (interactionSnapshotIncludesFrame ? 0f : framePaddingY) + richLayoutRect.Y,
+                                    richLayoutRect.Width,
+                                    richLayoutRect.Height),
+                                richSourceRect,
+                                GraphicsUnit.Pixel,
+                                richImageAttributes);
+                        }
+                        else
+                        {
+                            var textState = graphics.Save();
+                            graphics.Transform = new System.Drawing.Drawing2D.Matrix(
+                                rotCos, rotSin, -rotSin, rotCos,
+                                rect.X + offsetX, rect.Y + offsetY);
+                            graphics.DrawImage(
+                                richBitmap,
+                                BuildDestinationParallelogram(
+                                    (interactionSnapshotIncludesFrame ? 0f : framePaddingX) + richLayoutRect.X,
+                                    (interactionSnapshotIncludesFrame ? 0f : framePaddingY) + richLayoutRect.Y,
+                                    richLayoutRect.Width,
+                                    richLayoutRect.Height),
+                                richSourceRect,
+                                GraphicsUnit.Pixel,
+                                richImageAttributes);
+                            graphics.Restore(textState);
+                        }
+
+                        if (multiSelectionActive && isSelectedAnnotation)
+                        {
+                            if (TryGetTextAnnotationVisualScreenBounds(annotation, graphics.DpiX, graphics.DpiY, out RectangleF visualBounds))
+                            {
+                                DrawGroupSelectionOutline(graphics, visualBounds);
+                            }
+                        }
+
+                        return;
                     }
 
-                    DrawAnnotationBorder();
-                    DrawTextFrameOverlay();
+                    Bitmap richBitmapFallback = useInteractionPlaceholder
+                        ? null
+                        : GetRichTextPreviewBitmap(
+                            annotation,
+                            richPreviewWidthPx,
+                            richPreviewHeightPx,
+                            richPreviewFontScale,
+                            useInteractionPlaceholder: useInteractionPlaceholder,
+                            trimVertical: true);
+                    if (richBitmapFallback != null)
+                    {
+                        try
+                        {
+                            Rectangle richSourceRect = BuildRichBitmapSourceRect(richBitmapFallback);
+                            using ImageAttributes richImageAttributes = new ImageAttributes();
+                            richImageAttributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+                            float rotationRadians = (float)(annotationRotation * Math.PI / 180.0);
+                            float rotCos = (float)Math.Cos(rotationRadians);
+                            float rotSin = (float)Math.Sin(rotationRadians);
+                            PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
+                            float offsetX = rotationOffset.X;
+                            float offsetY = rotationOffset.Y;
+                            RectangleF richLayoutRect = new RectangleF(0f, 0f, Math.Max(1f, contentWidth), Math.Max(1f, contentHeight));
+
+                            if (annotationRotation == 0)
+                            {
+                                graphics.DrawImage(
+                                    richBitmapFallback,
+                                    BuildDestinationParallelogram(
+                                        rect.X + framePaddingX + richLayoutRect.X,
+                                        rect.Y + framePaddingY + richLayoutRect.Y,
+                                        richLayoutRect.Width,
+                                        richLayoutRect.Height),
+                                    richSourceRect,
+                                    GraphicsUnit.Pixel,
+                                    richImageAttributes);
+                            }
+                            else
+                            {
+                                var textState = graphics.Save();
+                                graphics.Transform = new System.Drawing.Drawing2D.Matrix(
+                                    rotCos, rotSin, -rotSin, rotCos,
+                                    rect.X + offsetX, rect.Y + offsetY);
+                                graphics.DrawImage(
+                                    richBitmapFallback,
+                                    BuildDestinationParallelogram(
+                                        framePaddingX + richLayoutRect.X,
+                                        framePaddingY + richLayoutRect.Y,
+                                        richLayoutRect.Width,
+                                        richLayoutRect.Height),
+                                    richSourceRect,
+                                    GraphicsUnit.Pixel,
+                                    richImageAttributes);
+                                graphics.Restore(textState);
+                            }
+                        }
+                        finally
+                        {
+                            if (DisableRichTextPreviewCachesForDiagnostics)
+                            {
+                                richBitmapFallback.Dispose();
+                            }
+                        }
+                    }
+
+                    DrawRichLoadingPlaceholder();
 
                     if (multiSelectionActive && isSelectedAnnotation)
                     {
@@ -28625,6 +33279,8 @@ namespace AnonPDF
                     float scaledFontSize = annotation.AnnotationFont.Size * scaleFactor * dpiCorrection;
                     using (Font scaledFont = new Font(annotation.AnnotationFont.FontFamily, scaledFontSize, annotation.AnnotationFont.Style))
                     {
+                        DrawAnnotationBorder();
+
                         float rotationRadians = (float)(annotationRotation * Math.PI / 180.0);
                         float rotCos = (float)Math.Cos(rotationRadians);
                         float rotSin = (float)Math.Sin(rotationRadians);
@@ -28648,9 +33304,6 @@ namespace AnonPDF
                     }
                 }
 
-                DrawAnnotationBorder();
-                DrawTextFrameOverlay();
-
                 if (multiSelectionActive && isSelectedAnnotation)
                 {
                     if (TryGetTextAnnotationVisualScreenBounds(annotation, graphics.DpiX, graphics.DpiY, out RectangleF visualBounds))
@@ -28661,6 +33314,22 @@ namespace AnonPDF
             }
             finally
             {
+                if (disposeRichPreviewBitmap)
+                {
+                    richPreviewBitmap?.Dispose();
+                }
+
+                if (drawStopwatch != null)
+                {
+                    drawStopwatch.Stop();
+                    if (drawStopwatch.ElapsedMilliseconds >= 20)
+                    {
+                        LogDebug(
+                            $"RichResize drawText ms={drawStopwatch.ElapsedMilliseconds} " +
+                            $"selected={(IsTextAnnotationSelected(annotation) ? 1 : 0)} " +
+                            $"bounds={FormatRectFInvariant(annotation.AnnotationBounds)}");
+                    }
+                }
                 graphics.Restore(state);
             }
         }
@@ -28671,6 +33340,8 @@ namespace AnonPDF
             {
                 return;
             }
+
+            Stopwatch commentsStopwatch = ShouldLogRichResizeDiagnostics() ? Stopwatch.StartNew() : null;
 
             Rectangle viewportRectPx = GetPdfViewerVisibleViewportRectanglePx();
             bool clipToViewport = !viewportRectPx.IsEmpty;
@@ -28778,6 +33449,15 @@ namespace AnonPDF
                             Math.Max(1f, noteRect.Height - (textPadding * 2f)));
                         graphics.DrawString(noteText, noteFont, noteTextBrush, textRect);
                     }
+                }
+            }
+
+            if (commentsStopwatch != null)
+            {
+                commentsStopwatch.Stop();
+                if (commentsStopwatch.ElapsedMilliseconds >= 20)
+                {
+                    LogDebug($"RichResize drawComments ms={commentsStopwatch.ElapsedMilliseconds} page={currentPage} count={comments.Count}");
                 }
             }
         }
@@ -29195,15 +33875,39 @@ namespace AnonPDF
             return Math.Max(markerLength * 0.52f, Math.Max(1f, strokeWidth) * 3.1f);
         }
 
-        private Bitmap RenderRichTextToBitmap(TextAnnotation annotation, int widthPx, int heightPx, System.Drawing.Color backgroundColor, float fontScale = 1f)
+        private Bitmap RenderRichTextToBitmap(
+            TextAnnotation annotation,
+            int widthPx,
+            int heightPx,
+            System.Drawing.Color backgroundColor,
+            float fontScale = 1f,
+            bool trimVertical = true)
         {
             int safeWidth = Math.Max(1, widthPx);
             int safeHeight = Math.Max(1, heightPx);
+            if (annotation != null &&
+                TryRenderRichTextToBitmapWithWpf(
+                    annotation.AnnotationText,
+                    annotation.AnnotationRichText,
+                    annotation.AnnotationFont ?? this.Font,
+                    annotation.AnnotationColor,
+                    annotation.AnnotationAlignment,
+                    safeWidth,
+                    safeHeight,
+                    backgroundColor,
+                    fontScale,
+                    trimVertical,
+                    out Bitmap wpfBitmap))
+            {
+                return wpfBitmap;
+            }
+
             if (backgroundColor.A > 0)
             {
                 return RenderRichTextToBitmapOpaque(annotation, safeWidth, safeHeight, backgroundColor, fontScale);
             }
 
+            System.Windows.Forms.HorizontalAlignment alignment = annotation?.AnnotationAlignment ?? System.Windows.Forms.HorizontalAlignment.Left;
             using (Bitmap black = RenderRichTextToBitmapOpaque(annotation, safeWidth, safeHeight, System.Drawing.Color.Black, fontScale))
             using (Bitmap white = RenderRichTextToBitmapOpaque(annotation, safeWidth, safeHeight, System.Drawing.Color.White, fontScale))
             {
@@ -29219,7 +33923,7 @@ namespace AnonPDF
                         int alphaG = 255 - (cw.G - cb.G);
                         int alphaB = 255 - (cw.B - cb.B);
                         int alpha = Math.Max(0, Math.Min(255, (alphaR + alphaG + alphaB) / 3));
-                        if (alpha <= 0)
+                        if (!IsRichInkAlpha(alpha))
                         {
                             bitmap.SetPixel(x, y, System.Drawing.Color.Transparent);
                             continue;
@@ -29232,20 +33936,196 @@ namespace AnonPDF
                     }
                 }
 
-                return bitmap;
+                Bitmap alignedBitmap = ApplyDetectedLineAlignmentToTransparentBitmap(
+                    bitmap,
+                    alignment,
+                    annotation?.Id);
+                if (!ReferenceEquals(alignedBitmap, bitmap))
+                {
+                    bitmap.Dispose();
+                    bitmap = alignedBitmap;
+                }
+
+                if (!trimVertical ||
+                    !TryGetNonTransparentBounds(bitmap, out Rectangle inkBounds) ||
+                    !TryGetNonTransparentVerticalBounds(bitmap, out Rectangle verticalBounds) ||
+                    (inkBounds.X <= 0 && inkBounds.Y <= 0 &&
+                     inkBounds.Width >= bitmap.Width && inkBounds.Height >= bitmap.Height))
+                {
+                    return bitmap;
+                }
+
+                const int richVerticalTrimTopPaddingPx = 0;
+                const int richVerticalTrimBottomPaddingPx = 4;
+                int expandedTop = Math.Max(0, verticalBounds.Top - richVerticalTrimTopPaddingPx);
+                int expandedBottom = Math.Min(bitmap.Height, verticalBounds.Bottom + richVerticalTrimBottomPaddingPx);
+
+                Rectangle paddedBounds = Rectangle.FromLTRB(
+                    0,
+                    expandedTop,
+                    Math.Max(1, bitmap.Width),
+                    Math.Max(expandedTop + 1, expandedBottom));
+
+                var trimmedBitmap = new Bitmap(
+                    Math.Max(1, paddedBounds.Width),
+                    Math.Max(1, paddedBounds.Height),
+                    PixelFormat.Format32bppArgb);
+                using (var graphics = Graphics.FromImage(trimmedBitmap))
+                {
+                    graphics.Clear(System.Drawing.Color.Transparent);
+                    graphics.DrawImage(
+                        bitmap,
+                        new Rectangle(0, 0, trimmedBitmap.Width, trimmedBitmap.Height),
+                        paddedBounds,
+                        GraphicsUnit.Pixel);
+                }
+
+                bitmap.Dispose();
+                return trimmedBitmap;
             }
+        }
+
+        private static Bitmap ApplyDetectedLineAlignmentToTransparentBitmap(
+            Bitmap source,
+            System.Windows.Forms.HorizontalAlignment alignment,
+            string annotationId)
+        {
+            if (source == null ||
+                source.Width <= 0 ||
+                source.Height <= 0 ||
+                alignment == System.Windows.Forms.HorizontalAlignment.Left)
+            {
+                return source;
+            }
+
+            List<Rectangle> lineBands = GetRichBitmapLineBands(source);
+            if (lineBands.Count == 0)
+            {
+                return source;
+            }
+
+            var target = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+            const int rightAlignmentInnerPaddingPx = 2;
+            const int centerAlignmentEdgePaddingPx = 1;
+            using (var graphics = Graphics.FromImage(target))
+            {
+                graphics.Clear(System.Drawing.Color.Transparent);
+                for (int i = 0; i < lineBands.Count; i++)
+                {
+                    Rectangle band = lineBands[i];
+                    int bandWidth = Math.Max(1, band.Width);
+                    int destX;
+                    switch (alignment)
+                    {
+                        case System.Windows.Forms.HorizontalAlignment.Center:
+                            destX = centerAlignmentEdgePaddingPx + ((Math.Max(1, source.Width - (centerAlignmentEdgePaddingPx * 2)) - bandWidth) / 2);
+                            break;
+                        case System.Windows.Forms.HorizontalAlignment.Right:
+                            destX = source.Width - bandWidth - rightAlignmentInnerPaddingPx;
+                            break;
+                        default:
+                            destX = band.X;
+                            break;
+                    }
+
+                    destX = Math.Max(0, Math.Min(source.Width - bandWidth, destX));
+                    graphics.DrawImage(
+                        source,
+                        new Rectangle(destX, band.Y, bandWidth, band.Height),
+                        band,
+                        GraphicsUnit.Pixel);
+                }
+            }
+
+            return target;
+        }
+
+        private static List<Rectangle> GetRichBitmapLineBands(Bitmap source)
+        {
+            var lineBands = new List<Rectangle>();
+            if (source == null || source.Width <= 0 || source.Height <= 0)
+            {
+                return lineBands;
+            }
+
+            int y = 0;
+            while (y < source.Height)
+            {
+                if (!HasMeaningfulRichInkRow(source, y))
+                {
+                    y++;
+                    continue;
+                }
+
+                int top = y;
+                int bottom = y;
+                while (bottom + 1 < source.Height)
+                {
+                    if (!HasMeaningfulRichInkRow(source, bottom + 1))
+                    {
+                        break;
+                    }
+
+                    bottom++;
+                }
+
+                int minX = source.Width;
+                int maxX = -1;
+                for (int row = top; row <= bottom; row++)
+                {
+                    for (int x = 0; x < source.Width; x++)
+                    {
+                        if (!IsRichInkAlpha(source.GetPixel(x, row).A))
+                        {
+                            continue;
+                        }
+
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                    }
+                }
+
+                if (maxX >= minX)
+                {
+                    lineBands.Add(Rectangle.FromLTRB(minX, top, maxX + 1, bottom + 1));
+                }
+
+                y = bottom + 1;
+            }
+
+            const int maxBandMergeGapPx = 4;
+            if (lineBands.Count > 1)
+            {
+                var mergedBands = new List<Rectangle>();
+                Rectangle currentBand = lineBands[0];
+                for (int i = 1; i < lineBands.Count; i++)
+                {
+                    Rectangle nextBand = lineBands[i];
+                    int gap = nextBand.Top - currentBand.Bottom;
+                    if (gap <= maxBandMergeGapPx)
+                    {
+                        currentBand = Rectangle.FromLTRB(
+                            Math.Min(currentBand.Left, nextBand.Left),
+                            Math.Min(currentBand.Top, nextBand.Top),
+                            Math.Max(currentBand.Right, nextBand.Right),
+                            Math.Max(currentBand.Bottom, nextBand.Bottom));
+                        continue;
+                    }
+
+                    mergedBands.Add(currentBand);
+                    currentBand = nextBand;
+                }
+
+                mergedBands.Add(currentBand);
+                lineBands = mergedBands;
+            }
+
+            return lineBands;
         }
 
         private Bitmap RenderRichTextToBitmapOpaque(TextAnnotation annotation, int safeWidth, int safeHeight, System.Drawing.Color backgroundColor, float fontScale)
         {
             int renderInsetPx = 0;
-            if (annotation != null &&
-                (annotation.AnnotationAlignment == System.Windows.Forms.HorizontalAlignment.Center ||
-                 annotation.AnnotationAlignment == System.Windows.Forms.HorizontalAlignment.Right))
-            {
-                renderInsetPx = 6;
-            }
-
             int renderWidth = safeWidth + renderInsetPx;
             var renderBitmap = new Bitmap(renderWidth, safeHeight, PixelFormat.Format32bppArgb);
             using (var graphics = Graphics.FromImage(renderBitmap))
@@ -29285,15 +34165,15 @@ namespace AnonPDF
                 {
                     richTextBox.Text = annotation?.AnnotationText ?? string.Empty;
                 }
+                richTextBox.CreateControl();
+                ApplyGlobalRichFont(richTextBox, annotation?.AnnotationFont ?? this.Font);
                 ApplyRichParagraphAlignment(
                     richTextBox,
                     annotation?.AnnotationAlignment ?? System.Windows.Forms.HorizontalAlignment.Left);
-                ApplyGlobalRichFont(richTextBox, annotation?.AnnotationFont ?? this.Font);
+                ApplyCompactRichLineSpacing(richTextBox, annotation?.AnnotationFont ?? this.Font);
 
                 float safeZoom = Math.Max(0.1f, Math.Min(8f, fontScale));
                 richTextBox.ZoomFactor = safeZoom;
-
-                richTextBox.CreateControl();
                 richTextBox.DrawToBitmap(renderBitmap, new Rectangle(0, 0, renderWidth, safeHeight));
             }
 
@@ -29318,11 +34198,23 @@ namespace AnonPDF
                 return;
             }
 
+            Stopwatch overlayStopwatch = ShouldLogRichResizeDiagnostics() ? Stopwatch.StartNew() : null;
             graphics.DrawImageUnscaled(redactionPreviewOverlayBitmap, 0, 0);
+            if (overlayStopwatch != null)
+            {
+                overlayStopwatch.Stop();
+                if (overlayStopwatch.ElapsedMilliseconds >= 20)
+                {
+                    LogDebug(
+                        $"RichResize drawRedactionOverlay ms={overlayStopwatch.ElapsedMilliseconds} " +
+                        $"size={redactionPreviewOverlayBitmap.Width}x{redactionPreviewOverlayBitmap.Height}");
+                }
+            }
         }
 
         private void OnPaint(object sender, PaintEventArgs e)
         {
+            Stopwatch paintStopwatch = ShouldLogRichResizeDiagnostics() ? Stopwatch.StartNew() : null;
             Dictionary<string, int> previewBasisNumberMap = BuildLegalBasisFootnoteNumberMap(
                 redactionBlocks.Where(block => block != null && block.PageNumber == currentPage && IsLayerVisible(block.LayerId)));
 
@@ -29718,6 +34610,17 @@ namespace AnonPDF
             }
 
             DrawObjectMarqueeSelectionOverlay(e.Graphics);
+
+            if (paintStopwatch != null)
+            {
+                paintStopwatch.Stop();
+                if (paintStopwatch.ElapsedMilliseconds >= 20)
+                {
+                    LogDebug(
+                        $"RichResize paint ms={paintStopwatch.ElapsedMilliseconds} " +
+                        $"page={currentPage} zoom={scaleFactor.ToString(CultureInfo.InvariantCulture)}");
+                }
+            }
 
         }
 
@@ -31726,6 +36629,10 @@ namespace AnonPDF
             // (D) Call page re-display
             //     (this method sets pdfViewer.Image = ... and pdfViewer.Size = ...)
             DisplayPdfPage(currentPage);
+            if (HasVisibleRichTextAnnotationsOnPage(currentPage))
+            {
+                RequestBusyCursorForNextRichPreviewWarm();
+            }
 
             // (E) Now we want to set scroll so that docCoordX/docCoordY
             //     is again in the center of the screen.
@@ -33403,6 +38310,10 @@ namespace AnonPDF
             CalculateMinScaleFactor(currentPage);
             scaleFactor = minScaleFactor;
             DisplayPdfPage(currentPage);
+            if (HasVisibleRichTextAnnotationsOnPage(currentPage))
+            {
+                RequestBusyCursorForNextRichPreviewWarm();
+            }
             this.Cursor = Cursors.Default;
         }
 
@@ -33414,6 +38325,10 @@ namespace AnonPDF
             CalculateMaxScaleFactor();
             scaleFactor = maxScaleFactor;
             DisplayPdfPage(currentPage);
+            if (HasVisibleRichTextAnnotationsOnPage(currentPage))
+            {
+                RequestBusyCursorForNextRichPreviewWarm();
+            }
             this.Cursor = Cursors.Default;
         }
 
@@ -35069,7 +39984,10 @@ namespace AnonPDF
             textScaleStartLeaderLineWidth = 0f;
             textScaleStartLeaderHeadLength = 0f;
             textScaleStartLeaderHeadWidth = 0f;
+            textMoveStartContentSize = SizeF.Empty;
+            textTransformStartContentSize = SizeF.Empty;
             textMoveStartLeaderEndPoint = PointF.Empty;
+            ClearActiveTextInteractionPreview();
             textLeaderDragStartEndPoint = PointF.Empty;
             textLeaderDragStartAnchorKind = TextLeaderAnchorKind.RightCenter;
         }
@@ -37993,6 +42911,7 @@ namespace AnonPDF
                     isMoving = true;
                     textMoveStartBounds = hitAnnotation.AnnotationBounds;
                     textMoveStartLeaderEndPoint = hitAnnotation.LeaderEndPoint;
+                    textMoveStartContentSize = GetInteractiveAwareAnnotationContentSize(hitAnnotation);
                     PointF mouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
                     textMoveMouseOffset = new PointF(
                         mouseDoc.X - hitAnnotation.AnnotationBounds.X,
@@ -39554,6 +44473,11 @@ namespace AnonPDF
                 return;
             }
 
+            if (isScalingTextAnnotation && ReferenceEquals(selectedTextAnnotation, annotationToScale))
+            {
+                return;
+            }
+
             if (TryGetAnnotationTextFrameGeometry(
                     selectedTextAnnotation,
                     graphics.DpiX,
@@ -39674,7 +44598,12 @@ namespace AnonPDF
             const float logicalScaleX = 72f / 96f;
             const float logicalScaleY = 72f / 96f;
             int rotation = NormalizeRotation(annotation.AnnotationRotation);
-            SizeF contentSize = GetAnnotationContentSize(annotation);
+            SizeF contentSize = IsRichTextMode(annotation) &&
+                TryGetApproximateRichContentSizeFromBounds(annotation, out SizeF approximateContentSize)
+                ? approximateContentSize
+                : (IsRichTextMode(annotation)
+                    ? GetRichAnnotationContentSize(annotation)
+                    : GetAnnotationPlainContentSize(annotation.AnnotationText, annotation.AnnotationFont));
             float padding = GetAnnotationFramePadding(annotation);
             float layoutWidth = Math.Max(1f, (contentSize.Width + (2f * padding)) * logicalScaleX);
             float layoutHeight = Math.Max(1f, (contentSize.Height + (2f * padding)) * logicalScaleY);
@@ -39731,15 +44660,69 @@ namespace AnonPDF
                 return false;
             }
 
+            return TryGetAnnotationTextFrameGeometryForContentSize(
+                annotation,
+                dpiX,
+                dpiY,
+                GetLiveAnnotationContentSize(annotation),
+                out frameCorners,
+                out frameBounds,
+                out frameCenter,
+                out frameTopMid);
+        }
+
+        private bool TryGetAnnotationTextFrameGeometryForContentSize(
+            TextAnnotation annotation,
+            float dpiX,
+            float dpiY,
+            SizeF contentSize,
+            out PointF[] frameCorners,
+            out RectangleF frameBounds,
+            out PointF frameCenter,
+            out PointF frameTopMid)
+        {
+            frameCorners = null;
+            frameBounds = RectangleF.Empty;
+            frameCenter = PointF.Empty;
+            frameTopMid = PointF.Empty;
+
+            if (annotation == null || annotation.PageNumber != currentPage)
+            {
+                return false;
+            }
+
+            bool useInteractionSnapshotOuterFrame =
+                IsRichTextMode(annotation) &&
+                annotation == annotationToScale &&
+                isScalingTextAnnotation &&
+                textRotationInteractionChanged &&
+                richTextInteractionPreviewArmed &&
+                activeTextInteractionPreviewIncludesFrame &&
+                activeTextInteractionPreviewBitmap != null;
+
+            if (!useInteractionSnapshotOuterFrame &&
+                IsRichTextMode(annotation) &&
+                TryGetRichPreviewInkFrameGeometryForContentSize(
+                    annotation,
+                    dpiX,
+                    dpiY,
+                    contentSize,
+                    out frameCorners,
+                    out frameBounds,
+                    out frameCenter,
+                    out frameTopMid))
+            {
+                return true;
+            }
+
             Rectangle rect = GetAnnotationScreenRect(annotation, dpiX, dpiY);
-            if (rect.Width <= 0 || rect.Height <= 0)
+            if (rect.Width <= 0 || rect.Height <= 0 || contentSize.Width <= 0f || contentSize.Height <= 0f)
             {
                 return false;
             }
 
             float dpiCorrection = 72f / dpiY;
             int rotation = NormalizeRotation(annotation.AnnotationRotation);
-            SizeF contentSize = GetAnnotationContentSize(annotation);
             float padding = GetAnnotationFramePadding(annotation);
             float layoutWidth = Math.Max(1f, (contentSize.Width + (2f * padding)) * scaleFactor * 72f / dpiX);
             float layoutHeight = Math.Max(1f, (contentSize.Height + (2f * padding)) * scaleFactor * dpiCorrection);
@@ -39781,6 +44764,156 @@ namespace AnonPDF
                 (p0.X + p1.X) / 2f,
                 (p0.Y + p1.Y) / 2f);
             return true;
+        }
+
+        private bool TryGetRichPreviewInkFrameGeometryForContentSize(
+            TextAnnotation annotation,
+            float dpiX,
+            float dpiY,
+            SizeF contentSize,
+            out PointF[] frameCorners,
+            out RectangleF frameBounds,
+            out PointF frameCenter,
+            out PointF frameTopMid)
+        {
+            frameCorners = null;
+            frameBounds = RectangleF.Empty;
+            frameCenter = PointF.Empty;
+            frameTopMid = PointF.Empty;
+
+            if (!TryGetRichPreviewInkLocalFrameRectForContentSize(annotation, dpiX, dpiY, contentSize, out RectangleF localFrameRect))
+            {
+                return false;
+            }
+
+            Rectangle rect = GetAnnotationScreenRect(annotation, dpiX, dpiY);
+            if (rect.Width <= 0 || rect.Height <= 0)
+            {
+                return false;
+            }
+
+            float dpiCorrection = 72f / dpiY;
+            float framePadding = GetAnnotationFramePadding(annotation);
+            float framePaddingX = framePadding * scaleFactor * 72f / dpiX;
+            float framePaddingY = framePadding * scaleFactor * dpiCorrection;
+            float contentWidth = Math.Max(1f, contentSize.Width * scaleFactor * 72f / dpiX);
+            float contentHeight = Math.Max(1f, contentSize.Height * scaleFactor * dpiCorrection);
+            float layoutWidth = contentWidth + (2f * framePaddingX);
+            float layoutHeight = contentHeight + (2f * framePaddingY);
+
+            int rotation = NormalizeRotation(annotation.AnnotationRotation);
+            PointF rotationOffset = GetRotationOffsetForBounds(rotation, layoutWidth, layoutHeight);
+            float translateX = rect.X + rotationOffset.X;
+            float translateY = rect.Y + rotationOffset.Y;
+            float angleRad = (float)(rotation * Math.PI / 180.0);
+            float cos = (float)Math.Cos(angleRad);
+            float sin = (float)Math.Sin(angleRad);
+
+            PointF Transform(float x, float y)
+            {
+                return new PointF(
+                    (x * cos) - (y * sin) + translateX,
+                    (x * sin) + (y * cos) + translateY);
+            }
+
+            PointF p0 = Transform(localFrameRect.Left, localFrameRect.Top);
+            PointF p1 = Transform(localFrameRect.Right, localFrameRect.Top);
+            PointF p2 = Transform(localFrameRect.Right, localFrameRect.Bottom);
+            PointF p3 = Transform(localFrameRect.Left, localFrameRect.Bottom);
+            frameCorners = new[] { p0, p1, p2, p3 };
+
+            float minX = frameCorners.Min(p => p.X);
+            float maxX = frameCorners.Max(p => p.X);
+            float minY = frameCorners.Min(p => p.Y);
+            float maxY = frameCorners.Max(p => p.Y);
+            frameBounds = new RectangleF(minX, minY, Math.Max(1f, maxX - minX), Math.Max(1f, maxY - minY));
+            frameCenter = new PointF(
+                (p0.X + p1.X + p2.X + p3.X) / 4f,
+                (p0.Y + p1.Y + p2.Y + p3.Y) / 4f);
+            frameTopMid = new PointF(
+                (p0.X + p1.X) / 2f,
+                (p0.Y + p1.Y) / 2f);
+            return true;
+        }
+
+        private bool TryGetRichPreviewInkLocalFrameRectForContentSize(
+            TextAnnotation annotation,
+            float dpiX,
+            float dpiY,
+            SizeF contentSize,
+            out RectangleF localFrameRect)
+        {
+            localFrameRect = RectangleF.Empty;
+
+            if (annotation == null ||
+                annotation.PageNumber != currentPage ||
+                contentSize.Width <= 0f ||
+                contentSize.Height <= 0f)
+            {
+                return false;
+            }
+
+            float dpiCorrection = 72f / dpiY;
+            float framePadding = GetAnnotationFramePadding(annotation);
+            float framePaddingX = framePadding * scaleFactor * 72f / dpiX;
+            float framePaddingY = framePadding * scaleFactor * dpiCorrection;
+            float contentWidth = Math.Max(1f, contentSize.Width * scaleFactor * 72f / dpiX);
+            float contentHeight = Math.Max(1f, contentSize.Height * scaleFactor * dpiCorrection);
+            float layoutWidth = contentWidth + (2f * framePaddingX);
+            float layoutHeight = contentHeight + (2f * framePaddingY);
+
+            int richPreviewWidthPx = Math.Max(1, (int)Math.Ceiling(contentWidth));
+            int richPreviewHeightPx = Math.Max(1, (int)Math.Ceiling(contentHeight));
+            float richPreviewFontScale = Math.Max(0.1f, scaleFactor * 72f / dpiY);
+            string previewBitmapKey = BuildRichPreviewBitmapCacheKey(annotation, richPreviewWidthPx, richPreviewHeightPx, richPreviewFontScale, trimVertical: true);
+            string frameCacheKey = string.Format(
+                CultureInfo.InvariantCulture,
+                "inkframe|{0}|pad={1:0.###},{2:0.###}|scale={3:0.###}",
+                previewBitmapKey,
+                framePaddingX,
+                framePaddingY,
+                scaleFactor);
+
+            if (annotation.HasCachedRichPreviewFrameLocalPx &&
+                string.Equals(annotation.CachedRichPreviewFrameKey, frameCacheKey, StringComparison.Ordinal))
+            {
+                localFrameRect = annotation.CachedRichPreviewFrameLocalPx;
+            }
+            else if (string.Equals(annotation.CachedRichPreviewBitmapKey, previewBitmapKey, StringComparison.Ordinal) &&
+                     annotation.CachedRichPreviewBitmap != null)
+            {
+                Bitmap richBitmap = annotation.CachedRichPreviewBitmap;
+                Rectangle sourceRect = BuildRichBitmapSourceRect(richBitmap);
+                if (sourceRect.Width <= 0 ||
+                    sourceRect.Height <= 0 ||
+                    !TryGetNonTransparentBounds(richBitmap, out Rectangle inkBounds))
+                {
+                    QueueAsyncRichTextPreviewWarm(annotation, richPreviewWidthPx, richPreviewHeightPx, richPreviewFontScale, trimVertical: true);
+                    localFrameRect = new RectangleF(0f, 0f, layoutWidth, layoutHeight);
+                }
+                else
+                {
+                    localFrameRect = BuildRichPreviewInkLocalFrameRectFromBitmap(
+                        richBitmap,
+                        sourceRect,
+                        contentWidth,
+                        contentHeight,
+                        framePaddingX,
+                        framePaddingY,
+                        layoutWidth,
+                        layoutHeight);
+                    annotation.CachedRichPreviewFrameKey = frameCacheKey;
+                    annotation.CachedRichPreviewFrameLocalPx = localFrameRect;
+                    annotation.HasCachedRichPreviewFrameLocalPx = localFrameRect.Width > 0.5f && localFrameRect.Height > 0.5f;
+                }
+            }
+            else
+            {
+                QueueAsyncRichTextPreviewWarm(annotation, richPreviewWidthPx, richPreviewHeightPx, richPreviewFontScale, trimVertical: true);
+                localFrameRect = new RectangleF(0f, 0f, layoutWidth, layoutHeight);
+            }
+
+            return localFrameRect.Width > 0.5f && localFrameRect.Height > 0.5f;
         }
 
         private bool TryGetAnnotationRotationHandleRect(TextAnnotation annotation, float dpiX, float dpiY, out RectangleF handleRect, out PointF connectorPoint)
@@ -40128,6 +45261,11 @@ namespace AnonPDF
                 return false;
             }
 
+            if (isScalingTextAnnotation && ReferenceEquals(annotation, annotationToScale))
+            {
+                return false;
+            }
+
             Rectangle annotationRect = GetAnnotationScreenRect(annotation, dpiX, dpiY);
             if (annotationRect.Width <= 0 || annotationRect.Height <= 0)
             {
@@ -40247,10 +45385,14 @@ namespace AnonPDF
                 return false;
             }
 
+            SizeF interactionStartContentSize = GetInteractiveAwareAnnotationContentSize(selectedTextAnnotation);
             annotationToRotate = selectedTextAnnotation;
             BeginUndoCapture("Rotate text");
             isRotatingTextAnnotation = true;
             textRotationInteractionChanged = false;
+            textTransformStartContentSize = interactionStartContentSize;
+            ClearActiveTextInteractionPreview();
+            richTextInteractionPreviewArmed = true;
             textRotationStartValue = NormalizeRotation(selectedTextAnnotation.AnnotationRotation);
             textRotationStartBounds = selectedTextAnnotation.AnnotationBounds;
             textRotationStartCenterDoc = new PointF(
@@ -40287,9 +45429,13 @@ namespace AnonPDF
                 return false;
             }
 
+            SizeF interactionStartContentSize = GetInteractiveAwareAnnotationContentSize(selectedTextAnnotation);
             BeginUndoCapture("Scale text");
             annotationToScale = selectedTextAnnotation;
             isScalingTextAnnotation = true;
+            textTransformStartContentSize = interactionStartContentSize;
+            ClearActiveTextInteractionPreview();
+            richTextInteractionPreviewArmed = true;
             activeObjectScaleHandleCorner = handleCorner;
             textScaleStartScreenBounds = screenBounds;
             textScaleStartBounds = selectedTextAnnotation.AnnotationBounds;
@@ -40303,6 +45449,7 @@ namespace AnonPDF
             textScaleStartLeaderLineWidth = NormalizeLeaderLineWidth(selectedTextAnnotation.LeaderLineWidth);
             textScaleStartLeaderHeadLength = NormalizeTextLeaderHeadLength(selectedTextAnnotation.LeaderHeadLength);
             textScaleStartLeaderHeadWidth = NormalizeTextLeaderHeadWidth(selectedTextAnnotation.LeaderHeadWidth);
+            PrimeActiveTextInteractionPreview(selectedTextAnnotation, dpiX, dpiY, interactionStartContentSize);
             this.Cursor = GetCursorForObjectScaleHandle(handleCorner);
             return true;
         }
@@ -40323,9 +45470,13 @@ namespace AnonPDF
                 return false;
             }
 
+            SizeF interactionStartContentSize = GetInteractiveAwareAnnotationContentSize(selectedTextAnnotation);
             BeginUndoCapture("Move text leader");
             annotationToAdjustLeader = selectedTextAnnotation;
             isDraggingTextLeaderHandle = true;
+            textTransformStartContentSize = interactionStartContentSize;
+            ClearActiveTextInteractionPreview();
+            richTextInteractionPreviewArmed = true;
             textLeaderDragStartEndPoint = selectedTextAnnotation.LeaderEndPoint;
             textLeaderDragStartAnchorKind = NormalizeTextLeaderAnchorKind(selectedTextAnnotation.LeaderAnchorKind);
             this.Cursor = Cursors.Hand;
@@ -40338,6 +45489,8 @@ namespace AnonPDF
             {
                 return false;
             }
+
+            Stopwatch resizeStopwatch = ShouldLogRichResizeDiagnostics() ? Stopwatch.StartNew() : null;
 
             bool preserveAspectRatio = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
             bool scaleFromCenter = (Control.ModifierKeys & Keys.Alt) == Keys.Alt;
@@ -40358,7 +45511,6 @@ namespace AnonPDF
                 annotationToScale.LeaderLineWidth = NormalizeLeaderLineWidth(textScaleStartLeaderLineWidth * uniformScale);
                 annotationToScale.LeaderHeadLength = NormalizeTextLeaderHeadLength(textScaleStartLeaderHeadLength * uniformScale);
                 annotationToScale.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(textScaleStartLeaderHeadWidth * uniformScale);
-                annotationToScale.LeaderAnchorKind = GetClosestTextLeaderAnchorKind(annotationToScale, annotationToScale.LeaderEndPoint);
             }
             TouchTextAnnotation(annotationToScale);
             textRotationInteractionChanged =
@@ -40374,6 +45526,18 @@ namespace AnonPDF
                   !AreSameFloat(textScaleStartLeaderHeadWidth, annotationToScale.LeaderHeadWidth)));
             this.Cursor = GetCursorForObjectScaleHandle(activeObjectScaleHandleCorner);
             pdfViewer.Invalidate();
+            if (resizeStopwatch != null)
+            {
+                resizeStopwatch.Stop();
+                if (resizeStopwatch.ElapsedMilliseconds >= 20)
+                {
+                    LogDebug(
+                        $"RichResize apply ms={resizeStopwatch.ElapsedMilliseconds} " +
+                        $"scale={uniformScale.ToString(CultureInfo.InvariantCulture)} " +
+                        $"bounds={FormatRectFInvariant(annotationToScale.AnnotationBounds)} " +
+                        $"font={(annotationToScale.AnnotationFont != null ? annotationToScale.AnnotationFont.Size.ToString(CultureInfo.InvariantCulture) : "-")}");
+                }
+            }
             return true;
         }
 
@@ -43848,6 +49012,15 @@ namespace AnonPDF
                 IsLayerVisible(c.LayerId));
         }
 
+        private bool HasVisibleRichTextAnnotationsOnPage(int pageNumber)
+        {
+            return textAnnotations.Any(annotation =>
+                annotation != null &&
+                annotation.PageNumber == pageNumber &&
+                IsLayerVisible(annotation.LayerId) &&
+                IsRichTextMode(annotation));
+        }
+
         private void CancelCommentPreviewRects()
         {
             var cts = commentPreviewRectsCts;
@@ -45976,6 +51149,63 @@ namespace AnonPDF
 
         public DateTime UpdatedAtUtc { get; set; }
 
+        [JsonIgnore]
+        public string RichContentSizeCacheKey { get; set; }
+
+        [JsonIgnore]
+        public SizeF RichContentSizeCacheValue { get; set; }
+
+        [JsonIgnore]
+        public string CachedRichContentSizeKey { get; set; }
+
+        [JsonIgnore]
+        public SizeF CachedRichContentSize { get; set; }
+
+        [JsonIgnore]
+        public bool HasCachedRichContentSize { get; set; }
+
+        [JsonIgnore]
+        public string CachedRichPreviewBitmapKey { get; set; }
+
+        [JsonIgnore]
+        public Bitmap CachedRichPreviewBitmap { get; set; }
+
+        [JsonIgnore]
+        public Rectangle CachedRichPreviewSourceRect { get; set; }
+
+        [JsonIgnore]
+        public bool HasCachedRichPreviewSourceRect { get; set; }
+
+        [JsonIgnore]
+        public string CachedRichPreviewFrameKey { get; set; }
+
+        [JsonIgnore]
+        public RectangleF CachedRichPreviewFrameLocalPx { get; set; }
+
+        [JsonIgnore]
+        public bool HasCachedRichPreviewFrameLocalPx { get; set; }
+
+        [JsonIgnore]
+        public string CachedRichHtmlRenderKey { get; set; }
+
+        [JsonIgnore]
+        public byte[] CachedRichHtmlRenderPdfBytes { get; set; }
+
+        [JsonIgnore]
+        public RectangleF CachedRichHtmlRenderFrameRectTopDownPt { get; set; }
+
+        [JsonIgnore]
+        public float CachedRichHtmlRenderSourceWidthPt { get; set; }
+
+        [JsonIgnore]
+        public float CachedRichHtmlRenderSourceHeightPt { get; set; }
+
+        [JsonIgnore]
+        public float CachedRichHtmlRenderTargetWidthPt { get; set; }
+
+        [JsonIgnore]
+        public float CachedRichHtmlRenderTargetHeightPt { get; set; }
+
         public TextAnnotation()
         {
             Id = Guid.NewGuid().ToString("N");
@@ -46175,8 +51405,10 @@ namespace AnonPDF
                 ScrollBars = RichTextBoxScrollBars.Both,
                 Location = new Point(10, 30),
                 Size = new Size(400, 100),
-                WordWrap = false
+                WordWrap = false,
+                Font = new Font("Segoe UI", 12f, FontStyle.Regular, GraphicsUnit.Point)
             };
+            txtText.ZoomFactor = 1f;
             txtText.TextChanged += TxtText_TextChanged;
 
             chkRichTextMode = new CheckBox
@@ -46850,6 +52082,7 @@ namespace AnonPDF
                 TryApplyChanges();
             }
 
+            UpdateEditorTextScale();
             UpdateColorControls();
         }
 
@@ -46877,8 +52110,24 @@ namespace AnonPDF
                 lblFontDisplay.Text = FormatResource("EditText_FontDisplayWithStyle", AnnotationFont.FontFamily.Name, AnnotationFont.Size, fontStyles);
             }
 
-            txtText.Font = AnnotationFont;
+            UpdateEditorTextScale();
             UpdateColorControls();
+        }
+
+        private void UpdateEditorTextScale()
+        {
+            if (txtText == null)
+            {
+                return;
+            }
+
+            float baseEditorFontSize = 12f;
+            Font sourceFont = AnnotationFont ?? new Font("Segoe UI", baseEditorFontSize, FontStyle.Regular, GraphicsUnit.Point);
+            if (!IsRichTextMode || txtText.TextLength == 0)
+            {
+                txtText.Font = new Font(sourceFont.FontFamily, baseEditorFontSize, sourceFont.Style, GraphicsUnit.Point);
+            }
+            txtText.ZoomFactor = 1f;
         }
 
         private void TxtText_TextChanged(object sender, EventArgs e)
@@ -46924,6 +52173,8 @@ namespace AnonPDF
             {
                 txtText.Select(selectionStart, selectionLength);
             }
+
+            UpdateEditorTextScale();
         }
 
         private void RotationValueChanged(object sender, EventArgs e)

@@ -1867,4 +1867,25 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="QuickStart_Button_Understood" xml:space="preserve">
     <value>Verstanden</value>
   </data>
+  <data name="Menu_SaveCurrentView" xml:space="preserve">
+    <value>Aktuelle Ansicht speichern...</value>
+  </data>
+  <data name="Dialog_Filter_SaveCurrentViewImage" xml:space="preserve">
+    <value>PNG (*.png)|*.png|Bitmap (*.bmp)|*.bmp</value>
+  </data>
+  <data name="Dialog_Title_SaveCurrentView" xml:space="preserve">
+    <value>Aktuelle Ansicht als Bild speichern</value>
+  </data>
+  <data name="Err_OutputPathRequired" xml:space="preserve">
+    <value>Ein Ausgabedateipfad ist erforderlich.</value>
+  </data>
+  <data name="Err_CurrentViewUnavailable" xml:space="preserve">
+    <value>Die aktuelle Vorschau ist nicht verfügbar.</value>
+  </data>
+  <data name="FileName_CurrentViewBase" xml:space="preserve">
+    <value>ansicht</value>
+  </data>
+  <data name="FileName_CurrentViewPattern" xml:space="preserve">
+    <value>{0}-ansicht-s{1}.png</value>
+  </data>
 </root>

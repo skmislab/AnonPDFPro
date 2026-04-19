@@ -1914,4 +1914,25 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="QuickStart_Button_Understood" xml:space="preserve">
     <value>Rozumiem</value>
   </data>
+  <data name="Menu_SaveCurrentView" xml:space="preserve">
+    <value>Zapisz aktualny widok...</value>
+  </data>
+  <data name="Dialog_Filter_SaveCurrentViewImage" xml:space="preserve">
+    <value>PNG (*.png)|*.png|Bitmapa (*.bmp)|*.bmp</value>
+  </data>
+  <data name="Dialog_Title_SaveCurrentView" xml:space="preserve">
+    <value>Zapisz aktualny widok do pliku obrazu</value>
+  </data>
+  <data name="Err_OutputPathRequired" xml:space="preserve">
+    <value>Ścieżka pliku wyjściowego jest wymagana.</value>
+  </data>
+  <data name="Err_CurrentViewUnavailable" xml:space="preserve">
+    <value>Bieżący podgląd nie jest dostępny.</value>
+  </data>
+  <data name="FileName_CurrentViewBase" xml:space="preserve">
+    <value>widok</value>
+  </data>
+  <data name="FileName_CurrentViewPattern" xml:space="preserve">
+    <value>{0}-widok-p{1}.png</value>
+  </data>
 </root>

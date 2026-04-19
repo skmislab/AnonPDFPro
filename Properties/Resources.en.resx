@@ -1914,4 +1914,25 @@ Close the application and run the installer now?</value>
   <data name="QuickStart_Button_Understood" xml:space="preserve">
     <value>Got it</value>
   </data>
+  <data name="Menu_SaveCurrentView" xml:space="preserve">
+    <value>Save current view ...</value>
+  </data>
+  <data name="Dialog_Filter_SaveCurrentViewImage" xml:space="preserve">
+    <value>PNG (*.png)|*.png|Bitmap (*.bmp)|*.bmp</value>
+  </data>
+  <data name="Dialog_Title_SaveCurrentView" xml:space="preserve">
+    <value>Save the current view as an image</value>
+  </data>
+  <data name="Err_OutputPathRequired" xml:space="preserve">
+    <value>Output file path is required.</value>
+  </data>
+  <data name="Err_CurrentViewUnavailable" xml:space="preserve">
+    <value>Current preview is not available.</value>
+  </data>
+  <data name="FileName_CurrentViewBase" xml:space="preserve">
+    <value>view</value>
+  </data>
+  <data name="FileName_CurrentViewPattern" xml:space="preserve">
+    <value>{0}-view-p{1}.png</value>
+  </data>
 </root>
