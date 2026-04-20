@@ -9791,9 +9791,9 @@ namespace AnonPDF
             return new SizeF(rotatedWidth, rotatedHeight);
         }
 
-        private static SizeF GetRichAnnotationSize(string plainText, string richText, Font fallbackFont, int rotation)
+        private static SizeF GetRichAnnotationSize(string plainText, string richText, Font fallbackFont, int rotation, System.Windows.Forms.HorizontalAlignment alignment)
         {
-            return RotateSize(GetRichAnnotationContentSize(plainText, richText, fallbackFont), rotation);
+            return RotateSize(GetRichAnnotationContentSize(plainText, richText, fallbackFont, alignment), rotation);
         }
 
         private static string BuildRichContentCacheKey(string plainText, string richText, Font fallbackFont)
@@ -9988,7 +9988,11 @@ namespace AnonPDF
                 annotation.AnnotationRichText,
                 annotation.AnnotationFont,
                 annotation.AnnotationAlignment);
-            SizeF measured = GetRichAnnotationContentSize(annotation.AnnotationText, annotation.AnnotationRichText, annotation.AnnotationFont);
+            SizeF measured = GetRichAnnotationContentSize(
+                annotation.AnnotationText,
+                annotation.AnnotationRichText,
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment);
             annotation.RichContentSizeCacheKey = cacheKey;
             annotation.RichContentSizeCacheValue = measured;
         }
@@ -10022,15 +10026,17 @@ namespace AnonPDF
             }
         }
 
-        private static SizeF GetRichAnnotationContentSize(string plainText, string richText, Font fallbackFont)
+        private static SizeF GetRichAnnotationContentSize(
+            string plainText,
+            string richText,
+            Font fallbackFont,
+            System.Windows.Forms.HorizontalAlignment alignment)
         {
             if (fallbackFont == null)
             {
                 fallbackFont = SystemFonts.DefaultFont;
             }
 
-            // Deterministic sizing: rich mode uses the same bounds model as plain mode.
-            // This keeps preview stable across font-size changes and alignment switches.
             string content = plainText ?? string.Empty;
             if (string.IsNullOrWhiteSpace(content) && !string.IsNullOrWhiteSpace(richText))
             {
@@ -10048,6 +10054,9 @@ namespace AnonPDF
                 }
             }
 
+            string normalizedContent = content.Replace("\r\n", "\n").Replace("\r", "\n");
+            int lineCount = Math.Max(1, normalizedContent.Split(new[] { '\n' }, StringSplitOptions.None).Length);
+            float expectedRichHeight = Math.Max(1f, GetConsistentRichLineHeightPx(fallbackFont) * lineCount);
             SizeF baseSize = GetAnnotationPlainContentSize(content, fallbackFont);
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
             using (StringFormat format = (StringFormat)StringFormat.GenericTypographic.Clone())
@@ -10055,67 +10064,75 @@ namespace AnonPDF
                 format.FormatFlags |= StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces;
                 format.Trimming = StringTrimming.None;
 
-                // Add one character (width) and one line (height), scaled by current font.
-                float extraWidth = g.MeasureString("M", fallbackFont, int.MaxValue, format).Width;
-                float fallbackHeight = fallbackFont.GetHeight(g);
+                float safetyWidth = Math.Max(2f, fallbackFont.Size * 0.08f);
+                float safetyHeight = Math.Max(2f, fallbackFont.GetHeight(g) * 0.06f);
                 SizeF paddedSize = new SizeF(
-                    Math.Max(1f, baseSize.Width + extraWidth),
-                    Math.Max(1f, baseSize.Height + fallbackHeight));
+                    Math.Max(1f, baseSize.Width + safetyWidth),
+                    Math.Max(1f, Math.Max(baseSize.Height, expectedRichHeight) + safetyHeight));
 
                 try
                 {
-                    using (var richTextBox = new RichTextBox())
+                    int measurementWidth = Math.Max(1, (int)Math.Ceiling(paddedSize.Width));
+                    int measurementHeight = Math.Max(1, (int)Math.Ceiling(paddedSize.Height));
+
+                    for (int attempt = 0; attempt < 4; attempt++)
                     {
-                        richTextBox.BorderStyle = BorderStyle.None;
-                        richTextBox.ScrollBars = RichTextBoxScrollBars.None;
-                        richTextBox.Multiline = true;
-                        richTextBox.WordWrap = false;
-                        richTextBox.DetectUrls = false;
-                        richTextBox.ReadOnly = true;
-                        richTextBox.Font = fallbackFont;
-                        richTextBox.ForeColor = System.Drawing.Color.Black;
-                        richTextBox.BackColor = System.Drawing.Color.White;
-                        richTextBox.Size = new Size(
-                            Math.Max(1, (int)Math.Ceiling(paddedSize.Width)),
-                            Math.Max(1, (int)Math.Ceiling(paddedSize.Height)));
-                        richTextBox.Location = Point.Empty;
-
-                        bool richLoaded = false;
-                        if (!string.IsNullOrWhiteSpace(richText))
+                        using (Bitmap renderedBitmap = TryRenderRichTextToBitmapWithWpf(
+                            content,
+                            richText,
+                            fallbackFont,
+                            System.Drawing.Color.Black,
+                            alignment,
+                            measurementWidth,
+                            measurementHeight,
+                            System.Drawing.Color.Transparent,
+                            1f,
+                            trimVertical: true,
+                            out Bitmap measurementBitmap)
+                            ? measurementBitmap
+                            : null)
                         {
-                            try
+                            if (renderedBitmap == null ||
+                                !TryGetNonTransparentBounds(renderedBitmap, out Rectangle pixelBounds))
                             {
-                                richTextBox.Rtf = richText;
-                                richLoaded = true;
+                                break;
                             }
-                            catch
+
+                            bool touchesRightEdge = pixelBounds.Right >= renderedBitmap.Width - 1;
+                            bool touchesBottomEdge = pixelBounds.Bottom >= renderedBitmap.Height - 1;
+                            if ((touchesRightEdge || touchesBottomEdge) && attempt < 3)
                             {
-                                richLoaded = false;
+                                if (touchesRightEdge)
+                                {
+                                    measurementWidth += Math.Max(8, (int)Math.Ceiling(fallbackFont.Size * 0.35f));
+                                }
+
+                                if (touchesBottomEdge)
+                                {
+                                    measurementHeight += Math.Max(6, (int)Math.Ceiling(fallbackFont.GetHeight(g) * 0.25f));
+                                }
+
+                                continue;
                             }
-                        }
 
-                        if (!richLoaded)
-                        {
-                            richTextBox.Text = content;
-                        }
+                            float measuredWidth = Math.Max(baseSize.Width, Math.Max(1f, pixelBounds.Width + 2f));
+                            float measuredHeight = Math.Max(
+                                Math.Max(baseSize.Height, expectedRichHeight),
+                                Math.Max(1f, renderedBitmap.Height + 2f));
+                            if (DebugLogEnabled)
+                            {
+                                LogDebug(
+                                    $"RichSizeMeasure align={alignment} font={fallbackFont.FontFamily.Name}@{fallbackFont.Size:0.###} " +
+                                    $"base={baseSize.Width:0.###}x{baseSize.Height:0.###} " +
+                                    $"padded={paddedSize.Width:0.###}x{paddedSize.Height:0.###} " +
+                                    $"bitmap={renderedBitmap.Width}x{renderedBitmap.Height} bounds={pixelBounds.Left},{pixelBounds.Top},{pixelBounds.Width},{pixelBounds.Height} " +
+                                    $"edgeR={(touchesRightEdge ? 1 : 0)} edgeB={(touchesBottomEdge ? 1 : 0)} " +
+                                    $"measuredW={measuredWidth:0.###} measuredH={measuredHeight:0.###}");
+                            }
 
-                        richTextBox.CreateControl();
-                        ApplyGlobalRichFont(richTextBox, fallbackFont);
-                        ApplyRichParagraphAlignment(richTextBox, System.Windows.Forms.HorizontalAlignment.Left);
-                        ApplyCompactRichLineSpacing(richTextBox, fallbackFont);
-                        richTextBox.ZoomFactor = 1f;
-
-                        RectangleF inkBounds = MeasureRichInkBounds(
-                            richTextBox,
-                            paddedSize.Width,
-                            paddedSize.Height);
-                        if (!inkBounds.IsEmpty)
-                        {
-                            float richBottomReserve = Math.Max(4f, fallbackHeight * 0.2f);
-                            float richHorizontalReserve = Math.Max(3f, extraWidth * 0.18f);
                             return new SizeF(
-                                Math.Max(1f, Math.Max(baseSize.Width, inkBounds.Right + richHorizontalReserve)),
-                                Math.Max(1f, inkBounds.Height + richBottomReserve));
+                                measuredWidth,
+                                measuredHeight);
                         }
                     }
                 }
@@ -10298,7 +10315,8 @@ namespace AnonPDF
             SizeF measuredSize = GetRichAnnotationContentSize(
                 annotation.AnnotationText,
                 annotation.AnnotationRichText,
-                annotation.AnnotationFont);
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment);
             if (!TryBuildSharedRichLayout(annotation, out SharedRichLayoutResult sharedRichLayout) ||
                 sharedRichLayout == null)
             {
@@ -12196,6 +12214,7 @@ namespace AnonPDF
         private static RectangleF BuildRichPreviewInkLocalFrameRectFromBitmap(
             Bitmap richBitmap,
             Rectangle sourceRect,
+            System.Windows.Forms.HorizontalAlignment alignment,
             float contentWidth,
             float contentHeight,
             float framePaddingX,
@@ -12211,15 +12230,35 @@ namespace AnonPDF
                 return new RectangleF(0f, 0f, layoutWidth, layoutHeight);
             }
 
+            RectangleF layoutRect = BuildRichBitmapLayoutRect(
+                annotation: null,
+                sourceRect: sourceRect,
+                contentWidth: contentWidth,
+                contentHeight: contentHeight,
+                bitmapToLayoutScale: 1f,
+                alignmentOffset: 0f);
+            switch (alignment)
+            {
+                case System.Windows.Forms.HorizontalAlignment.Center:
+                    layoutRect.X = Math.Max(0f, (contentWidth - layoutRect.Width) / 2f);
+                    break;
+                case System.Windows.Forms.HorizontalAlignment.Right:
+                    layoutRect.X = Math.Max(0f, contentWidth - layoutRect.Width);
+                    break;
+                default:
+                    layoutRect.X = 0f;
+                    break;
+            }
+
             float normalizedLeft = (inkBounds.Left - sourceRect.Left) / (float)Math.Max(1, sourceRect.Width);
             float normalizedRight = (inkBounds.Right - sourceRect.Left) / (float)Math.Max(1, sourceRect.Width);
             float normalizedTop = inkBounds.Top / (float)Math.Max(1, richBitmap.Height);
             float normalizedBottom = inkBounds.Bottom / (float)Math.Max(1, richBitmap.Height);
 
-            float inkLeft = framePaddingX + (Math.Max(0f, normalizedLeft) * contentWidth);
-            float inkTop = framePaddingY + (Math.Max(0f, normalizedTop) * contentHeight);
-            float inkRight = framePaddingX + (Math.Min(1f, normalizedRight) * contentWidth);
-            float inkBottom = framePaddingY + (Math.Min(1f, normalizedBottom) * contentHeight);
+            float inkLeft = framePaddingX + layoutRect.X + (Math.Max(0f, normalizedLeft) * layoutRect.Width);
+            float inkTop = framePaddingY + layoutRect.Y + (Math.Max(0f, normalizedTop) * layoutRect.Height);
+            float inkRight = framePaddingX + layoutRect.X + (Math.Min(1f, normalizedRight) * layoutRect.Width);
+            float inkBottom = framePaddingY + layoutRect.Y + (Math.Min(1f, normalizedBottom) * layoutRect.Height);
 
             RectangleF localFrameRect = RectangleF.FromLTRB(
                 Math.Max(0f, inkLeft - framePaddingX),
@@ -12467,6 +12506,7 @@ namespace AnonPDF
                             effectiveInteractionFrameLocalRect = BuildRichPreviewInkLocalFrameRectFromBitmap(
                                 interactionSourceBitmap,
                                 interactionSourceRect,
+                                annotation.AnnotationAlignment,
                                 Math.Max(1f, interactionSnapshotContentWidthPx > 0f ? interactionSnapshotContentWidthPx : widthPx),
                                 Math.Max(1f, interactionSnapshotContentHeightPx > 0f ? interactionSnapshotContentHeightPx : heightPx),
                                 interactionFramePaddingX,
@@ -12540,6 +12580,7 @@ namespace AnonPDF
                     interactionFrameLocalRect = BuildRichPreviewInkLocalFrameRectFromBitmap(
                         annotation.CachedRichPreviewBitmap,
                         sourceRect,
+                        annotation.AnnotationAlignment,
                         contentWidthPx,
                         contentHeightPx,
                         framePaddingX,
@@ -13274,6 +13315,15 @@ namespace AnonPDF
             }
         }
 
+        internal static string BuildEditorDisplayRichTextRtf(string plainText, string richText, Font annotationFont)
+        {
+            Font sourceFont = annotationFont ?? SystemFonts.DefaultFont;
+            using (Font editorFont = new Font(sourceFont.FontFamily, 12f, sourceFont.Style, GraphicsUnit.Point))
+            {
+                return BuildRenderableRichTextRtf(plainText, richText, editorFont);
+            }
+        }
+
         private static FontStyle GetRichMeasurementFontStyle(FontStyle style)
         {
             FontStyle sanitized = style & ~FontStyle.Strikeout;
@@ -13727,6 +13777,19 @@ namespace AnonPDF
             }
         }
 
+        private static double ToWpfFontSizeDip(Font font)
+        {
+            if (font == null)
+            {
+                return 12d;
+            }
+
+            double points = font.Unit == GraphicsUnit.Point
+                ? font.Size
+                : font.SizeInPoints;
+            return Math.Max(1d, points * 96d / 72d);
+        }
+
         private static void NormalizeWpfRichDocument(
             System.Windows.Documents.FlowDocument document,
             Font baseFont,
@@ -13758,7 +13821,7 @@ namespace AnonPDF
                 new System.Windows.Media.FontFamily(baseFont.FontFamily.Name));
             range.ApplyPropertyValue(
                 System.Windows.Documents.TextElement.FontSizeProperty,
-                (double)baseFont.Size);
+                ToWpfFontSizeDip(baseFont));
 
             foreach (System.Windows.Documents.Block block in document.Blocks)
             {
@@ -13816,30 +13879,16 @@ namespace AnonPDF
                         VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled
                     };
 
-                    System.Windows.TextAlignment textAlignment;
-                    switch (alignment)
-                    {
-                        case System.Windows.Forms.HorizontalAlignment.Center:
-                            textAlignment = System.Windows.TextAlignment.Center;
-                            break;
-                        case System.Windows.Forms.HorizontalAlignment.Right:
-                            textAlignment = System.Windows.TextAlignment.Right;
-                            break;
-                        default:
-                            textAlignment = System.Windows.TextAlignment.Left;
-                            break;
-                    }
-
                     var document = new System.Windows.Documents.FlowDocument
                     {
                         PagePadding = new System.Windows.Thickness(0),
                         ColumnGap = 0,
                         ColumnWidth = double.PositiveInfinity,
                         FontFamily = new System.Windows.Media.FontFamily(scaledFont.FontFamily.Name),
-                        FontSize = scaledFont.Size,
-                        TextAlignment = textAlignment,
+                        FontSize = ToWpfFontSizeDip(scaledFont),
+                        TextAlignment = System.Windows.TextAlignment.Left,
                         LineStackingStrategy = System.Windows.LineStackingStrategy.BlockLineHeight,
-                        PageWidth = Math.Max(1d, widthPx - leftInsetPx - rightInsetPx),
+                        PageWidth = 100000d,
                         PageHeight = Math.Max(1, heightPx)
                     };
                     document.LineHeight = Math.Max(1d, GetConsistentRichLineHeightPx(scaledFont));
@@ -13859,7 +13908,7 @@ namespace AnonPDF
                         document.Blocks.Add(new System.Windows.Documents.Paragraph(new System.Windows.Documents.Run(plainText ?? string.Empty)));
                     }
 
-                    NormalizeWpfRichDocument(document, scaledFont, alignment, document.LineHeight);
+                    NormalizeWpfRichDocument(document, scaledFont, System.Windows.Forms.HorizontalAlignment.Left, document.LineHeight);
 
                     richTextBox.Measure(new System.Windows.Size(widthPx, heightPx));
                     richTextBox.Arrange(new System.Windows.Rect(0, 0, widthPx, heightPx));
@@ -13877,6 +13926,16 @@ namespace AnonPDF
                     if (renderedBitmap == null)
                     {
                         return false;
+                    }
+
+                    Bitmap alignedBitmap = ApplyDetectedLineAlignmentToTransparentBitmap(
+                        renderedBitmap,
+                        alignment,
+                        plainText);
+                    if (!ReferenceEquals(alignedBitmap, renderedBitmap))
+                    {
+                        renderedBitmap.Dispose();
+                        renderedBitmap = alignedBitmap;
                     }
 
                     if (!trimVertical ||
@@ -13959,7 +14018,7 @@ namespace AnonPDF
         private static void ApplyAnnotationFromDialog(TextAnnotation annotation, EditTextDialog dlg)
         {
             SizeF contentSize = dlg.IsRichTextMode
-                ? GetRichAnnotationContentSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont)
+                ? GetRichAnnotationContentSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont, dlg.AnnotationAlignment)
                 : GetAnnotationPlainContentSize(dlg.AnnotationText, dlg.AnnotationFont);
             SizeF textSize = GetAnnotationOuterSizeFromContent(
                 contentSize,
@@ -14214,7 +14273,7 @@ namespace AnonPDF
                     // Calculate text size using the selected font
                     SizeF textSize = dlg.IsRichTextMode
                         ? GetAnnotationOuterSizeFromContent(
-                            GetRichAnnotationContentSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont),
+                            GetRichAnnotationContentSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont, dlg.AnnotationAlignment),
                             dlg.AnnotationBorderWidth,
                             dlg.AnnotationFrameMargin,
                             dlg.AnnotationRotation)
@@ -33532,7 +33591,13 @@ namespace AnonPDF
                         richImageAttributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
                         RectangleF richLayoutRect = interactionSnapshotIncludesFrame
                             ? new RectangleF(0f, 0f, Math.Max(1f, layoutWidth), Math.Max(1f, layoutHeight))
-                            : new RectangleF(0f, 0f, Math.Max(1f, contentWidth), Math.Max(1f, contentHeight));
+                            : BuildRichBitmapLayoutRect(
+                                annotation,
+                                richSourceRect,
+                                contentWidth,
+                                contentHeight,
+                                1f,
+                                0f);
 
                         if (annotationRotation == 0)
                         {
@@ -33599,7 +33664,13 @@ namespace AnonPDF
                             PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
                             float offsetX = rotationOffset.X;
                             float offsetY = rotationOffset.Y;
-                            RectangleF richLayoutRect = new RectangleF(0f, 0f, Math.Max(1f, contentWidth), Math.Max(1f, contentHeight));
+                            RectangleF richLayoutRect = BuildRichBitmapLayoutRect(
+                                annotation,
+                                richSourceRect,
+                                contentWidth,
+                                contentHeight,
+                                1f,
+                                0f);
 
                             if (annotationRotation == 0)
                             {
@@ -45277,6 +45348,7 @@ namespace AnonPDF
                     localFrameRect = BuildRichPreviewInkLocalFrameRectFromBitmap(
                         richBitmap,
                         sourceRect,
+                        annotation.AnnotationAlignment,
                         contentWidth,
                         contentHeight,
                         framePaddingX,
@@ -51829,6 +51901,11 @@ namespace AnonPDF
         public Action ApplyChanges { get; set; }
         public Action<EditTextDialog> RestoreDefaultsAction { get; set; }
         private bool suppressAutoApply;
+        private bool suppressEditorPresentationRefresh;
+        private Font editorDisplayFont;
+        private readonly Timer liveApplyTimer;
+        private const int LiveApplyDelayMs = 180;
+        private const float EditorDisplayFontSize = 12f;
 
         public EditTextDialog()
         {
@@ -51848,6 +51925,18 @@ namespace AnonPDF
             LeaderHeadLength = PDFForm.NormalizeLeaderHeadLength(LeaderHeadLength <= 0f ? PDFForm.DefaultArrowHeadLength : LeaderHeadLength);
             LeaderHeadWidth = PDFForm.NormalizeLeaderHeadWidth(LeaderHeadWidth <= 0f ? PDFForm.DefaultArrowHeadWidth : LeaderHeadWidth);
             AnnotationRotation = NormalizeAngle(AnnotationRotation);
+            liveApplyTimer = new Timer { Interval = LiveApplyDelayMs };
+            liveApplyTimer.Tick += (_, __) =>
+            {
+                liveApplyTimer.Stop();
+                TryApplyChanges();
+            };
+            this.FormClosing += (_, __) => liveApplyTimer.Stop();
+            this.FormClosed += (_, __) =>
+            {
+                editorDisplayFont?.Dispose();
+                editorDisplayFont = null;
+            };
 
             InitializeComponents();
         }
@@ -52320,9 +52409,21 @@ namespace AnonPDF
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            suppressAutoApply = true;
-            ApplyPropertiesToControls();
-            suppressAutoApply = false;
+            bool previousSuppressAutoApply = suppressAutoApply;
+            bool previousSuppressPresentationRefresh = suppressEditorPresentationRefresh;
+            try
+            {
+                suppressAutoApply = true;
+                suppressEditorPresentationRefresh = true;
+                ApplyPropertiesToControls();
+            }
+            finally
+            {
+                suppressAutoApply = previousSuppressAutoApply;
+                suppressEditorPresentationRefresh = previousSuppressPresentationRefresh;
+            }
+
+            ApplyEditorDisplayFormatting(normalizeRichContent: IsRichTextMode);
         }
 
         private void BtnRestoreDefaults_Click(object sender, EventArgs e)
@@ -52336,22 +52437,44 @@ namespace AnonPDF
             RestoreDefaultsAction(this);
             AnnotationText = preservedText;
             AnnotationRichText = null;
-            suppressAutoApply = true;
+            bool previousSuppressAutoApply = suppressAutoApply;
+            bool previousSuppressPresentationRefresh = suppressEditorPresentationRefresh;
             try
             {
+                suppressAutoApply = true;
+                suppressEditorPresentationRefresh = true;
                 ApplyPropertiesToControls();
             }
             finally
             {
-                suppressAutoApply = false;
+                suppressAutoApply = previousSuppressAutoApply;
+                suppressEditorPresentationRefresh = previousSuppressPresentationRefresh;
             }
+            ApplyEditorDisplayFormatting(normalizeRichContent: IsRichTextMode);
             TryApplyChanges();
         }
 
         private void ApplyPropertiesToControls()
         {
-            txtText.Text = AnnotationText ?? string.Empty;
             UpdateFontDisplay();
+            bool richLoaded = false;
+            if (IsRichTextMode && !string.IsNullOrWhiteSpace(AnnotationRichText))
+            {
+                try
+                {
+                    txtText.Rtf = AnnotationRichText;
+                    richLoaded = true;
+                }
+                catch
+                {
+                    richLoaded = false;
+                }
+            }
+
+            if (!richLoaded)
+            {
+                txtText.Text = AnnotationText ?? string.Empty;
+            }
 
             switch (AnnotationAlignment)
             {
@@ -52401,7 +52524,7 @@ namespace AnonPDF
                     txtText.Text = AnnotationText ?? string.Empty;
                 }
             }
-            SetRichMode(IsRichTextMode, updateState: false);
+            SetRichMode(IsRichTextMode, updateState: false, reloadEditorContent: false, applyFormatting: false);
             ApplyAlignmentToEditor();
             UpdateLeaderControlsState();
         }
@@ -52509,7 +52632,7 @@ namespace AnonPDF
             }
         }
 
-        private void SetRichMode(bool richMode, bool updateState)
+        private void SetRichMode(bool richMode, bool updateState, bool reloadEditorContent = true, bool applyFormatting = true)
         {
             IsRichTextMode = richMode;
             richTextToolbarPanel.Visible = richMode;
@@ -52526,7 +52649,7 @@ namespace AnonPDF
                 chkNoBackgroundColor.Enabled = true;
             }
 
-            if (richMode)
+            if (reloadEditorContent && richMode)
             {
                 if (!string.IsNullOrWhiteSpace(AnnotationRichText))
                 {
@@ -52540,20 +52663,22 @@ namespace AnonPDF
                     }
                 }
             }
-            else
+            else if (reloadEditorContent)
             {
                 AnnotationRichText = null;
                 AnnotationText = txtText.Text;
             }
 
             ApplyAlignmentToEditor();
+            if (applyFormatting)
+            {
+                ApplyEditorDisplayFormatting(normalizeRichContent: richMode);
+            }
 
             if (updateState)
             {
-                TryApplyChanges();
+                ScheduleApplyChanges();
             }
-
-            UpdateEditorTextScale();
             UpdateColorControls();
         }
 
@@ -52581,29 +52706,84 @@ namespace AnonPDF
                 lblFontDisplay.Text = FormatResource("EditText_FontDisplayWithStyle", AnnotationFont.FontFamily.Name, AnnotationFont.Size, fontStyles);
             }
 
-            UpdateEditorTextScale();
+            if (!suppressEditorPresentationRefresh)
+            {
+                ApplyEditorDisplayFormatting(normalizeRichContent: IsRichTextMode);
+            }
             UpdateColorControls();
         }
 
-        private void UpdateEditorTextScale()
+        private void ApplyEditorDisplayFormatting(bool normalizeRichContent)
         {
             if (txtText == null)
             {
                 return;
             }
 
-            float baseEditorFontSize = 12f;
-            Font sourceFont = AnnotationFont ?? new Font("Segoe UI", baseEditorFontSize, FontStyle.Regular, GraphicsUnit.Point);
-            if (!IsRichTextMode || txtText.TextLength == 0)
-            {
-                txtText.Font = new Font(sourceFont.FontFamily, baseEditorFontSize, sourceFont.Style, GraphicsUnit.Point);
-            }
+            Font sourceFont = AnnotationFont ?? this.Font ?? SystemFonts.DefaultFont;
+            Font newEditorFont = new Font(sourceFont.FontFamily, EditorDisplayFontSize, sourceFont.Style, GraphicsUnit.Point);
+            Font previousEditorFont = editorDisplayFont;
+            editorDisplayFont = newEditorFont;
             txtText.ZoomFactor = 1f;
+            previousEditorFont?.Dispose();
+
+            if (!IsRichTextMode)
+            {
+                txtText.Font = editorDisplayFont;
+                return;
+            }
+
+            if (!normalizeRichContent || txtText.TextLength <= 0)
+            {
+                txtText.Font = editorDisplayFont;
+                return;
+            }
+
+            RefreshRichEditorPresentation();
+        }
+
+        private void RefreshRichEditorPresentation()
+        {
+            if (txtText == null || editorDisplayFont == null || txtText.TextLength <= 0)
+            {
+                return;
+            }
+
+            int selectionStart = txtText.SelectionStart;
+            int selectionLength = txtText.SelectionLength;
+            bool previousSuppressAutoApply = suppressAutoApply;
+            bool previousSuppressPresentationRefresh = suppressEditorPresentationRefresh;
+
+            try
+            {
+                suppressAutoApply = true;
+                suppressEditorPresentationRefresh = true;
+                string editorDisplayRtf = PDFForm.BuildEditorDisplayRichTextRtf(txtText.Text, txtText.Rtf, AnnotationFont);
+                if (!string.IsNullOrWhiteSpace(editorDisplayRtf))
+                {
+                    txtText.Rtf = editorDisplayRtf;
+                }
+
+                ApplyAlignmentToEditor();
+            }
+            finally
+            {
+                int safeSelectionStart = Math.Max(0, Math.Min(selectionStart, txtText.TextLength));
+                int safeSelectionLength = Math.Max(0, Math.Min(selectionLength, txtText.TextLength - safeSelectionStart));
+                txtText.Select(safeSelectionStart, safeSelectionLength);
+                suppressAutoApply = previousSuppressAutoApply;
+                suppressEditorPresentationRefresh = previousSuppressPresentationRefresh;
+            }
         }
 
         private void TxtText_TextChanged(object sender, EventArgs e)
         {
-            TryApplyChanges();
+            if (IsRichTextMode && !suppressEditorPresentationRefresh)
+            {
+                RefreshRichEditorPresentation();
+            }
+
+            ScheduleApplyChanges();
         }
 
 
@@ -52622,7 +52802,7 @@ namespace AnonPDF
                 AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Right;
             }
             ApplyAlignmentToEditor();
-            TryApplyChanges();
+            ScheduleApplyChanges();
 
         }
 
@@ -52644,14 +52824,12 @@ namespace AnonPDF
             {
                 txtText.Select(selectionStart, selectionLength);
             }
-
-            UpdateEditorTextScale();
         }
 
         private void RotationValueChanged(object sender, EventArgs e)
         {
             AnnotationRotation = NormalizeAngle((int)nudRotation.Value);
-            TryApplyChanges();
+            ScheduleApplyChanges();
         }
 
         private void RotationPresetButton_Click(object sender, EventArgs e)
@@ -52691,7 +52869,7 @@ namespace AnonPDF
                 {
                     AnnotationFont = fontDialog.Font;
                     UpdateFontDisplay();
-                    TryApplyChanges();
+                    ScheduleApplyChanges();
                 }
             }
         }
@@ -52775,6 +52953,14 @@ namespace AnonPDF
 
         private void RichModeCheckedChanged(object sender, EventArgs e)
         {
+            if (suppressAutoApply && suppressEditorPresentationRefresh)
+            {
+                IsRichTextMode = chkRichTextMode.Checked;
+                richTextToolbarPanel.Visible = IsRichTextMode;
+                UpdateColorControls();
+                return;
+            }
+
             SetRichMode(chkRichTextMode.Checked, updateState: true);
         }
 
@@ -52791,7 +52977,7 @@ namespace AnonPDF
                 : (selectionFont.Style | style);
             txtText.SelectionFont = new Font(selectionFont, newStyle);
             txtText.Focus();
-            TryApplyChanges();
+            ScheduleApplyChanges();
         }
 
         private void BtnRichTextColor_Click(object sender, EventArgs e)
@@ -52808,7 +52994,7 @@ namespace AnonPDF
                 {
                     txtText.SelectionColor = colorDialog.Color;
                     txtText.Focus();
-                    TryApplyChanges();
+                    ScheduleApplyChanges();
                 }
             }
         }
@@ -52822,7 +53008,9 @@ namespace AnonPDF
                 return;
             }
             AnnotationText = txtText.Text.Trim();
-            AnnotationRichText = IsRichTextMode ? txtText.Rtf : null;
+            AnnotationRichText = IsRichTextMode
+                ? BuildRichTextForApply()
+                : null;
             AnnotationBorderWidth = NormalizeAnnotationBorderWidth((float)nudBorderWidth.Value);
             AnnotationFrameMargin = NormalizeAnnotationFrameMargin((float)nudFrameMargin.Value);
             HasLeaderArrow = chkLeaderArrow != null && chkLeaderArrow.Checked;
@@ -52868,6 +53056,24 @@ namespace AnonPDF
             }
         }
 
+        private void ScheduleApplyChanges()
+        {
+            if (suppressAutoApply)
+            {
+                liveApplyTimer?.Stop();
+                return;
+            }
+
+            if (liveApplyTimer == null)
+            {
+                TryApplyChanges();
+                return;
+            }
+
+            liveApplyTimer.Stop();
+            liveApplyTimer.Start();
+        }
+
         private void TryApplyChanges()
         {
             if (ApplyChanges == null || suppressAutoApply)
@@ -52875,7 +53081,9 @@ namespace AnonPDF
             if (string.IsNullOrWhiteSpace(txtText.Text))
                 return;
             AnnotationText = txtText.Text;
-            AnnotationRichText = IsRichTextMode ? txtText.Rtf : null;
+            AnnotationRichText = IsRichTextMode
+                ? BuildRichTextForApply()
+                : null;
             AnnotationBorderWidth = NormalizeAnnotationBorderWidth((float)nudBorderWidth.Value);
             AnnotationFrameMargin = NormalizeAnnotationFrameMargin((float)nudFrameMargin.Value);
             HasLeaderArrow = chkLeaderArrow != null && chkLeaderArrow.Checked;
@@ -52883,6 +53091,59 @@ namespace AnonPDF
             LeaderHeadLength = PDFForm.NormalizeLeaderHeadLength((float)nudLeaderHeadLength.Value);
             LeaderHeadWidth = PDFForm.NormalizeLeaderHeadWidth((float)nudLeaderHeadWidth.Value);
             ApplyChanges?.Invoke();
+        }
+
+        private string BuildRichTextForApply()
+        {
+            if (!IsRichTextMode)
+            {
+                return null;
+            }
+
+            string editorText = txtText?.Text ?? string.Empty;
+            string editorRtf = txtText?.Rtf ?? string.Empty;
+            string renderableRtf = PDFForm.BuildRenderableRichTextRtf(editorText, editorRtf, AnnotationFont);
+            int expectedLineCount = CountNormalizedLines(editorText);
+            int renderableLineCount = GetLineCountFromRtf(renderableRtf);
+            if (renderableLineCount >= expectedLineCount || string.IsNullOrWhiteSpace(editorRtf))
+            {
+                return renderableRtf;
+            }
+
+            int editorRtfLineCount = GetLineCountFromRtf(editorRtf);
+            if (editorRtfLineCount >= expectedLineCount)
+            {
+                return editorRtf;
+            }
+
+            return renderableRtf;
+        }
+
+        private static int CountNormalizedLines(string text)
+        {
+            string normalized = (text ?? string.Empty).Replace("\r\n", "\n").Replace("\r", "\n");
+            return Math.Max(1, normalized.Split(new[] { '\n' }, StringSplitOptions.None).Length);
+        }
+
+        private static int GetLineCountFromRtf(string rtf)
+        {
+            if (string.IsNullOrWhiteSpace(rtf))
+            {
+                return 1;
+            }
+
+            try
+            {
+                using (var richTextBox = new RichTextBox())
+                {
+                    richTextBox.Rtf = rtf;
+                    return CountNormalizedLines(richTextBox.Text);
+                }
+            }
+            catch
+            {
+                return 1;
+            }
         }
 
         private static string FormatResource(string key, params object[] args)
