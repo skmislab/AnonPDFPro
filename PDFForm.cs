@@ -30108,14 +30108,9 @@ namespace AnonPDF
             }
 
             iText.Kernel.Geom.Rectangle sourceRect = ConvertToItTextRectangle(pdfCoords);
-            List<iText.Kernel.Geom.Rectangle> pdfLineRects = block.IsMarkerSelection
-                ? GetVisualLineRectsForBlock(
-                    page,
-                    sourceRect,
-                    block.PageNumber,
-                    rotation,
-                    "visual")
-                : GetPdfCleanUpPreviewRectsForBlock(page, sourceRect);
+            // Grey preview must keep membership from the same glyph qualification path as pdfSweep.
+            // Marker preview may refine visual bounds in a second step, but only for already selected glyphs.
+            List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetPdfCleanUpPreviewRectsForBlock(page, block, sourceRect);
 
             return pdfLineRects
                 .Where(r => r != null && r.GetWidth() > 0f && r.GetHeight() > 0f)
@@ -30123,12 +30118,9 @@ namespace AnonPDF
                 .ToList();
         }
 
-        // TODO(remove): legacy preview path introduced to mirror pdfSweep glyph matching.
-        // Marker preview was moved back to GetVisualLineRectsForBlock after regressions
-        // (for example missing Polish diacritics like the upper stroke on "Ś").
-        // Remove this method after box preview is migrated to the unified visual-bounds path.
         private List<iText.Kernel.Geom.Rectangle> GetPdfCleanUpPreviewRectsForBlock(
             iText.Kernel.Pdf.PdfPage page,
+            RedactionBlock block,
             iText.Kernel.Geom.Rectangle sourceRectangle)
         {
             if (page == null || sourceRectangle == null || sourceRectangle.GetWidth() <= 0f || sourceRectangle.GetHeight() <= 0f)
@@ -30141,9 +30133,18 @@ namespace AnonPDF
                 var strategy = new PdfCleanUpPreviewTextExtractionStrategy(
                     new List<iText.Kernel.Geom.Rectangle> { sourceRectangle });
                 PdfTextExtractor.GetTextFromPage(page, strategy);
-                if (strategy.TryGetCleanedGlyphRectangles(out List<iText.Kernel.Geom.Rectangle> glyphRects))
+                if (strategy.TryGetCleanedGlyphInfos(out List<PdfCleanUpPreviewTextExtractionStrategy.CleanedGlyphInfo> glyphInfos))
                 {
-                    return glyphRects;
+                    if (block?.IsMarkerSelection == true &&
+                        TryRefineMarkerPreviewGlyphRectsWithPdfium(block.PageNumber, glyphInfos, out List<iText.Kernel.Geom.Rectangle> refinedGlyphRects))
+                    {
+                        return refinedGlyphRects;
+                    }
+
+                    return glyphInfos
+                        .Select(info => info.Bounds)
+                        .Where(rect => rect != null && rect.GetWidth() > 0f && rect.GetHeight() > 0f)
+                        .ToList();
                 }
             }
             catch (Exception ex)
@@ -30152,6 +30153,230 @@ namespace AnonPDF
             }
 
             return new List<iText.Kernel.Geom.Rectangle>();
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeFsRectF
+        {
+            public float Left;
+            public float Top;
+            public float Right;
+            public float Bottom;
+        }
+
+        private sealed class PdfiumPreviewGlyphCandidate
+        {
+            public int Index { get; set; }
+            public string Text { get; set; }
+            public iText.Kernel.Geom.Rectangle CharBounds { get; set; }
+            public iText.Kernel.Geom.Rectangle LooseBounds { get; set; }
+            public bool Used { get; set; }
+        }
+
+        [DllImport("pdfium_x64.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "FPDFText_GetLooseCharBox")]
+        private static extern bool NativeGetLooseCharBox64(PDFiumSharp.Types.FPDF_TEXTPAGE textPage, int index, ref NativeFsRectF rect);
+
+        [DllImport("pdfium_x86.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "FPDFText_GetLooseCharBox")]
+        private static extern bool NativeGetLooseCharBox32(PDFiumSharp.Types.FPDF_TEXTPAGE textPage, int index, ref NativeFsRectF rect);
+
+        [DllImport("pdfium_x64.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "FPDFText_GetUnicode")]
+        private static extern uint NativeGetUnicode64(PDFiumSharp.Types.FPDF_TEXTPAGE textPage, int index);
+
+        [DllImport("pdfium_x86.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "FPDFText_GetUnicode")]
+        private static extern uint NativeGetUnicode32(PDFiumSharp.Types.FPDF_TEXTPAGE textPage, int index);
+
+        private static bool NativeGetLooseCharBox(PDFiumSharp.Types.FPDF_TEXTPAGE textPage, int index, ref NativeFsRectF rect)
+        {
+            return Environment.Is64BitProcess
+                ? NativeGetLooseCharBox64(textPage, index, ref rect)
+                : NativeGetLooseCharBox32(textPage, index, ref rect);
+        }
+
+        private static uint NativeGetUnicode(PDFiumSharp.Types.FPDF_TEXTPAGE textPage, int index)
+        {
+            return Environment.Is64BitProcess
+                ? NativeGetUnicode64(textPage, index)
+                : NativeGetUnicode32(textPage, index);
+        }
+
+        private bool TryRefineMarkerPreviewGlyphRectsWithPdfium(
+            int pageNumber,
+            List<PdfCleanUpPreviewTextExtractionStrategy.CleanedGlyphInfo> selectedGlyphs,
+            out List<iText.Kernel.Geom.Rectangle> refinedGlyphRects)
+        {
+            refinedGlyphRects = new List<iText.Kernel.Geom.Rectangle>();
+            if (selectedGlyphs == null || selectedGlyphs.Count == 0 || string.IsNullOrWhiteSpace(inputPdfPath) || !File.Exists(inputPdfPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                using (var pdfiumDoc = string.IsNullOrEmpty(userPassword)
+                    ? new PDFiumSharp.PdfDocument(inputPdfPath)
+                    : new PDFiumSharp.PdfDocument(inputPdfPath, userPassword))
+                {
+                    if (pageNumber < 1 || pageNumber > pdfiumDoc.Pages.Count)
+                    {
+                        return false;
+                    }
+
+                    var page = pdfiumDoc.Pages[pageNumber - 1];
+                    PDFiumSharp.Types.FPDF_TEXTPAGE textPage = PDFiumSharp.PDFium.FPDFText_LoadPage(page.Handle);
+                    try
+                    {
+                        List<PdfiumPreviewGlyphCandidate> candidates = BuildPdfiumPreviewGlyphCandidates(textPage);
+                        if (candidates.Count == 0)
+                        {
+                            return false;
+                        }
+
+                        foreach (var glyph in selectedGlyphs)
+                        {
+                            var matched = MatchPdfiumPreviewCandidate(glyph, candidates);
+                            refinedGlyphRects.Add(matched?.CharBounds ?? glyph.Bounds);
+                        }
+                    }
+                    finally
+                    {
+                        PDFiumSharp.PDFium.FPDFText_ClosePage(textPage);
+                    }
+                }
+
+                return refinedGlyphRects.Count > 0;
+            }
+            catch (Exception ex)
+            {
+                LogDebug("PDFium marker preview refinement failed: " + ex.Message);
+                refinedGlyphRects.Clear();
+                return false;
+            }
+        }
+
+        private List<PdfiumPreviewGlyphCandidate> BuildPdfiumPreviewGlyphCandidates(PDFiumSharp.Types.FPDF_TEXTPAGE textPage)
+        {
+            var candidates = new List<PdfiumPreviewGlyphCandidate>();
+            int count = PDFiumSharp.PDFium.FPDFText_CountChars(textPage);
+            for (int i = 0; i < count; i++)
+            {
+                uint unicodeValue = NativeGetUnicode(textPage, i);
+                if (unicodeValue == 0u || unicodeValue > 0xFFFFu)
+                {
+                    continue;
+                }
+
+                if (!PDFiumSharp.PDFium.FPDFText_GetCharBox(textPage, i, out double left, out double right, out double bottom, out double top))
+                {
+                    continue;
+                }
+
+                var looseRect = new NativeFsRectF();
+                bool hasLooseBounds = NativeGetLooseCharBox(textPage, i, ref looseRect);
+                var charBounds = NormalizePdfiumRect((float)left, (float)bottom, (float)right, (float)top);
+                var looseBounds = hasLooseBounds
+                    ? NormalizePdfiumRect(looseRect.Left, looseRect.Bottom, looseRect.Right, looseRect.Top)
+                    : charBounds;
+
+                if (charBounds == null || looseBounds == null)
+                {
+                    continue;
+                }
+
+                candidates.Add(new PdfiumPreviewGlyphCandidate
+                {
+                    Index = i,
+                    Text = ((char)unicodeValue).ToString(),
+                    CharBounds = charBounds,
+                    LooseBounds = looseBounds,
+                    Used = false
+                });
+            }
+
+            return candidates;
+        }
+
+        private PdfiumPreviewGlyphCandidate MatchPdfiumPreviewCandidate(
+            PdfCleanUpPreviewTextExtractionStrategy.CleanedGlyphInfo glyph,
+            List<PdfiumPreviewGlyphCandidate> candidates)
+        {
+            if (glyph == null || string.IsNullOrEmpty(glyph.Text) || candidates == null || candidates.Count == 0)
+            {
+                return null;
+            }
+
+            PdfiumPreviewGlyphCandidate best = null;
+            double bestScore = double.MaxValue;
+            foreach (var candidate in candidates)
+            {
+                if (candidate.Used || !string.Equals(candidate.Text, glyph.Text, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                float overlapArea = CalculateRectIntersectionArea(glyph.Bounds, candidate.CharBounds);
+                double centerDistance = CalculateRectCenterDistanceSquared(glyph.Bounds, candidate.CharBounds);
+                double score = centerDistance - (overlapArea * 1000d);
+                if (best == null || score < bestScore)
+                {
+                    best = candidate;
+                    bestScore = score;
+                }
+            }
+
+            if (best != null)
+            {
+                best.Used = true;
+            }
+
+            return best;
+        }
+
+        private static iText.Kernel.Geom.Rectangle NormalizePdfiumRect(float left, float bottom, float right, float top)
+        {
+            float minX = Math.Min(left, right);
+            float maxX = Math.Max(left, right);
+            float minY = Math.Min(bottom, top);
+            float maxY = Math.Max(bottom, top);
+            float width = maxX - minX;
+            float height = maxY - minY;
+            if (width <= 0f || height <= 0f)
+            {
+                return null;
+            }
+
+            return new iText.Kernel.Geom.Rectangle(minX, minY, width, height);
+        }
+
+        private static float CalculateRectIntersectionArea(iText.Kernel.Geom.Rectangle a, iText.Kernel.Geom.Rectangle b)
+        {
+            if (a == null || b == null)
+            {
+                return 0f;
+            }
+
+            float left = Math.Max(a.GetLeft(), b.GetLeft());
+            float right = Math.Min(a.GetRight(), b.GetRight());
+            float bottom = Math.Max(a.GetBottom(), b.GetBottom());
+            float top = Math.Min(a.GetTop(), b.GetTop());
+            float width = right - left;
+            float height = top - bottom;
+            return (width > 0f && height > 0f) ? width * height : 0f;
+        }
+
+        private static double CalculateRectCenterDistanceSquared(iText.Kernel.Geom.Rectangle a, iText.Kernel.Geom.Rectangle b)
+        {
+            if (a == null || b == null)
+            {
+                return double.MaxValue;
+            }
+
+            double ax = (a.GetLeft() + a.GetRight()) * 0.5d;
+            double ay = (a.GetBottom() + a.GetTop()) * 0.5d;
+            double bx = (b.GetLeft() + b.GetRight()) * 0.5d;
+            double by = (b.GetBottom() + b.GetTop()) * 0.5d;
+            double dx = ax - bx;
+            double dy = ay - by;
+            return (dx * dx) + (dy * dy);
         }
 
         private void QueueRedactionPreviewRectsForPage(int pageNumber)
@@ -49407,18 +49632,26 @@ namespace AnonPDF
                             long sumG = 0;
                             long sumR = 0;
                             int sampleCount = 0;
-                            for (int x = left; x <= right; x++)
-                            {
-                                int topIndex = x * sourceBpp;
-                                byte* topRow = sourcePtr + (top * sourceStride);
-                                sumB += topRow[topIndex];
-                                sumG += topRow[topIndex + 1];
-                                sumR += topRow[topIndex + 2];
-                                sampleCount++;
+                            int sampleLeft = Math.Max(0, left - 1);
+                            int sampleTop = Math.Max(0, top - 1);
+                            int sampleRight = Math.Min(sourceBitmap.Width - 1, right + 1);
+                            int sampleBottom = Math.Min(sourceBitmap.Height - 1, bottom + 1);
 
-                                if (bottom != top)
+                            for (int x = sampleLeft; x <= sampleRight; x++)
+                            {
+                                if (sampleTop < top)
                                 {
-                                    byte* bottomRow = sourcePtr + (bottom * sourceStride);
+                                    byte* topRow = sourcePtr + (sampleTop * sourceStride);
+                                    int topIndex = x * sourceBpp;
+                                    sumB += topRow[topIndex];
+                                    sumG += topRow[topIndex + 1];
+                                    sumR += topRow[topIndex + 2];
+                                    sampleCount++;
+                                }
+
+                                if (sampleBottom > bottom)
+                                {
+                                    byte* bottomRow = sourcePtr + (sampleBottom * sourceStride);
                                     int bottomIndex = x * sourceBpp;
                                     sumB += bottomRow[bottomIndex];
                                     sumG += bottomRow[bottomIndex + 1];
@@ -49427,22 +49660,67 @@ namespace AnonPDF
                                 }
                             }
 
-                            for (int y = top + 1; y < bottom; y++)
+                            for (int y = sampleTop + 1; y < sampleBottom; y++)
                             {
                                 byte* row = sourcePtr + (y * sourceStride);
-                                int leftIndex = left * sourceBpp;
-                                sumB += row[leftIndex];
-                                sumG += row[leftIndex + 1];
-                                sumR += row[leftIndex + 2];
-                                sampleCount++;
-
-                                if (right != left)
+                                if (sampleLeft < left)
                                 {
-                                    int rightIndex = right * sourceBpp;
+                                    int leftIndex = sampleLeft * sourceBpp;
+                                    sumB += row[leftIndex];
+                                    sumG += row[leftIndex + 1];
+                                    sumR += row[leftIndex + 2];
+                                    sampleCount++;
+                                }
+
+                                if (sampleRight > right)
+                                {
+                                    int rightIndex = sampleRight * sourceBpp;
                                     sumB += row[rightIndex];
                                     sumG += row[rightIndex + 1];
                                     sumR += row[rightIndex + 2];
                                     sampleCount++;
+                                }
+                            }
+
+                            if (sampleCount == 0)
+                            {
+                                for (int x = left; x <= right; x++)
+                                {
+                                    int topIndex = x * sourceBpp;
+                                    byte* topRow = sourcePtr + (top * sourceStride);
+                                    sumB += topRow[topIndex];
+                                    sumG += topRow[topIndex + 1];
+                                    sumR += topRow[topIndex + 2];
+                                    sampleCount++;
+
+                                    if (bottom != top)
+                                    {
+                                        byte* bottomRow = sourcePtr + (bottom * sourceStride);
+                                        int bottomIndex = x * sourceBpp;
+                                        sumB += bottomRow[bottomIndex];
+                                        sumG += bottomRow[bottomIndex + 1];
+                                        sumR += bottomRow[bottomIndex + 2];
+                                        sampleCount++;
+                                    }
+                                }
+
+                                for (int y = top + 1; y < bottom; y++)
+                                {
+                                    byte* row = sourcePtr + (y * sourceStride);
+                                    int leftIndex = left * sourceBpp;
+                                    sumB += row[leftIndex];
+                                    sumG += row[leftIndex + 1];
+                                    sumR += row[leftIndex + 2];
+                                    sampleCount++;
+
+                                    if (right != left)
+                                    {
+                                        int rightIndex = right * sourceBpp;
+                                        sumB += row[rightIndex];
+                                        sumG += row[rightIndex + 1];
+                                        sumR += row[rightIndex + 2];
+                                        sampleCount++;
+                                    }
                                 }
                             }
 
@@ -55464,9 +55742,22 @@ namespace AnonPDF
     {
         private const float PreviewIntersectionEpsilon = 1e-4f;
 
+        public sealed class CleanedGlyphInfo
+        {
+            public CleanedGlyphInfo(iText.Kernel.Geom.Rectangle bounds, string text)
+            {
+                Bounds = bounds;
+                Text = text ?? string.Empty;
+            }
+
+            public iText.Kernel.Geom.Rectangle Bounds { get; }
+            public string Text { get; }
+        }
+
         private readonly IList<iText.Kernel.Geom.Rectangle> regions;
         private readonly CleanUpProperties properties;
         private readonly List<iText.Kernel.Geom.Rectangle> cleanedGlyphRectangles;
+        private readonly List<CleanedGlyphInfo> cleanedGlyphInfos;
 
         public PdfCleanUpPreviewTextExtractionStrategy(
             IList<iText.Kernel.Geom.Rectangle> regions,
@@ -55475,6 +55766,7 @@ namespace AnonPDF
             this.regions = regions ?? new List<iText.Kernel.Geom.Rectangle>();
             this.properties = properties ?? new CleanUpProperties();
             cleanedGlyphRectangles = new List<iText.Kernel.Geom.Rectangle>();
+            cleanedGlyphInfos = new List<CleanedGlyphInfo>();
         }
 
         public void EventOccurred(IEventData data, EventType type)
@@ -55497,6 +55789,7 @@ namespace AnonPDF
                     if (glyphBounds != null && glyphBounds.GetWidth() > 0f && glyphBounds.GetHeight() > 0f)
                     {
                         cleanedGlyphRectangles.Add(glyphBounds);
+                        cleanedGlyphInfos.Add(new CleanedGlyphInfo(glyphBounds, glyphRenderInfo.GetText()));
                     }
                 }
             }
@@ -55523,6 +55816,14 @@ namespace AnonPDF
                 .Where(rect => rect != null && rect.GetWidth() > 0f && rect.GetHeight() > 0f)
                 .ToList();
             return glyphRects.Count > 0;
+        }
+
+        public bool TryGetCleanedGlyphInfos(out List<CleanedGlyphInfo> glyphInfos)
+        {
+            glyphInfos = cleanedGlyphInfos
+                .Where(info => info?.Bounds != null && info.Bounds.GetWidth() > 0f && info.Bounds.GetHeight() > 0f)
+                .ToList();
+            return glyphInfos.Count > 0;
         }
 
         private bool IsTextNotToBeCleaned(TextRenderInfo renderInfo)
@@ -55710,21 +56011,6 @@ namespace AnonPDF
             float minY = points.Min(point => (float)point.GetY());
             float maxX = points.Max(point => (float)point.GetX());
             float maxY = points.Max(point => (float)point.GetY());
-
-            string glyphText = renderInfo?.GetText();
-            if (!string.IsNullOrEmpty(glyphText) && glyphText.Length == 1 && maxY > minY)
-            {
-                string nfd = glyphText[0].ToString().Normalize(System.Text.NormalizationForm.FormD);
-                for (int ni = 1; ni < nfd.Length; ni++)
-                {
-                    int cp = (int)nfd[ni];
-                    if (cp >= 0x0300 && cp <= 0x0315)
-                    {
-                        maxY += (maxY - minY) * 0.20f;
-                        break;
-                    }
-                }
-            }
 
             float width = maxX - minX;
             float height = maxY - minY;
