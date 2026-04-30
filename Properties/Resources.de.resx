@@ -1888,4 +1888,7 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="FileName_CurrentViewPattern" xml:space="preserve">
     <value>{0}-ansicht-s{1}.png</value>
   </data>
+  <data name="ContextMenu_OpenWithAnonPDFPro" xml:space="preserve">
+    <value>Mit AnonPDF Pro &#246;ffnen</value>
+  </data>
 </root>

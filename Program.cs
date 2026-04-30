@@ -3,6 +3,7 @@ using System.Windows.Forms;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.Win32;
 using Newtonsoft.Json.Linq;
 
 // Suppress spell-check warning for project name 'AnonPDF'
@@ -15,7 +16,7 @@ namespace AnonPDF
         /// The main entry point for the application.
         /// </summary>
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
 
             // Global exception handler for all UI threads
@@ -38,6 +39,8 @@ namespace AnonPDF
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            EnsureContextMenuRegistration();
+            string startupInputPath = ParseStartupInputPath(args);
             LicenseManager.Initialize(AppDomain.CurrentDomain.BaseDirectory);
             if (!ValidateRequiredLicenseFiles(out string licenseError))
             {
@@ -48,23 +51,126 @@ namespace AnonPDF
                     MessageBoxIcon.Error);
                 return;
             }
-            var splash = new SplashForm();
+            bool hasStartupInputPath = !string.IsNullOrWhiteSpace(startupInputPath);
+            SplashForm splash = hasStartupInputPath ? null : new SplashForm();
             var mainForm = new PDFForm(splash);
-            splash.OpenPdfRequested += (_, __) => mainForm.OpenPdfFromSplash();
-            splash.OpenProjectRequested += (_, __) => mainForm.OpenProjectFromSplash();
-            splash.ResumeWorkRequested += (_, __) => mainForm.ResumeWorkFromSplash();
-            splash.Owner = mainForm;
-            splash.Show();
-            Application.DoEvents();
+            if (splash != null)
+            {
+                splash.OpenPdfRequested += (_, __) => mainForm.OpenPdfFromSplash();
+                splash.OpenProjectRequested += (_, __) => mainForm.OpenProjectFromSplash();
+                splash.ResumeWorkRequested += (_, __) => mainForm.ResumeWorkFromSplash();
+                splash.Owner = mainForm;
+                splash.Show();
+                Application.DoEvents();
+            }
+
+            if (hasStartupInputPath)
+            {
+                mainForm.Shown += (_, __) => mainForm.OpenInputPath(startupInputPath, suppressTutorial: true);
+            }
+
             mainForm.FormClosed += (_, __) =>
             {
-                if (!splash.IsDisposed)
+                if (splash != null && !splash.IsDisposed)
                 {
                     splash.Close();
                 }
             };
 
             Application.Run(mainForm);
+        }
+
+        private static string ParseStartupInputPath(string[] args)
+        {
+            if (args == null || args.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            foreach (string arg in args)
+            {
+                if (string.IsNullOrWhiteSpace(arg))
+                {
+                    continue;
+                }
+
+                string trimmed = arg.Trim();
+                if (trimmed.StartsWith("--", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string extension = Path.GetExtension(trimmed);
+                if (string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(extension, ".app", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(extension, ".pap", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        return Path.GetFullPath(trimmed);
+                    }
+                    catch
+                    {
+                        return trimmed;
+                    }
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static void EnsureContextMenuRegistration()
+        {
+            try
+            {
+                string exePath = Application.ExecutablePath;
+                if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
+                {
+                    return;
+                }
+
+                string commandValue = $"\"{exePath}\" \"%1\"";
+                RegisterContextMenuForExtension(".pdf", commandValue, exePath);
+                RegisterContextMenuForExtension(".app", commandValue, exePath);
+                RegisterContextMenuForExtension(".pap", commandValue, exePath);
+            }
+            catch
+            {
+                // Best effort only. Lack of registry access must not block app startup.
+            }
+        }
+
+        private static void RegisterContextMenuForExtension(string extension, string commandValue, string iconPath)
+        {
+            string shellKeyPath = $@"Software\Classes\SystemFileAssociations\{extension}\shell\AnonPDFPro";
+            using (RegistryKey shellKey = Registry.CurrentUser.CreateSubKey(shellKeyPath))
+            {
+                if (shellKey == null)
+                {
+                    return;
+                }
+
+                shellKey.SetValue(string.Empty, GetContextMenuOpenText(), RegistryValueKind.String);
+                shellKey.SetValue("Icon", iconPath, RegistryValueKind.String);
+            }
+
+            using (RegistryKey commandKey = Registry.CurrentUser.CreateSubKey(shellKeyPath + @"\command"))
+            {
+                if (commandKey == null)
+                {
+                    return;
+                }
+
+                commandKey.SetValue(string.Empty, commandValue, RegistryValueKind.String);
+            }
+        }
+
+        private static string GetContextMenuOpenText()
+        {
+            string value = Properties.Resources.ResourceManager.GetString(
+                "ContextMenu_OpenWithAnonPDFPro",
+                Properties.Resources.Culture ?? System.Globalization.CultureInfo.CurrentUICulture);
+            return string.IsNullOrWhiteSpace(value) ? "Open with AnonPDF Pro" : value;
         }
 
         private static bool ValidateRequiredLicenseFiles(out string errorMessage)

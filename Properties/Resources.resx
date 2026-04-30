@@ -1935,4 +1935,7 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="FileName_CurrentViewPattern" xml:space="preserve">
     <value>{0}-widok-p{1}.png</value>
   </data>
+  <data name="ContextMenu_OpenWithAnonPDFPro" xml:space="preserve">
+    <value>Otw&#243;rz w AnonPDF Pro</value>
+  </data>
 </root>

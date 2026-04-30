@@ -175,6 +175,7 @@ namespace AnonPDF
         private RedactionBlock selectedRedactionBlock = null;
         private int textRotationStartValue;
         private float textRotationStartAngle;
+        private PointF textRotationStartCenterScreen = PointF.Empty;
         private PDFiumSharp.PdfDocument pdf;
         private string lastSavedProjectName = "";
         private System.Drawing.RectangleF currentSelection;
@@ -9060,6 +9061,47 @@ namespace AnonPDF
                 (centerScreenY - (screenHeight / 2f)) / Math.Max(0.0001f, scaleFactor),
                 newWidth,
                 newHeight);
+        }
+
+        private RectangleF ScalePlainRotatedTextBoundsFromScreenFrame(RectangleF initialDocBounds, RectangleF newScreenFrameBounds, float scale)
+        {
+            scale = Math.Max(0.05f, scale);
+            float safeScaleFactor = Math.Max(0.0001f, scaleFactor);
+            return new RectangleF(
+                newScreenFrameBounds.Left / safeScaleFactor,
+                newScreenFrameBounds.Top / safeScaleFactor,
+                Math.Max(1f, initialDocBounds.Width * scale),
+                Math.Max(1f, initialDocBounds.Height * scale));
+        }
+
+        private RectangleF BuildPlainRotatedTextBoundsAroundScreenCenter(
+            TextAnnotation annotation,
+            RectangleF initialDocBounds,
+            SizeF contentSize,
+            int rotation,
+            PointF frameCenterScreen,
+            float dpiX,
+            float dpiY)
+        {
+            if (annotation == null || contentSize.IsEmpty || frameCenterScreen.IsEmpty)
+            {
+                return initialDocBounds;
+            }
+
+            float safeScaleFactor = Math.Max(0.0001f, scaleFactor);
+            dpiX = Math.Max(1f, dpiX);
+            dpiY = Math.Max(1f, dpiY);
+
+            float framePadding = GetAnnotationFramePadding(annotation);
+            float layoutWidth = Math.Max(1f, (contentSize.Width + (2f * framePadding)) * safeScaleFactor * 72f / dpiX);
+            float layoutHeight = Math.Max(1f, (contentSize.Height + (2f * framePadding)) * safeScaleFactor * 72f / dpiY);
+            SizeF rotatedFrameSize = RotateSize(new SizeF(layoutWidth, layoutHeight), rotation);
+
+            return new RectangleF(
+                (frameCenterScreen.X - (rotatedFrameSize.Width / 2f)) / safeScaleFactor,
+                (frameCenterScreen.Y - (rotatedFrameSize.Height / 2f)) / safeScaleFactor,
+                initialDocBounds.Width,
+                initialDocBounds.Height);
         }
 
         private static RectangleF ScaleRectangleUniformFromHandle(RectangleF initialBounds, ObjectScaleHandleCorner handleCorner, float scale, bool scaleFromCenter)
@@ -17992,14 +18034,23 @@ namespace AnonPDF
             }
         }
 
-        public bool OpenInputPath(string filePath)
+        public bool OpenInputPath(string filePath, bool suppressTutorial = false)
         {
             if (string.IsNullOrWhiteSpace(filePath))
             {
                 return false;
             }
 
-            string fullPath = Path.GetFullPath(filePath);
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(filePath);
+            }
+            catch
+            {
+                return false;
+            }
+
             if (!File.Exists(fullPath))
             {
                 return false;
@@ -18008,7 +18059,10 @@ namespace AnonPDF
             string extension = Path.GetExtension(fullPath);
             if (string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
             {
-                suppressStartupTutorialOnce = true;
+                if (suppressTutorial)
+                {
+                    suppressStartupTutorialOnce = true;
+                }
                 OpenPdfFromPath(fullPath);
                 return true;
             }
@@ -18016,7 +18070,10 @@ namespace AnonPDF
             if (string.Equals(extension, ProjectFileExtension, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(extension, LegacyProjectFileExtension, StringComparison.OrdinalIgnoreCase))
             {
-                suppressStartupTutorialOnce = true;
+                if (suppressTutorial)
+                {
+                    suppressStartupTutorialOnce = true;
+                }
                 LoadRedactionBlocks(fullPath);
                 return true;
             }
@@ -27922,12 +27979,28 @@ namespace AnonPDF
                 }
 
                 PointF center = GetAnnotationScreenCenter(annotationToRotate, dpiX, dpiY);
+                bool rotatingPlainText = !IsRichTextMode(annotationToRotate);
+                if (rotatingPlainText && !textRotationStartCenterScreen.IsEmpty)
+                {
+                    center = textRotationStartCenterScreen;
+                }
                 float currentAngle = GetAngleDegrees(center, e.Location);
                 float delta = NormalizeAngleDelta(currentAngle - textRotationStartAngle);
                 int updatedRotation = NormalizeRotation(textRotationStartValue + (int)Math.Round(delta));
                 int previousRotation = NormalizeRotation(annotationToRotate.AnnotationRotation);
                 annotationToRotate.AnnotationRotation = updatedRotation;
-                annotationToRotate.AnnotationBounds = textRotationStartBounds;
+                annotationToRotate.AnnotationBounds = rotatingPlainText && !textRotationStartCenterScreen.IsEmpty
+                    ? BuildPlainRotatedTextBoundsAroundScreenCenter(
+                        annotationToRotate,
+                        textRotationStartBounds,
+                        textTransformStartContentSize.IsEmpty
+                            ? GetAnnotationContentSize(annotationToRotate)
+                            : textTransformStartContentSize,
+                        updatedRotation,
+                        textRotationStartCenterScreen,
+                        dpiX,
+                        dpiY)
+                    : textRotationStartBounds;
                 if (annotationToRotate.HasLeaderArrow)
                 {
                     annotationToRotate.LeaderAnchorKind = GetClosestTextLeaderAnchorKind(annotationToRotate, annotationToRotate.LeaderEndPoint);
@@ -40938,6 +41011,7 @@ namespace AnonPDF
             annotationToAdjustLeader = null;
             textRotationStartValue = 0;
             textRotationStartAngle = 0f;
+            textRotationStartCenterScreen = PointF.Empty;
             textRotationStartBounds = RectangleF.Empty;
             textScaleStartBounds = RectangleF.Empty;
             textScaleStartScreenBounds = RectangleF.Empty;
@@ -46670,6 +46744,7 @@ namespace AnonPDF
             {
                 center = frameCenter;
             }
+            textRotationStartCenterScreen = center;
             textRotationStartAngle = GetAngleDegrees(center, location);
             this.Cursor = Cursors.Hand;
             return true;
@@ -46776,26 +46851,36 @@ namespace AnonPDF
             int annotationRotation = NormalizeRotation(annotationToScale.AnnotationRotation);
             if (annotationRotation != 0)
             {
-                float dpiX = 96f;
-                float dpiY = 96f;
-                try
+                if (!IsRichTextMode(annotationToScale))
                 {
-                    using (Graphics graphics = pdfViewer.CreateGraphics())
+                    annotationToScale.AnnotationBounds = ScalePlainRotatedTextBoundsFromScreenFrame(
+                        textScaleStartBounds,
+                        effectiveScreenBounds,
+                        uniformScale);
+                }
+                else
+                {
+                    float dpiX = 96f;
+                    float dpiY = 96f;
+                    try
                     {
-                        dpiX = graphics.DpiX;
-                        dpiY = graphics.DpiY;
+                        using (Graphics graphics = pdfViewer.CreateGraphics())
+                        {
+                            dpiX = graphics.DpiX;
+                            dpiY = graphics.DpiY;
+                        }
                     }
-                }
-                catch
-                {
-                }
+                    catch
+                    {
+                    }
 
-                annotationToScale.AnnotationBounds = ScaleRotatedTextBoundsFromScreenFrame(
-                    textScaleStartBounds,
-                    effectiveScreenBounds,
-                    uniformScale,
-                    dpiX,
-                    dpiY);
+                    annotationToScale.AnnotationBounds = ScaleRotatedTextBoundsFromScreenFrame(
+                        textScaleStartBounds,
+                        effectiveScreenBounds,
+                        uniformScale,
+                        dpiX,
+                        dpiY);
+                }
             }
             else
             {

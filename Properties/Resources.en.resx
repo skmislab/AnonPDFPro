@@ -1935,4 +1935,7 @@ Close the application and run the installer now?</value>
   <data name="FileName_CurrentViewPattern" xml:space="preserve">
     <value>{0}-view-p{1}.png</value>
   </data>
+  <data name="ContextMenu_OpenWithAnonPDFPro" xml:space="preserve">
+    <value>Open with AnonPDF Pro</value>
+  </data>
 </root>
