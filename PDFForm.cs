@@ -106,6 +106,7 @@ namespace AnonPDF
         private const string RightPanelTabThumbnailsKey = "thumbnails";
         private const string RightPanelTabLayersKey = "layers";
         private const float FootnoteMarkerGapPx = 2f;
+        private const int RichTextHorizontalRenderSafetyPx = 8;
         private const int RasterDownsampleTextThresholdDpi = 300;
         private const int RasterDownsamplePhotoThresholdDpi = 220;
         private const int RasterDownsampleTextTargetDpi = 200;
@@ -114,8 +115,7 @@ namespace AnonPDF
         private const int PrintRenderMaxDimension = 8192;
         private const int SelectionOverlayInvalidatePaddingPx = 6;
         private const string RichTextLayoutCacheVersion = "rich-layout-v9";
-        private const string RichTextPreviewCacheVersion = "rich-preview-v23";
-        private static readonly bool DisableRichTextPreviewCachesForDiagnostics = false;
+        private const string RichTextPreviewCacheVersion = "rich-preview-v25";
         private const string ShapeIconFontFileName = "materialdesignicons-subset.ttf";
         private const string ShapeIconFontLegacyFileName = "materialdesignicons-webfont.ttf";
         private const int LayersHeaderActiveIconCodePoint = 0xF043E;
@@ -175,7 +175,6 @@ namespace AnonPDF
         private RedactionBlock selectedRedactionBlock = null;
         private int textRotationStartValue;
         private float textRotationStartAngle;
-        private PointF textRotationStartCenterDoc = PointF.Empty;
         private PDFiumSharp.PdfDocument pdf;
         private string lastSavedProjectName = "";
         private System.Drawing.RectangleF currentSelection;
@@ -335,6 +334,7 @@ namespace AnonPDF
         private float textScaleStartLeaderLineWidth;
         private float textScaleStartLeaderHeadLength;
         private float textScaleStartLeaderHeadWidth;
+        private TextLeaderAnchorKind textScaleStartLeaderAnchorKind = TextLeaderAnchorKind.RightCenter;
         private RectangleF textRotationStartBounds = RectangleF.Empty;
         private PointF textLeaderDragStartEndPoint = PointF.Empty;
         private TextLeaderAnchorKind textLeaderDragStartAnchorKind = TextLeaderAnchorKind.RightCenter;
@@ -891,6 +891,7 @@ namespace AnonPDF
         private const int LeftPanelScrollbarPadding = 6;
         private readonly SplashForm splashForm;
         private bool splashClosed;
+        private bool suppressStartupTutorialOnce;
         private readonly CultureInfo systemUiCulture;
         private const string ProjectFileExtension = ".app";
         private const string LegacyProjectFileExtension = ".pap";
@@ -7854,12 +7855,6 @@ namespace AnonPDF
             float minHeight = Math.Max(1f, markerHeight);
             PointF mouseDoc = new PointF(location.X / scaleFactor, location.Y / scaleFactor);
 
-            if (snapToGridEnabled)
-            {
-                mouseDoc.X = SnapValueToGrid(mouseDoc.X, SnapGridStep);
-                mouseDoc.Y = SnapValueToGrid(mouseDoc.Y, SnapGridStep);
-            }
-
             RectangleF bounds = redactionResizeStartBounds;
             RectangleF updatedBounds;
             switch (redactionResizeHandle)
@@ -9047,6 +9042,26 @@ namespace AnonPDF
                 Math.Max(topLeft.Y, bottomRight.Y));
         }
 
+        private RectangleF ScaleRotatedTextBoundsFromScreenFrame(RectangleF initialDocBounds, RectangleF newScreenFrameBounds, float scale, float dpiX, float dpiY)
+        {
+            scale = Math.Max(0.05f, scale);
+            dpiX = Math.Max(1f, dpiX);
+            dpiY = Math.Max(1f, dpiY);
+
+            float newWidth = Math.Max(1f, initialDocBounds.Width * scale);
+            float newHeight = Math.Max(1f, initialDocBounds.Height * scale);
+            float screenWidth = newWidth * scaleFactor * 72f / dpiX;
+            float screenHeight = newHeight * scaleFactor * 72f / dpiY;
+            float centerScreenX = newScreenFrameBounds.Left + (newScreenFrameBounds.Width / 2f);
+            float centerScreenY = newScreenFrameBounds.Top + (newScreenFrameBounds.Height / 2f);
+
+            return new RectangleF(
+                (centerScreenX - (screenWidth / 2f)) / Math.Max(0.0001f, scaleFactor),
+                (centerScreenY - (screenHeight / 2f)) / Math.Max(0.0001f, scaleFactor),
+                newWidth,
+                newHeight);
+        }
+
         private static RectangleF ScaleRectangleUniformFromHandle(RectangleF initialBounds, ObjectScaleHandleCorner handleCorner, float scale, bool scaleFromCenter)
         {
             scale = Math.Max(0.05f, scale);
@@ -9832,7 +9847,7 @@ namespace AnonPDF
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0}|{1}|{2}|{3}|{4}|{5:0.###}|{6}|{7}|{8}",
+                "{0}|{1}|{2}|{3}|{4}|{5:0.###}|{6}|{7}|{8}|bg={9}|bc={10}|bw={11:0.###}|fm={12:0.###}",
                 RichTextPreviewCacheVersion,
                 BuildRichContentCacheKey(annotation.AnnotationText, annotation.AnnotationRichText, annotation.AnnotationFont, annotation.AnnotationAlignment),
                 annotation.AnnotationColor.ToArgb(),
@@ -9841,7 +9856,11 @@ namespace AnonPDF
                 fontScale,
                 heightPx,
                 annotation.Id ?? string.Empty,
-                trimVertical ? 1 : 0);
+                trimVertical ? 1 : 0,
+                annotation.AnnotationBackgroundColorArgb,
+                annotation.AnnotationBorderColorArgb,
+                NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth),
+                NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin));
         }
 
         private string BuildActiveTextInteractionPreviewKey(
@@ -9866,7 +9885,7 @@ namespace AnonPDF
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|interaction",
+                "{0}|{1}|{2}|{3}|{4}|{5}|{6}|{7}|{8}|bg={9}|bc={10}|bw={11:0.###}|fm={12:0.###}|interaction",
                 RichTextPreviewCacheVersion,
                 annotation.Id ?? string.Empty,
                 annotation.AnnotationColor.ToArgb(),
@@ -9875,7 +9894,11 @@ namespace AnonPDF
                 fontPart,
                 previewWidth,
                 string.Format(CultureInfo.InvariantCulture, "{0}|{1:0.###}", previewHeight, fontScale),
-                trimVertical ? 1 : 0);
+                trimVertical ? 1 : 0,
+                annotation.AnnotationBackgroundColorArgb,
+                annotation.AnnotationBorderColorArgb,
+                NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth),
+                NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin));
         }
 
         private sealed class RichPreviewWarmRequest
@@ -9885,6 +9908,8 @@ namespace AnonPDF
             public int WidthPx { get; set; }
             public int HeightPx { get; set; }
             public float FontScale { get; set; }
+            public float FramePaddingX { get; set; }
+            public float FramePaddingY { get; set; }
             public bool TrimVertical { get; set; }
             public string PlainText { get; set; }
             public string RichText { get; set; }
@@ -9936,38 +9961,17 @@ namespace AnonPDF
             }
 
             int rotation = NormalizeRotation(annotation.AnnotationRotation);
-            SizeF unrotatedOuterSize;
-            if (rotation == 0 || rotation == 180)
+            if (rotation != 0 &&
+                rotation != 90 &&
+                rotation != 180 &&
+                rotation != 270)
             {
-                unrotatedOuterSize = new SizeF(bounds.Width, bounds.Height);
+                return false;
             }
-            else if (rotation == 90 || rotation == 270)
-            {
-                unrotatedOuterSize = new SizeF(bounds.Height, bounds.Width);
-            }
-            else
-            {
-                float radians = (float)(rotation * Math.PI / 180.0);
-                float a = Math.Abs((float)Math.Cos(radians));
-                float b = Math.Abs((float)Math.Sin(radians));
-                float determinant = (a * a) - (b * b);
 
-                if (Math.Abs(determinant) < 0.2f)
-                {
-                    return false;
-                }
-
-                float solvedWidth = ((bounds.Width * a) - (bounds.Height * b)) / determinant;
-                float solvedHeight = ((bounds.Height * a) - (bounds.Width * b)) / determinant;
-                if (float.IsNaN(solvedWidth) || float.IsInfinity(solvedWidth) ||
-                    float.IsNaN(solvedHeight) || float.IsInfinity(solvedHeight) ||
-                    solvedWidth <= 0.5f || solvedHeight <= 0.5f)
-                {
-                    return false;
-                }
-
-                unrotatedOuterSize = new SizeF(solvedWidth, solvedHeight);
-            }
+            SizeF unrotatedOuterSize = rotation == 90 || rotation == 270
+                ? new SizeF(bounds.Height, bounds.Width)
+                : new SizeF(bounds.Width, bounds.Height);
 
             float padding = GetAnnotationFramePadding(annotation);
             contentSize = new SizeF(
@@ -9995,6 +9999,78 @@ namespace AnonPDF
                 annotation.AnnotationAlignment);
             annotation.RichContentSizeCacheKey = cacheKey;
             annotation.RichContentSizeCacheValue = measured;
+        }
+
+        private static void InvalidateTextAnnotationRenderCaches(
+            TextAnnotation annotation,
+            bool clearContentMetrics = true,
+            bool clearPreviewBitmap = true)
+        {
+            if (annotation == null)
+            {
+                return;
+            }
+
+            annotation.RichContentSizeCacheKey = null;
+            annotation.RichContentSizeCacheValue = SizeF.Empty;
+
+            if (clearContentMetrics)
+            {
+                annotation.CachedRichContentSizeKey = null;
+                annotation.CachedRichContentSize = SizeF.Empty;
+                annotation.HasCachedRichContentSize = false;
+            }
+
+            annotation.CachedRichPreviewBitmapKey = null;
+            if (clearPreviewBitmap && annotation.CachedRichPreviewBitmap != null)
+            {
+                annotation.CachedRichPreviewBitmap.Dispose();
+                annotation.CachedRichPreviewBitmap = null;
+            }
+            annotation.CachedRichPreviewSourceRect = Rectangle.Empty;
+            annotation.HasCachedRichPreviewSourceRect = false;
+            annotation.CachedRichPreviewIncludesFrame = false;
+
+            annotation.CachedRichPreviewFrameKey = null;
+            annotation.CachedRichPreviewFrameLocalPx = RectangleF.Empty;
+            annotation.HasCachedRichPreviewFrameLocalPx = false;
+
+            annotation.CachedRichHtmlRenderKey = null;
+            annotation.CachedRichHtmlRenderPdfBytes = null;
+            annotation.CachedRichHtmlRenderFrameRectTopDownPt = RectangleF.Empty;
+            annotation.CachedRichHtmlRenderSourceWidthPt = 0f;
+            annotation.CachedRichHtmlRenderSourceHeightPt = 0f;
+            annotation.CachedRichHtmlRenderTargetWidthPt = 0f;
+            annotation.CachedRichHtmlRenderTargetHeightPt = 0f;
+        }
+
+        private static void InvalidateTextAnnotationPreviewVisualCaches(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return;
+            }
+
+            annotation.CachedRichPreviewBitmapKey = null;
+            if (annotation.CachedRichPreviewBitmap != null)
+            {
+                annotation.CachedRichPreviewBitmap.Dispose();
+                annotation.CachedRichPreviewBitmap = null;
+            }
+
+            annotation.CachedRichPreviewSourceRect = Rectangle.Empty;
+            annotation.HasCachedRichPreviewSourceRect = false;
+            annotation.CachedRichPreviewIncludesFrame = false;
+            annotation.CachedRichPreviewFrameKey = null;
+            annotation.CachedRichPreviewFrameLocalPx = RectangleF.Empty;
+            annotation.HasCachedRichPreviewFrameLocalPx = false;
+            annotation.CachedRichHtmlRenderKey = null;
+            annotation.CachedRichHtmlRenderPdfBytes = null;
+            annotation.CachedRichHtmlRenderFrameRectTopDownPt = RectangleF.Empty;
+            annotation.CachedRichHtmlRenderSourceWidthPt = 0f;
+            annotation.CachedRichHtmlRenderSourceHeightPt = 0f;
+            annotation.CachedRichHtmlRenderTargetWidthPt = 0f;
+            annotation.CachedRichHtmlRenderTargetHeightPt = 0f;
         }
 
         private static SizeF GetCheapRichAnnotationContentSize(TextAnnotation annotation)
@@ -10270,6 +10346,11 @@ namespace AnonPDF
             return RotateSize(outerUnrotated, rotation);
         }
 
+        private static SizeF GetAnnotationUnrotatedOuterSizeFromContent(SizeF contentSize, float borderWidth, float frameMargin)
+        {
+            return GetAnnotationOuterSizeFromContent(contentSize, borderWidth, frameMargin, 0);
+        }
+
         private SizeF GetAnnotationContentSize(TextAnnotation annotation)
         {
             if (annotation == null)
@@ -10280,11 +10361,6 @@ namespace AnonPDF
             if (!IsRichTextMode(annotation))
             {
                 return GetAnnotationPlainContentSize(annotation.AnnotationText, annotation.AnnotationFont);
-            }
-
-            if (DisableRichTextPreviewCachesForDiagnostics)
-            {
-                return GetRenderedRichAnnotationContentSize(annotation);
             }
 
             string cacheKey = BuildRichContentCacheKey(
@@ -10386,11 +10462,10 @@ namespace AnonPDF
             }
 
             SizeF contentSize = GetAnnotationContentSize(annotation);
-            SizeF outerSize = GetAnnotationOuterSizeFromContent(
+            SizeF outerSize = GetAnnotationUnrotatedOuterSizeFromContent(
                 contentSize,
                 annotation.AnnotationBorderWidth,
-                annotation.AnnotationFrameMargin,
-                annotation.AnnotationRotation);
+                annotation.AnnotationFrameMargin);
 
             RectangleF bounds = annotation.AnnotationBounds;
             if (Math.Abs(bounds.Width - outerSize.Width) < 0.5f &&
@@ -10435,6 +10510,100 @@ namespace AnonPDF
             }
 
             return GetAnnotationContentSize(annotation);
+        }
+
+        private SizeF GetDisplayedTextAnnotationContentSizeForInteractionStart(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return SizeF.Empty;
+            }
+
+            if (!IsRichTextMode(annotation))
+            {
+                return GetAnnotationContentSize(annotation);
+            }
+
+            if (annotation == annotationToScale && isScalingTextAnnotation && !textTransformStartContentSize.IsEmpty)
+            {
+                return textTransformStartContentSize;
+            }
+
+            if (annotation == annotationToRotate && isRotatingTextAnnotation && !textTransformStartContentSize.IsEmpty)
+            {
+                return textTransformStartContentSize;
+            }
+
+            if (annotation == annotationToAdjustLeader && isDraggingTextLeaderHandle && !textTransformStartContentSize.IsEmpty)
+            {
+                return textTransformStartContentSize;
+            }
+
+            if (annotation == annotationToMove && isMoving && !textMoveStartContentSize.IsEmpty)
+            {
+                return textMoveStartContentSize;
+            }
+
+            if (annotation.HasCachedRichContentSize)
+            {
+                string cacheKey = BuildRichContentCacheKey(
+                    annotation.AnnotationText,
+                    annotation.AnnotationRichText,
+                    annotation.AnnotationFont,
+                    annotation.AnnotationAlignment);
+                if (string.Equals(annotation.CachedRichContentSizeKey, cacheKey, StringComparison.Ordinal))
+                {
+                    return annotation.CachedRichContentSize;
+                }
+            }
+
+            if (TryGetApproximateRichContentSizeFromBounds(annotation, out SizeF approximateContentSize))
+            {
+                return approximateContentSize;
+            }
+
+            return GetAnnotationContentSize(annotation);
+        }
+
+        private SizeF GetTextAnnotationContentSizeFromScreenFrameBounds(TextAnnotation annotation, RectangleF screenFrameBounds, float dpiX, float dpiY)
+        {
+            if (annotation == null || screenFrameBounds.Width <= 0f || screenFrameBounds.Height <= 0f || scaleFactor <= 0f)
+            {
+                return SizeF.Empty;
+            }
+
+            float outerWidthLogical = screenFrameBounds.Width * dpiX / (scaleFactor * 72f);
+            float outerHeightLogical = screenFrameBounds.Height * dpiY / (scaleFactor * 72f);
+
+            int rotation = NormalizeRotation(annotation.AnnotationRotation);
+            SizeF unrotatedOuterLogical = rotation == 90 || rotation == 270
+                ? new SizeF(outerHeightLogical, outerWidthLogical)
+                : new SizeF(outerWidthLogical, outerHeightLogical);
+
+            float contentWidth = Math.Max(1f, unrotatedOuterLogical.Width - (2f * GetAnnotationFramePadding(annotation)));
+            float contentHeight = Math.Max(1f, unrotatedOuterLogical.Height - (2f * GetAnnotationFramePadding(annotation)));
+
+            return new SizeF(contentWidth, contentHeight);
+        }
+
+        private void SeedRichContentSizeCache(TextAnnotation annotation, SizeF contentSize)
+        {
+            if (annotation == null || !IsRichTextMode(annotation) || contentSize.IsEmpty)
+            {
+                return;
+            }
+
+            string cacheKey = BuildRichContentCacheKey(
+                annotation.AnnotationText,
+                annotation.AnnotationRichText,
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment);
+
+            annotation.RichContentSizeCacheKey = cacheKey;
+            annotation.RichContentSizeCacheValue = contentSize;
+            annotation.CachedRichContentSizeKey = cacheKey;
+            annotation.CachedRichContentSize = contentSize;
+            annotation.HasCachedRichContentSize = true;
         }
 
         private SizeF GetInteractiveAwareAnnotationContentSize(TextAnnotation annotation)
@@ -10498,8 +10667,7 @@ namespace AnonPDF
             }
 
             if ((annotation == annotationToScale && isScalingTextAnnotation) ||
-                (annotation == annotationToRotate && isRotatingTextAnnotation) ||
-                (annotation == annotationToAdjustLeader && isDraggingTextLeaderHandle))
+                (annotation == annotationToRotate && isRotatingTextAnnotation))
             {
                 return textRotationInteractionChanged;
             }
@@ -10510,14 +10678,6 @@ namespace AnonPDF
         private SizeF GetLiveAnnotationContentSize(TextAnnotation annotation)
         {
             return GetInteractiveAwareAnnotationContentSize(annotation);
-        }
-
-        private bool ShouldLogRichResizeDiagnostics()
-        {
-            return DebugLogEnabled &&
-                   isScalingTextAnnotation &&
-                   annotationToScale != null &&
-                   IsRichTextMode(annotationToScale);
         }
 
         private void RepairRichAnnotationBoundsIfNeeded(TextAnnotation annotation)
@@ -10539,11 +10699,10 @@ namespace AnonPDF
                 return;
             }
 
-            SizeF outerSize = GetAnnotationOuterSizeFromContent(
+            SizeF outerSize = GetAnnotationUnrotatedOuterSizeFromContent(
                 contentSize,
                 annotation.AnnotationBorderWidth,
-                annotation.AnnotationFrameMargin,
-                annotation.AnnotationRotation);
+                annotation.AnnotationFrameMargin);
 
             if (bounds.Width + 0.5f >= outerSize.Width &&
                 bounds.Height + 0.5f >= outerSize.Height)
@@ -10782,8 +10941,6 @@ namespace AnonPDF
                 return false;
             }
 
-            Stopwatch profileStopwatch = DebugLogEnabled ? Stopwatch.StartNew() : null;
-
             string contentKey = BuildRichContentCacheKey(
                 annotation.AnnotationText,
                 annotation.AnnotationRichText,
@@ -10800,8 +10957,7 @@ namespace AnonPDF
                 layoutWidthPt,
                 layoutHeightPt);
 
-            if (!DisableRichTextPreviewCachesForDiagnostics &&
-                string.Equals(annotation.CachedRichHtmlRenderKey, cacheKey, StringComparison.Ordinal) &&
+            if (string.Equals(annotation.CachedRichHtmlRenderKey, cacheKey, StringComparison.Ordinal) &&
                 annotation.CachedRichHtmlRenderPdfBytes != null &&
                 annotation.CachedRichHtmlRenderPdfBytes.Length > 0 &&
                 annotation.CachedRichHtmlRenderSourceWidthPt > 0f &&
@@ -10820,14 +10976,6 @@ namespace AnonPDF
                     TargetHeightPt = annotation.CachedRichHtmlRenderTargetHeightPt,
                     FrameRectTopDownPt = annotation.CachedRichHtmlRenderFrameRectTopDownPt
                 };
-                profileStopwatch?.Stop();
-                if (profileStopwatch != null)
-                {
-                    LogDebug(
-                        $"ProfileRichHtmlRender hit annotation={annotation.Id ?? "-"} ms={profileStopwatch.ElapsedMilliseconds} " +
-                        $"targetPt={result.TargetWidthPt:0.###}x{result.TargetHeightPt:0.###}");
-                }
-
                 return true;
             }
 
@@ -10846,24 +10994,13 @@ namespace AnonPDF
                 return false;
             }
 
-            if (!DisableRichTextPreviewCachesForDiagnostics)
-            {
-                annotation.CachedRichHtmlRenderKey = cacheKey;
-                annotation.CachedRichHtmlRenderPdfBytes = result.PdfBytes;
-                annotation.CachedRichHtmlRenderFrameRectTopDownPt = result.FrameRectTopDownPt;
-                annotation.CachedRichHtmlRenderSourceWidthPt = result.SourceWidthPt;
-                annotation.CachedRichHtmlRenderSourceHeightPt = result.SourceHeightPt;
-                annotation.CachedRichHtmlRenderTargetWidthPt = result.TargetWidthPt;
-                annotation.CachedRichHtmlRenderTargetHeightPt = result.TargetHeightPt;
-            }
-
-            profileStopwatch?.Stop();
-            if (profileStopwatch != null)
-            {
-                LogDebug(
-                    $"ProfileRichHtmlRender miss annotation={annotation.Id ?? "-"} ms={profileStopwatch.ElapsedMilliseconds} " +
-                    $"targetPt={result.TargetWidthPt:0.###}x{result.TargetHeightPt:0.###}");
-            }
+            annotation.CachedRichHtmlRenderKey = cacheKey;
+            annotation.CachedRichHtmlRenderPdfBytes = result.PdfBytes;
+            annotation.CachedRichHtmlRenderFrameRectTopDownPt = result.FrameRectTopDownPt;
+            annotation.CachedRichHtmlRenderSourceWidthPt = result.SourceWidthPt;
+            annotation.CachedRichHtmlRenderSourceHeightPt = result.SourceHeightPt;
+            annotation.CachedRichHtmlRenderTargetWidthPt = result.TargetWidthPt;
+            annotation.CachedRichHtmlRenderTargetHeightPt = result.TargetHeightPt;
 
             return true;
         }
@@ -11424,6 +11561,30 @@ namespace AnonPDF
             return sourceRect;
         }
 
+        private static Rectangle BuildRichBitmapDrawSourceRect(Bitmap richBitmap)
+        {
+            if (richBitmap == null || richBitmap.Width <= 0 || richBitmap.Height <= 0)
+            {
+                return Rectangle.Empty;
+            }
+
+            Rectangle sourceRect = new Rectangle(0, 0, richBitmap.Width, richBitmap.Height);
+            if (TryGetNonTransparentBounds(richBitmap, out Rectangle richInkBounds))
+            {
+                const int leftInkSafetyPx = 1;
+                const int rightInkSafetyPx = 2;
+                int left = Math.Max(0, richInkBounds.Left - leftInkSafetyPx);
+                int right = Math.Min(richBitmap.Width, richInkBounds.Right + rightInkSafetyPx);
+                sourceRect = new Rectangle(
+                    left,
+                    0,
+                    Math.Max(1, right - left),
+                    richBitmap.Height);
+            }
+
+            return sourceRect;
+        }
+
         private Rectangle GetCachedRichBitmapSourceRect(TextAnnotation annotation, Bitmap richBitmap, bool useInteractionPlaceholder)
         {
             if (richBitmap == null)
@@ -11440,6 +11601,13 @@ namespace AnonPDF
 
                 activeTextInteractionPreviewSourceRect = BuildRichBitmapSourceRect(richBitmap);
                 return activeTextInteractionPreviewSourceRect;
+            }
+
+            if (annotation != null &&
+                ReferenceEquals(annotation.CachedRichPreviewBitmap, richBitmap) &&
+                annotation.CachedRichPreviewIncludesFrame)
+            {
+                return new Rectangle(0, 0, richBitmap.Width, richBitmap.Height);
             }
 
             if (annotation != null &&
@@ -11519,6 +11687,29 @@ namespace AnonPDF
             }
 
             return cropped;
+        }
+
+        private static Bitmap TrimBitmapToVisibleBounds(Bitmap source)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            if (!TryGetNonTransparentBounds(source, out Rectangle visibleBounds))
+            {
+                return (Bitmap)source.Clone();
+            }
+
+            if (visibleBounds.X <= 0 &&
+                visibleBounds.Y <= 0 &&
+                visibleBounds.Width >= source.Width &&
+                visibleBounds.Height >= source.Height)
+            {
+                return (Bitmap)source.Clone();
+            }
+
+            return CropBitmap(source, visibleBounds);
         }
 
         private bool TryRenderSharedRichLayoutToPdf(
@@ -12274,6 +12465,35 @@ namespace AnonPDF
             return localFrameRect;
         }
 
+        private static RectangleF BuildRichPreviewVisibleLocalFrameRectFromComposedBitmap(
+            Bitmap richBitmap,
+            float layoutWidth,
+            float layoutHeight)
+        {
+            if (richBitmap == null ||
+                richBitmap.Width <= 0 ||
+                richBitmap.Height <= 0 ||
+                !TryGetNonTransparentBounds(richBitmap, out Rectangle visibleBounds))
+            {
+                return new RectangleF(0f, 0f, layoutWidth, layoutHeight);
+            }
+
+            float scaleX = Math.Max(1f, layoutWidth) / Math.Max(1f, richBitmap.Width);
+            float scaleY = Math.Max(1f, layoutHeight) / Math.Max(1f, richBitmap.Height);
+            RectangleF localFrameRect = RectangleF.FromLTRB(
+                Math.Max(0f, visibleBounds.Left * scaleX),
+                Math.Max(0f, visibleBounds.Top * scaleY),
+                Math.Min(layoutWidth, visibleBounds.Right * scaleX),
+                Math.Min(layoutHeight, visibleBounds.Bottom * scaleY));
+
+            if (localFrameRect.Width <= 0.5f || localFrameRect.Height <= 0.5f)
+            {
+                return new RectangleF(0f, 0f, layoutWidth, layoutHeight);
+            }
+
+            return localFrameRect;
+        }
+
         private static Bitmap ComposeRichInteractionSnapshotBitmap(
             Bitmap richBitmap,
             Rectangle richSourceRect,
@@ -12282,6 +12502,7 @@ namespace AnonPDF
             float framePaddingX,
             float framePaddingY,
             RectangleF interactionFrameLocalRect,
+            System.Windows.Forms.HorizontalAlignment alignment,
             System.Drawing.Color backgroundColor,
             System.Drawing.Color borderColor,
             float borderWidthPx)
@@ -12321,6 +12542,26 @@ namespace AnonPDF
                     }
                 }
 
+                RectangleF richLayoutRect = BuildRichBitmapLayoutRect(
+                    annotation: null,
+                    sourceRect: safeSourceRect,
+                    contentWidth: Math.Max(1f, contentWidthPx),
+                    contentHeight: Math.Max(1f, contentHeightPx),
+                    bitmapToLayoutScale: 1f,
+                    alignmentOffset: 0f);
+                switch (alignment)
+                {
+                    case System.Windows.Forms.HorizontalAlignment.Center:
+                        richLayoutRect.X = Math.Max(0f, (Math.Max(1f, contentWidthPx) - richLayoutRect.Width) / 2f);
+                        break;
+                    case System.Windows.Forms.HorizontalAlignment.Right:
+                        richLayoutRect.X = Math.Max(0f, Math.Max(1f, contentWidthPx) - richLayoutRect.Width);
+                        break;
+                    default:
+                        richLayoutRect.X = 0f;
+                        break;
+                }
+
                 using (ImageAttributes richImageAttributes = new ImageAttributes())
                 {
                     richImageAttributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
@@ -12328,9 +12569,9 @@ namespace AnonPDF
                         richBitmap,
                         new[]
                         {
-                            new PointF(framePaddingX, framePaddingY),
-                            new PointF(framePaddingX + Math.Max(1f, contentWidthPx), framePaddingY),
-                            new PointF(framePaddingX, framePaddingY + Math.Max(1f, contentHeightPx))
+                            new PointF(framePaddingX + richLayoutRect.X, framePaddingY + richLayoutRect.Y),
+                            new PointF(framePaddingX + richLayoutRect.X + richLayoutRect.Width, framePaddingY + richLayoutRect.Y),
+                            new PointF(framePaddingX + richLayoutRect.X, framePaddingY + richLayoutRect.Y + richLayoutRect.Height)
                         },
                         safeSourceRect,
                         GraphicsUnit.Pixel,
@@ -12354,6 +12595,59 @@ namespace AnonPDF
             }
 
             return composed;
+        }
+
+        private static Bitmap ComposeRichCachedPreviewBitmap(
+            TextAnnotation annotation,
+            Bitmap renderedBitmap,
+            float contentWidthPx,
+            float contentHeightPx,
+            float framePaddingX,
+            float framePaddingY,
+            float borderWidthPx)
+        {
+            if (annotation == null || renderedBitmap == null)
+            {
+                return null;
+            }
+
+            Rectangle sourceRect = BuildRichBitmapSourceRect(renderedBitmap);
+            if (sourceRect.Width <= 0 || sourceRect.Height <= 0)
+            {
+                sourceRect = new Rectangle(0, 0, renderedBitmap.Width, renderedBitmap.Height);
+            }
+
+            float layoutWidthPx = Math.Max(1f, contentWidthPx + (2f * framePaddingX));
+            float layoutHeightPx = Math.Max(1f, contentHeightPx + (2f * framePaddingY));
+            RectangleF frameLocalRect = BuildRichPreviewInkLocalFrameRectFromBitmap(
+                renderedBitmap,
+                sourceRect,
+                annotation.AnnotationAlignment,
+                contentWidthPx,
+                contentHeightPx,
+                framePaddingX,
+                framePaddingY,
+                layoutWidthPx,
+                layoutHeightPx);
+
+            Bitmap composedBitmap = ComposeRichInteractionSnapshotBitmap(
+                renderedBitmap,
+                sourceRect,
+                contentWidthPx,
+                contentHeightPx,
+                framePaddingX,
+                framePaddingY,
+                frameLocalRect,
+                annotation.AnnotationAlignment,
+                GetAnnotationBackgroundColor(annotation),
+                GetAnnotationBorderColor(annotation),
+                Math.Max(0f, borderWidthPx));
+            if (composedBitmap == null)
+            {
+                return null;
+            }
+
+            return composedBitmap;
         }
 
         private static float GetStableRichPreviewRenderScale(TextAnnotation annotation, SizeF contentSize)
@@ -12416,16 +12710,6 @@ namespace AnonPDF
             if (annotation == null || widthPx <= 0 || heightPx <= 0)
             {
                 return null;
-            }
-
-            if (DisableRichTextPreviewCachesForDiagnostics)
-            {
-                return RenderRichTextToBitmap(
-                    annotation,
-                    widthPx,
-                    heightPx,
-                    System.Drawing.Color.Transparent,
-                    fontScale);
             }
 
             if (useInteractionPlaceholder)
@@ -12499,6 +12783,24 @@ namespace AnonPDF
                     if (interactionSourceBitmap != null)
                     {
                         RectangleF effectiveInteractionFrameLocalRect = interactionFrameLocalRect;
+                        bool cachedPreviewIncludesFrame =
+                            clonedDisplayedPreview &&
+                            annotation.CachedRichPreviewIncludesFrame &&
+                            interactionSourceRect.Width > 0 &&
+                            interactionSourceRect.Height > 0 &&
+                            interactionSourceRect.X == 0 &&
+                            interactionSourceRect.Y == 0 &&
+                            interactionSourceRect.Width == interactionSourceBitmap.Width &&
+                            interactionSourceRect.Height == interactionSourceBitmap.Height;
+                        if (cachedPreviewIncludesFrame)
+                        {
+                            activeTextInteractionPreviewBitmap = interactionSourceBitmap;
+                            activeTextInteractionPreviewSourceRect = new Rectangle(0, 0, interactionSourceBitmap.Width, interactionSourceBitmap.Height);
+                            activeTextInteractionPreviewIncludesFrame = true;
+                            activeTextInteractionPreviewKey ??= string.Concat(annotation.CachedRichPreviewBitmapKey ?? string.Empty, "|interaction-clone");
+                            interactionFrameLocalRect = new RectangleF(0f, 0f, interactionSourceBitmap.Width, interactionSourceBitmap.Height);
+                            return activeTextInteractionPreviewBitmap;
+                        }
                         if (effectiveInteractionFrameLocalRect.Width <= 0.5f || effectiveInteractionFrameLocalRect.Height <= 0.5f)
                         {
                             float snapshotLayoutWidth = Math.Max(1f, Math.Max(1f, interactionSnapshotContentWidthPx > 0f ? interactionSnapshotContentWidthPx : widthPx) + (2f * interactionFramePaddingX));
@@ -12523,14 +12825,45 @@ namespace AnonPDF
                             interactionFramePaddingX,
                             interactionFramePaddingY,
                             effectiveInteractionFrameLocalRect,
+                            annotation.AnnotationAlignment,
                             GetAnnotationBackgroundColor(annotation),
                             GetAnnotationBorderColor(annotation),
                             Math.Max(1f, NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) * Math.Max(0.1f, fontScale)));
+                        if (activeTextInteractionPreviewBitmap != null &&
+                            effectiveInteractionFrameLocalRect.Width > 0.5f &&
+                            effectiveInteractionFrameLocalRect.Height > 0.5f)
+                        {
+                            Rectangle interactionCropRect = Rectangle.FromLTRB(
+                                Math.Max(0, (int)Math.Floor(effectiveInteractionFrameLocalRect.Left)),
+                                Math.Max(0, (int)Math.Floor(effectiveInteractionFrameLocalRect.Top)),
+                                Math.Min(activeTextInteractionPreviewBitmap.Width, (int)Math.Ceiling(effectiveInteractionFrameLocalRect.Right)),
+                                Math.Min(activeTextInteractionPreviewBitmap.Height, (int)Math.Ceiling(effectiveInteractionFrameLocalRect.Bottom)));
+                            if (interactionCropRect.Width > 0 &&
+                                interactionCropRect.Height > 0 &&
+                                (interactionCropRect.Width != activeTextInteractionPreviewBitmap.Width ||
+                                 interactionCropRect.Height != activeTextInteractionPreviewBitmap.Height ||
+                                 interactionCropRect.X != 0 ||
+                                 interactionCropRect.Y != 0))
+                            {
+                                Bitmap croppedInteractionSnapshot = CropBitmap(activeTextInteractionPreviewBitmap, interactionCropRect);
+                                if (croppedInteractionSnapshot != null)
+                                {
+                                    activeTextInteractionPreviewBitmap.Dispose();
+                                    activeTextInteractionPreviewBitmap = croppedInteractionSnapshot;
+                                    effectiveInteractionFrameLocalRect = new RectangleF(
+                                        0f,
+                                        0f,
+                                        croppedInteractionSnapshot.Width,
+                                        croppedInteractionSnapshot.Height);
+                                }
+                            }
+                        }
                         activeTextInteractionPreviewSourceRect = activeTextInteractionPreviewBitmap != null
                             ? new Rectangle(0, 0, activeTextInteractionPreviewBitmap.Width, activeTextInteractionPreviewBitmap.Height)
                             : Rectangle.Empty;
                         activeTextInteractionPreviewIncludesFrame = activeTextInteractionPreviewBitmap != null;
                         interactionSourceBitmap.Dispose();
+                        interactionFrameLocalRect = effectiveInteractionFrameLocalRect;
                     }
                 }
 
@@ -12604,6 +12937,87 @@ namespace AnonPDF
                 trimVertical: true);
         }
 
+        private void WarmHighQualityRichTextPreview(TextAnnotation annotation, SizeF? contentSizeOverride = null)
+        {
+            if (annotation == null || !IsRichTextMode(annotation) || pdfViewer == null || pdfViewer.IsDisposed)
+            {
+                return;
+            }
+
+            InvalidatePendingRichPreviewWarmWork();
+
+            SizeF contentSize = contentSizeOverride.GetValueOrDefault();
+            if (contentSize.IsEmpty)
+            {
+                contentSize = GetAnnotationContentSize(annotation);
+            }
+
+            float richDpiX;
+            float richDpiY;
+            using (Graphics graphics = pdfViewer.CreateGraphics())
+            {
+                richDpiX = graphics.DpiX;
+                richDpiY = graphics.DpiY;
+            }
+
+            int bitmapWidth = Math.Max(1, (int)Math.Ceiling(contentSize.Width * scaleFactor * 72f / richDpiX));
+            int bitmapHeight = Math.Max(1, (int)Math.Ceiling(contentSize.Height * scaleFactor * 72f / richDpiY));
+            int renderHeightPx = Math.Max(bitmapHeight, bitmapHeight + Math.Max(8, (int)Math.Ceiling(bitmapHeight * 0.75f)));
+            float richPreviewFontScale = Math.Max(0.1f, scaleFactor * 72f / richDpiY);
+            string cacheKey = BuildRichPreviewBitmapCacheKey(annotation, bitmapWidth, bitmapHeight, richPreviewFontScale, trimVertical: true);
+            if (string.Equals(annotation.CachedRichPreviewBitmapKey, cacheKey, StringComparison.Ordinal) &&
+                annotation.CachedRichPreviewBitmap != null)
+            {
+                return;
+            }
+
+            Bitmap renderedBitmap = null;
+            try
+            {
+                renderedBitmap = RenderRichTextToBitmap(
+                    annotation,
+                    bitmapWidth,
+                    renderHeightPx,
+                    System.Drawing.Color.Transparent,
+                    richPreviewFontScale,
+                    trimVertical: true);
+                if (renderedBitmap == null)
+                {
+                    return;
+                }
+
+                Bitmap composedBitmap = ComposeRichCachedPreviewBitmap(
+                    annotation,
+                    renderedBitmap,
+                    bitmapWidth,
+                    bitmapHeight,
+                    (NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin)) * scaleFactor * 72f / richDpiX,
+                    (NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin)) * scaleFactor * 72f / richDpiY,
+                    NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) * scaleFactor * 72f / richDpiX);
+                if (composedBitmap != null)
+                {
+                    renderedBitmap.Dispose();
+                    renderedBitmap = composedBitmap;
+                }
+
+                Bitmap previousBitmap = annotation.CachedRichPreviewBitmap;
+                annotation.CachedRichPreviewBitmap = renderedBitmap;
+                annotation.CachedRichPreviewBitmapKey = cacheKey;
+                annotation.CachedRichPreviewSourceRect = new Rectangle(0, 0, renderedBitmap.Width, renderedBitmap.Height);
+                annotation.HasCachedRichPreviewSourceRect = true;
+                annotation.CachedRichPreviewIncludesFrame = true;
+                annotation.CachedRichPreviewFrameKey = null;
+                annotation.CachedRichPreviewFrameLocalPx = new RectangleF(0f, 0f, renderedBitmap.Width, renderedBitmap.Height);
+                annotation.HasCachedRichPreviewFrameLocalPx = true;
+                previousBitmap?.Dispose();
+                renderedBitmap = null;
+            }
+            finally
+            {
+                renderedBitmap?.Dispose();
+            }
+        }
+
         private bool TryGetSelectedTextAnnotationOverlayScreenBounds(TextAnnotation annotation, float dpiX, float dpiY, out RectangleF bounds)
         {
             bounds = RectangleF.Empty;
@@ -12617,6 +13031,7 @@ namespace AnonPDF
                 return false;
             }
 
+            Rectangle screenRect = GetAnnotationScreenRect(annotation, dpiX, dpiY);
             bounds = visualBounds;
             if (ReferenceEquals(selectedTextAnnotation, annotation) && GetGroupSelectionCount() == 0 && IsLayerVisible(annotation.LayerId))
             {
@@ -12787,6 +13202,8 @@ namespace AnonPDF
                     WidthPx = Math.Max(1, widthPx),
                     HeightPx = Math.Max(1, heightPx),
                     FontScale = fontScale,
+                    FramePaddingX = (NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin)) * fontScale,
+                    FramePaddingY = (NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth) + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin)) * fontScale,
                     TrimVertical = trimVertical,
                     PlainText = annotation.AnnotationText ?? string.Empty,
                     RichText = annotation.AnnotationRichText ?? string.Empty,
@@ -12948,6 +13365,20 @@ namespace AnonPDF
                             return;
                         }
 
+                        Bitmap composedBitmap = ComposeRichCachedPreviewBitmap(
+                            request.Annotation,
+                            renderedBitmap,
+                            request.WidthPx,
+                            request.HeightPx,
+                            request.FramePaddingX,
+                            request.FramePaddingY,
+                            NormalizeAnnotationBorderWidth(request.Annotation.AnnotationBorderWidth) * request.FontScale);
+                        if (composedBitmap != null)
+                        {
+                            renderedBitmap.Dispose();
+                            renderedBitmap = composedBitmap;
+                        }
+
                         RectangleF previousOverlayBounds = RectangleF.Empty;
                         if (pdfViewer != null && !pdfViewer.IsDisposed)
                         {
@@ -12966,13 +13397,12 @@ namespace AnonPDF
                         Bitmap previousBitmap = request.Annotation.CachedRichPreviewBitmap;
                         request.Annotation.CachedRichPreviewBitmap = renderedBitmap;
                         request.Annotation.CachedRichPreviewBitmapKey = request.CacheKey;
-                        request.Annotation.CachedRichPreviewSourceRect = BuildRichBitmapSourceRect(renderedBitmap);
-                        request.Annotation.HasCachedRichPreviewSourceRect =
-                            request.Annotation.CachedRichPreviewSourceRect.Width > 0 &&
-                            request.Annotation.CachedRichPreviewSourceRect.Height > 0;
+                        request.Annotation.CachedRichPreviewSourceRect = new Rectangle(0, 0, renderedBitmap.Width, renderedBitmap.Height);
+                        request.Annotation.HasCachedRichPreviewSourceRect = true;
+                        request.Annotation.CachedRichPreviewIncludesFrame = true;
                         request.Annotation.CachedRichPreviewFrameKey = null;
-                        request.Annotation.CachedRichPreviewFrameLocalPx = RectangleF.Empty;
-                        request.Annotation.HasCachedRichPreviewFrameLocalPx = false;
+                        request.Annotation.CachedRichPreviewFrameLocalPx = new RectangleF(0f, 0f, renderedBitmap.Width, renderedBitmap.Height);
+                        request.Annotation.HasCachedRichPreviewFrameLocalPx = true;
                         previousBitmap?.Dispose();
 
                         InvalidateRichTextAnnotationPreview(request.Annotation, previousOverlayBounds);
@@ -13201,29 +13631,6 @@ namespace AnonPDF
             return 0f;
         }
 
-        private static string SummarizeRichParagraphGeometryTags(string rtf)
-        {
-            if (string.IsNullOrWhiteSpace(rtf))
-            {
-                return "empty";
-            }
-
-            try
-            {
-                int qr = Regex.Matches(rtf, @"\\qr", RegexOptions.CultureInvariant).Count;
-                int qc = Regex.Matches(rtf, @"\\qc", RegexOptions.CultureInvariant).Count;
-                int li = Regex.Matches(rtf, @"\\li-?\d+", RegexOptions.CultureInvariant).Count;
-                int ri = Regex.Matches(rtf, @"\\ri-?\d+", RegexOptions.CultureInvariant).Count;
-                int fi = Regex.Matches(rtf, @"\\fi-?\d+", RegexOptions.CultureInvariant).Count;
-                int tx = Regex.Matches(rtf, @"\\tx-?\d+", RegexOptions.CultureInvariant).Count;
-                return $"qr={qr} qc={qc} li={li} ri={ri} fi={fi} tx={tx}";
-            }
-            catch
-            {
-                return "summary-failed";
-            }
-        }
-
         internal static string NormalizeRichTextParagraphAlignmentRtf(string rtf)
         {
             if (string.IsNullOrWhiteSpace(rtf))
@@ -13244,15 +13651,7 @@ namespace AnonPDF
                     richTextBox.Rtf = rtf;
                     richTextBox.CreateControl();
                     NormalizeRichParagraphAlignmentLeft(richTextBox);
-                    string normalizedRtf = richTextBox.Rtf;
-                    if (DebugLogEnabled)
-                    {
-                        LogDebug(
-                            $"RichNormalize before={SummarizeRichParagraphGeometryTags(rtf)} " +
-                            $"afterRtf={SummarizeRichParagraphGeometryTags(normalizedRtf)}");
-                    }
-
-                    return normalizedRtf;
+                    return richTextBox.Rtf;
                 }
             }
             catch
@@ -13859,6 +14258,8 @@ namespace AnonPDF
             {
                 string renderableRichText = BuildRenderableRichTextRtf(plainText, richText, baseFont);
                 float scaledFontSize = Math.Max(0.1f, baseFont.Size * Math.Max(0.1f, fontScale));
+                int renderWidthPx = Math.Max(1, widthPx + RichTextHorizontalRenderSafetyPx);
+                int renderHeightPx = Math.Max(1, heightPx);
                 using (var scaledFont = new Font(baseFont.FontFamily, scaledFontSize, baseFont.Style, GraphicsUnit.Point))
                 {
                     const double leftInsetPx = 0d;
@@ -13873,8 +14274,8 @@ namespace AnonPDF
                         Focusable = false,
                         Background = new System.Windows.Media.SolidColorBrush(ToWpfColor(backgroundColor)),
                         Foreground = new System.Windows.Media.SolidColorBrush(ToWpfColor(defaultTextColor)),
-                        Width = Math.Max(1, widthPx),
-                        Height = Math.Max(1, heightPx),
+                        Width = renderWidthPx,
+                        Height = renderHeightPx,
                         HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled,
                         VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Disabled
                     };
@@ -13889,7 +14290,7 @@ namespace AnonPDF
                         TextAlignment = System.Windows.TextAlignment.Left,
                         LineStackingStrategy = System.Windows.LineStackingStrategy.BlockLineHeight,
                         PageWidth = 100000d,
-                        PageHeight = Math.Max(1, heightPx)
+                        PageHeight = renderHeightPx
                     };
                     document.LineHeight = Math.Max(1d, GetConsistentRichLineHeightPx(scaledFont));
                     richTextBox.Document = document;
@@ -13910,13 +14311,13 @@ namespace AnonPDF
 
                     NormalizeWpfRichDocument(document, scaledFont, System.Windows.Forms.HorizontalAlignment.Left, document.LineHeight);
 
-                    richTextBox.Measure(new System.Windows.Size(widthPx, heightPx));
-                    richTextBox.Arrange(new System.Windows.Rect(0, 0, widthPx, heightPx));
+                    richTextBox.Measure(new System.Windows.Size(renderWidthPx, renderHeightPx));
+                    richTextBox.Arrange(new System.Windows.Rect(0, 0, renderWidthPx, renderHeightPx));
                     richTextBox.UpdateLayout();
 
                     var renderTarget = new MediaRenderTargetBitmap(
-                        Math.Max(1, widthPx),
-                        Math.Max(1, heightPx),
+                        renderWidthPx,
+                        renderHeightPx,
                         96,
                         96,
                         MediaPixelFormats.Pbgra32);
@@ -14017,21 +14418,37 @@ namespace AnonPDF
 
         private static void ApplyAnnotationFromDialog(TextAnnotation annotation, EditTextDialog dlg)
         {
+            RectangleF previousBounds = annotation.AnnotationBounds;
+            int previousRotation = NormalizeRotation(annotation.AnnotationRotation);
+            int updatedRotation = NormalizeRotation(dlg.AnnotationRotation);
+            int previousBackgroundArgb = annotation.AnnotationBackgroundColorArgb;
+            int previousBorderColorArgb = annotation.AnnotationBorderColorArgb;
+            float previousBorderWidth = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth);
+            float previousFrameMargin = NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
+            float updatedBorderWidth = NormalizeAnnotationBorderWidth(dlg.AnnotationBorderWidth);
+            float updatedFrameMargin = NormalizeAnnotationFrameMargin(dlg.AnnotationFrameMargin);
+            float previousPadding = previousBorderWidth + previousFrameMargin;
+            float updatedPadding = updatedBorderWidth + updatedFrameMargin;
+            bool richPreviewVisualChanged =
+                dlg.IsRichTextMode &&
+                (previousBackgroundArgb != dlg.AnnotationBackgroundColor.ToArgb() ||
+                 previousBorderColorArgb != dlg.AnnotationBorderColor.ToArgb() ||
+                 !AreSameFloat(previousBorderWidth, updatedBorderWidth) ||
+                 !AreSameFloat(previousFrameMargin, updatedFrameMargin));
             SizeF contentSize = dlg.IsRichTextMode
                 ? GetRichAnnotationContentSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont, dlg.AnnotationAlignment)
                 : GetAnnotationPlainContentSize(dlg.AnnotationText, dlg.AnnotationFont);
-            SizeF textSize = GetAnnotationOuterSizeFromContent(
+            SizeF textSize = GetAnnotationUnrotatedOuterSizeFromContent(
                 contentSize,
                 dlg.AnnotationBorderWidth,
-                dlg.AnnotationFrameMargin,
-                dlg.AnnotationRotation);
+                dlg.AnnotationFrameMargin);
             annotation.AnnotationText = dlg.AnnotationText;
             annotation.AnnotationFont = dlg.AnnotationFont;
             annotation.AnnotationColor = dlg.AnnotationColor;
             annotation.AnnotationBackgroundColorArgb = dlg.AnnotationBackgroundColor.ToArgb();
             annotation.AnnotationBorderColorArgb = dlg.AnnotationBorderColor.ToArgb();
-            annotation.AnnotationBorderWidth = NormalizeAnnotationBorderWidth(dlg.AnnotationBorderWidth);
-            annotation.AnnotationFrameMargin = NormalizeAnnotationFrameMargin(dlg.AnnotationFrameMargin);
+            annotation.AnnotationBorderWidth = updatedBorderWidth;
+            annotation.AnnotationFrameMargin = updatedFrameMargin;
             bool hadLeaderArrow = annotation.HasLeaderArrow;
             annotation.HasLeaderArrow = dlg.HasLeaderArrow;
             annotation.LeaderLineWidth = NormalizeLeaderLineWidth(dlg.LeaderLineWidth);
@@ -14040,7 +14457,7 @@ namespace AnonPDF
             annotation.AnnotationContentMode = dlg.IsRichTextMode ? "rich" : "plain";
             annotation.AnnotationRichText = dlg.IsRichTextMode ? dlg.AnnotationRichText : null;
             annotation.AnnotationAlignment = dlg.AnnotationAlignment;
-            annotation.AnnotationRotation = dlg.AnnotationRotation;
+            annotation.AnnotationRotation = updatedRotation;
             if (dlg.IsRichTextMode)
             {
                 RefreshRichContentSizeCache(annotation);
@@ -14050,9 +14467,33 @@ namespace AnonPDF
                 annotation.RichContentSizeCacheKey = null;
                 annotation.RichContentSizeCacheValue = SizeF.Empty;
             }
+            if (richPreviewVisualChanged)
+            {
+                InvalidateTextAnnotationPreviewVisualCaches(annotation);
+            }
+
+            float boundsX = previousBounds.X;
+            float boundsY = previousBounds.Y;
+            if (previousRotation != updatedRotation &&
+                previousBounds.Width > 0f &&
+                previousBounds.Height > 0f)
+            {
+                PointF previousCenter = new PointF(
+                    previousBounds.X + (previousBounds.Width / 2f),
+                    previousBounds.Y + (previousBounds.Height / 2f));
+                boundsX = previousCenter.X - (textSize.Width / 2f);
+                boundsY = previousCenter.Y - (textSize.Height / 2f);
+            }
+            else if (!AreSameFloat(previousPadding, updatedPadding))
+            {
+                float paddingDelta = previousPadding - updatedPadding;
+                boundsX = previousBounds.X + paddingDelta;
+                boundsY = previousBounds.Y + paddingDelta;
+            }
+
             annotation.AnnotationBounds = new RectangleF(
-                annotation.AnnotationBounds.X,
-                annotation.AnnotationBounds.Y,
+                boundsX,
+                boundsY,
                 textSize.Width,
                 textSize.Height
             );
@@ -14080,11 +14521,6 @@ namespace AnonPDF
         private static string FormatPoint(PointF point)
         {
             return $"{{X={point.X:0.###},Y={point.Y:0.###}}}";
-        }
-
-        private static string FormatRect(RectangleF rect)
-        {
-            return $"{{X={rect.X:0.###},Y={rect.Y:0.###},W={rect.Width:0.###},H={rect.Height:0.###}}}";
         }
 
         private static System.Drawing.Color GetAnnotationBackgroundColor(TextAnnotation annotation)
@@ -14272,16 +14708,14 @@ namespace AnonPDF
                 {
                     // Calculate text size using the selected font
                     SizeF textSize = dlg.IsRichTextMode
-                        ? GetAnnotationOuterSizeFromContent(
+                        ? GetAnnotationUnrotatedOuterSizeFromContent(
                             GetRichAnnotationContentSize(dlg.AnnotationText, dlg.AnnotationRichText, dlg.AnnotationFont, dlg.AnnotationAlignment),
                             dlg.AnnotationBorderWidth,
-                            dlg.AnnotationFrameMargin,
-                            dlg.AnnotationRotation)
-                        : GetAnnotationOuterSizeFromContent(
+                            dlg.AnnotationFrameMargin)
+                        : GetAnnotationUnrotatedOuterSizeFromContent(
                             GetAnnotationPlainContentSize(dlg.AnnotationText, dlg.AnnotationFont),
                             dlg.AnnotationBorderWidth,
-                            dlg.AnnotationFrameMargin,
-                            dlg.AnnotationRotation);
+                            dlg.AnnotationFrameMargin);
 
                     float boxWidth = textSize.Width;
                     float boxHeight = textSize.Height;
@@ -17195,6 +17629,12 @@ namespace AnonPDF
 
         private void ShowQuickStartTutorialIfNeeded()
         {
+            if (suppressStartupTutorialOnce)
+            {
+                suppressStartupTutorialOnce = false;
+                return;
+            }
+
             if (Properties.Settings.Default.TutorialShown)
             {
                 return;
@@ -17541,31 +17981,7 @@ namespace AnonPDF
             if (files == null || files.Length == 0)
                 return;
 
-            // Take first file (or handle more if you want)
-            string droppedFile = files[0];
-            string extension = Path.GetExtension(droppedFile).ToLowerInvariant();
-
-            // Handle depending on extension
-            if (extension == ".pdf")
-            {
-                // 1) Remember in 'inputPdfPath' field
-                inputPdfPath = droppedFile;
-                Properties.Settings.Default.LastPdfPath = inputPdfPath;
-                Properties.Settings.Default.Save(); // Zapis do pliku user.config
-
-                // 2) Load PDF (e.g. your method that you already have in code)
-                LoadPdf();
-            }
-            else if (string.Equals(extension, ProjectFileExtension, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(extension, LegacyProjectFileExtension, StringComparison.OrdinalIgnoreCase))
-            {
-                // 2) Load project (e.g. your method to load .app)
-                //    NOTE: for this to make sense, PDF should also be already loaded
-                //    or .app knows which PDF to work with.
-
-                LoadRedactionBlocks(droppedFile);
-            }
-            else
+            if (!OpenInputPath(files[0]))
             {
                 MessageBox.Show(this,
                     Resources.Msg_DragDrop_UnsupportedFileType,
@@ -17574,6 +17990,38 @@ namespace AnonPDF
                     MessageBoxIcon.Exclamation
                 );
             }
+        }
+
+        public bool OpenInputPath(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                return false;
+            }
+
+            string fullPath = Path.GetFullPath(filePath);
+            if (!File.Exists(fullPath))
+            {
+                return false;
+            }
+
+            string extension = Path.GetExtension(fullPath);
+            if (string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                suppressStartupTutorialOnce = true;
+                OpenPdfFromPath(fullPath);
+                return true;
+            }
+
+            if (string.Equals(extension, ProjectFileExtension, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(extension, LegacyProjectFileExtension, StringComparison.OrdinalIgnoreCase))
+            {
+                suppressStartupTutorialOnce = true;
+                LoadRedactionBlocks(fullPath);
+                return true;
+            }
+
+            return false;
         }
 
         public void Panel2_MouseWheel(MouseEventArgs e)
@@ -27096,7 +27544,7 @@ namespace AnonPDF
                     return;
                 }
 
-                if (TryHandleTextScaleMouseDown(e.Location, dpiX, dpiY))
+                if (TryHandleTextLeaderMouseDown(e.Location, dpiX, dpiY))
                 {
                     selectedArrowObject = null;
                     ResetArrowInteractionState();
@@ -27113,7 +27561,7 @@ namespace AnonPDF
                     return;
                 }
 
-                if (TryHandleTextLeaderMouseDown(e.Location, dpiX, dpiY))
+                if (TryHandleTextScaleMouseDown(e.Location, dpiX, dpiY))
                 {
                     selectedArrowObject = null;
                     ResetArrowInteractionState();
@@ -27474,35 +27922,12 @@ namespace AnonPDF
                 }
 
                 PointF center = GetAnnotationScreenCenter(annotationToRotate, dpiX, dpiY);
-                if (TryGetAnnotationTextFrameGeometry(
-                        annotationToRotate,
-                        dpiX,
-                        dpiY,
-                        out _,
-                        out _,
-                        out PointF frameCenter,
-                        out _))
-                {
-                    center = frameCenter;
-                }
                 float currentAngle = GetAngleDegrees(center, e.Location);
                 float delta = NormalizeAngleDelta(currentAngle - textRotationStartAngle);
                 int updatedRotation = NormalizeRotation(textRotationStartValue + (int)Math.Round(delta));
                 int previousRotation = NormalizeRotation(annotationToRotate.AnnotationRotation);
                 annotationToRotate.AnnotationRotation = updatedRotation;
-                SizeF contentSize = IsRichTextMode(annotationToRotate)
-                    ? GetRichAnnotationContentSize(annotationToRotate)
-                    : GetAnnotationPlainContentSize(annotationToRotate.AnnotationText, annotationToRotate.AnnotationFont);
-                SizeF rotatedSize = GetAnnotationOuterSizeFromContent(
-                    contentSize,
-                    annotationToRotate.AnnotationBorderWidth,
-                    annotationToRotate.AnnotationFrameMargin,
-                    updatedRotation);
-                annotationToRotate.AnnotationBounds = new RectangleF(
-                    textRotationStartCenterDoc.X - (rotatedSize.Width / 2f),
-                    textRotationStartCenterDoc.Y - (rotatedSize.Height / 2f),
-                    rotatedSize.Width,
-                    rotatedSize.Height);
+                annotationToRotate.AnnotationBounds = textRotationStartBounds;
                 if (annotationToRotate.HasLeaderArrow)
                 {
                     annotationToRotate.LeaderAnchorKind = GetClosestTextLeaderAnchorKind(annotationToRotate, annotationToRotate.LeaderEndPoint);
@@ -28304,6 +28729,23 @@ namespace AnonPDF
                 if (isRotatingTextAnnotation)
                 {
                     bool changed = textRotationInteractionChanged;
+                    TextAnnotation rotatedAnnotation = annotationToRotate;
+                    SizeF finalInteractionContentSize = textTransformStartContentSize;
+                    RectangleF previousTextOverlayBounds = RectangleF.Empty;
+                    if (rotatedAnnotation != null)
+                    {
+                        TryCaptureTextAnnotationOverlayScreenBounds(rotatedAnnotation, out previousTextOverlayBounds);
+                    }
+
+                    if (changed && rotatedAnnotation != null && IsRichTextMode(rotatedAnnotation))
+                    {
+                        InvalidatePendingRichPreviewWarmWork();
+                        if (!finalInteractionContentSize.IsEmpty)
+                        {
+                            SeedRichContentSizeCache(rotatedAnnotation, finalInteractionContentSize);
+                        }
+                    }
+
                     ResetTextRotationInteractionState();
                     this.Cursor = Cursors.Default;
                     if (changed)
@@ -28313,52 +28755,67 @@ namespace AnonPDF
                         saveProjectMenuItem.Enabled = true;
                         InvalidateThumbnailPage(currentPage);
                     }
+
+                    if (rotatedAnnotation != null)
+                    {
+                        InvalidateTextAnnotationOverlayTransition(rotatedAnnotation, previousTextOverlayBounds);
+                    }
+
                     pdfViewer.Invalidate();
                     return;
                 }
 
-            if (isScalingTextAnnotation)
-            {
-                bool changed = textRotationInteractionChanged;
-                TextAnnotation scaledAnnotation = annotationToScale;
-                bool waitForRichFinalize = changed && scaledAnnotation != null && IsRichTextMode(scaledAnnotation);
-                if (waitForRichFinalize)
+                if (isScalingTextAnnotation)
                 {
-                    BeginBusyCursorUntilNextPdfViewerPaint();
-                }
+                    bool changed = textRotationInteractionChanged;
+                    TextAnnotation scaledAnnotation = annotationToScale;
+                    SizeF finalInteractionContentSize = GetInteractiveAwareAnnotationContentSize(annotationToScale);
+                    RectangleF previousTextOverlayBounds = RectangleF.Empty;
+                    if (scaledAnnotation != null)
+                    {
+                        TryCaptureTextAnnotationOverlayScreenBounds(scaledAnnotation, out previousTextOverlayBounds);
+                    }
 
-                try
-                {
-                    if (changed && scaledAnnotation != null && scaledAnnotation.HasLeaderArrow)
-                    {
-                        scaledAnnotation.LeaderAnchorKind = GetClosestTextLeaderAnchorKind(scaledAnnotation, scaledAnnotation.LeaderEndPoint);
-                    }
-                    if (changed && scaledAnnotation != null && IsRichTextMode(scaledAnnotation))
-                    {
-                        RefreshRichContentSizeCache(scaledAnnotation);
-                    }
-                    ResetTextRotationInteractionState();
-                    this.Cursor = Cursors.Default;
                     if (changed)
                     {
+                        if (scaledAnnotation != null && IsRichTextMode(scaledAnnotation))
+                        {
+                            if (!finalInteractionContentSize.IsEmpty)
+                            {
+                                SeedRichContentSizeCache(scaledAnnotation, finalInteractionContentSize);
+                            }
+
+                            InvalidateTextAnnotationRenderCaches(scaledAnnotation, clearContentMetrics: false, clearPreviewBitmap: false);
+                            BeginBusyCursor();
+                            try
+                            {
+                                WarmHighQualityRichTextPreview(
+                                    scaledAnnotation,
+                                    finalInteractionContentSize.IsEmpty ? (SizeF?)null : finalInteractionContentSize);
+                            }
+                            finally
+                            {
+                                EndBusyCursor();
+                            }
+                        }
+
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
                         InvalidateThumbnailPage(currentPage);
                     }
+
+                    ResetTextRotationInteractionState();
+                    this.Cursor = Cursors.Default;
+
+                    if (scaledAnnotation != null)
+                    {
+                        InvalidateTextAnnotationOverlayTransition(scaledAnnotation, previousTextOverlayBounds);
+                    }
+
                     pdfViewer.Invalidate();
                     return;
                 }
-                catch
-                {
-                    if (waitForRichFinalize)
-                    {
-                        CancelDeferredBusyCursorForPdfViewerPaint();
-                    }
-
-                    throw;
-                }
-            }
 
                 if (isDraggingTextLeaderHandle)
                 {
@@ -31258,11 +31715,6 @@ namespace AnonPDF
                     return;
                 }
 
-                if (DebugLogEnabled)
-                {
-                    LogDebug($"RichPdfExportFallback annotation={annotation.Id ?? "-"}");
-                }
-
                 float richDpiX;
                 float richDpiY;
                 using (Graphics gRich = Graphics.FromHwnd(IntPtr.Zero))
@@ -33328,9 +33780,6 @@ namespace AnonPDF
                 return;
             }
 
-            bool logRichResize = ShouldLogRichResizeDiagnostics() && ReferenceEquals(annotation, annotationToScale);
-            Stopwatch drawStopwatch = logRichResize ? Stopwatch.StartNew() : null;
-
             if (!IsRichTextMode(annotation))
             {
                 EnsureRichAnnotationBoundsSynchronized(annotation);
@@ -33338,7 +33787,6 @@ namespace AnonPDF
 
             var state = graphics.Save();
             Bitmap richPreviewBitmap = null;
-            bool disposeRichPreviewBitmap = false;
             graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
             graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
@@ -33400,7 +33848,6 @@ namespace AnonPDF
                         interactionSnapshotFramePaddingY,
                         interactionSnapshotFrameLocalRect,
                         trimVertical: true);
-                    disposeRichPreviewBitmap = DisableRichTextPreviewCachesForDiagnostics && richPreviewBitmap != null;
                 }
 
                 PointF[] textFrameCorners = null;
@@ -33415,7 +33862,8 @@ namespace AnonPDF
                     out _);
 
                 if (annotation.HasLeaderArrow &&
-                    TryGetAnnotationLeaderGeometry(annotation, graphics.DpiX, graphics.DpiY, out PointF leaderAnchor, out PointF leaderEnd, out PointF leaderLeft, out PointF leaderRight, out PointF leaderLineEnd))
+                    hasTextFrame &&
+                    TryBuildAnnotationLeaderGeometryFromScreenFrame(annotation, textFrameCorners, out PointF leaderAnchor, out PointF leaderEnd, out PointF leaderLeft, out PointF leaderRight, out PointF leaderLineEnd))
                 {
                     float lineWidthPx = Math.Max(1f, GetEffectiveTextLeaderLineWidth(annotation) * scaleFactor);
                     float borderWidthPx = Math.Max(0f, annotationBorderWidth * scaleFactor);
@@ -33462,8 +33910,32 @@ namespace AnonPDF
                 }
 
                 bool interactionSnapshotIncludesFrame = useInteractionPlaceholder && activeTextInteractionPreviewIncludesFrame;
+                bool cachedPreviewIncludesFrame =
+                    isRich &&
+                    !useInteractionPlaceholder &&
+                    richPreviewBitmap != null &&
+                    ReferenceEquals(annotation.CachedRichPreviewBitmap, richPreviewBitmap) &&
+                    annotation.CachedRichPreviewIncludesFrame;
+                bool previewBitmapIncludesFrame = interactionSnapshotIncludesFrame || cachedPreviewIncludesFrame;
+                bool useInteractionRotateRasterDraw =
+                    previewBitmapIncludesFrame &&
+                    useInteractionPlaceholder &&
+                    isRotatingTextAnnotation &&
+                    ReferenceEquals(annotation, annotationToRotate) &&
+                    activeTextInteractionPreviewBitmap != null;
+                bool useInteractionRasterDraw =
+                    previewBitmapIncludesFrame &&
+                    ((isScalingTextAnnotation &&
+                      ReferenceEquals(annotation, annotationToScale) &&
+                      activeTextInteractionPreviewBitmap != null) ||
+                     useInteractionRotateRasterDraw ||
+                     cachedPreviewIncludesFrame);
+                bool useFramedRasterRotateDraw =
+                    previewBitmapIncludesFrame &&
+                    annotationRotation != 0 &&
+                    (useInteractionRasterDraw || cachedPreviewIncludesFrame);
 
-                if (!interactionSnapshotIncludesFrame && hasTextFrame && annotationBackgroundColor.A > 0)
+                if (!previewBitmapIncludesFrame && hasTextFrame && annotationBackgroundColor.A > 0)
                 {
                     using (SolidBrush backgroundBrush = new SolidBrush(annotationBackgroundColor))
                     {
@@ -33567,11 +34039,14 @@ namespace AnonPDF
                 float layoutWidth = contentWidth + (2f * framePaddingX);
                 float layoutHeight = contentHeight + (2f * framePaddingY);
 
-                DrawTextFrameOverlay();
+                if (!useInteractionRasterDraw)
+                {
+                    DrawTextFrameOverlay();
+                }
 
                 if (isRich)
                 {
-                    if (!interactionSnapshotIncludesFrame)
+                    if (!previewBitmapIncludesFrame)
                     {
                         DrawAnnotationBorder();
                     }
@@ -33580,16 +34055,28 @@ namespace AnonPDF
                     {
                         Bitmap richBitmap = richPreviewBitmap;
                         richPreviewBitmap = null;
+                        float bitmapLayoutWidth = useInteractionRotateRasterDraw
+                            ? Math.Max(1f, rect.Width)
+                            : layoutWidth;
+                        float bitmapLayoutHeight = useInteractionRotateRasterDraw
+                            ? Math.Max(1f, rect.Height)
+                            : layoutHeight;
                         float rotationRadians = (float)(annotationRotation * Math.PI / 180.0);
                         float rotCos = (float)Math.Cos(rotationRadians);
                         float rotSin = (float)Math.Sin(rotationRadians);
-                        PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
+                        PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, bitmapLayoutWidth, bitmapLayoutHeight);
                         float offsetX = rotationOffset.X;
                         float offsetY = rotationOffset.Y;
-                        Rectangle richSourceRect = GetCachedRichBitmapSourceRect(annotation, richBitmap, useInteractionPlaceholder);
+                        Rectangle richSourceRect = useInteractionRasterDraw
+                            ? new Rectangle(0, 0, richBitmap.Width, richBitmap.Height)
+                            : BuildRichBitmapDrawSourceRect(richBitmap);
                         using ImageAttributes richImageAttributes = new ImageAttributes();
                         richImageAttributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
-                        RectangleF richLayoutRect = interactionSnapshotIncludesFrame
+                        RectangleF richLayoutRect = useInteractionRasterDraw
+                            ? useInteractionRotateRasterDraw
+                                ? new RectangleF(0f, 0f, Math.Max(1f, rect.Width), Math.Max(1f, rect.Height))
+                                : new RectangleF(0f, 0f, Math.Max(1f, rect.Width), Math.Max(1f, rect.Height))
+                            : previewBitmapIncludesFrame
                             ? new RectangleF(0f, 0f, Math.Max(1f, layoutWidth), Math.Max(1f, layoutHeight))
                             : BuildRichBitmapLayoutRect(
                                 annotation,
@@ -33604,8 +34091,8 @@ namespace AnonPDF
                             graphics.DrawImage(
                                 richBitmap,
                                 BuildDestinationParallelogram(
-                                    rect.X + (interactionSnapshotIncludesFrame ? 0f : framePaddingX) + richLayoutRect.X,
-                                    rect.Y + (interactionSnapshotIncludesFrame ? 0f : framePaddingY) + richLayoutRect.Y,
+                                    rect.X + ((previewBitmapIncludesFrame || useInteractionRasterDraw) ? 0f : framePaddingX) + richLayoutRect.X,
+                                    rect.Y + ((previewBitmapIncludesFrame || useInteractionRasterDraw) ? 0f : framePaddingY) + richLayoutRect.Y,
                                     richLayoutRect.Width,
                                     richLayoutRect.Height),
                                 richSourceRect,
@@ -33615,19 +34102,42 @@ namespace AnonPDF
                         else
                         {
                             var textState = graphics.Save();
-                            graphics.Transform = new System.Drawing.Drawing2D.Matrix(
-                                rotCos, rotSin, -rotSin, rotCos,
-                                rect.X + offsetX, rect.Y + offsetY);
-                            graphics.DrawImage(
-                                richBitmap,
-                                BuildDestinationParallelogram(
-                                    (interactionSnapshotIncludesFrame ? 0f : framePaddingX) + richLayoutRect.X,
-                                    (interactionSnapshotIncludesFrame ? 0f : framePaddingY) + richLayoutRect.Y,
-                                    richLayoutRect.Width,
-                                    richLayoutRect.Height),
-                                richSourceRect,
-                                GraphicsUnit.Pixel,
-                                richImageAttributes);
+                            if (useFramedRasterRotateDraw)
+                            {
+                                graphics.TranslateTransform(
+                                    rect.X + (rect.Width / 2f),
+                                    rect.Y + (rect.Height / 2f));
+                                graphics.RotateTransform(annotationRotation);
+                                graphics.TranslateTransform(
+                                    -(rect.Width / 2f),
+                                    -(rect.Height / 2f));
+                                graphics.DrawImage(
+                                    richBitmap,
+                                    BuildDestinationParallelogram(
+                                        0f,
+                                        0f,
+                                        Math.Max(1f, rect.Width),
+                                        Math.Max(1f, rect.Height)),
+                                    richSourceRect,
+                                    GraphicsUnit.Pixel,
+                                    richImageAttributes);
+                            }
+                            else
+                            {
+                                graphics.Transform = new System.Drawing.Drawing2D.Matrix(
+                                    rotCos, rotSin, -rotSin, rotCos,
+                                    rect.X + offsetX, rect.Y + offsetY);
+                                graphics.DrawImage(
+                                    richBitmap,
+                                    BuildDestinationParallelogram(
+                                        ((previewBitmapIncludesFrame || useInteractionRasterDraw) ? 0f : framePaddingX) + richLayoutRect.X,
+                                        ((previewBitmapIncludesFrame || useInteractionRasterDraw) ? 0f : framePaddingY) + richLayoutRect.Y,
+                                        richLayoutRect.Width,
+                                        richLayoutRect.Height),
+                                    richSourceRect,
+                                    GraphicsUnit.Pixel,
+                                    richImageAttributes);
+                            }
                             graphics.Restore(textState);
                         }
 
@@ -33653,63 +34163,47 @@ namespace AnonPDF
                             trimVertical: true);
                     if (richBitmapFallback != null)
                     {
-                        try
-                        {
-                            Rectangle richSourceRect = BuildRichBitmapSourceRect(richBitmapFallback);
-                            using ImageAttributes richImageAttributes = new ImageAttributes();
-                            richImageAttributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
-                            float rotationRadians = (float)(annotationRotation * Math.PI / 180.0);
-                            float rotCos = (float)Math.Cos(rotationRadians);
-                            float rotSin = (float)Math.Sin(rotationRadians);
-                            PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
-                            float offsetX = rotationOffset.X;
-                            float offsetY = rotationOffset.Y;
-                            RectangleF richLayoutRect = BuildRichBitmapLayoutRect(
-                                annotation,
-                                richSourceRect,
-                                contentWidth,
-                                contentHeight,
-                                1f,
-                                0f);
+                        Rectangle richSourceRect = BuildRichBitmapDrawSourceRect(richBitmapFallback);
+                        using ImageAttributes richImageAttributes = new ImageAttributes();
+                        richImageAttributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+                        float rotationRadians = (float)(annotationRotation * Math.PI / 180.0);
+                        float rotCos = (float)Math.Cos(rotationRadians);
+                        float rotSin = (float)Math.Sin(rotationRadians);
+                        PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
+                        float offsetX = rotationOffset.X;
+                        float offsetY = rotationOffset.Y;
+                        RectangleF richLayoutRect = new RectangleF(0f, 0f, Math.Max(1f, contentWidth), Math.Max(1f, contentHeight));
 
-                            if (annotationRotation == 0)
-                            {
-                                graphics.DrawImage(
-                                    richBitmapFallback,
-                                    BuildDestinationParallelogram(
-                                        rect.X + framePaddingX + richLayoutRect.X,
-                                        rect.Y + framePaddingY + richLayoutRect.Y,
-                                        richLayoutRect.Width,
-                                        richLayoutRect.Height),
-                                    richSourceRect,
-                                    GraphicsUnit.Pixel,
-                                    richImageAttributes);
-                            }
-                            else
-                            {
-                                var textState = graphics.Save();
-                                graphics.Transform = new System.Drawing.Drawing2D.Matrix(
-                                    rotCos, rotSin, -rotSin, rotCos,
-                                    rect.X + offsetX, rect.Y + offsetY);
-                                graphics.DrawImage(
-                                    richBitmapFallback,
-                                    BuildDestinationParallelogram(
-                                        framePaddingX + richLayoutRect.X,
-                                        framePaddingY + richLayoutRect.Y,
-                                        richLayoutRect.Width,
-                                        richLayoutRect.Height),
-                                    richSourceRect,
-                                    GraphicsUnit.Pixel,
-                                    richImageAttributes);
-                                graphics.Restore(textState);
-                            }
-                        }
-                        finally
+                        if (annotationRotation == 0)
                         {
-                            if (DisableRichTextPreviewCachesForDiagnostics)
-                            {
-                                richBitmapFallback.Dispose();
-                            }
+                            graphics.DrawImage(
+                                richBitmapFallback,
+                                BuildDestinationParallelogram(
+                                    rect.X + framePaddingX + richLayoutRect.X,
+                                    rect.Y + framePaddingY + richLayoutRect.Y,
+                                    richLayoutRect.Width,
+                                    richLayoutRect.Height),
+                                richSourceRect,
+                                GraphicsUnit.Pixel,
+                                richImageAttributes);
+                        }
+                        else
+                        {
+                            var textState = graphics.Save();
+                            graphics.Transform = new System.Drawing.Drawing2D.Matrix(
+                                rotCos, rotSin, -rotSin, rotCos,
+                                rect.X + offsetX, rect.Y + offsetY);
+                            graphics.DrawImage(
+                                richBitmapFallback,
+                                BuildDestinationParallelogram(
+                                    framePaddingX + richLayoutRect.X,
+                                    framePaddingY + richLayoutRect.Y,
+                                    richLayoutRect.Width,
+                                    richLayoutRect.Height),
+                                richSourceRect,
+                                GraphicsUnit.Pixel,
+                                richImageAttributes);
+                            graphics.Restore(textState);
                         }
                     }
 
@@ -33766,22 +34260,6 @@ namespace AnonPDF
             }
             finally
             {
-                if (disposeRichPreviewBitmap)
-                {
-                    richPreviewBitmap?.Dispose();
-                }
-
-                if (drawStopwatch != null)
-                {
-                    drawStopwatch.Stop();
-                    if (drawStopwatch.ElapsedMilliseconds >= 20)
-                    {
-                        LogDebug(
-                            $"RichResize drawText ms={drawStopwatch.ElapsedMilliseconds} " +
-                            $"selected={(IsTextAnnotationSelected(annotation) ? 1 : 0)} " +
-                            $"bounds={FormatRectFInvariant(annotation.AnnotationBounds)}");
-                    }
-                }
                 graphics.Restore(state);
             }
         }
@@ -33792,8 +34270,6 @@ namespace AnonPDF
             {
                 return;
             }
-
-            Stopwatch commentsStopwatch = ShouldLogRichResizeDiagnostics() ? Stopwatch.StartNew() : null;
 
             Rectangle viewportRectPx = GetPdfViewerVisibleViewportRectanglePx();
             bool clipToViewport = !viewportRectPx.IsEmpty;
@@ -33904,14 +34380,6 @@ namespace AnonPDF
                 }
             }
 
-            if (commentsStopwatch != null)
-            {
-                commentsStopwatch.Stop();
-                if (commentsStopwatch.ElapsedMilliseconds >= 20)
-                {
-                    LogDebug($"RichResize drawComments ms={commentsStopwatch.ElapsedMilliseconds} page={currentPage} count={comments.Count}");
-                }
-            }
         }
 
         private void DrawCommentHighlightOnPreview(Graphics graphics, RectangleF highlightRect, System.Drawing.Color highlightColor)
@@ -34337,6 +34805,7 @@ namespace AnonPDF
         {
             int safeWidth = Math.Max(1, widthPx);
             int safeHeight = Math.Max(1, heightPx);
+            int safeRenderWidth = Math.Max(1, safeWidth + RichTextHorizontalRenderSafetyPx);
             if (annotation != null &&
                 TryRenderRichTextToBitmapWithWpf(
                     annotation.AnnotationText,
@@ -34356,17 +34825,17 @@ namespace AnonPDF
 
             if (backgroundColor.A > 0)
             {
-                return RenderRichTextToBitmapOpaque(annotation, safeWidth, safeHeight, backgroundColor, fontScale);
+                return RenderRichTextToBitmapOpaque(annotation, safeRenderWidth, safeHeight, backgroundColor, fontScale);
             }
 
             System.Windows.Forms.HorizontalAlignment alignment = annotation?.AnnotationAlignment ?? System.Windows.Forms.HorizontalAlignment.Left;
-            using (Bitmap black = RenderRichTextToBitmapOpaque(annotation, safeWidth, safeHeight, System.Drawing.Color.Black, fontScale))
-            using (Bitmap white = RenderRichTextToBitmapOpaque(annotation, safeWidth, safeHeight, System.Drawing.Color.White, fontScale))
+            using (Bitmap black = RenderRichTextToBitmapOpaque(annotation, safeRenderWidth, safeHeight, System.Drawing.Color.Black, fontScale))
+            using (Bitmap white = RenderRichTextToBitmapOpaque(annotation, safeRenderWidth, safeHeight, System.Drawing.Color.White, fontScale))
             {
-                var bitmap = new Bitmap(safeWidth, safeHeight, PixelFormat.Format32bppArgb);
+                var bitmap = new Bitmap(safeRenderWidth, safeHeight, PixelFormat.Format32bppArgb);
                 for (int y = 0; y < safeHeight; y++)
                 {
-                    for (int x = 0; x < safeWidth; x++)
+                    for (int x = 0; x < safeRenderWidth; x++)
                     {
                         System.Drawing.Color cb = black.GetPixel(x, y);
                         System.Drawing.Color cw = white.GetPixel(x, y);
@@ -34391,7 +34860,7 @@ namespace AnonPDF
                 Bitmap alignedBitmap = ApplyDetectedLineAlignmentToTransparentBitmap(
                     bitmap,
                     alignment,
-                    annotation?.Id);
+                    annotation?.AnnotationText);
                 if (!ReferenceEquals(alignedBitmap, bitmap))
                 {
                     bitmap.Dispose();
@@ -34440,7 +34909,7 @@ namespace AnonPDF
         private static Bitmap ApplyDetectedLineAlignmentToTransparentBitmap(
             Bitmap source,
             System.Windows.Forms.HorizontalAlignment alignment,
-            string annotationId)
+            string plainText)
         {
             if (source == null ||
                 source.Width <= 0 ||
@@ -34450,7 +34919,7 @@ namespace AnonPDF
                 return source;
             }
 
-            List<Rectangle> lineBands = GetRichBitmapLineBands(source);
+            List<Rectangle> lineBands = GetRichBitmapLineBands(source, GetExpectedRichTextLineCount(plainText));
             if (lineBands.Count == 0)
             {
                 return source;
@@ -34492,7 +34961,18 @@ namespace AnonPDF
             return target;
         }
 
-        private static List<Rectangle> GetRichBitmapLineBands(Bitmap source)
+        private static int? GetExpectedRichTextLineCount(string plainText)
+        {
+            if (plainText == null)
+            {
+                return null;
+            }
+
+            string normalizedText = plainText.Replace("\r\n", "\n").Replace('\r', '\n');
+            return Math.Max(1, normalizedText.Split(new[] { '\n' }, StringSplitOptions.None).Length);
+        }
+
+        private static List<Rectangle> GetRichBitmapLineBands(Bitmap source, int? expectedLineCount)
         {
             var lineBands = new List<Rectangle>();
             if (source == null || source.Width <= 0 || source.Height <= 0)
@@ -34546,33 +35026,91 @@ namespace AnonPDF
             }
 
             const int maxBandMergeGapPx = 4;
-            if (lineBands.Count > 1)
+            if (lineBands.Count <= 1)
             {
-                var mergedBands = new List<Rectangle>();
-                Rectangle currentBand = lineBands[0];
-                for (int i = 1; i < lineBands.Count; i++)
+                return lineBands;
+            }
+
+            if (expectedLineCount.HasValue && expectedLineCount.Value > 0)
+            {
+                int targetLineCount = expectedLineCount.Value;
+                if (lineBands.Count <= targetLineCount)
                 {
-                    Rectangle nextBand = lineBands[i];
-                    int gap = nextBand.Top - currentBand.Bottom;
-                    if (gap <= maxBandMergeGapPx)
+                    return lineBands;
+                }
+
+                while (lineBands.Count > targetLineCount)
+                {
+                    int mergeIndex = FindBestRichBitmapLineBandMergeIndex(lineBands, maxBandMergeGapPx);
+                    if (mergeIndex < 0)
                     {
-                        currentBand = Rectangle.FromLTRB(
-                            Math.Min(currentBand.Left, nextBand.Left),
-                            Math.Min(currentBand.Top, nextBand.Top),
-                            Math.Max(currentBand.Right, nextBand.Right),
-                            Math.Max(currentBand.Bottom, nextBand.Bottom));
-                        continue;
+                        break;
                     }
 
-                    mergedBands.Add(currentBand);
-                    currentBand = nextBand;
+                    lineBands[mergeIndex] = MergeRichBitmapLineBands(lineBands[mergeIndex], lineBands[mergeIndex + 1]);
+                    lineBands.RemoveAt(mergeIndex + 1);
+                }
+
+                return lineBands;
+            }
+
+            var mergedBands = new List<Rectangle>();
+            Rectangle currentBand = lineBands[0];
+            for (int i = 1; i < lineBands.Count; i++)
+            {
+                Rectangle nextBand = lineBands[i];
+                int gap = nextBand.Top - currentBand.Bottom;
+                if (gap <= maxBandMergeGapPx)
+                {
+                    currentBand = MergeRichBitmapLineBands(currentBand, nextBand);
+                    continue;
                 }
 
                 mergedBands.Add(currentBand);
-                lineBands = mergedBands;
+                currentBand = nextBand;
             }
 
-            return lineBands;
+            mergedBands.Add(currentBand);
+            return mergedBands;
+        }
+
+        private static int FindBestRichBitmapLineBandMergeIndex(List<Rectangle> lineBands, int maxBandMergeGapPx)
+        {
+            int bestIndex = -1;
+            int bestGap = int.MaxValue;
+            int bestSmallHeight = int.MaxValue;
+            int bestMergedHeight = int.MaxValue;
+            for (int i = 0; i + 1 < lineBands.Count; i++)
+            {
+                int gap = lineBands[i + 1].Top - lineBands[i].Bottom;
+                if (gap < 0 || gap > maxBandMergeGapPx)
+                {
+                    continue;
+                }
+
+                int smallHeight = Math.Min(lineBands[i].Height, lineBands[i + 1].Height);
+                int mergedHeight = MergeRichBitmapLineBands(lineBands[i], lineBands[i + 1]).Height;
+                if (gap < bestGap ||
+                    (gap == bestGap && smallHeight < bestSmallHeight) ||
+                    (gap == bestGap && smallHeight == bestSmallHeight && mergedHeight < bestMergedHeight))
+                {
+                    bestIndex = i;
+                    bestGap = gap;
+                    bestSmallHeight = smallHeight;
+                    bestMergedHeight = mergedHeight;
+                }
+            }
+
+            return bestIndex;
+        }
+
+        private static Rectangle MergeRichBitmapLineBands(Rectangle first, Rectangle second)
+        {
+            return Rectangle.FromLTRB(
+                Math.Min(first.Left, second.Left),
+                Math.Min(first.Top, second.Top),
+                Math.Max(first.Right, second.Right),
+                Math.Max(first.Bottom, second.Bottom));
         }
 
         private Bitmap RenderRichTextToBitmapOpaque(TextAnnotation annotation, int safeWidth, int safeHeight, System.Drawing.Color backgroundColor, float fontScale)
@@ -34650,23 +35188,11 @@ namespace AnonPDF
                 return;
             }
 
-            Stopwatch overlayStopwatch = ShouldLogRichResizeDiagnostics() ? Stopwatch.StartNew() : null;
             graphics.DrawImageUnscaled(redactionPreviewOverlayBitmap, 0, 0);
-            if (overlayStopwatch != null)
-            {
-                overlayStopwatch.Stop();
-                if (overlayStopwatch.ElapsedMilliseconds >= 20)
-                {
-                    LogDebug(
-                        $"RichResize drawRedactionOverlay ms={overlayStopwatch.ElapsedMilliseconds} " +
-                        $"size={redactionPreviewOverlayBitmap.Width}x{redactionPreviewOverlayBitmap.Height}");
-                }
-            }
         }
 
         private void OnPaint(object sender, PaintEventArgs e)
         {
-            Stopwatch paintStopwatch = ShouldLogRichResizeDiagnostics() ? Stopwatch.StartNew() : null;
             Dictionary<string, int> previewBasisNumberMap = BuildLegalBasisFootnoteNumberMap(
                 redactionBlocks.Where(block => block != null && block.PageNumber == currentPage && IsLayerVisible(block.LayerId)));
 
@@ -35062,17 +35588,6 @@ namespace AnonPDF
             }
 
             DrawObjectMarqueeSelectionOverlay(e.Graphics);
-
-            if (paintStopwatch != null)
-            {
-                paintStopwatch.Stop();
-                if (paintStopwatch.ElapsedMilliseconds >= 20)
-                {
-                    LogDebug(
-                        $"RichResize paint ms={paintStopwatch.ElapsedMilliseconds} " +
-                        $"page={currentPage} zoom={scaleFactor.ToString(CultureInfo.InvariantCulture)}");
-                }
-            }
 
         }
 
@@ -39224,6 +39739,7 @@ namespace AnonPDF
                         textToRestore.LeaderLineWidth = NormalizeLeaderLineWidth(textScaleStartLeaderLineWidth);
                         textToRestore.LeaderHeadLength = NormalizeTextLeaderHeadLength(textScaleStartLeaderHeadLength);
                         textToRestore.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(textScaleStartLeaderHeadWidth);
+                        textToRestore.LeaderAnchorKind = NormalizeTextLeaderAnchorKind(textScaleStartLeaderAnchorKind);
                     }
                     TouchTextAnnotation(textToRestore);
                 }
@@ -40422,7 +40938,6 @@ namespace AnonPDF
             annotationToAdjustLeader = null;
             textRotationStartValue = 0;
             textRotationStartAngle = 0f;
-            textRotationStartCenterDoc = PointF.Empty;
             textRotationStartBounds = RectangleF.Empty;
             textScaleStartBounds = RectangleF.Empty;
             textScaleStartScreenBounds = RectangleF.Empty;
@@ -40436,6 +40951,7 @@ namespace AnonPDF
             textScaleStartLeaderLineWidth = 0f;
             textScaleStartLeaderHeadLength = 0f;
             textScaleStartLeaderHeadWidth = 0f;
+            textScaleStartLeaderAnchorKind = TextLeaderAnchorKind.RightCenter;
             textMoveStartContentSize = SizeF.Empty;
             textTransformStartContentSize = SizeF.Empty;
             textMoveStartLeaderEndPoint = PointF.Empty;
@@ -44925,19 +45441,49 @@ namespace AnonPDF
                 return;
             }
 
-            if (isScalingTextAnnotation && ReferenceEquals(selectedTextAnnotation, annotationToScale))
-            {
-                return;
-            }
+            Rectangle screenRect = GetAnnotationScreenRect(selectedTextAnnotation, graphics.DpiX, graphics.DpiY);
 
-            if (TryGetAnnotationTextFrameGeometry(
-                    selectedTextAnnotation,
-                    graphics.DpiX,
-                    graphics.DpiY,
-                    out _,
-                    out RectangleF textFrameBounds,
-                    out _,
-                    out _))
+            bool useInteractionRasterOverlay =
+                IsRichTextMode(selectedTextAnnotation) &&
+                isScalingTextAnnotation &&
+                ReferenceEquals(selectedTextAnnotation, annotationToScale) &&
+                textRotationInteractionChanged &&
+                richTextInteractionPreviewArmed &&
+                activeTextInteractionPreviewIncludesFrame &&
+                activeTextInteractionPreviewBitmap != null;
+
+            if (useInteractionRasterOverlay)
+            {
+                if (!TryGetAnnotationTextFrameGeometry(
+                        selectedTextAnnotation,
+                        graphics.DpiX,
+                        graphics.DpiY,
+                        out _,
+                        out RectangleF textFrameBounds,
+                        out _,
+                        out _))
+                {
+                    textFrameBounds = new RectangleF(screenRect.X, screenRect.Y, screenRect.Width, screenRect.Height);
+                }
+
+                using (Pen boundPen = new Pen(System.Drawing.Color.Green, 1f))
+                {
+                    graphics.DrawRectangle(boundPen, textFrameBounds.X, textFrameBounds.Y, textFrameBounds.Width, textFrameBounds.Height);
+                }
+
+                if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation))
+                {
+                    DrawObjectScaleHandleRects(graphics, textFrameBounds);
+                }
+            }
+            else if (TryGetAnnotationTextFrameGeometry(
+                         selectedTextAnnotation,
+                         graphics.DpiX,
+                         graphics.DpiY,
+                         out _,
+                         out RectangleF textFrameBounds,
+                         out _,
+                         out _))
             {
                 using (Pen boundPen = new Pen(System.Drawing.Color.Green, 1f))
                 {
@@ -45123,6 +45669,84 @@ namespace AnonPDF
                 out frameTopMid);
         }
 
+        private static bool TryBuildVisibleFramedBitmapScreenGeometry(
+            Bitmap bitmap,
+            Rectangle screenRect,
+            int rotation,
+            out PointF[] frameCorners,
+            out RectangleF frameBounds,
+            out PointF frameCenter,
+            out PointF frameTopMid)
+        {
+            frameCorners = null;
+            frameBounds = RectangleF.Empty;
+            frameCenter = PointF.Empty;
+            frameTopMid = PointF.Empty;
+
+            if (bitmap == null ||
+                bitmap.Width <= 0 ||
+                bitmap.Height <= 0 ||
+                screenRect.Width <= 0 ||
+                screenRect.Height <= 0)
+            {
+                return false;
+            }
+
+            Rectangle visibleBounds = TryGetNonTransparentBounds(bitmap, out Rectangle inkBounds)
+                ? inkBounds
+                : new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+
+            float rectWidth = Math.Max(1f, screenRect.Width);
+            float rectHeight = Math.Max(1f, screenRect.Height);
+            float scaleX = rectWidth / Math.Max(1f, bitmap.Width);
+            float scaleY = rectHeight / Math.Max(1f, bitmap.Height);
+            RectangleF localFrameRect = RectangleF.FromLTRB(
+                Math.Max(0f, visibleBounds.Left * scaleX),
+                Math.Max(0f, visibleBounds.Top * scaleY),
+                Math.Min(rectWidth, visibleBounds.Right * scaleX),
+                Math.Min(rectHeight, visibleBounds.Bottom * scaleY));
+
+            if (localFrameRect.Width <= 0.5f || localFrameRect.Height <= 0.5f)
+            {
+                localFrameRect = new RectangleF(0f, 0f, rectWidth, rectHeight);
+            }
+
+            PointF rectCenter = new PointF(
+                screenRect.X + (rectWidth / 2f),
+                screenRect.Y + (rectHeight / 2f));
+            float angleRad = (float)(NormalizeRotation(rotation) * Math.PI / 180.0);
+            float cos = (float)Math.Cos(angleRad);
+            float sin = (float)Math.Sin(angleRad);
+
+            PointF TransformPoint(float x, float y)
+            {
+                float dx = x - (rectWidth / 2f);
+                float dy = y - (rectHeight / 2f);
+                return new PointF(
+                    rectCenter.X + (dx * cos) - (dy * sin),
+                    rectCenter.Y + (dx * sin) + (dy * cos));
+            }
+
+            PointF p0 = TransformPoint(localFrameRect.Left, localFrameRect.Top);
+            PointF p1 = TransformPoint(localFrameRect.Right, localFrameRect.Top);
+            PointF p2 = TransformPoint(localFrameRect.Right, localFrameRect.Bottom);
+            PointF p3 = TransformPoint(localFrameRect.Left, localFrameRect.Bottom);
+            frameCorners = new[] { p0, p1, p2, p3 };
+
+            float minX = frameCorners.Min(point => point.X);
+            float maxX = frameCorners.Max(point => point.X);
+            float minY = frameCorners.Min(point => point.Y);
+            float maxY = frameCorners.Max(point => point.Y);
+            frameBounds = new RectangleF(minX, minY, Math.Max(1f, maxX - minX), Math.Max(1f, maxY - minY));
+            frameCenter = new PointF(
+                (p0.X + p1.X + p2.X + p3.X) / 4f,
+                (p0.Y + p1.Y + p2.Y + p3.Y) / 4f);
+            frameTopMid = new PointF(
+                (p0.X + p1.X) / 2f,
+                (p0.Y + p1.Y) / 2f);
+            return true;
+        }
+
         private bool TryGetAnnotationTextFrameGeometryForContentSize(
             TextAnnotation annotation,
             float dpiX,
@@ -45143,6 +45767,27 @@ namespace AnonPDF
                 return false;
             }
 
+            bool useInteractionRotateOuterFrame =
+                IsRichTextMode(annotation) &&
+                annotation == annotationToRotate &&
+                isRotatingTextAnnotation &&
+                textRotationInteractionChanged &&
+                richTextInteractionPreviewArmed &&
+                activeTextInteractionPreviewBitmap != null &&
+                activeTextInteractionPreviewIncludesFrame;
+
+            if (useInteractionRotateOuterFrame)
+            {
+                return TryBuildVisibleFramedBitmapScreenGeometry(
+                    activeTextInteractionPreviewBitmap,
+                    GetAnnotationScreenRect(annotation, dpiX, dpiY),
+                    NormalizeRotation(annotation.AnnotationRotation),
+                    out frameCorners,
+                    out frameBounds,
+                    out frameCenter,
+                    out frameTopMid);
+            }
+
             bool useInteractionSnapshotOuterFrame =
                 IsRichTextMode(annotation) &&
                 annotation == annotationToScale &&
@@ -45151,6 +45796,18 @@ namespace AnonPDF
                 richTextInteractionPreviewArmed &&
                 activeTextInteractionPreviewIncludesFrame &&
                 activeTextInteractionPreviewBitmap != null;
+
+            if (useInteractionSnapshotOuterFrame)
+            {
+                return TryBuildVisibleFramedBitmapScreenGeometry(
+                    activeTextInteractionPreviewBitmap,
+                    GetAnnotationScreenRect(annotation, dpiX, dpiY),
+                    NormalizeRotation(annotation.AnnotationRotation),
+                    out frameCorners,
+                    out frameBounds,
+                    out frameCenter,
+                    out frameTopMid);
+            }
 
             if (!useInteractionSnapshotOuterFrame &&
                 IsRichTextMode(annotation) &&
@@ -45254,6 +45911,52 @@ namespace AnonPDF
             float layoutHeight = contentHeight + (2f * framePaddingY);
 
             int rotation = NormalizeRotation(annotation.AnnotationRotation);
+            if (rotation != 0 &&
+                annotation.CachedRichPreviewIncludesFrame &&
+                annotation.CachedRichPreviewBitmap != null)
+            {
+                float rectWidth = Math.Max(1f, rect.Width);
+                float rectHeight = Math.Max(1f, rect.Height);
+                float localScaleX = rectWidth / Math.Max(1f, layoutWidth);
+                float localScaleY = rectHeight / Math.Max(1f, layoutHeight);
+                PointF rectCenter = new PointF(
+                    rect.X + (rectWidth / 2f),
+                    rect.Y + (rectHeight / 2f));
+                float angleRadForCache = (float)(rotation * Math.PI / 180.0);
+                float cacheCos = (float)Math.Cos(angleRadForCache);
+                float cacheSin = (float)Math.Sin(angleRadForCache);
+
+                PointF TransformFramedCachePoint(float x, float y)
+                {
+                    float screenLocalX = x * localScaleX;
+                    float screenLocalY = y * localScaleY;
+                    float dx = screenLocalX - (rectWidth / 2f);
+                    float dy = screenLocalY - (rectHeight / 2f);
+                    return new PointF(
+                        rectCenter.X + (dx * cacheCos) - (dy * cacheSin),
+                        rectCenter.Y + (dx * cacheSin) + (dy * cacheCos));
+                }
+
+                PointF cp0 = TransformFramedCachePoint(localFrameRect.Left, localFrameRect.Top);
+                PointF cp1 = TransformFramedCachePoint(localFrameRect.Right, localFrameRect.Top);
+                PointF cp2 = TransformFramedCachePoint(localFrameRect.Right, localFrameRect.Bottom);
+                PointF cp3 = TransformFramedCachePoint(localFrameRect.Left, localFrameRect.Bottom);
+                frameCorners = new[] { cp0, cp1, cp2, cp3 };
+
+                float cacheMinX = frameCorners.Min(p => p.X);
+                float cacheMaxX = frameCorners.Max(p => p.X);
+                float cacheMinY = frameCorners.Min(p => p.Y);
+                float cacheMaxY = frameCorners.Max(p => p.Y);
+                frameBounds = new RectangleF(cacheMinX, cacheMinY, Math.Max(1f, cacheMaxX - cacheMinX), Math.Max(1f, cacheMaxY - cacheMinY));
+                frameCenter = new PointF(
+                    (cp0.X + cp1.X + cp2.X + cp3.X) / 4f,
+                    (cp0.Y + cp1.Y + cp2.Y + cp3.Y) / 4f);
+                frameTopMid = new PointF(
+                    (cp0.X + cp1.X) / 2f,
+                    (cp0.Y + cp1.Y) / 2f);
+                return true;
+            }
+
             PointF rotationOffset = GetRotationOffsetForBounds(rotation, layoutWidth, layoutHeight);
             float translateX = rect.X + rotationOffset.X;
             float translateY = rect.Y + rotationOffset.Y;
@@ -45332,6 +46035,18 @@ namespace AnonPDF
                 localFrameRect = annotation.CachedRichPreviewFrameLocalPx;
             }
             else if (string.Equals(annotation.CachedRichPreviewBitmapKey, previewBitmapKey, StringComparison.Ordinal) &&
+                     annotation.CachedRichPreviewBitmap != null &&
+                     annotation.CachedRichPreviewIncludesFrame)
+            {
+                localFrameRect = BuildRichPreviewVisibleLocalFrameRectFromComposedBitmap(
+                    annotation.CachedRichPreviewBitmap,
+                    layoutWidth,
+                    layoutHeight);
+                annotation.CachedRichPreviewFrameKey = frameCacheKey;
+                annotation.CachedRichPreviewFrameLocalPx = localFrameRect;
+                annotation.HasCachedRichPreviewFrameLocalPx = true;
+            }
+            else if (string.Equals(annotation.CachedRichPreviewBitmapKey, previewBitmapKey, StringComparison.Ordinal) &&
                      annotation.CachedRichPreviewBitmap != null)
             {
                 Bitmap richBitmap = annotation.CachedRichPreviewBitmap;
@@ -45363,7 +46078,18 @@ namespace AnonPDF
             else
             {
                 QueueAsyncRichTextPreviewWarm(annotation, richPreviewWidthPx, richPreviewHeightPx, richPreviewFontScale, trimVertical: true);
-                localFrameRect = new RectangleF(0f, 0f, layoutWidth, layoutHeight);
+                if (annotation.CachedRichPreviewBitmap != null &&
+                    annotation.CachedRichPreviewIncludesFrame)
+                {
+                    localFrameRect = BuildRichPreviewVisibleLocalFrameRectFromComposedBitmap(
+                        annotation.CachedRichPreviewBitmap,
+                        layoutWidth,
+                        layoutHeight);
+                }
+                else
+                {
+                    localFrameRect = new RectangleF(0f, 0f, layoutWidth, layoutHeight);
+                }
             }
 
             return localFrameRect.Width > 0.5f && localFrameRect.Height > 0.5f;
@@ -45537,21 +46263,55 @@ namespace AnonPDF
             rightPoint = PointF.Empty;
             lineEndPoint = PointF.Empty;
 
-            if (!TryGetAnnotationLeaderGeometryDoc(annotation, out PointF docAnchor, out PointF docEnd, out PointF docLeft, out PointF docRight, out PointF docLineEnd))
+            if (annotation == null || annotation.PageNumber != currentPage || !annotation.HasLeaderArrow)
             {
                 return false;
             }
 
-            float screenScaleX = scaleFactor;
-            float screenScaleY = scaleFactor;
-            PointF ToScreen(PointF point) => new PointF(point.X * screenScaleX, point.Y * screenScaleY);
+            if (!TryGetAnnotationTextFrameGeometry(annotation, dpiX, dpiY, out PointF[] frameCorners, out _, out _, out _))
+            {
+                return false;
+            }
 
-            anchorPoint = ToScreen(docAnchor);
-            endPoint = ToScreen(docEnd);
-            leftPoint = ToScreen(docLeft);
-            rightPoint = ToScreen(docRight);
-            lineEndPoint = ToScreen(docLineEnd);
-            return true;
+            return TryBuildAnnotationLeaderGeometryFromScreenFrame(
+                annotation,
+                frameCorners,
+                out anchorPoint,
+                out endPoint,
+                out leftPoint,
+                out rightPoint,
+                out lineEndPoint);
+        }
+
+        private bool TryBuildAnnotationLeaderGeometryFromScreenFrame(
+            TextAnnotation annotation,
+            PointF[] frameCorners,
+            out PointF anchorPoint,
+            out PointF endPoint,
+            out PointF leftPoint,
+            out PointF rightPoint,
+            out PointF lineEndPoint)
+        {
+            anchorPoint = PointF.Empty;
+            endPoint = PointF.Empty;
+            leftPoint = PointF.Empty;
+            rightPoint = PointF.Empty;
+            lineEndPoint = PointF.Empty;
+
+            if (annotation == null ||
+                annotation.PageNumber != currentPage ||
+                !annotation.HasLeaderArrow ||
+                frameCorners == null ||
+                frameCorners.Length < 4)
+            {
+                return false;
+            }
+
+            anchorPoint = GetTextLeaderAnchorPoint(frameCorners, NormalizeTextLeaderAnchorKind(annotation.LeaderAnchorKind));
+            endPoint = new PointF(annotation.LeaderEndPoint.X * scaleFactor, annotation.LeaderEndPoint.Y * scaleFactor);
+            float headLength = NormalizeTextLeaderHeadLength(annotation.LeaderHeadLength) * scaleFactor;
+            float headWidth = NormalizeTextLeaderHeadWidth(annotation.LeaderHeadWidth) * scaleFactor;
+            return TryBuildArrowHead(anchorPoint, endPoint, headLength, headWidth, out leftPoint, out rightPoint, out lineEndPoint);
         }
 
         private static TextLeaderAnchorKind GetClosestTextLeaderAnchorKind(TextAnnotation annotation, PointF leaderEndPoint)
@@ -45719,16 +46479,60 @@ namespace AnonPDF
                 return false;
             }
 
-            Rectangle annotationRect = GetAnnotationScreenRect(annotation, dpiX, dpiY);
-            if (annotationRect.Width <= 0 || annotationRect.Height <= 0)
+            RectangleF toolbarBounds;
+            float toolbarRightEdge;
+            if (TryGetAnnotationTextFrameGeometry(
+                    annotation,
+                    dpiX,
+                    dpiY,
+                    out PointF[] frameCorners,
+                    out RectangleF frameBounds,
+                    out _,
+                    out _) &&
+                frameCorners != null &&
+                frameCorners.Length >= 2)
+            {
+                PointF topStart = frameCorners[0];
+                PointF topEnd = frameCorners[1];
+                float bestTopMidY = (topStart.Y + topEnd.Y) / 2f;
+                for (int i = 1; i < frameCorners.Length; i++)
+                {
+                    PointF edgeStart = frameCorners[i];
+                    PointF edgeEnd = frameCorners[(i + 1) % frameCorners.Length];
+                    float edgeMidY = (edgeStart.Y + edgeEnd.Y) / 2f;
+                    if (edgeMidY < bestTopMidY)
+                    {
+                        topStart = edgeStart;
+                        topEnd = edgeEnd;
+                        bestTopMidY = edgeMidY;
+                    }
+                }
+
+                float topLineMinY = Math.Min(topStart.Y, topEnd.Y);
+                float topLineMaxY = Math.Max(topStart.Y, topEnd.Y);
+                toolbarBounds = new RectangleF(
+                    frameBounds.X,
+                    topLineMinY,
+                    frameBounds.Width,
+                    Math.Max(1f, topLineMaxY - topLineMinY));
+                toolbarRightEdge = frameBounds.Right;
+            }
+            else
+            {
+                Rectangle annotationRect = GetAnnotationScreenRect(annotation, dpiX, dpiY);
+                toolbarBounds = new RectangleF(annotationRect.X, annotationRect.Y, annotationRect.Width, annotationRect.Height);
+                toolbarRightEdge = annotationRect.Right;
+            }
+
+            if (toolbarBounds.Width <= 0 || toolbarBounds.Height <= 0)
             {
                 return false;
             }
 
-            int top = ResolveObjectToolbarTop(annotationRect.Top, annotationRect.Bottom);
+            int top = ResolveObjectToolbarTop(toolbarBounds.Top, toolbarBounds.Bottom);
             const int buttonCount = 5;
             int totalWidth = (buttonCount * annotationsIconSize) + ((buttonCount - 1) * annotationsIconPadding);
-            int right = ResolveObjectToolbarRight(annotationRect.Right, totalWidth);
+            int right = ResolveObjectToolbarRight(toolbarRightEdge, totalWidth);
 
             Rectangle deleteIconRect = new Rectangle(
                 right - annotationsIconSize,
@@ -45792,17 +46596,17 @@ namespace AnonPDF
             }
 
             if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation) &&
-                TryGetTextScaleHandleAtPoint(selectedTextAnnotation, location, dpiX, dpiY, out ObjectScaleHandleCorner scaleHandleCorner, out _))
-            {
-                this.Cursor = GetCursorForObjectScaleHandle(scaleHandleCorner);
-                return true;
-            }
-
-            if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation) &&
                 TryGetTextLeaderHandleRect(selectedTextAnnotation, dpiX, dpiY, out RectangleF leaderHandleRect) &&
                 leaderHandleRect.Contains(location))
             {
                 this.Cursor = Cursors.Hand;
+                return true;
+            }
+
+            if (!IsTextAnnotationEffectivelyLocked(selectedTextAnnotation) &&
+                TryGetTextScaleHandleAtPoint(selectedTextAnnotation, location, dpiX, dpiY, out ObjectScaleHandleCorner scaleHandleCorner, out _))
+            {
+                this.Cursor = GetCursorForObjectScaleHandle(scaleHandleCorner);
                 return true;
             }
 
@@ -45839,6 +46643,12 @@ namespace AnonPDF
             }
 
             SizeF interactionStartContentSize = GetInteractiveAwareAnnotationContentSize(selectedTextAnnotation);
+            if (IsRichTextMode(selectedTextAnnotation))
+            {
+                InvalidatePendingRichPreviewWarmWork();
+                SeedRichContentSizeCache(selectedTextAnnotation, interactionStartContentSize);
+            }
+
             annotationToRotate = selectedTextAnnotation;
             BeginUndoCapture("Rotate text");
             isRotatingTextAnnotation = true;
@@ -45848,9 +46658,6 @@ namespace AnonPDF
             richTextInteractionPreviewArmed = true;
             textRotationStartValue = NormalizeRotation(selectedTextAnnotation.AnnotationRotation);
             textRotationStartBounds = selectedTextAnnotation.AnnotationBounds;
-            textRotationStartCenterDoc = new PointF(
-                selectedTextAnnotation.AnnotationBounds.X + (selectedTextAnnotation.AnnotationBounds.Width / 2f),
-                selectedTextAnnotation.AnnotationBounds.Y + (selectedTextAnnotation.AnnotationBounds.Height / 2f));
             PointF center = GetAnnotationScreenCenter(selectedTextAnnotation, dpiX, dpiY);
             if (TryGetAnnotationTextFrameGeometry(
                     selectedTextAnnotation,
@@ -45882,7 +46689,13 @@ namespace AnonPDF
                 return false;
             }
 
-            SizeF interactionStartContentSize = GetInteractiveAwareAnnotationContentSize(selectedTextAnnotation);
+            SizeF interactionStartContentSize = GetDisplayedTextAnnotationContentSizeForInteractionStart(selectedTextAnnotation);
+            if (interactionStartContentSize.IsEmpty)
+            {
+                interactionStartContentSize = GetTextAnnotationContentSizeFromScreenFrameBounds(selectedTextAnnotation, screenBounds, dpiX, dpiY);
+            }
+            InvalidatePendingRichPreviewWarmWork();
+            SeedRichContentSizeCache(selectedTextAnnotation, interactionStartContentSize);
             BeginUndoCapture("Scale text");
             annotationToScale = selectedTextAnnotation;
             isScalingTextAnnotation = true;
@@ -45902,6 +46715,7 @@ namespace AnonPDF
             textScaleStartLeaderLineWidth = NormalizeLeaderLineWidth(selectedTextAnnotation.LeaderLineWidth);
             textScaleStartLeaderHeadLength = NormalizeTextLeaderHeadLength(selectedTextAnnotation.LeaderHeadLength);
             textScaleStartLeaderHeadWidth = NormalizeTextLeaderHeadWidth(selectedTextAnnotation.LeaderHeadWidth);
+            textScaleStartLeaderAnchorKind = NormalizeTextLeaderAnchorKind(selectedTextAnnotation.LeaderAnchorKind);
             PrimeActiveTextInteractionPreview(selectedTextAnnotation, dpiX, dpiY, interactionStartContentSize);
             this.Cursor = GetCursorForObjectScaleHandle(handleCorner);
             return true;
@@ -45929,7 +46743,6 @@ namespace AnonPDF
             isDraggingTextLeaderHandle = true;
             textTransformStartContentSize = interactionStartContentSize;
             ClearActiveTextInteractionPreview();
-            richTextInteractionPreviewArmed = true;
             textLeaderDragStartEndPoint = selectedTextAnnotation.LeaderEndPoint;
             textLeaderDragStartAnchorKind = NormalizeTextLeaderAnchorKind(selectedTextAnnotation.LeaderAnchorKind);
             this.Cursor = Cursors.Hand;
@@ -45943,8 +46756,6 @@ namespace AnonPDF
                 return false;
             }
 
-            Stopwatch resizeStopwatch = ShouldLogRichResizeDiagnostics() ? Stopwatch.StartNew() : null;
-
             bool preserveAspectRatio = (Control.ModifierKeys & Keys.Shift) == Keys.Shift;
             bool scaleFromCenter = (Control.ModifierKeys & Keys.Alt) == Keys.Alt;
             RectangleF newScreenBounds = BuildScaledBoundsFromAnchor(textScaleStartScreenBounds, activeObjectScaleHandleCorner, location, preserveAspectRatio, scaleFromCenter);
@@ -45952,7 +46763,49 @@ namespace AnonPDF
             float scaleY = newScreenBounds.Height / Math.Max(1f, textScaleStartScreenBounds.Height);
             float uniformScale = Math.Max(0.05f, Math.Max(Math.Abs(scaleX), Math.Abs(scaleY)));
             RectangleF effectiveScreenBounds = ScaleRectangleUniformFromHandle(textScaleStartScreenBounds, activeObjectScaleHandleCorner, uniformScale, scaleFromCenter);
-            annotationToScale.AnnotationBounds = ScaleRectangleUniformFromHandle(textScaleStartBounds, activeObjectScaleHandleCorner, uniformScale, scaleFromCenter);
+            bool geometryChanged =
+                !AreSameFloat(textScaleStartScreenBounds.X, effectiveScreenBounds.X) ||
+                !AreSameFloat(textScaleStartScreenBounds.Y, effectiveScreenBounds.Y) ||
+                !AreSameFloat(textScaleStartScreenBounds.Width, effectiveScreenBounds.Width) ||
+                !AreSameFloat(textScaleStartScreenBounds.Height, effectiveScreenBounds.Height);
+            if (geometryChanged)
+            {
+                textRotationInteractionChanged = true;
+            }
+
+            int annotationRotation = NormalizeRotation(annotationToScale.AnnotationRotation);
+            if (annotationRotation != 0)
+            {
+                float dpiX = 96f;
+                float dpiY = 96f;
+                try
+                {
+                    using (Graphics graphics = pdfViewer.CreateGraphics())
+                    {
+                        dpiX = graphics.DpiX;
+                        dpiY = graphics.DpiY;
+                    }
+                }
+                catch
+                {
+                }
+
+                annotationToScale.AnnotationBounds = ScaleRotatedTextBoundsFromScreenFrame(
+                    textScaleStartBounds,
+                    effectiveScreenBounds,
+                    uniformScale,
+                    dpiX,
+                    dpiY);
+            }
+            else
+            {
+                annotationToScale.AnnotationBounds = ScaleRectangleFromScreenBounds(
+                    textScaleStartBounds,
+                    textScaleStartScreenBounds,
+                    effectiveScreenBounds,
+                    scaleFactor);
+            }
+
             Font baseFont = annotationToScale.AnnotationFont ?? new Font("Arial", 12f, textScaleStartFontStyle, textScaleStartFontUnit);
             float scaledFontSize = Math.Max(4f, textScaleStartFontSize * uniformScale);
             annotationToScale.AnnotationFont = new Font(baseFont.FontFamily, scaledFontSize, textScaleStartFontStyle, textScaleStartFontUnit);
@@ -45964,7 +46817,9 @@ namespace AnonPDF
                 annotationToScale.LeaderLineWidth = NormalizeLeaderLineWidth(textScaleStartLeaderLineWidth * uniformScale);
                 annotationToScale.LeaderHeadLength = NormalizeTextLeaderHeadLength(textScaleStartLeaderHeadLength * uniformScale);
                 annotationToScale.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(textScaleStartLeaderHeadWidth * uniformScale);
+                annotationToScale.LeaderAnchorKind = textScaleStartLeaderAnchorKind;
             }
+
             TouchTextAnnotation(annotationToScale);
             textRotationInteractionChanged =
                 textRotationInteractionChanged ||
@@ -45973,24 +46828,13 @@ namespace AnonPDF
                 !AreSameFloat(textScaleStartBounds.Width, annotationToScale.AnnotationBounds.Width) ||
                 !AreSameFloat(textScaleStartBounds.Height, annotationToScale.AnnotationBounds.Height) ||
                 (annotationToScale.HasLeaderArrow &&
-                 (!AreSamePoint(textScaleStartLeaderEndPoint, annotationToScale.LeaderEndPoint) ||
-                  !AreSameFloat(textScaleStartLeaderLineWidth, annotationToScale.LeaderLineWidth) ||
-                  !AreSameFloat(textScaleStartLeaderHeadLength, annotationToScale.LeaderHeadLength) ||
-                  !AreSameFloat(textScaleStartLeaderHeadWidth, annotationToScale.LeaderHeadWidth)));
+                  (!AreSamePoint(textScaleStartLeaderEndPoint, annotationToScale.LeaderEndPoint) ||
+                   !AreSameFloat(textScaleStartLeaderLineWidth, annotationToScale.LeaderLineWidth) ||
+                   !AreSameFloat(textScaleStartLeaderHeadLength, annotationToScale.LeaderHeadLength) ||
+                   !AreSameFloat(textScaleStartLeaderHeadWidth, annotationToScale.LeaderHeadWidth) ||
+                   textScaleStartLeaderAnchorKind != annotationToScale.LeaderAnchorKind));
             this.Cursor = GetCursorForObjectScaleHandle(activeObjectScaleHandleCorner);
             pdfViewer.Invalidate();
-            if (resizeStopwatch != null)
-            {
-                resizeStopwatch.Stop();
-                if (resizeStopwatch.ElapsedMilliseconds >= 20)
-                {
-                    LogDebug(
-                        $"RichResize apply ms={resizeStopwatch.ElapsedMilliseconds} " +
-                        $"scale={uniformScale.ToString(CultureInfo.InvariantCulture)} " +
-                        $"bounds={FormatRectFInvariant(annotationToScale.AnnotationBounds)} " +
-                        $"font={(annotationToScale.AnnotationFont != null ? annotationToScale.AnnotationFont.Size.ToString(CultureInfo.InvariantCulture) : "-")}");
-                }
-            }
             return true;
         }
 
@@ -47441,17 +48285,9 @@ namespace AnonPDF
                 return;
             }
 
-            string ext = Path.GetExtension(filePath);
-            if (string.Equals(ext, ".pdf", StringComparison.OrdinalIgnoreCase))
+            if (!OpenInputPath(filePath))
             {
-                OpenPdfFromPath(filePath);
-                return;
-            }
-
-            if (string.Equals(ext, ProjectFileExtension, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(ext, LegacyProjectFileExtension, StringComparison.OrdinalIgnoreCase))
-            {
-                LoadRedactionBlocks(filePath);
+                MessageBox.Show(this, Resources.Msg_DragDrop_UnsupportedFileType, Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
@@ -51720,6 +52556,9 @@ namespace AnonPDF
         public bool HasCachedRichPreviewSourceRect { get; set; }
 
         [JsonIgnore]
+        public bool CachedRichPreviewIncludesFrame { get; set; }
+
+        [JsonIgnore]
         public string CachedRichPreviewFrameKey { get; set; }
 
         [JsonIgnore]
@@ -52116,10 +52955,10 @@ namespace AnonPDF
             {
                 Location = new Point(145, 336),
                 Size = new Size(80, 22),
-                DecimalPlaces = 1,
+                DecimalPlaces = 3,
                 Minimum = 0,
                 Maximum = 24,
-                Increment = 0.5m
+                Increment = 0.001m
             };
             nudBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
 
@@ -53931,8 +54770,8 @@ namespace AnonPDF
                 Size = new Size(160, 22),
                 Minimum = 0,
                 Maximum = 24,
-                DecimalPlaces = 1,
-                Increment = 0.5m
+                DecimalPlaces = 3,
+                Increment = 0.001m
             };
             nudBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
 
