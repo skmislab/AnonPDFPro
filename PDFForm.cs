@@ -93,6 +93,7 @@ namespace AnonPDF
         private string userNewPassword = null;
         private bool isPrintInProgress = false;
         private bool isApplicationClosing = false;
+        private Action<string> searchCacheStatusHandler;
 
         private const string SignatureModeOriginal = "original";
         private const string SignatureModeRemove = "remove";
@@ -1595,16 +1596,46 @@ namespace AnonPDF
             UpdateSaveGroupState();
             UpdateOptionsGroupState();
 
-            PdfTextSearcher.OnCacheStatusChanged += status => {
+            searchCacheStatusHandler = UpdateSearchCacheStatusLabel;
+            PdfTextSearcher.OnCacheStatusChanged += searchCacheStatusHandler;
 
-                searchResultLabel.Invoke((MethodInvoker)(() =>
-                    searchResultLabel.Text = status
-                ));
-                searchResultLabel.Invoke((MethodInvoker)(() =>
-                    searchResultLabel.Refresh()
-                ));
-            };
+        }
 
+        private void UpdateSearchCacheStatusLabel(string status)
+        {
+            if (isApplicationClosing ||
+                IsDisposed ||
+                Disposing ||
+                !IsHandleCreated ||
+                searchResultLabel == null ||
+                searchResultLabel.IsDisposed)
+            {
+                return;
+            }
+
+            void ApplyStatus()
+            {
+                if (isApplicationClosing ||
+                    IsDisposed ||
+                    Disposing ||
+                    !IsHandleCreated ||
+                    searchResultLabel == null ||
+                    searchResultLabel.IsDisposed)
+                {
+                    return;
+                }
+
+                searchResultLabel.Text = status;
+                searchResultLabel.Refresh();
+            }
+
+            if (searchResultLabel.InvokeRequired)
+            {
+                TryBeginInvokeOnUi(ApplyStatus);
+                return;
+            }
+
+            ApplyStatus();
         }
 
         private static string LocalizedText(string key)
@@ -1714,25 +1745,79 @@ namespace AnonPDF
                 return;
             }
 
-            if (IsHandleCreated)
+            if (TryBeginInvokeOnUi(() => EndBusyCursor()))
             {
-                try
-                {
-                    BeginInvoke((Action)(() =>
-                    {
-                        if (!IsDisposed)
-                        {
-                            EndBusyCursor();
-                        }
-                    }));
-                }
-                catch
-                {
-                }
+                return;
             }
-            else if (!IsDisposed)
+
+            if (!isApplicationClosing && !IsDisposed && !Disposing && !IsHandleCreated)
             {
                 EndBusyCursor();
+            }
+        }
+
+        private bool CanQueueUiWork()
+        {
+            return !isApplicationClosing && !IsDisposed && !Disposing && IsHandleCreated;
+        }
+
+        private bool TryBeginInvokeOnUi(Action action)
+        {
+            if (action == null || !CanQueueUiWork())
+            {
+                return false;
+            }
+
+            try
+            {
+                BeginInvoke(action);
+                return true;
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        private bool TryInvokeOnUi(Action action)
+        {
+            if (action == null)
+            {
+                return false;
+            }
+
+            if (!InvokeRequired)
+            {
+                if (isApplicationClosing || IsDisposed || Disposing)
+                {
+                    return false;
+                }
+
+                action();
+                return true;
+            }
+
+            if (!CanQueueUiWork())
+            {
+                return false;
+            }
+
+            try
+            {
+                Invoke(action);
+                return true;
+            }
+            catch (ObjectDisposedException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
             }
         }
 
@@ -9231,7 +9316,12 @@ namespace AnonPDF
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(OpenPdfFromSplash));
+                TryBeginInvokeOnUi(OpenPdfFromSplash);
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -9242,7 +9332,12 @@ namespace AnonPDF
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(OpenProjectFromSplash));
+                TryBeginInvokeOnUi(OpenProjectFromSplash);
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -9253,7 +9348,12 @@ namespace AnonPDF
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(ResumeWorkFromSplash));
+                TryBeginInvokeOnUi(ResumeWorkFromSplash);
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -13203,6 +13303,8 @@ namespace AnonPDF
                 !IsRichTextMode(annotation) ||
                 widthPx <= 0 ||
                 heightPx <= 0 ||
+                isApplicationClosing ||
+                Disposing ||
                 IsDisposed)
             {
                 return;
@@ -13315,19 +13417,7 @@ namespace AnonPDF
                             richPreviewWarmBusyCursorVisible = false;
                             if (shouldEndBusyCursor)
                             {
-                                try
-                                {
-                                    BeginInvoke((Action)(() =>
-                                    {
-                                        if (!IsDisposed)
-                                        {
-                                            EndBusyCursor();
-                                        }
-                                    }));
-                                }
-                                catch
-                                {
-                                }
+                                TryBeginInvokeOnUi(() => EndBusyCursor());
                             }
                             return;
                         }
@@ -13342,6 +13432,8 @@ namespace AnonPDF
 
                     if (request.Generation != richPreviewWarmGeneration ||
                         request.Annotation == null ||
+                        isApplicationClosing ||
+                        Disposing ||
                         IsDisposed)
                     {
                         lock (richPreviewWarmSync)
@@ -13450,24 +13542,15 @@ namespace AnonPDF
                         InvalidateRichTextAnnotationPreview(request.Annotation, previousOverlayBounds);
                     }
 
-                    if (IsHandleCreated)
+                    if (TryBeginInvokeOnUi(ApplyWarmResult))
                     {
-                        try
-                        {
-                            BeginInvoke((Action)ApplyWarmResult);
-                        }
-                        catch
-                        {
-                            renderedBitmap?.Dispose();
-                            lock (richPreviewWarmSync)
-                            {
-                                pendingRichPreviewWarmKeys.Remove(request.CacheKey);
-                            }
-                        }
+                        continue;
                     }
-                    else
+
+                    renderedBitmap?.Dispose();
+                    lock (richPreviewWarmSync)
                     {
-                        ApplyWarmResult();
+                        pendingRichPreviewWarmKeys.Remove(request.CacheKey);
                     }
                 }
             });
@@ -16163,7 +16246,12 @@ namespace AnonPDF
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new Action<DateTime>(StartMaintenanceCountdown), shutdownAt);
+                TryBeginInvokeOnUi(() => StartMaintenanceCountdown(shutdownAt));
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -16755,7 +16843,12 @@ namespace AnonPDF
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(() => PromptStandaloneInstallerReady(msiPath)));
+                TryBeginInvokeOnUi(() => PromptStandaloneInstallerReady(msiPath));
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -16774,7 +16867,12 @@ namespace AnonPDF
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(() => LaunchStandaloneMsiInstaller(msiPath)));
+                TryBeginInvokeOnUi(() => LaunchStandaloneMsiInstaller(msiPath));
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -16928,12 +17026,12 @@ namespace AnonPDF
                 lastNotifiedVersion = string.Empty;
                 if (InvokeRequired)
                 {
-                    BeginInvoke(new Action(() =>
+                    TryBeginInvokeOnUi(() =>
                     {
                         ApplyLicenseStatusUi();
                         UpdateHelpMenuAvailability();
                         ShowInfoMessage(LocalizedText("Msg_LicenseActivated"));
-                    }));
+                    });
                 }
                 else
                 {
@@ -17016,7 +17114,12 @@ namespace AnonPDF
 
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(ApplyLicenseStatusUi));
+                TryBeginInvokeOnUi(ApplyLicenseStatusUi);
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -17046,7 +17149,12 @@ namespace AnonPDF
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(() => ShowInfoMessage(message)));
+                TryBeginInvokeOnUi(() => ShowInfoMessage(message));
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -17078,7 +17186,12 @@ namespace AnonPDF
 
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(NotifyUpdatesOutOfRangeIfNeeded));
+                TryBeginInvokeOnUi(NotifyUpdatesOutOfRangeIfNeeded);
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -17111,7 +17224,12 @@ namespace AnonPDF
 
             if (InvokeRequired)
             {
-                BeginInvoke(new Action(NotifyLicenseRevokedIfNeeded));
+                TryBeginInvokeOnUi(NotifyLicenseRevokedIfNeeded);
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
                 return;
             }
 
@@ -21079,11 +21197,11 @@ namespace AnonPDF
             ExtractSignatures();
             AddRecentFile(inputPdfPath);
             CloseSplashIfVisible();
-            if (IsHandleCreated)
+            if (CanQueueUiWork())
             {
-                BeginInvoke(new Action(ShowQuickStartTutorialIfNeeded));
+                TryBeginInvokeOnUi(ShowQuickStartTutorialIfNeeded);
             }
-            else
+            else if (!isApplicationClosing && !IsDisposed && !Disposing)
             {
                 ShowQuickStartTutorialIfNeeded();
             }
@@ -24787,10 +24905,10 @@ namespace AnonPDF
             UpdateSelectionNavigationButtons();
             UpdateSearchNavigationButtons();
             UpdateNavigationButtons(currentPage);
-            BeginInvoke(new MethodInvoker(() =>
+            TryBeginInvokeOnUi(() =>
             {
                 RestoreRightPanelsViewState(projectData.PagesListTopPage, projectData.ThumbnailsTopPage);
-            }));
+            });
             renderTimer.Stop();
             renderTimer.Start();
             pdfViewer.Invalidate();
@@ -24953,18 +25071,21 @@ namespace AnonPDF
                 return null;
             }
 
-            try
+            if (CanUseListViewTopItem(listView))
             {
-                ListViewItem topItem = listView.TopItem;
-                int? topPage = GetPageNumberFromListViewItem(topItem);
-                if (topPage.HasValue)
+                try
                 {
-                    return topPage.Value;
+                    ListViewItem topItem = listView.TopItem;
+                    int? topPage = GetPageNumberFromListViewItem(topItem);
+                    if (topPage.HasValue)
+                    {
+                        return topPage.Value;
+                    }
                 }
-            }
-            catch
-            {
-                // Fallback to bounds-based detection.
+                catch
+                {
+                    // Fallback to bounds-based detection.
+                }
             }
 
             try
@@ -25002,6 +25123,12 @@ namespace AnonPDF
             {
                 return null;
             }
+        }
+
+        private static bool CanUseListViewTopItem(ListView listView)
+        {
+            return listView != null &&
+                (listView.View == View.Details || listView.View == View.List);
         }
 
         private static int? GetPageNumberFromListViewItem(ListViewItem item)
@@ -25051,14 +25178,17 @@ namespace AnonPDF
                 item.EnsureVisible();
 
                 bool topItemApplied = false;
-                try
+                if (CanUseListViewTopItem(listView))
                 {
-                    listView.TopItem = item;
-                    topItemApplied = true;
-                }
-                catch
-                {
-                    // Some view modes do not support setting TopItem directly.
+                    try
+                    {
+                        listView.TopItem = item;
+                        topItemApplied = true;
+                    }
+                    catch
+                    {
+                        // Fallback to bounds-based alignment.
+                    }
                 }
 
                 if (!topItemApplied)
@@ -29966,11 +30096,11 @@ namespace AnonPDF
                 return;
             }
 
-            if (IsHandleCreated)
+            if (CanQueueUiWork())
             {
-                BeginInvoke(new Action(() =>
+                TryBeginInvokeOnUi(() =>
                 {
-                    if (IsDisposed || Disposing || pdf == null || numPages <= 0)
+                    if (isApplicationClosing || IsDisposed || Disposing || pdf == null || numPages <= 0)
                     {
                         return;
                     }
@@ -29978,7 +30108,12 @@ namespace AnonPDF
                     ShowRedactPreview();
                     pdfViewer.Invalidate();
                     InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
-                }));
+                });
+                return;
+            }
+
+            if (isApplicationClosing)
+            {
                 return;
             }
 
@@ -30228,7 +30363,7 @@ namespace AnonPDF
             menu.Items.Add(new ToolStripSeparator());
 
             var addBasisItem = new ToolStripMenuItem(GetLegalBasisAddContextMenuText());
-            addBasisItem.Click += (_, __) => BeginInvoke(new Action(() => AddLegalBasisFromContextMenu(block)));
+            addBasisItem.Click += (_, __) => TryBeginInvokeOnUi(() => AddLegalBasisFromContextMenu(block));
             menu.Items.Add(addBasisItem);
             menu.Items.Add(new ToolStripSeparator());
 
@@ -31042,7 +31177,13 @@ namespace AnonPDF
                 return results;
             }, token).ContinueWith(t =>
             {
-                if (IsDisposed || token.IsCancellationRequested || t.IsCanceled || t.Result == null)
+                if (isApplicationClosing ||
+                    IsDisposed ||
+                    Disposing ||
+                    token.IsCancellationRequested ||
+                    t.IsCanceled ||
+                    t.IsFaulted ||
+                    t.Result == null)
                 {
                     return;
                 }
@@ -31061,7 +31202,10 @@ namespace AnonPDF
                 }
 
                 QueueRedactionPreviewOverlayForPage(pageNumber);
-                pdfViewer.Invalidate();
+                if (pdfViewer != null && !pdfViewer.IsDisposed)
+                {
+                    pdfViewer.Invalidate();
+                }
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
@@ -31099,16 +31243,7 @@ namespace AnonPDF
 
             if (keepCurrentOverlay)
             {
-                try
-                {
-                    redactionPreviewOverlayCts?.Cancel();
-                }
-                catch
-                {
-                }
-
-                redactionPreviewOverlayCts = null;
-                redactionPreviewOverlayRequestId++;
+                CancelRedactionPreviewOverlay();
             }
             else
             {
@@ -31116,7 +31251,10 @@ namespace AnonPDF
             }
 
             QueueRedactionPreviewRectsForPage(currentPage);
-            pdfViewer.Invalidate();
+            if (pdfViewer != null && !pdfViewer.IsDisposed)
+            {
+                pdfViewer.Invalidate();
+            }
         }
 
         private bool TryApplyAutomaticFootnoteClassification(RedactionBlock block)
@@ -36582,16 +36720,29 @@ namespace AnonPDF
                             }
                         }
 
-                        if (!IsHandleCreated || IsDisposed || token.IsCancellationRequested)
+                        if (isApplicationClosing ||
+                            Disposing ||
+                            !IsHandleCreated ||
+                            IsDisposed ||
+                            token.IsCancellationRequested)
                         {
                             thumbBitmap.Dispose();
                             break;
                         }
 
-                        Invoke(new Action(() =>
+                        bool applied = TryInvokeOnUi(() =>
                         {
                             if (thumbBitmap == null)
                             {
+                                return;
+                            }
+
+                            if (isApplicationClosing ||
+                                Disposing ||
+                                !CanUseThumbnailPanel(requireHandle: true) ||
+                                token.IsCancellationRequested)
+                            {
+                                thumbBitmap.Dispose();
                                 return;
                             }
 
@@ -36621,7 +36772,13 @@ namespace AnonPDF
                             {
                                 thumbnailRenderedPages.Add(pageNumber);
                             }
-                        }));
+                        });
+
+                        if (!applied)
+                        {
+                            thumbBitmap.Dispose();
+                            break;
+                        }
 
                         await Task.Yield();
                     }
@@ -36647,16 +36804,16 @@ namespace AnonPDF
                 }
                 cts.Dispose();
 
-                if (IsHandleCreated && !IsDisposed)
+                if (!isApplicationClosing && IsHandleCreated && !IsDisposed && !Disposing)
                 {
-                    BeginInvoke(new Action(() =>
+                    TryBeginInvokeOnUi(() =>
                     {
-                        if (IsThumbnailsTabSelected())
+                        if (!isApplicationClosing && IsThumbnailsTabSelected())
                         {
                             QueueVisibleThumbnailsForGeneration();
                             StartThumbnailGenerationWorkerIfNeeded();
                         }
-                    }));
+                    });
                 }
             }
         }
@@ -37579,9 +37736,9 @@ namespace AnonPDF
             ListViewItem hitItem = pagesListView.HitTest(e.Location).Item;
 
             // Let native ListView finish processing click first.
-            BeginInvoke(new Action(() =>
+            TryBeginInvokeOnUi(() =>
             {
-                if (pagesListView.IsDisposed)
+                if (isApplicationClosing || pagesListView.IsDisposed)
                 {
                     return;
                 }
@@ -37597,7 +37754,7 @@ namespace AnonPDF
                     ?? pagesListView.Items[0];
 
                 ForcePageListSelection(target);
-            }));
+            });
         }
 
         private void ForcePageListSelection(ListViewItem item)
@@ -38034,10 +38191,10 @@ namespace AnonPDF
                         }
                     }
 
-                    BeginInvoke(new MethodInvoker(() =>
+                    TryBeginInvokeOnUi(() =>
                     {
                         RestoreRightPanelsViewState(projectData.PagesListTopPage, projectData.ThumbnailsTopPage);
-                    }));
+                    });
 
                     if (registerAsProject)
                     {
@@ -39189,6 +39346,7 @@ namespace AnonPDF
             }
 
             isApplicationClosing = true;
+            StopBackgroundUiWorkForShutdown();
 
             if (!e.Cancel)
             {
@@ -39222,9 +39380,39 @@ namespace AnonPDF
             Properties.Settings.Default.Save();
         }
 
+        private void StopBackgroundUiWorkForShutdown()
+        {
+            if (searchCacheStatusHandler != null)
+            {
+                PdfTextSearcher.OnCacheStatusChanged -= searchCacheStatusHandler;
+                searchCacheStatusHandler = null;
+            }
+
+            try { maintenanceCheckTimer?.Stop(); } catch { }
+            try { maintenanceCheckTimer?.Dispose(); } catch { }
+            maintenanceCheckTimer = null;
+
+            try { maintenanceCountdownTimer?.Stop(); } catch { }
+            try { zoomTimer?.Stop(); } catch { }
+            try { pagingTimer?.Stop(); } catch { }
+            try { renderTimer?.Stop(); } catch { }
+            try { thumbnailViewportTimer?.Stop(); } catch { }
+            try { layerPanelApplyTimer?.Stop(); } catch { }
+
+            CancelDeferredBusyCursorForPdfViewerPaint();
+            InvalidatePendingRichPreviewWarmWork();
+            CancelThumbnailGeneration();
+            CancelAsyncPreviewWorkForShutdown();
+            ClearRedactionPreviewOverlay();
+        }
+
         private void MainWindow_Closed(object sender, FormClosedEventArgs e)
         {
-            CancelPreviewRender();
+            isApplicationClosing = true;
+            try { thumbnailViewportTimer?.Stop(); } catch { }
+            CancelThumbnailGeneration();
+            CancelAsyncPreviewWorkForShutdown();
+
             if (!launchStandaloneInstallerAfterClose || standaloneInstallerLaunchAttempted)
             {
                 return;
@@ -50378,6 +50566,52 @@ namespace AnonPDF
             }
         }
 
+        private void CancelRedactionPreviewRects()
+        {
+            var cts = redactionPreviewRectsCts;
+            redactionPreviewRectsCts = null;
+            redactionPreviewRectsRequestId++;
+            if (cts == null)
+            {
+                return;
+            }
+
+            try
+            {
+                cts.Cancel();
+            }
+            catch
+            {
+            }
+        }
+
+        private void CancelRedactionPreviewOverlay()
+        {
+            var cts = redactionPreviewOverlayCts;
+            redactionPreviewOverlayCts = null;
+            redactionPreviewOverlayRequestId++;
+            if (cts == null)
+            {
+                return;
+            }
+
+            try
+            {
+                cts.Cancel();
+            }
+            catch
+            {
+            }
+        }
+
+        private void CancelAsyncPreviewWorkForShutdown()
+        {
+            CancelPreviewRender();
+            CancelCommentPreviewRects();
+            CancelRedactionPreviewRects();
+            CancelRedactionPreviewOverlay();
+        }
+
         private bool HasVisibleCommentsOnPage(int pageNumber)
         {
             return commentAnnotations.Any(c =>
@@ -50530,7 +50764,13 @@ namespace AnonPDF
                 return results;
             }, token).ContinueWith(t =>
             {
-                if (IsDisposed || Disposing || token.IsCancellationRequested || requestId != commentPreviewRectsRequestId)
+                if (isApplicationClosing ||
+                    IsDisposed ||
+                    Disposing ||
+                    token.IsCancellationRequested ||
+                    t.IsCanceled ||
+                    t.IsFaulted ||
+                    requestId != commentPreviewRectsRequestId)
                 {
                     return;
                 }
@@ -50550,22 +50790,16 @@ namespace AnonPDF
 
                 commentPreviewOverlayReady = true;
                 delayCommentAndSelectionOverlayUntilPreviewReady = false;
-                pdfViewer?.Invalidate();
+                if (pdfViewer != null && !pdfViewer.IsDisposed)
+                {
+                    pdfViewer.Invalidate();
+                }
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
         private void ClearRedactionPreviewOverlay()
         {
-            try
-            {
-                redactionPreviewOverlayCts?.Cancel();
-            }
-            catch
-            {
-            }
-
-            redactionPreviewOverlayCts = null;
-            redactionPreviewOverlayRequestId++;
+            CancelRedactionPreviewOverlay();
 
             if (redactionPreviewOverlayBitmap != null)
             {
@@ -50791,7 +51025,10 @@ namespace AnonPDF
                 {
                     redactionPreviewOverlayBitmap.Dispose();
                     redactionPreviewOverlayBitmap = null;
-                    pdfViewer.Invalidate();
+                    if (pdfViewer != null && !pdfViewer.IsDisposed)
+                    {
+                        pdfViewer.Invalidate();
+                    }
                 }
                 return;
             }
@@ -50828,9 +51065,18 @@ namespace AnonPDF
                 }
             }, token).ContinueWith(t =>
             {
-                if (IsDisposed || token.IsCancellationRequested || t.IsCanceled || requestId != redactionPreviewOverlayRequestId)
+                if (isApplicationClosing ||
+                    IsDisposed ||
+                    Disposing ||
+                    token.IsCancellationRequested ||
+                    t.IsCanceled ||
+                    t.IsFaulted ||
+                    requestId != redactionPreviewOverlayRequestId)
                 {
-                    t.Result?.Dispose();
+                    if (!t.IsCanceled && !t.IsFaulted)
+                    {
+                        t.Result?.Dispose();
+                    }
                     return;
                 }
 
@@ -50846,7 +51092,10 @@ namespace AnonPDF
                 }
 
                 redactionPreviewOverlayBitmap = t.Result;
-                pdfViewer.Invalidate();
+                if (pdfViewer != null && !pdfViewer.IsDisposed)
+                {
+                    pdfViewer.Invalidate();
+                }
             }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
@@ -50925,7 +51174,7 @@ namespace AnonPDF
             {
                 try
                 {
-                    if (t.IsCanceled || token.IsCancellationRequested)
+                    if (isApplicationClosing || IsDisposed || Disposing || t.IsCanceled || token.IsCancellationRequested)
                     {
                         return;
                     }
@@ -50961,10 +51210,19 @@ namespace AnonPDF
                         pdfCleanUpToolError = true;
                     }
 
+                    if (pdfViewer == null || pdfViewer.IsDisposed)
+                    {
+                        previewImage?.Dispose();
+                        return;
+                    }
+
                     pdfViewer.Image = previewImage;
                     commentPreviewOverlayReady = includeComments && previewImage != null;
                     delayCommentAndSelectionOverlayUntilPreviewReady = false;
-                    pdfViewer.Invalidate();
+                    if (pdfViewer != null && !pdfViewer.IsDisposed)
+                    {
+                        pdfViewer.Invalidate();
+                    }
                 }
                 finally
                 {
