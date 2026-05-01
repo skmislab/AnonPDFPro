@@ -1938,4 +1938,7 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="ContextMenu_OpenWithAnonPDFPro" xml:space="preserve">
     <value>Otw&#243;rz w AnonPDF Pro</value>
   </data>
+  <data name="FileAssociation_AppProjectDescription" xml:space="preserve">
+    <value>Projekt AnonPDF Pro</value>
+  </data>
 </root>

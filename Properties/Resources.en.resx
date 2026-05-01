@@ -1938,4 +1938,7 @@ Close the application and run the installer now?</value>
   <data name="ContextMenu_OpenWithAnonPDFPro" xml:space="preserve">
     <value>Open with AnonPDF Pro</value>
   </data>
+  <data name="FileAssociation_AppProjectDescription" xml:space="preserve">
+    <value>AnonPDF Pro project</value>
+  </data>
 </root>

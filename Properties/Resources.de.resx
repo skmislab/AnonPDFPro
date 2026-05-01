@@ -1891,4 +1891,7 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="ContextMenu_OpenWithAnonPDFPro" xml:space="preserve">
     <value>Mit AnonPDF Pro &#246;ffnen</value>
   </data>
+  <data name="FileAssociation_AppProjectDescription" xml:space="preserve">
+    <value>AnonPDF Pro-Projekt</value>
+  </data>
 </root>

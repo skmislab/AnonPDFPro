@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Win32;
 using Newtonsoft.Json.Linq;
+using System.Runtime.InteropServices;
 
 // Suppress spell-check warning for project name 'AnonPDF'
 #pragma warning disable SPELL
@@ -12,6 +13,14 @@ namespace AnonPDF
 {
     internal static class Program
     {
+        private const string AppProjectExtension = ".app";
+        private const string AppProjectProgId = "AnonPDFPro.Project";
+        private const int ShcneAssocChanged = 0x08000000;
+        private const uint ShcnfIdList = 0x0000;
+
+        [DllImport("shell32.dll")]
+        private static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
         /// <summary>
         /// The main entry point for the application.
         /// </summary>
@@ -131,12 +140,77 @@ namespace AnonPDF
 
                 string commandValue = $"\"{exePath}\" \"%1\"";
                 RegisterContextMenuForExtension(".pdf", commandValue, exePath);
-                RegisterContextMenuForExtension(".app", commandValue, exePath);
+                RegisterContextMenuForExtension(AppProjectExtension, commandValue, exePath);
                 RegisterContextMenuForExtension(".pap", commandValue, exePath);
+                RegisterAppProjectFileAssociation(commandValue, exePath);
+                NotifyShellAssociationChanged();
             }
             catch
             {
                 // Best effort only. Lack of registry access must not block app startup.
+            }
+        }
+
+        private static void RegisterAppProjectFileAssociation(string commandValue, string exePath)
+        {
+            string description = GetAppProjectFileTypeDescriptionText();
+            string iconValue = $"\"{exePath}\",0";
+
+            using (RegistryKey extensionKey = Registry.CurrentUser.CreateSubKey($@"Software\Classes\{AppProjectExtension}"))
+            {
+                if (extensionKey != null)
+                {
+                    extensionKey.SetValue(string.Empty, AppProjectProgId, RegistryValueKind.String);
+                    extensionKey.SetValue("PerceivedType", "document", RegistryValueKind.String);
+
+                    using (RegistryKey openWithKey = extensionKey.CreateSubKey("OpenWithProgids"))
+                    {
+                        openWithKey?.SetValue(AppProjectProgId, string.Empty, RegistryValueKind.String);
+                    }
+                }
+            }
+
+            using (RegistryKey progIdKey = Registry.CurrentUser.CreateSubKey($@"Software\Classes\{AppProjectProgId}"))
+            {
+                if (progIdKey == null)
+                {
+                    return;
+                }
+
+                progIdKey.SetValue(string.Empty, description, RegistryValueKind.String);
+                progIdKey.SetValue("FriendlyTypeName", description, RegistryValueKind.String);
+
+                using (RegistryKey defaultIconKey = progIdKey.CreateSubKey("DefaultIcon"))
+                {
+                    defaultIconKey?.SetValue(string.Empty, iconValue, RegistryValueKind.String);
+                }
+
+                using (RegistryKey shellKey = progIdKey.CreateSubKey("shell"))
+                {
+                    shellKey?.SetValue(string.Empty, "open", RegistryValueKind.String);
+                }
+
+                using (RegistryKey openKey = progIdKey.CreateSubKey(@"shell\open"))
+                {
+                    openKey?.SetValue(string.Empty, GetContextMenuOpenText(), RegistryValueKind.String);
+                }
+
+                using (RegistryKey commandKey = progIdKey.CreateSubKey(@"shell\open\command"))
+                {
+                    commandKey?.SetValue(string.Empty, commandValue, RegistryValueKind.String);
+                }
+            }
+        }
+
+        private static void NotifyShellAssociationChanged()
+        {
+            try
+            {
+                SHChangeNotify(ShcneAssocChanged, ShcnfIdList, IntPtr.Zero, IntPtr.Zero);
+            }
+            catch
+            {
+                // Best effort only. Explorer may refresh the association later.
             }
         }
 
@@ -171,6 +245,14 @@ namespace AnonPDF
                 "ContextMenu_OpenWithAnonPDFPro",
                 Properties.Resources.Culture ?? System.Globalization.CultureInfo.CurrentUICulture);
             return string.IsNullOrWhiteSpace(value) ? "Open with AnonPDF Pro" : value;
+        }
+
+        private static string GetAppProjectFileTypeDescriptionText()
+        {
+            string value = Properties.Resources.ResourceManager.GetString(
+                "FileAssociation_AppProjectDescription",
+                Properties.Resources.Culture ?? System.Globalization.CultureInfo.CurrentUICulture);
+            return string.IsNullOrWhiteSpace(value) ? "AnonPDF Pro project" : value;
         }
 
         private static bool ValidateRequiredLicenseFiles(out string errorMessage)
