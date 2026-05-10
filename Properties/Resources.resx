@@ -1995,6 +1995,9 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="Msg_CursorModeUnavailable" xml:space="preserve">
     <value>Tryb Kursor niedostępny</value>
   </data>
+  <data name="Msg_DpiChangedRestartPrompt" xml:space="preserve">
+    <value>Wykryto zmianę skali ekranu lub DPI. Aby uniknąć problemów z podglądem i rozmieszczeniem elementów, aplikacja powinna zostać uruchomiona ponownie. Uruchomić ponownie teraz?</value>
+  </data>
 
   <data name="QuickStart_Step1_Line3" xml:space="preserve">
     <value>Box służy do zaznaczania prostokątnych obszarów</value>

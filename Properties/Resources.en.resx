@@ -1995,6 +1995,9 @@ Close the application and run the installer now?</value>
   <data name="Msg_CursorModeUnavailable" xml:space="preserve">
     <value>Cursor mode unavailable</value>
   </data>
+  <data name="Msg_DpiChangedRestartPrompt" xml:space="preserve">
+    <value>A display scale or DPI change was detected. To avoid preview and layout issues, the application should be restarted. Restart now?</value>
+  </data>
 
   <data name="QuickStart_Step1_Line3" xml:space="preserve">
     <value>Box selects rectangular areas</value>

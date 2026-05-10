@@ -80,6 +80,7 @@ namespace AnonPDF
         public static bool IsDiagnosticModeEnabled => diagnosticModeEnabled;
         private readonly string fileVersion;
         private readonly Timer maintenanceCountdownTimer;
+        private readonly Timer dpiWatchTimer;
         private DateTime? maintenanceShutdownAt;
         private Label maintenanceCountdownLabel;
         private Label objectSelectionInfoLabel;
@@ -99,6 +100,10 @@ namespace AnonPDF
         private string userNewPassword = null;
         private bool isPrintInProgress = false;
         private bool isApplicationClosing = false;
+        private float initialDpiX;
+        private float initialDpiY;
+        private bool dpiChangeRestartPromptShown;
+        private bool dpiChangeRestartRequested;
         private Action<string> searchCacheStatusHandler;
 
         private const string SignatureModeOriginal = "original";
@@ -128,6 +133,9 @@ namespace AnonPDF
         private const int LayersHeaderActiveIconCodePoint = 0xF043E;
         private const int LayersHeaderVisibleIconCodePoint = 0xF06D0;
         private const int LayersHeaderLockedIconCodePoint = 0xF0341;
+        private const int WmDpiChanged = 0x02E0;
+        private const int WmDisplayChange = 0x007E;
+        private const int WmSettingChange = 0x001A;
         private const string RasterSourceClipboard = "Clipboard";
         private const string RasterSourceFile = "File";
         private static readonly System.Drawing.Color DefaultCommentHighlightColor = System.Drawing.Color.FromArgb(255, 235, 59);
@@ -1386,6 +1394,9 @@ namespace AnonPDF
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, ref PARAFORMAT2 lParam);
 
+        [DllImport("user32.dll")]
+        private static extern uint GetDpiForWindow(IntPtr hwnd);
+
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
@@ -1444,6 +1455,12 @@ namespace AnonPDF
             };
             maintenanceCountdownTimer.Tick += MaintenanceCountdownTimer_Tick;
 
+            dpiWatchTimer = new Timer
+            {
+                Interval = 5000
+            };
+            dpiWatchTimer.Tick += DpiWatchTimer_Tick;
+
             bool hasServiceFileAtStartup = File.Exists(Path.Combine(Application.StartupPath, "service.json"));
             if (hasServiceFileAtStartup && !IsVersionMatching())
             {
@@ -1491,8 +1508,20 @@ namespace AnonPDF
             ApplyAddObjectsByPageRotationMenuState();
             LoadPreferredTheme();
             ApplyTheme();
-            this.HandleCreated += (_, __) => ApplyTitleBarColor();
+            this.HandleCreated += (_, __) =>
+            {
+                CaptureInitialDpi();
+                StartDpiWatchTimer();
+                ApplyTitleBarColor();
+            };
+            if (IsHandleCreated)
+            {
+                CaptureInitialDpi();
+                StartDpiWatchTimer();
+            }
             InitializeSaveCurrentViewMenuItem();
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += SystemEvents_DisplaySettingsChanged;
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged += SystemEvents_UserPreferenceChanged;
 
             // Apply preferred UI culture if set; otherwise use environment (OS) culture
             var prefCulture = Properties.Settings.Default.PreferredUICulture;
@@ -18273,6 +18302,237 @@ namespace AnonPDF
         {
             using (var g = Graphics.FromHwnd(IntPtr.Zero))
                 return g.DpiX;
+        }
+
+        private void CaptureInitialDpi()
+        {
+            if (initialDpiX > 0f && initialDpiY > 0f)
+            {
+                return;
+            }
+
+            if (TryGetCurrentFormDpi(out float dpiX, out float dpiY))
+            {
+                initialDpiX = dpiX;
+                initialDpiY = dpiY;
+            }
+        }
+
+        private bool TryGetCurrentFormDpi(out float dpiX, out float dpiY)
+        {
+            dpiX = 96f;
+            dpiY = 96f;
+
+            if (IsHandleCreated)
+            {
+                try
+                {
+                    uint windowDpi = GetDpiForWindow(Handle);
+                    if (windowDpi > 0)
+                    {
+                        dpiX = windowDpi;
+                        dpiY = windowDpi;
+                        return true;
+                    }
+                }
+                catch (DllNotFoundException)
+                {
+                }
+                catch (EntryPointNotFoundException)
+                {
+                }
+                catch (ExternalException)
+                {
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            }
+
+            try
+            {
+                using (Graphics graphics = IsHandleCreated
+                    ? Graphics.FromHwnd(Handle)
+                    : Graphics.FromHwnd(IntPtr.Zero))
+                {
+                    dpiX = graphics.DpiX;
+                    dpiY = graphics.DpiY;
+                    return dpiX > 0f && dpiY > 0f;
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is ExternalException || ex is ObjectDisposedException || ex is InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            bool dpiChangedMessage = m.Msg == WmDpiChanged;
+            bool displayChangedMessage = m.Msg == WmDisplayChange;
+            bool settingChangedMessage = m.Msg == WmSettingChange;
+            int dpiFromMessageX = 0;
+            int dpiFromMessageY = 0;
+
+            if (dpiChangedMessage)
+            {
+                long value = m.WParam.ToInt64();
+                dpiFromMessageX = (int)(value & 0xffff);
+                dpiFromMessageY = (int)((value >> 16) & 0xffff);
+            }
+
+            base.WndProc(ref m);
+
+            if (dpiChangedMessage)
+            {
+                ScheduleDpiChangeRestartPrompt(dpiFromMessageX, dpiFromMessageY);
+            }
+            else if (displayChangedMessage)
+            {
+                ScheduleDpiChangeRestartPromptForDisplayChange();
+            }
+            else if (settingChangedMessage)
+            {
+                ScheduleDpiChangeRestartPromptForCurrentDpi();
+            }
+        }
+
+        private void StartDpiWatchTimer()
+        {
+            if (isApplicationClosing || IsDisposed || Disposing || dpiWatchTimer == null || dpiWatchTimer.Enabled)
+            {
+                return;
+            }
+
+            dpiWatchTimer.Start();
+        }
+
+        private void DpiWatchTimer_Tick(object sender, EventArgs e)
+        {
+            ScheduleDpiChangeRestartPromptForCurrentDpi();
+        }
+
+        private void SystemEvents_DisplaySettingsChanged(object sender, EventArgs e)
+        {
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
+                return;
+            }
+
+            if (!TryBeginInvokeOnUi(ScheduleDpiChangeRestartPromptForDisplayChange))
+            {
+                ScheduleDpiChangeRestartPromptForDisplayChange();
+            }
+        }
+
+        private void SystemEvents_UserPreferenceChanged(object sender, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+        {
+            if (e == null ||
+                (e.Category != Microsoft.Win32.UserPreferenceCategory.Window &&
+                 e.Category != Microsoft.Win32.UserPreferenceCategory.General))
+            {
+                return;
+            }
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+            {
+                return;
+            }
+
+            if (!TryBeginInvokeOnUi(ScheduleDpiChangeRestartPromptForCurrentDpi))
+            {
+                ScheduleDpiChangeRestartPromptForCurrentDpi();
+            }
+        }
+
+        private void ScheduleDpiChangeRestartPromptForCurrentDpi()
+        {
+            if (!TryGetCurrentFormDpi(out float dpiX, out float dpiY))
+            {
+                return;
+            }
+
+            ScheduleDpiChangeRestartPrompt(dpiX, dpiY);
+        }
+
+        private void ScheduleDpiChangeRestartPromptForDisplayChange()
+        {
+            if (!TryGetCurrentFormDpi(out float dpiX, out float dpiY))
+            {
+                return;
+            }
+
+            ScheduleDpiChangeRestartPrompt(dpiX, dpiY, force: true);
+        }
+
+        private void ScheduleDpiChangeRestartPrompt(float newDpiX, float newDpiY, bool force = false)
+        {
+            if (isApplicationClosing || IsDisposed || Disposing || dpiChangeRestartPromptShown || dpiChangeRestartRequested)
+            {
+                return;
+            }
+
+            if (initialDpiX <= 0f || initialDpiY <= 0f)
+            {
+                CaptureInitialDpi();
+            }
+
+            if (initialDpiX <= 0f || initialDpiY <= 0f)
+            {
+                initialDpiX = newDpiX;
+                initialDpiY = newDpiY;
+                return;
+            }
+
+            if (!force && Math.Abs(newDpiX - initialDpiX) < 0.5f && Math.Abs(newDpiY - initialDpiY) < 0.5f)
+            {
+                return;
+            }
+
+            dpiChangeRestartPromptShown = true;
+            if (!TryBeginInvokeOnUi(ShowDpiChangeRestartPrompt))
+            {
+                dpiChangeRestartPromptShown = false;
+            }
+        }
+
+        private void ShowDpiChangeRestartPrompt()
+        {
+            if (isApplicationClosing || IsDisposed || Disposing || dpiChangeRestartRequested)
+            {
+                return;
+            }
+
+            DialogResult result = MessageBox.Show(
+                this,
+                LocalizedText("Msg_DpiChangedRestartPrompt"),
+                Resources.Title_Confirmation,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button1);
+
+            if (result != DialogResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                dpiChangeRestartRequested = true;
+                if (!HasUnsavedProjectContent())
+                {
+                    suppressCloseConfirmation = true;
+                }
+
+                Application.Restart();
+            }
+            catch (Exception ex)
+            {
+                dpiChangeRestartRequested = false;
+                suppressCloseConfirmation = false;
+                LogDebug("DPI change restart failed: " + ex);
+                Close();
+            }
         }
 
         private void UpdateSaveGroupState()
@@ -40599,11 +40859,15 @@ namespace AnonPDF
             maintenanceCheckTimer = null;
 
             try { maintenanceCountdownTimer?.Stop(); } catch { }
+            try { dpiWatchTimer?.Stop(); } catch { }
             try { zoomTimer?.Stop(); } catch { }
             try { pagingTimer?.Stop(); } catch { }
             try { renderTimer?.Stop(); } catch { }
             try { thumbnailViewportTimer?.Stop(); } catch { }
             try { layerPanelApplyTimer?.Stop(); } catch { }
+
+            try { Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= SystemEvents_DisplaySettingsChanged; } catch { }
+            try { Microsoft.Win32.SystemEvents.UserPreferenceChanged -= SystemEvents_UserPreferenceChanged; } catch { }
 
             CancelDeferredBusyCursorForPdfViewerPaint();
             InvalidatePendingRichPreviewWarmWork();

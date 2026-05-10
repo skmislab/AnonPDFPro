@@ -1948,6 +1948,9 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="Msg_CursorModeUnavailable" xml:space="preserve">
     <value>Cursor-Modus nicht verfügbar</value>
   </data>
+  <data name="Msg_DpiChangedRestartPrompt" xml:space="preserve">
+    <value>Eine Änderung der Anzeigeskalierung oder DPI wurde erkannt. Um Probleme mit Vorschau und Layout zu vermeiden, sollte die Anwendung neu gestartet werden. Jetzt neu starten?</value>
+  </data>
 
   <data name="QuickStart_Step1_Line3" xml:space="preserve">
     <value>Box wählt rechteckige Bereiche aus</value>
