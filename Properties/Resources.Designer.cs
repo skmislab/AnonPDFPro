@@ -320,6 +320,78 @@ namespace AnonPDF.Properties {
         }
 
         /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Kolor ramki:.
+        /// </summary>
+        internal static string EditArrow_BorderColor {
+            get {
+                return ResourceManager.GetString("EditArrow_BorderColor", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Grubość ramki:.
+        /// </summary>
+        internal static string EditArrow_BorderThickness {
+            get {
+                return ResourceManager.GetString("EditArrow_BorderThickness", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Wybierz kolor.
+        /// </summary>
+        internal static string EditArrow_ChooseColor {
+            get {
+                return ResourceManager.GetString("EditArrow_ChooseColor", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Kolor:.
+        /// </summary>
+        internal static string EditArrow_Color {
+            get {
+                return ResourceManager.GetString("EditArrow_Color", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Długość grotu:.
+        /// </summary>
+        internal static string EditArrow_HeadLength {
+            get {
+                return ResourceManager.GetString("EditArrow_HeadLength", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Szerokość grotu:.
+        /// </summary>
+        internal static string EditArrow_HeadWidth {
+            get {
+                return ResourceManager.GetString("EditArrow_HeadWidth", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Grubość linii:.
+        /// </summary>
+        internal static string EditArrow_LineThickness {
+            get {
+                return ResourceManager.GetString("EditArrow_LineThickness", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Edytuj strzałkę.
+        /// </summary>
+        internal static string EditArrow_Title {
+            get {
+                return ResourceManager.GetString("EditArrow_Title", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   Wyszukuje zlokalizowany ciąg podobny do ciągu Zablokuj obiekt.
         /// </summary>
         internal static string EditRaster_CheckLocked {
@@ -1052,6 +1124,15 @@ namespace AnonPDF.Properties {
         }
         
         /// <summary>
+        /// Wyszukuje zlokalizowany ciąg podobny do ciągu &amp;Szukaj.
+        /// </summary>
+        internal static string Menu_Search {
+            get {
+                return ResourceManager.GetString("Menu_Search", resourceCulture);
+            }
+        }
+
+        /// <summary>
         /// Wyszukuje zlokalizowany ciąg podobny do ciągu Podziel plik PDF.
         /// </summary>
         internal static string Menu_SplitPdf {
@@ -1747,6 +1828,24 @@ namespace AnonPDF.Properties {
         internal static string Theme_BalticBreeze {
             get {
                 return ResourceManager.GetString("Theme_BalticBreeze", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        /// Wyszukuje zlokalizowany ciąg podobny do ciągu Czarno-Żółty.
+        /// </summary>
+        internal static string Theme_BlackYellowHighContrast {
+            get {
+                return ResourceManager.GetString("Theme_BlackYellowHighContrast", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        /// Wyszukuje zlokalizowany ciąg podobny do ciągu Czarno-Biały.
+        /// </summary>
+        internal static string Theme_BlackWhiteHighContrast {
+            get {
+                return ResourceManager.GetString("Theme_BlackWhiteHighContrast", resourceCulture);
             }
         }
         

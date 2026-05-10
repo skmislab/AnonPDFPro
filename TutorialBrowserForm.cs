@@ -155,7 +155,7 @@ namespace AnonPDF
             StartPosition = FormStartPosition.CenterParent;
             MinimizeBox = false;
             MaximizeBox = false;
-            ClientSize = new Size(720, 420);
+            ClientSize = PDFForm.ScaleSizeForDpiStatic(860, 460);
             try
             {
                 using (var extractedIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath))

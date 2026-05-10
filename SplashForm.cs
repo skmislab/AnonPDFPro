@@ -38,8 +38,13 @@ namespace AnonPDF
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Color.White;
-            ClientSize = new Size(420, 320);
+            AutoScaleDimensions = new SizeF(6F, 13F);
+            AutoScaleMode = AutoScaleMode.Font;
+            ClientSize = ScaleForDpi(420, 328);
             Text = Branding.ProductName;
+
+            float dpiScale = GetDpiScale();
+
             DoubleBuffered = true;
             Padding = new Padding(BorderThickness, BorderThickness, BorderThickness + ShadowSize, BorderThickness + ShadowSize);
 
@@ -62,11 +67,11 @@ namespace AnonPDF
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 12F));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52F));
 
             var logoBox = new PictureBox
             {
-                Size = new Size(64, 64),
+                Size = ScaleForDpi(64, 64),
                 SizeMode = PictureBoxSizeMode.Zoom,
                 Anchor = AnchorStyles.None
             };
@@ -135,33 +140,36 @@ namespace AnonPDF
             openPdfButton = new Button
             {
                 Text = Properties.Resources.UI_Button_OpenPdf,
-                Size = new Size(110, 36),
+                Size = ScaleForDpi(110, 44),
                 Anchor = AnchorStyles.None,
                 FlatStyle = FlatStyle.Flat,
                 UseVisualStyleBackColor = false,
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter
             };
             openPdfButton.Click += (_, __) => OpenPdfRequested?.Invoke(this, EventArgs.Empty);
 
             openProjectButton = new Button
             {
                 Text = Properties.Resources.UI_Button_OpenProject,
-                Size = new Size(110, 36),
+                Size = ScaleForDpi(110, 44),
                 Anchor = AnchorStyles.None,
                 FlatStyle = FlatStyle.Flat,
                 UseVisualStyleBackColor = false,
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter
             };
             openProjectButton.Click += (_, __) => OpenProjectRequested?.Invoke(this, EventArgs.Empty);
 
             resumeWorkButton = new Button
             {
                 Text = GetResourceText("UI_Button_ResumeWork", "Wznów pracę"),
-                Size = new Size(110, 36),
+                Size = ScaleForDpi(110, 44),
                 Anchor = AnchorStyles.None,
                 FlatStyle = FlatStyle.Flat,
                 UseVisualStyleBackColor = false,
-                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold)
+                Font = new Font("Segoe UI", 9.5F, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter
             };
             resumeWorkButton.Click += (_, __) => ResumeWorkRequested?.Invoke(this, EventArgs.Empty);
 
@@ -548,6 +556,18 @@ namespace AnonPDF
             }
 
             return null;
+        }
+
+        private float GetDpiScale()
+        {
+            using (var g = CreateGraphics())
+                return g.DpiX / 96f;
+        }
+
+        private Size ScaleForDpi(int w, int h)
+        {
+            float s = GetDpiScale();
+            return new Size((int)(w * s), (int)(h * s));
         }
     }
 }

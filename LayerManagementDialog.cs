@@ -21,6 +21,7 @@ namespace AnonPDF
         private readonly Button saveButton;
         private readonly Button cancelButton;
         private readonly CheckBox exportVisibleLayersOnlyCheckBox;
+        private readonly DialogTheme dialogTheme;
         private readonly List<LayerDeletionAction> pendingLayerDeletionActions = new List<LayerDeletionAction>();
 
         internal event Action<List<LayerDefinition>, string> PreviewChanged;
@@ -32,8 +33,10 @@ namespace AnonPDF
             IDictionary<string, int> usageCounts,
             Color checkBoxBorderColor,
             Color checkBoxAccentColor,
-            Color checkBoxBackColor)
+            Color checkBoxBackColor,
+            DialogTheme dialogTheme = null)
         {
+            this.dialogTheme = dialogTheme;
             layerUsageCounts = new Dictionary<string, int>(usageCounts ?? new Dictionary<string, int>(), StringComparer.OrdinalIgnoreCase);
             layerRows = new BindingList<LayerRowModel>(
                 (layers ?? Enumerable.Empty<LayerDefinition>())
@@ -54,7 +57,7 @@ namespace AnonPDF
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(840, 470);
+            ClientSize = PDFForm.ScaleSizeForDpiStatic(840, 470);
 
             layersGridView = new DataGridView
             {
@@ -156,7 +159,7 @@ namespace AnonPDF
             var leftPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Left,
-                Width = 520,
+                Width = PDFForm.ScaleForDpiStatic(520),
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 Margin = new Padding(0),
@@ -170,7 +173,7 @@ namespace AnonPDF
             var rightPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Right,
-                Width = 280,
+                Width = PDFForm.ScaleForDpiStatic(280),
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
                 Margin = new Padding(0),
@@ -199,8 +202,8 @@ namespace AnonPDF
                 RowCount = 3
             };
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, PDFForm.ScaleForDpiStatic(30)));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, PDFForm.ScaleForDpiStatic(42)));
             layout.Controls.Add(layersGridView, 0, 0);
             layout.Controls.Add(exportOptionsPanel, 0, 1);
             layout.Controls.Add(buttonsPanel, 0, 2);
@@ -208,6 +211,8 @@ namespace AnonPDF
             Controls.Add(layout);
             AcceptButton = saveButton;
             CancelButton = cancelButton;
+
+            DialogThemeApplier.ApplyTo(this, dialogTheme);
 
             if (layerRows.Count > 0)
             {
@@ -264,8 +269,8 @@ namespace AnonPDF
             var button = new Button
             {
                 Text = Tr(textResourceKey),
-                Width = 120,
-                Height = 28
+                Width = PDFForm.ScaleForDpiStatic(120),
+                Height = PDFForm.ScaleForDpiStatic(28)
             };
             button.Click += clickHandler;
             return button;
@@ -593,6 +598,7 @@ namespace AnonPDF
                 prompt.Controls.Add(deleteButton);
                 prompt.Controls.Add(cancelButton);
                 prompt.Controls.Add(moveButton);
+                DialogThemeApplier.ApplyTo(prompt, dialogTheme);
                 prompt.ShowDialog(this);
                 return decision;
             }
@@ -769,6 +775,8 @@ namespace AnonPDF
                 prompt.Controls.Add(cancelButton);
                 prompt.AcceptButton = okButton;
                 prompt.CancelButton = cancelButton;
+
+                DialogThemeApplier.ApplyTo(prompt, dialogTheme);
 
                 prompt.Shown += (_, __) =>
                 {

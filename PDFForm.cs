@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
@@ -52,6 +52,10 @@ using TesseractOCR;
 using System.Data.SqlClient;
 using System.Drawing.Drawing2D;
 using System.Drawing.Printing;
+using Windows.Graphics.Imaging;
+using Windows.Media.Ocr;
+using Windows.Storage;
+using Windows.Storage.Streams;
 using MediaGlyphTypeface = System.Windows.Media.GlyphTypeface;
 using MediaDrawingVisual = System.Windows.Media.DrawingVisual;
 using MediaBrushes = System.Windows.Media.Brushes;
@@ -73,11 +77,13 @@ namespace AnonPDF
         private static readonly string MaintenanceRecoveryProjectPath = Path.Combine(MaintenanceRecoveryDirectory, "maintenance-recovery.app");
         private static bool diagnosticModeEnabled = false;
         private static bool DebugLogEnabled => diagnosticModeEnabled;
+        public static bool IsDiagnosticModeEnabled => diagnosticModeEnabled;
         private readonly string fileVersion;
         private readonly Timer maintenanceCountdownTimer;
         private DateTime? maintenanceShutdownAt;
         private Label maintenanceCountdownLabel;
         private Label objectSelectionInfoLabel;
+        private Label indexingStatusLabel;
         private QuickStartTutorialOverlay quickStartTutorialOverlay;
         private string serviceEndDate = "";
         private static System.Timers.Timer maintenanceCheckTimer;
@@ -131,7 +137,7 @@ namespace AnonPDF
         private string shapeIconPrivateFontPath = string.Empty;
         private bool shapeIconPrivateFontChecked;
 
-        private readonly float searchWidthCorrection = 1.0f;
+        private System.Threading.CancellationTokenSource backgroundIndexingCts;
         private float scaleFactor = 0;
         private readonly float percentScaleFactor = 0.5f;
         private float minScaleFactor = 1.2f;
@@ -147,7 +153,8 @@ namespace AnonPDF
         private bool suppressUndoRedoCapture;
         private bool isMarkerCtrlBoxMode;
         private bool suppressRedactionModeTracking;
-        private bool? lastManualRedactionModeIsMarker;
+        private enum RedactionMode { Cursor, Marker, Box }
+        private RedactionMode? lastManualRedactionMode;
         private bool isMoving;
         private bool isScalingTextAnnotation;
         private bool isRotatingTextAnnotation;
@@ -258,6 +265,7 @@ namespace AnonPDF
         private ToolStripMenuItem addShapeToolStripMenuItem;
         private ToolStripMenuItem addCommentToolStripMenuItem;
         private ToolStripMenuItem addBlankPageToolStripMenuItem;
+        private ToolStripMenuItem searchToolStripMenuItem;
         private ToolStripMenuItem layersToolStripMenuItem;
         private ToolStripMenuItem snapToGridToolStripMenuItem;
         private ToolStripMenuItem addObjectsByPageRotationToolStripMenuItem;
@@ -281,6 +289,9 @@ namespace AnonPDF
         private bool layersTooltipShownThisSession;
         private bool syncPageSelectionFromThumbnail;
         private bool syncThumbnailSelectionFromPage;
+        private bool isLoadingPdf;
+        private string integrationPdfOutputPath;
+        private string autoSavePngOutputPath;
         private readonly Timer thumbnailViewportTimer;
         private System.Threading.CancellationTokenSource thumbnailGenerationCts;
         private readonly object thumbnailGenerationSync = new object();
@@ -887,13 +898,15 @@ namespace AnonPDF
 
         private MergeFilesForm mergeForm;
 
-        const int annotationsIconSize = 22;
+        int annotationsIconSize = 22;
         const int annotationsIconPadding = 4;
         private const int LeftPanelBaseWidth = 213;
         private const int LeftPanelScrollbarPadding = 6;
+        private int scaledLeftPanelBaseWidth = 213;
         private readonly SplashForm splashForm;
         private bool splashClosed;
         private bool suppressStartupTutorialOnce;
+        public bool SuppressStartupUpdateCheck { get; set; }
         private readonly CultureInfo systemUiCulture;
         private const string ProjectFileExtension = ".app";
         private const string LegacyProjectFileExtension = ".pap";
@@ -906,7 +919,9 @@ namespace AnonPDF
             WarmSand,
             ForestGreen,
             GraphiteDark,
-            OledDarkTeal
+            OledDarkTeal,
+            BlackYellowHighContrast,
+            BlackWhiteHighContrast
         }
 
         private sealed class UiThemePalette
@@ -1127,8 +1142,72 @@ namespace AnonPDF
                         System.Drawing.Color.FromArgb(0xE6, 0xED, 0xF3),
                         System.Drawing.Color.FromArgb(0xFF, 0x6B, 0x6B),
                         System.Drawing.Color.FromArgb(0x12, 0x1E, 0x2A))
+                },
+                {
+                    UiThemeKind.BlackYellowHighContrast,
+                    new UiThemePalette(
+                        Resources.Theme_BlackYellowHighContrast,
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.FromArgb(0x0A, 0x0A, 0x00),
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.FromArgb(0xFF, 0xFF, 0x00),
+                        System.Drawing.Color.FromArgb(0xFF, 0xFF, 0x00),
+                        System.Drawing.Color.White,
+                        System.Drawing.Color.FromArgb(0xFF, 0xFF, 0x00),
+                        System.Drawing.Color.FromArgb(0xFF, 0xE8, 0x00),
+                        System.Drawing.Color.FromArgb(0xFF, 0xFF, 0x00),
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.FromArgb(0xFF, 0xFF, 0x00),
+                        System.Drawing.Color.FromArgb(0x40, 0x40, 0x00),
+                        System.Drawing.Color.FromArgb(0xFF, 0xFF, 0x00),
+                        System.Drawing.Color.FromArgb(0x7A, 0x00, 0x00),
+                        System.Drawing.Color.Black)
+                },
+                {
+                    UiThemeKind.BlackWhiteHighContrast,
+                    new UiThemePalette(
+                        Resources.Theme_BlackWhiteHighContrast,
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.White,
+                        System.Drawing.Color.White,
+                        System.Drawing.Color.White,
+                        System.Drawing.Color.White,
+                        System.Drawing.Color.FromArgb(0xE8, 0xE8, 0xE8),
+                        System.Drawing.Color.White,
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.Black,
+                        System.Drawing.Color.White,
+                        System.Drawing.Color.FromArgb(0x40, 0x40, 0x40),
+                        System.Drawing.Color.White,
+                        System.Drawing.Color.FromArgb(0x7A, 0x00, 0x00),
+                        System.Drawing.Color.Black)
                 }
             };
+
+        private sealed class ThemedColorTable : ProfessionalColorTable
+        {
+            private readonly UiThemePalette _t;
+            public ThemedColorTable(UiThemePalette t) => _t = t;
+            public override System.Drawing.Color ToolStripDropDownBackground   => _t.WindowBackColor;
+            public override System.Drawing.Color MenuItemSelected              => _t.SelectionBackColor;
+            public override System.Drawing.Color MenuItemSelectedGradientBegin => _t.SelectionBackColor;
+            public override System.Drawing.Color MenuItemSelectedGradientEnd   => _t.SelectionBackColor;
+            public override System.Drawing.Color MenuItemBorder                => _t.SelectionBackColor;
+            public override System.Drawing.Color MenuBorder                    => _t.BorderColor;
+            public override System.Drawing.Color ImageMarginGradientBegin      => _t.WindowBackColor;
+            public override System.Drawing.Color ImageMarginGradientMiddle     => _t.WindowBackColor;
+            public override System.Drawing.Color ImageMarginGradientEnd        => _t.WindowBackColor;
+            public override System.Drawing.Color SeparatorDark                 => _t.BorderColor;
+            public override System.Drawing.Color SeparatorLight                => _t.WindowBackColor;
+            public override System.Drawing.Color CheckBackground               => _t.SelectionBackColor;
+            public override System.Drawing.Color CheckSelectedBackground       => _t.SelectionBackColor;
+            public override System.Drawing.Color CheckPressedBackground        => _t.SelectionBackColor;
+        }
 
         private UiThemeKind currentThemeKind = UiThemeKind.BalticBreeze;
         private UiThemePalette CurrentTheme => UiThemes[currentThemeKind];
@@ -1399,6 +1478,16 @@ namespace AnonPDF
             InitializeRasterMenu();
             LoadFootnotesCatalog();
             ApplyAutomaticFootnotesMenuState();
+
+            // Apply saved default redaction mode (kept disabled until document is indexed)
+            string defaultMode = Properties.Settings.Default.DefaultRedactionMode ?? "Cursor";
+            suppressRedactionModeTracking = true;
+            cursorRadioButton.Checked = defaultMode == "Cursor";
+            markerRadioButton.Checked = defaultMode == "Marker";
+            boxRadioButton.Checked = defaultMode == "Box";
+            if (!cursorRadioButton.Checked && !markerRadioButton.Checked && !boxRadioButton.Checked)
+                markerRadioButton.Checked = true;
+            suppressRedactionModeTracking = false;
             ApplyAddObjectsByPageRotationMenuState();
             LoadPreferredTheme();
             ApplyTheme();
@@ -1451,7 +1540,7 @@ namespace AnonPDF
 
             thumbnailViewportTimer = new Timer
             {
-                Interval = 220
+                Interval = 500
             };
             thumbnailViewportTimer.Tick += ThumbnailViewportTimer_Tick;
 
@@ -1501,7 +1590,7 @@ namespace AnonPDF
             ApplyRightPanelTabSelectionFromSettings();
             UpdateRightPanelTabContentVisibility();
 
-            filterComboBox.SelectedIndex = 0;            
+            filterComboBox.SelectedIndex = 0;
             filterComboBox.DrawMode = DrawMode.OwnerDrawFixed;
             filterComboBox.SelectedIndexChanged += FilterComboBox_SelectedIndexChanged;
             filterComboBox.DrawItem += FilterComboBox_DrawItem;
@@ -1520,17 +1609,20 @@ namespace AnonPDF
             safeModeCheckBox.CheckedChanged += SafeModeCheckBox_CheckedChanged;
             colorCheckBox.CheckedChanged += ColorCheckBox_CheckedChanged;
             outlineCheckBox.CheckedChanged += OutlineCheckBox_CheckedChanged;
+            cursorRadioButton.CheckedChanged += CursorRadioButton_CheckedChanged;
             markerRadioButton.CheckedChanged += MarkerRadioButton_CheckedChanged;
             boxRadioButton.CheckedChanged += BoxRadioButton_CheckedChanged;
             signaturesRemoveRadioButton.CheckedChanged += SignaturesRemoveRadioButton_CheckedChanged;
             signaturesOriginalRadioButton.CheckedChanged += SignaturesOriginalRadioButton_CheckedChanged;
             signaturesReportRadioButton.CheckedChanged += SignaturesReportRadioButton_CheckedChanged;
 
-            lastManualRedactionModeIsMarker = markerRadioButton.Checked
-                ? true
-                : boxRadioButton.Checked
-                    ? false
-                    : (bool?)null;
+            lastManualRedactionMode = cursorRadioButton.Checked
+                ? RedactionMode.Cursor
+                : markerRadioButton.Checked
+                    ? RedactionMode.Marker
+                    : boxRadioButton.Checked
+                        ? RedactionMode.Box
+                        : (RedactionMode?)null;
 
             removePageButton.Click += RemovePageButton_Click;
             removePageRangeButton.Click += RemovePageRangeButton_Click;
@@ -1626,7 +1718,15 @@ namespace AnonPDF
                 }
 
                 searchResultLabel.Text = status;
-                searchResultLabel.Refresh();
+
+                // Also update the indexing overlay when cursor is disabled (background indexing in progress)
+                if (!string.IsNullOrEmpty(status) &&
+                    cursorRadioButton != null && !cursorRadioButton.Enabled &&
+                    !cursorRadioButton.IsDisposed)
+                {
+                    string line1 = LocalizedText("Msg_CursorModeUnavailable");
+                    ShowIndexingStatus(line1 + "\n" + status);
+                }
             }
 
             if (searchResultLabel.InvokeRequired)
@@ -1913,7 +2013,7 @@ namespace AnonPDF
             addShapeToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "addShapeToolStripMenuItem",
-                ShortcutKeys = Keys.Control | Keys.F,
+                ShortcutKeys = Keys.Control | Keys.Q,
                 Enabled = false
             };
             addShapeToolStripMenuItem.Click += AddShapeToolStripMenuItem_Click;
@@ -1927,8 +2027,16 @@ namespace AnonPDF
             addBlankPageToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "addBlankPageToolStripMenuItem",
-                Enabled = false
+                Enabled = false,
+                Visible = false
             };
+            searchToolStripMenuItem = new ToolStripMenuItem
+            {
+                Name = "searchToolStripMenuItem",
+                ShortcutKeys = Keys.Control | Keys.F,
+                Enabled = true
+            };
+            searchToolStripMenuItem.Click += (s, e) => FocusSearchTextBox();
             layersToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "layersToolStripMenuItem",
@@ -2079,6 +2187,18 @@ namespace AnonPDF
                 }
             }
 
+            if (menuOptionsItem != null && searchToolStripMenuItem != null)
+            {
+                if (searchToolStripMenuItem.OwnerItem is ToolStripDropDownItem searchOwner &&
+                    searchOwner.DropDownItems.Contains(searchToolStripMenuItem))
+                {
+                    searchOwner.DropDownItems.Remove(searchToolStripMenuItem);
+                }
+
+                menuOptionsItem.DropDownItems.Add(new ToolStripSeparator());
+                menuOptionsItem.DropDownItems.Add(searchToolStripMenuItem);
+            }
+
             menuAddItem.DropDownItems.Clear();
             menuAddItem.DropDownItems.Add(undoToolStripMenuItem);
             menuAddItem.DropDownItems.Add(redoToolStripMenuItem);
@@ -2223,7 +2343,8 @@ namespace AnonPDF
                 BuildLayerUsageCounts(),
                 CurrentTheme.BorderColor,
                 CurrentTheme.SelectionBackColor,
-                CurrentTheme.SectionBackColor))
+                CurrentTheme.SectionBackColor,
+                CreateDialogTheme()))
             {
                 dialog.PreviewChanged += (previewLayers, previewActiveLayerId) =>
                     ApplyLayerConfiguration(previewLayers, previewActiveLayerId, markProjectChanged: false);
@@ -3734,30 +3855,30 @@ namespace AnonPDF
                 prompt.MinimizeBox = false;
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
-                prompt.ClientSize = new Size(420, 125);
+                prompt.ClientSize = ScaleSizeForCurrentDpi(420, 125);
 
                 label.AutoSize = true;
-                label.Left = 12;
-                label.Top = 14;
+                label.Left = ScaleForCurrentDpi(12);
+                label.Top = ScaleForCurrentDpi(14);
                 label.Text = labelText;
 
-                inputTextBox.Left = 12;
-                inputTextBox.Top = 38;
-                inputTextBox.Width = 396;
+                inputTextBox.Left = ScaleForCurrentDpi(12);
+                inputTextBox.Top = ScaleForCurrentDpi(38);
+                inputTextBox.Width = ScaleForCurrentDpi(396);
                 inputTextBox.Text = value;
 
                 okButton.Text = LocalizedText("Dialog_Button_Save");
-                okButton.Width = 100;
-                okButton.Height = 28;
-                okButton.Left = 206;
-                okButton.Top = 82;
+                okButton.Width = ScaleForCurrentDpi(100);
+                okButton.Height = ScaleForCurrentDpi(28);
+                okButton.Left = ScaleForCurrentDpi(206);
+                okButton.Top = ScaleForCurrentDpi(82);
                 okButton.DialogResult = DialogResult.OK;
 
                 cancelButton.Text = LocalizedText("Dialog_Button_Cancel");
-                cancelButton.Width = 100;
-                cancelButton.Height = 28;
-                cancelButton.Left = 308;
-                cancelButton.Top = 82;
+                cancelButton.Width = ScaleForCurrentDpi(100);
+                cancelButton.Height = ScaleForCurrentDpi(28);
+                cancelButton.Left = ScaleForCurrentDpi(308);
+                cancelButton.Top = ScaleForCurrentDpi(82);
                 cancelButton.DialogResult = DialogResult.Cancel;
 
                 prompt.Controls.Add(label);
@@ -3766,6 +3887,8 @@ namespace AnonPDF
                 prompt.Controls.Add(cancelButton);
                 prompt.AcceptButton = okButton;
                 prompt.CancelButton = cancelButton;
+
+                ApplyThemeToDialog(prompt);
 
                 prompt.Shown += (_, __) =>
                 {
@@ -4057,7 +4180,8 @@ namespace AnonPDF
                 canEditGlobalScopes,
                 canEditLocalScopes,
                 globalPath,
-                localPath))
+                localPath,
+                CreateDialogTheme()))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                 {
@@ -4117,7 +4241,7 @@ namespace AnonPDF
             pdfViewer.Invalidate();
             ShowInfoMessage(GetLegalBasesSavedMessage());
         }
-        
+
         private string GetExclusionAuthorityMenuText()
         {
             return LocalizedText("Footnotes_ExclusionAuthority_Menu");
@@ -4347,46 +4471,46 @@ namespace AnonPDF
             {
                 using (Form prompt = new Form())
                 {
-                    prompt.Width = 620;
-                    prompt.Height = 180;
+                    prompt.Width = ScaleForCurrentDpi(620);
+                    prompt.Height = ScaleForCurrentDpi(180);
                     prompt.StartPosition = FormStartPosition.CenterParent;
-                    prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
-                    prompt.MinimizeBox = false;
-                    prompt.MaximizeBox = false;
-                    prompt.ShowInTaskbar = false;
+                prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
+                prompt.MinimizeBox = false;
                     prompt.Text = GetExclusionAuthorityDialogTitleText();
 
                     Label textLabel = new Label
                     {
-                        Left = 10,
-                        Top = 16,
+                        Left = ScaleForCurrentDpi(10),
+                        Top = ScaleForCurrentDpi(16),
                         AutoSize = true,
                         Text = GetExclusionAuthorityDialogLabelText()
                     };
 
                     TextBox inputBox = new TextBox
                     {
-                        Left = 10,
-                        Top = 44,
-                        Width = 582,
+                        Left = ScaleForCurrentDpi(10),
+                        Top = ScaleForCurrentDpi(44),
+                        Width = ScaleForCurrentDpi(582),
                         Text = currentValue
                     };
 
                     Button confirmation = new Button
                     {
                         Text = "OK",
-                        Left = 432,
-                        Width = 78,
-                        Top = 82,
+                        Left = ScaleForCurrentDpi(432),
+                        Width = ScaleForCurrentDpi(78),
+                        Top = ScaleForCurrentDpi(82),
+                        Height = ScaleForCurrentDpi(28),
                         DialogResult = DialogResult.OK
                     };
 
                     Button cancel = new Button
                     {
                         Text = GetCancelButtonText(),
-                        Left = 514,
-                        Width = 78,
-                        Top = 82,
+                        Left = ScaleForCurrentDpi(514),
+                        Width = ScaleForCurrentDpi(78),
+                        Top = ScaleForCurrentDpi(82),
+                        Height = ScaleForCurrentDpi(28),
                         DialogResult = DialogResult.Cancel
                     };
 
@@ -4396,6 +4520,8 @@ namespace AnonPDF
                     prompt.Controls.Add(cancel);
                     prompt.AcceptButton = confirmation;
                     prompt.CancelButton = cancel;
+
+                    ApplyThemeToDialog(prompt);
 
                     DialogResult result = prompt.ShowDialog(this);
                     if (result != DialogResult.OK)
@@ -4520,7 +4646,8 @@ namespace AnonPDF
                 nextId,
                 availableScopes,
                 Enumerable.Empty<string>(),
-                canEditTargetScopeAssignments))
+                canEditTargetScopeAssignments,
+                CreateDialogTheme()))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                 {
@@ -4859,6 +4986,19 @@ namespace AnonPDF
             catch (Exception ex)
             {
                 LogDebug("Save reduce-pdf-file-size user setting failed: " + ex.Message);
+            }
+        }
+
+        private void SaveDefaultRedactionModeUserSetting(string mode)
+        {
+            try
+            {
+                Properties.Settings.Default.DefaultRedactionMode = mode;
+                Properties.Settings.Default.Save();
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Save default redaction mode user setting failed: " + ex.Message);
             }
         }
 
@@ -7367,7 +7507,7 @@ namespace AnonPDF
                 return;
             }
 
-            var menu = new ContextMenuStrip();
+            var menu = CreateThemedMenu();
             menu.Items.Add(LocalizedText("Order_BringToFront"), null, (_, __) => TryReorderTextAnnotation(annotation, BringTextAnnotationToFront));
             menu.Items.Add(LocalizedText("Order_MoveForward"), null, (_, __) => TryReorderTextAnnotation(annotation, MoveTextAnnotationForward));
             menu.Items.Add(LocalizedText("Order_MoveBackward"), null, (_, __) => TryReorderTextAnnotation(annotation, MoveTextAnnotationBackward));
@@ -7799,6 +7939,184 @@ namespace AnonPDF
             }
 
             return block.Bounds.Height > block.Bounds.Width;
+        }
+
+        private bool TryGetWordBoundsAtPoint(Point location, out RectangleF wordBounds)
+        {
+            wordBounds = RectangleF.Empty;
+            if (string.IsNullOrWhiteSpace(inputPdfPath) || currentPage < 1 || pdf == null || currentPage > pdf.Pages.Count)
+            {
+                LogDebug($"TryGetWordBoundsAtPoint: early exit inputPdfPath={!string.IsNullOrWhiteSpace(inputPdfPath)} currentPage={currentPage} pdf={pdf != null}");
+                return false;
+            }
+
+            int rotation = GetEffectiveRotationDegrees(currentPage);
+            float docX = location.X / scaleFactor;
+            float docY = location.Y / scaleFactor;
+
+            var page = pdf.Pages[currentPage - 1];
+            float pageH = (float)page.Height;
+            float pdfX = docX;
+            float pdfY = pageH - docY;
+
+            var lines = PdfTextSearcher.GetCachedLines(inputPdfPath);
+            if (lines == null || lines.Count == 0)
+            {
+                LogDebug($"TryGetWordBoundsAtPoint: no cached lines for {inputPdfPath}");
+                return false;
+            }
+
+            LogDebug($"TryGetWordBoundsAtPoint: click=({location.X},{location.Y}) doc=({docX:F1},{docY:F1}) pdf=({pdfX:F1},{pdfY:F1}) pageH={pageH:F0} scaleFactor={scaleFactor:F3} rotation={rotation} lineCount={lines.Count}");
+
+            // For OCR lines: search ALL OcrWords across all lines by bounding box.
+            // Lines can overlap in Y, so we must match X too.
+            foreach (var line in lines)
+            {
+                if (!line.IsOcr || line.PageNumber != currentPage || line.OcrWords == null) continue;
+                foreach (var ow in line.OcrWords)
+                {
+                    if (ow?.BoundingBox == null) continue;
+                    float ox = (float)ow.BoundingBox.GetX();
+                    float oy = (float)ow.BoundingBox.GetY();
+                    float owW = (float)ow.BoundingBox.GetWidth();
+                    float owH = (float)ow.BoundingBox.GetHeight();
+                    float oR = ox + owW;
+                    float oT = oy + owH;
+                    if (pdfX >= ox - 2f && pdfX <= oR + 2f && pdfY >= oy - 2f && pdfY <= oT + 2f)
+                    {
+                        LogDebug($"TryGetWordBoundsAtPoint: OCR word hit text={ow.Text} bounds=({ox:F1},{oy:F1},{owW:F1},{owH:F1})");
+                        var pdfRect = new RectangleF(ox, oy, owW, owH);
+                        wordBounds = ConvertPdfToViewCoordinates(pdfRect, currentPage, rotation);
+                        return true;
+                    }
+                }
+            }
+
+            // Native text: find line by Y, then character by X
+            float yTol = 6f / scaleFactor;
+            int bestLi = -1;
+            float bestD = float.MaxValue;
+            for (int li = 0; li < lines.Count; li++)
+            {
+                var l = lines[li];
+                if (l.PageNumber != currentPage || l.IsOcr || string.IsNullOrWhiteSpace(l.Text)) continue;
+                var lb = PdfTextSearcher.GetCachedLineBounds(l);
+                if (lb == null) continue;
+                float bot = (float)lb.GetY(), top = bot + (float)lb.GetHeight();
+                if (pdfY < bot - yTol || pdfY > top + yTol) continue;
+                float d = pdfY < bot ? bot - pdfY : pdfY > top ? pdfY - top : 0f;
+                if (d < bestD) { bestD = d; bestLi = li; }
+            }
+            if (bestLi < 0)
+            {
+                LogDebug("TryGetWordBoundsAtPoint: no native line found at click Y");
+                return false;
+            }
+            var best = lines[bestLi];
+            LogDebug($"TryGetWordBoundsAtPoint: nativeLine[{bestLi}] text={best.Text.Substring(0, Math.Min(40, best.Text.Length))} chars={best.Characters.Count}");
+
+            int ci = -1;
+            for (int i = 0; i < best.Characters.Count; i++)
+            {
+                var ch = best.Characters[i];
+                float l = (float)ch.BoundingBox.GetX();
+                if (pdfX >= l && pdfX <= l + (float)ch.BoundingBox.GetWidth()) { ci = i; break; }
+            }
+            if (ci < 0)
+            {
+                LogDebug("TryGetWordBoundsAtPoint: no character hit at click X");
+                return false;
+            }
+
+            string txt = best.Text;
+            int ws = ci, we = ci;
+            while (ws > 0 && IsWordChar(txt[ws - 1])) ws--;
+            while (we < txt.Length && IsWordChar(txt[we])) we++;
+            if (we <= ws)
+            {
+                LogDebug("TryGetWordBoundsAtPoint: word expansion failed");
+                return false;
+            }
+
+            float mnX = float.MaxValue, mnY = float.MaxValue, mxX = float.MinValue, mxY = float.MinValue;
+            for (int i = ws; i < we && i < best.Characters.Count; i++)
+            {
+                var ch = best.Characters[i];
+                mnX = Math.Min(mnX, (float)ch.BoundingBox.GetX());
+                mnY = Math.Min(mnY, (float)ch.BoundingBox.GetY());
+                mxX = Math.Max(mxX, (float)ch.BoundingBox.GetX() + (float)ch.BoundingBox.GetWidth());
+                mxY = Math.Max(mxY, (float)ch.BoundingBox.GetY() + (float)ch.BoundingBox.GetHeight());
+            }
+            if (mnX >= mxX || mnY >= mxY)
+            {
+                LogDebug("TryGetWordBoundsAtPoint: char bounds union failed");
+                return false;
+            }
+
+            var pdfRect2 = new RectangleF(mnX, mnY, mxX - mnX, mxY - mnY);
+            wordBounds = ConvertPdfToViewCoordinates(pdfRect2, currentPage, rotation);
+            LogDebug($"TryGetWordBoundsAtPoint: native word bounds=({wordBounds})");
+            return true;
+        }
+
+        private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_' || c == '-' || c == '\'' || c > 127;
+
+        private bool TryRefineWordBoundsWithGlyphData(RectangleF bounds, RectangleF wordBounds, out RectangleF refinedBounds)
+        {
+            refinedBounds = wordBounds;
+            if (string.IsNullOrWhiteSpace(inputPdfPath) || bounds.Width <= 0 || bounds.Height <= 0)
+                return false;
+
+            try
+            {
+                var props = new iText.Kernel.Pdf.ReaderProperties();
+                if (!string.IsNullOrEmpty(userPassword))
+                    props.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
+
+                using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(
+                    new iText.Kernel.Pdf.PdfReader(inputPdfPath, props)
+                        .SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions)))
+                {
+                    if (currentPage < 1 || currentPage > pdfDoc.GetNumberOfPages())
+                        return false;
+
+                    var page = pdfDoc.GetPage(currentPage);
+                    int rotation = page.GetRotation();
+
+                    // Convert block bounds to PDF coordinates
+                    RectangleF pdfCoords = ConvertToPdfCoordinates(bounds, currentPage, rotation);
+                    if (pdfCoords.Width <= 0 || pdfCoords.Height <= 0)
+                        return false;
+
+                    var sourceRect = new iText.Kernel.Geom.Rectangle(pdfCoords.X, pdfCoords.Y, pdfCoords.Width, pdfCoords.Height);
+
+                    // Get precise per-glyph rects using the same strategy as the grey preview
+                    var previewRects = GetPdfCleanUpPreviewRectsForBlock(page, null, sourceRect);
+                    if (previewRects == null || previewRects.Count == 0)
+                        return false;
+
+                    // Compute union of all glyph rects in PDF space
+                    float uMinX = float.MaxValue, uMinY = float.MaxValue, uMaxX = float.MinValue, uMaxY = float.MinValue;
+                    foreach (var r in previewRects)
+                    {
+                        if (r == null) continue;
+                        uMinX = Math.Min(uMinX, (float)r.GetX());
+                        uMinY = Math.Min(uMinY, (float)r.GetY());
+                        uMaxX = Math.Max(uMaxX, (float)r.GetX() + (float)r.GetWidth());
+                        uMaxY = Math.Max(uMaxY, (float)r.GetY() + (float)r.GetHeight());
+                    }
+                    if (uMinX >= uMaxX || uMinY >= uMaxY) return false;
+
+                    var unionPdf = new RectangleF(uMinX, uMinY, uMaxX - uMinX, uMaxY - uMinY);
+                    refinedBounds = ConvertPdfToViewCoordinates(unionPdf, currentPage, rotation);
+                    return refinedBounds.Width > 0 && refinedBounds.Height > 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Refine cursor word bounds failed: " + ex.Message);
+                return false;
+            }
         }
 
         private bool TryGetRedactionResizeHandleRects(RedactionBlock block, out Dictionary<RasterResizeHandleType, RectangleF> handles)
@@ -9504,6 +9822,10 @@ namespace AnonPDF
               rotatePageMenuItem.Text = Resources.Menu_RotatePage;
               copyToClipboardMenuItem.Text = Resources.Menu_CopyToClipboard;
               exportGraphicsMenuItem.Text = Resources.Menu_ExportGraphics;
+              if (searchToolStripMenuItem != null)
+              {
+                  searchToolStripMenuItem.Text = LocalizedText("Menu_Search");
+              }
               if (combineObjectsWithScanPagesToolStripMenuItem != null)
               {
                   combineObjectsWithScanPagesToolStripMenuItem.Text = LocalizedText("Menu_CombineObjectsWithScanPages");
@@ -9537,6 +9859,8 @@ namespace AnonPDF
               themeForestGreenMenuItem.Text = GetThemeMenuText("Theme_ForestGreen", UiThemes[UiThemeKind.ForestGreen].Name);
               themeGraphiteDarkMenuItem.Text = GetThemeMenuText("Theme_GraphiteDark", UiThemes[UiThemeKind.GraphiteDark].Name);
               themeOledDarkTealMenuItem.Text = GetThemeMenuText("Theme_OledDarkTeal", UiThemes[UiThemeKind.OledDarkTeal].Name);
+              themeBlackYellowHighContrastMenuItem.Text = GetThemeMenuText("Theme_BlackYellowHighContrast", UiThemes[UiThemeKind.BlackYellowHighContrast].Name);
+              themeBlackWhiteHighContrastMenuItem.Text = GetThemeMenuText("Theme_BlackWhiteHighContrast", UiThemes[UiThemeKind.BlackWhiteHighContrast].Name);
               var fullScreenText = Resources.ResourceManager.GetString("Menu_Options_FullScreen", currentCulture);
               if (!string.IsNullOrWhiteSpace(fullScreenText))
               {
@@ -9586,6 +9910,7 @@ namespace AnonPDF
             try { signaturesRemoveRadioButton.Text = Resources.UI_Radio_Signatures_Remove; } catch { }
             try { signaturesOriginalRadioButton.Text = Resources.UI_Radio_Signatures_Original; } catch { }
             try { signaturesReportRadioButton.Text = Resources.UI_Radio_Signatures_Report; } catch { }
+            try { cursorRadioButton.Text = LocalizedText("UI_Radio_Cursor"); } catch { }
             try { markerRadioButton.Text = LocalizedText("UI_Radio_Marker"); } catch { }
             try { boxRadioButton.Text = LocalizedText("UI_Radio_Box"); } catch { }
 
@@ -9644,6 +9969,7 @@ namespace AnonPDF
             try { toolTip1.SetToolTip(searchButton, Resources.Tooltip_Search); } catch { }
             try { toolTip1.SetToolTip(searchToSelectionButton, Resources.Tooltip_SearchToSelection); } catch { }
             try { toolTip1.SetToolTip(SearchClearButton, Resources.Tooltip_SearchClear); } catch { }
+            try { SearchClearButton.Text = LocalizedText("UI_SearchClearGlyph"); } catch { }
             try { toolTip1.SetToolTip(searchFirstButton, LocalizedText("Tooltip_SearchResultFirst")); } catch { }
             try { toolTip1.SetToolTip(searchPrevButton, LocalizedText("Tooltip_SearchResultPrev")); } catch { }
             try { toolTip1.SetToolTip(searchNextButton, LocalizedText("Tooltip_SearchResultNext")); } catch { }
@@ -9660,6 +9986,7 @@ namespace AnonPDF
             try { toolTip1.SetToolTip(selectionNextButton, Resources.Tooltip_SelectionNext); } catch { }
             try { toolTip1.SetToolTip(selectionPrevButton, Resources.Tooltip_SelectionPrev); } catch { }
             try { toolTip1.SetToolTip(selectionLastButton, Resources.Tooltip_SelectionLast); } catch { }
+            try { toolTip1.SetToolTip(cursorRadioButton, LocalizedText("Tooltip_Cursor")); } catch { }
             try { toolTip1.SetToolTip(markerRadioButton, Resources.Tooltip_Marker); } catch { }
             try { toolTip1.SetToolTip(boxRadioButton, Resources.Tooltip_Box); } catch { }
             try { toolTip1.SetToolTip(clearPageButton, Resources.Tooltip_ClearPage); } catch { }
@@ -9811,6 +10138,16 @@ namespace AnonPDF
             SetTheme(UiThemeKind.OledDarkTeal);
         }
 
+        private void ThemeBlackYellowHighContrastMenuItem_Click(object sender, EventArgs e)
+        {
+            SetTheme(UiThemeKind.BlackYellowHighContrast);
+        }
+
+        private void ThemeBlackWhiteHighContrastMenuItem_Click(object sender, EventArgs e)
+        {
+            SetTheme(UiThemeKind.BlackWhiteHighContrast);
+        }
+
         private void FilterComboBox_DrawItem(object sender, DrawItemEventArgs e)
         {
             if (e.Index < 0) return;
@@ -9889,6 +10226,7 @@ namespace AnonPDF
                 mergeForm = new MergeFilesForm();
             }
 
+            ApplyThemeToDialog(mergeForm);
             if (!mergeForm.Visible)
             {
                 mergeForm.Show(this);
@@ -9963,10 +10301,13 @@ namespace AnonPDF
                     ((int)fallbackFont.Style).ToString(CultureInfo.InvariantCulture),
                     ((int)fallbackFont.Unit).ToString(CultureInfo.InvariantCulture));
 
+            string dpiPart = GetCurrentDpiX().ToString("F0", CultureInfo.InvariantCulture);
+
             return string.Join("||",
                 plainText ?? string.Empty,
                 richText ?? string.Empty,
-                fontPart);
+                fontPart,
+                "dpi" + dpiPart);
         }
 
         private static string BuildRichContentCacheKey(
@@ -10111,14 +10452,14 @@ namespace AnonPDF
                 return false;
             }
 
-            SizeF unrotatedOuterSize = rotation == 90 || rotation == 270
-                ? new SizeF(bounds.Height, bounds.Width)
-                : new SizeF(bounds.Width, bounds.Height);
-
             float padding = GetAnnotationFramePadding(annotation);
+            // For 90°/270° rotations AnnotationBounds.W/H are swapped relative to the natural content
+            // orientation (RotateCurrentPageClockwise swaps them). The bitmap must be rendered at the
+            // natural (unrotated) dimensions, so swap them back here.
+            bool swapContent = (rotation == 90 || rotation == 270);
             contentSize = new SizeF(
-                Math.Max(1f, unrotatedOuterSize.Width - (2f * padding)),
-                Math.Max(1f, unrotatedOuterSize.Height - (2f * padding)));
+                Math.Max(1f, (swapContent ? bounds.Height : bounds.Width) - (2f * padding)),
+                Math.Max(1f, (swapContent ? bounds.Width : bounds.Height) - (2f * padding)));
             return true;
         }
 
@@ -10520,6 +10861,11 @@ namespace AnonPDF
             annotation.CachedRichContentSizeKey = cacheKey;
             annotation.CachedRichContentSize = contentSize;
             annotation.HasCachedRichContentSize = true;
+            if (DebugLogEnabled)
+            {
+                LogDebug($"RichContentSizeCache populated id={annotation.Id} cacheKey={cacheKey} size=({contentSize.Width:F1},{contentSize.Height:F1}) " +
+                    $"boundsW={annotation.AnnotationBounds.Width:F1} boundsH={annotation.AnnotationBounds.Height:F1} fontScale={annotation.AnnotationFont?.Size ?? -1:F1}");
+            }
             return contentSize;
         }
 
@@ -10535,10 +10881,13 @@ namespace AnonPDF
                 annotation.AnnotationRichText,
                 annotation.AnnotationFont,
                 annotation.AnnotationAlignment);
+            float dpiScale = GetCurrentDpiX() / 96f;
+            // Width is DPI-independent from WPF; height is approximately DPI-proportional.
+            // Only width needs dpiScale to become DPI-proportional for 72/DpiX formulas.
             if (!TryBuildSharedRichLayout(annotation, out SharedRichLayoutResult sharedRichLayout) ||
                 sharedRichLayout == null)
             {
-                return measuredSize;
+                return new SizeF(measuredSize.Width * dpiScale, measuredSize.Height);
             }
 
             float logicalToPtX = 72f / 96f;
@@ -10584,11 +10933,11 @@ namespace AnonPDF
                 }
 
                 return new SizeF(
-                    Math.Max(1f, (frameRect.Width / logicalToPtX) + 1f),
+                    Math.Max(1f, (frameRect.Width / logicalToPtX + 1f) * dpiScale),
                     Math.Max(1f, (frameRect.Height / logicalToPtY) + 2f));
             }
 
-            return measuredSize;
+            return new SizeF(measuredSize.Width * dpiScale, measuredSize.Height);
         }
 
         private void EnsureRichAnnotationBoundsSynchronized(TextAnnotation annotation)
@@ -10646,12 +10995,96 @@ namespace AnonPDF
                 return annotation.CachedRichContentSize;
             }
 
+            if (annotation.MeasuredAtDpi != GetCurrentDpiX())
+            {
+                SyncRichAnnotationBoundsFromMeasuredContent(annotation);
+            }
+
             if (TryGetApproximateRichContentSizeFromBounds(annotation, out SizeF approximateContentSize))
             {
                 return approximateContentSize;
             }
 
             return GetAnnotationContentSize(annotation);
+        }
+
+        private void SyncRichAnnotationBoundsFromMeasuredContent(TextAnnotation annotation)
+        {
+            if (annotation == null || !IsRichTextMode(annotation))
+            {
+                return;
+            }
+
+            float dpiScale = GetCurrentDpiX() / 96f;
+            RectangleF currentBounds = annotation.AnnotationBounds;
+            if (currentBounds.Width <= 0f || currentBounds.Height <= 0f)
+            {
+                return;
+            }
+
+            SizeF rawContentSize = GetRichAnnotationContentSize(
+                annotation.AnnotationText,
+                annotation.AnnotationRichText,
+                annotation.AnnotationFont,
+                annotation.AnnotationAlignment);
+            float padding = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth)
+                + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
+
+            // For 90°/270° rotations AnnotationBounds.W/H are swapped relative to the natural
+            // content orientation. Compare natural-orientation bounds against natural-orientation
+            // WPF measurement, then swap back when storing the result.
+            int syncRotation = NormalizeRotation(annotation.AnnotationRotation);
+            bool swapSync = (syncRotation == 90 || syncRotation == 270);
+            float boundsNaturalW = swapSync ? currentBounds.Height : currentBounds.Width;
+            float boundsNaturalH = swapSync ? currentBounds.Width : currentBounds.Height;
+
+            // Scaled: linearly interpolate stored bounds by DPI ratio (exact).
+            float scaledContentWidth = (boundsNaturalW - 2f * padding) * dpiScale;
+            float scaledContentHeight = (boundsNaturalH - 2f * padding) * dpiScale;
+            // Measured: from raw WPF measurement at current DPI (may have rendering variations).
+            // Use the minimum of scaled and measured to avoid overestimating from WPF variations.
+            float targetContentWidth = Math.Min(scaledContentWidth, rawContentSize.Width);
+            float targetContentHeight = Math.Min(scaledContentHeight, rawContentSize.Height);
+            // Convert natural-orientation expectedOuter back to rotated-orientation for AnnotationBounds.
+            float outerNaturalW = Math.Max(1f, targetContentWidth + 2f * padding);
+            float outerNaturalH = Math.Max(1f, targetContentHeight + 2f * padding);
+            SizeF expectedOuter = swapSync
+                ? new SizeF(outerNaturalH, outerNaturalW)
+                : new SizeF(outerNaturalW, outerNaturalH);
+
+            if (DebugLogEnabled)
+            {
+                LogDebug(
+                    $"SyncRichBounds id={annotation.Id} " +
+                    $"curBounds=({currentBounds.X:F1},{currentBounds.Y:F1},{currentBounds.Width:F1},{currentBounds.Height:F1}) " +
+                    $"rawContentSize=({rawContentSize.Width:F1},{rawContentSize.Height:F1}) " +
+                    $"scaledCW={scaledContentWidth:F1} scaledCH={scaledContentHeight:F1} " +
+                    $"expectedOuter=({expectedOuter.Width:F1},{expectedOuter.Height:F1}) " +
+                    $"padding={padding:F3} dpiScale={dpiScale:F3}");
+            }
+            if (Math.Abs(currentBounds.Width - expectedOuter.Width) > 1f ||
+                Math.Abs(currentBounds.Height - expectedOuter.Height) > 1f)
+            {
+                if (DebugLogEnabled)
+                {
+                    LogDebug($"SyncRichBounds UPDATING bounds from ({currentBounds.Width:F1},{currentBounds.Height:F1}) to ({expectedOuter.Width:F1},{expectedOuter.Height:F1})");
+                }
+                annotation.AnnotationBounds = new RectangleF(
+                    currentBounds.X,
+                    currentBounds.Y,
+                    expectedOuter.Width,
+                    expectedOuter.Height);
+                if (annotation.HasLeaderArrow && !annotation.LeaderEndPoint.IsEmpty)
+                {
+                    PointF defaultEnd = GetDefaultLeaderEndPoint(currentBounds);
+                    if (Math.Abs(annotation.LeaderEndPoint.X - defaultEnd.X) < 2f &&
+                        Math.Abs(annotation.LeaderEndPoint.Y - defaultEnd.Y) < 2f)
+                    {
+                        annotation.LeaderEndPoint = GetDefaultLeaderEndPoint(annotation.AnnotationBounds);
+                    }
+                }
+            }
+            annotation.MeasuredAtDpi = GetCurrentDpiX();
         }
 
         private SizeF GetDisplayedTextAnnotationContentSizeForInteractionStart(TextAnnotation annotation)
@@ -11527,7 +11960,7 @@ namespace AnonPDF
                 lines,
                 annotation.AnnotationFont,
                 annotation.AnnotationAlignment,
-                layout.LineHeight,
+                layout.LineHeight / (GetCurrentDpiX() / 96f),
                 !string.IsNullOrWhiteSpace(symbolFontPath) && File.Exists(symbolFontPath));
             if (string.IsNullOrWhiteSpace(htmlSnippet))
             {
@@ -14383,6 +14816,10 @@ namespace AnonPDF
             {
                 string renderableRichText = BuildRenderableRichTextRtf(plainText, richText, baseFont);
                 float scaledFontSize = Math.Max(0.1f, baseFont.Size * Math.Max(0.1f, fontScale));
+                float dpiScale;
+                using (var dpiG = Graphics.FromHwnd(IntPtr.Zero))
+                    dpiScale = dpiG.DpiX / 96f;
+                scaledFontSize *= dpiScale;
                 int renderWidthPx = Math.Max(1, widthPx + RichTextHorizontalRenderSafetyPx);
                 int renderHeightPx = Math.Max(1, heightPx);
                 using (var scaledFont = new Font(baseFont.FontFamily, scaledFontSize, baseFont.Style, GraphicsUnit.Point))
@@ -14417,7 +14854,7 @@ namespace AnonPDF
                         PageWidth = 100000d,
                         PageHeight = renderHeightPx
                     };
-                    document.LineHeight = Math.Max(1d, GetConsistentRichLineHeightPx(scaledFont));
+                    document.LineHeight = Math.Max(1d, GetConsistentRichLineHeightPx(scaledFont) / dpiScale);
                     richTextBox.Document = document;
 
                     if (!string.IsNullOrWhiteSpace(renderableRichText))
@@ -14829,6 +15266,7 @@ namespace AnonPDF
                     ApplyTextDialogDefaultsToDialog(dialog, TextDialogDefaults.CreateDefault());
                 };
 
+                dlg.ApplyDialogTheme(CreateDialogTheme());
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     // Calculate text size using the selected font
@@ -14886,7 +15324,7 @@ namespace AnonPDF
                         StampTextAnnotationCreated(newAnnotation);
                         textAnnotations.Add(newAnnotation);
 
-                        
+
 
                         PageItemStatus status = allPageStatuses[currentPage - 1];
                         status.HasObjects = true;
@@ -15385,7 +15823,7 @@ namespace AnonPDF
                 return;
             }
 
-            var menu = new ContextMenuStrip();
+            var menu = CreateThemedMenu();
             menu.Items.Add(LocalizedText("Order_BringToFront"), null, (_, __) => TryReorderRasterObject(rasterObject, BringRasterObjectToFront));
             menu.Items.Add(LocalizedText("Order_MoveForward"), null, (_, __) => TryReorderRasterObject(rasterObject, MoveRasterObjectForward));
             menu.Items.Add(LocalizedText("Order_MoveBackward"), null, (_, __) => TryReorderRasterObject(rasterObject, MoveRasterObjectBackward));
@@ -15402,7 +15840,7 @@ namespace AnonPDF
                 return;
             }
 
-            var menu = new ContextMenuStrip();
+            var menu = CreateThemedMenu();
             menu.Items.Add(LocalizedText("Order_BringToFront"), null, (_, __) => TryReorderArrowObject(arrowObject, BringArrowObjectToFront));
             menu.Items.Add(LocalizedText("Order_MoveForward"), null, (_, __) => TryReorderArrowObject(arrowObject, MoveArrowObjectForward));
             menu.Items.Add(LocalizedText("Order_MoveBackward"), null, (_, __) => TryReorderArrowObject(arrowObject, MoveArrowObjectBackward));
@@ -15419,7 +15857,7 @@ namespace AnonPDF
                 return;
             }
 
-            var menu = new ContextMenuStrip();
+            var menu = CreateThemedMenu();
             menu.Items.Add(LocalizedText("Order_BringToFront"), null, (_, __) => TryReorderVectorShape(vectorShape, BringVectorShapeToFront));
             menu.Items.Add(LocalizedText("Order_MoveForward"), null, (_, __) => TryReorderVectorShape(vectorShape, MoveVectorShapeForward));
             menu.Items.Add(LocalizedText("Order_MoveBackward"), null, (_, __) => TryReorderVectorShape(vectorShape, MoveVectorShapeBackward));
@@ -15737,7 +16175,7 @@ namespace AnonPDF
             string outputDir = Path.Combine(pdfDirectory, pdfFileName);
 
             Directory.CreateDirectory(outputDir);
-            var props = new ReaderProperties();          
+            var props = new ReaderProperties();
             if (!string.IsNullOrEmpty(userPassword))
             {
                 props.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
@@ -15951,7 +16389,7 @@ namespace AnonPDF
                         }
 
                     }
-                    
+
                 }
             }
             System.Windows.Forms.MessageBox.Show(this, string.Format(Resources.Msg_ExportGraphics_Done, outputDir), Resources.Title_Success, System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
@@ -15964,6 +16402,7 @@ namespace AnonPDF
 
             using (SplitDocumentDialog dlg = new SplitDocumentDialog(numPages, inputPdfPath))
             {
+                ApplyThemeToDialog(dlg);
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     Console.WriteLine("OK");
@@ -16163,8 +16602,11 @@ namespace AnonPDF
                 thumbnailsListView.Items.Clear();
                 foreach (int page in pageNumbers)
                 {
-                    string key = $"thumb_{page}";
-                    string imageKey = thumbnailsImageList.Images.ContainsKey(key) ? key : "placeholder";
+                    string key = null;
+                    thumbnailImageKeyByPage.TryGetValue(page, out key);
+                    string imageKey = !string.IsNullOrEmpty(key) && thumbnailsImageList.Images.ContainsKey(key)
+                        ? key
+                        : "placeholder";
                     var item = new ListViewItem(string.Format(Resources.UI_PageLabelFormat, page))
                     {
                         Tag = page,
@@ -16419,6 +16861,57 @@ namespace AnonPDF
             objectSelectionInfoLabel.Location = new Point(x, y);
         }
 
+        private void EnsureIndexingStatusOverlay()
+        {
+            if (indexingStatusLabel != null) return;
+
+            indexingStatusLabel = new Label
+            {
+                AutoSize = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Microsoft Sans Serif", 8.25F, FontStyle.Bold),
+                Padding = new Padding(6, 2, 6, 2),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Visible = false
+            };
+            this.Controls.Add(indexingStatusLabel);
+            indexingStatusLabel.BringToFront();
+            this.ClientSizeChanged += (_, __) => PositionIndexingStatusLabel();
+            mainAppSplitContainer.Panel2.SizeChanged += (_, __) => PositionIndexingStatusLabel();
+            ApplyThemeToIndexingStatusLabel();
+            PositionIndexingStatusLabel();
+        }
+
+        private void PositionIndexingStatusLabel()
+        {
+            if (indexingStatusLabel == null) return;
+            int margin = 8;
+            int spacing = 6;
+            Point panelOrigin = GetPanel2OriginInForm();
+            int x = panelOrigin.X + margin;
+            int y = panelOrigin.Y + margin;
+            if (maintenanceCountdownLabel != null && maintenanceCountdownLabel.Visible)
+                y = maintenanceCountdownLabel.Bottom + spacing;
+            if (objectSelectionInfoLabel != null && objectSelectionInfoLabel.Visible)
+                y = Math.Max(y, objectSelectionInfoLabel.Bottom + spacing);
+            indexingStatusLabel.Location = new Point(x, y);
+        }
+
+        private void ShowIndexingStatus(string text)
+        {
+            EnsureIndexingStatusOverlay();
+            ApplyThemeToIndexingStatusLabel();
+            indexingStatusLabel.Text = text;
+            indexingStatusLabel.Visible = true;
+            PositionIndexingStatusLabel();
+        }
+
+        private void HideIndexingStatus()
+        {
+            if (indexingStatusLabel != null)
+                indexingStatusLabel.Visible = false;
+        }
+
         private void ApplyThemeToObjectSelectionInfoLabel()
         {
             if (objectSelectionInfoLabel == null)
@@ -16428,6 +16921,17 @@ namespace AnonPDF
 
             objectSelectionInfoLabel.BackColor = CurrentTheme.SelectionBackColor;
             objectSelectionInfoLabel.ForeColor = CurrentTheme.SelectionForeColor;
+        }
+
+        private void ApplyThemeToIndexingStatusLabel()
+        {
+            if (indexingStatusLabel == null)
+            {
+                return;
+            }
+
+            indexingStatusLabel.BackColor = CurrentTheme.SelectionBackColor;
+            indexingStatusLabel.ForeColor = CurrentTheme.SelectionForeColor;
         }
 
         private Point GetPanel2OriginInForm()
@@ -16694,8 +17198,7 @@ namespace AnonPDF
                     return;
                 }
 
-                var message = BuildNewVersionMessage(info);
-                ShowInfoMessage(message);
+                ShowNewVersionDialog(info, offerDownload: false);
             }
             finally
             {
@@ -16773,10 +17276,7 @@ namespace AnonPDF
         private void PromptStandaloneUpdateInstall(RemoteVersionInfo info, bool manualRequest)
         {
             string msiDownloadUrl = GetStandaloneMsiDownloadUrl(info);
-            string prompt = BuildNewVersionMessage(info, msiDownloadUrl)
-                + Environment.NewLine + Environment.NewLine
-                + LocalizedText("Msg_StandaloneUpdate_AskDownloadAndRun");
-            var result = ShowQuestionMessage(prompt, LocalizedText("Title_UpdateAvailable"));
+            var result = ShowNewVersionDialog(info, offerDownload: true);
             if (result != DialogResult.Yes)
             {
                 if (manualRequest)
@@ -17161,12 +17661,136 @@ namespace AnonPDF
             MessageBox.Show(this, message, Resources.Title_Info, MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
+        private DialogResult ShowNewVersionDialog(RemoteVersionInfo info, bool offerDownload)
+        {
+            if (InvokeRequired)
+                return (DialogResult)Invoke(new Func<DialogResult>(() => ShowNewVersionDialog(info, offerDownload)));
+
+            if (isApplicationClosing || IsDisposed || Disposing)
+                return DialogResult.Cancel;
+
+            string dateText = string.IsNullOrWhiteSpace(info.Updated) ? "-" : info.Updated;
+            string downloadUrl = offerDownload ? GetStandaloneMsiDownloadUrl(info) : info.DownloadUrl;
+            bool hasUrl = !string.IsNullOrWhiteSpace(downloadUrl);
+
+            // URL label text: strip URL placeholder from existing resource "Link do pobrania: {0}"
+            string urlLabelText = string.Format(Resources.Msg_NewVersionDownload, "").TrimEnd();
+
+            int changesH = hasUrl ? 180 : 215;
+            int formH    = hasUrl ? 390 : 354;
+            int buttonY  = formH - 46;
+
+            using (var dialog       = new Form())
+            using (var versionLabel = new Label())
+            using (var changesHdr   = new Label())
+            using (var changesBox   = new TextBox())
+            using (var urlLabel     = new Label())
+            using (var urlBox       = new TextBox())
+            using (var downloadBtn  = new Button())
+            using (var closeBtn     = new Button())
+            {
+                dialog.Text = LocalizedText("Title_UpdateAvailable");
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.ShowInTaskbar = false;
+                dialog.ClientSize = ScaleSizeForCurrentDpi(500, formH);
+
+                versionLabel.Text = string.Format(Resources.Msg_NewVersionAvailable, info.Version, dateText);
+                versionLabel.Font = new Font(Font.FontFamily, 10f, FontStyle.Bold, GraphicsUnit.Point);
+                versionLabel.AutoSize = false;
+                versionLabel.Location = new Point(ScaleForCurrentDpi(16), ScaleForCurrentDpi(16));
+                versionLabel.Size = ScaleSizeForCurrentDpi(468, 38);
+
+                changesHdr.Text = Resources.Msg_NewVersionChangesHeader;
+                changesHdr.AutoSize = true;
+                changesHdr.Location = new Point(ScaleForCurrentDpi(16), ScaleForCurrentDpi(62));
+
+                changesBox.Multiline = true;
+                changesBox.ReadOnly = true;
+                changesBox.ScrollBars = ScrollBars.Vertical;
+                changesBox.WordWrap = true;
+                changesBox.BorderStyle = BorderStyle.FixedSingle;
+                changesBox.Font = new Font(Font.FontFamily, 9.5f, FontStyle.Regular, GraphicsUnit.Point);
+                changesBox.Location = new Point(ScaleForCurrentDpi(16), ScaleForCurrentDpi(82));
+                changesBox.Size = ScaleSizeForCurrentDpi(468, changesH);
+                changesBox.Text = string.IsNullOrWhiteSpace(info.ChangesText)
+                    ? Resources.Msg_NewVersionNoChanges
+                    : info.ChangesText;
+
+                if (hasUrl)
+                {
+                    urlLabel.Text = urlLabelText;
+                    urlLabel.AutoSize = true;
+                    urlLabel.Location = new Point(ScaleForCurrentDpi(16), ScaleForCurrentDpi(82 + changesH + 12));
+
+                    urlBox.Text = downloadUrl;
+                    urlBox.ReadOnly = true;
+                    urlBox.BorderStyle = BorderStyle.FixedSingle;
+                    urlBox.Font = new Font(Font.FontFamily, 9f, FontStyle.Regular, GraphicsUnit.Point);
+                    urlBox.Location = new Point(ScaleForCurrentDpi(16), ScaleForCurrentDpi(82 + changesH + 32));
+                    urlBox.Size = ScaleSizeForCurrentDpi(468, 24);
+                    urlBox.GotFocus += (_, __) => urlBox.SelectAll();
+
+                    dialog.Controls.Add(urlLabel);
+                    dialog.Controls.Add(urlBox);
+                }
+
+                if (offerDownload)
+                {
+                    downloadBtn.Text = LocalizedText("Btn_Update_DownloadAndRun");
+                    downloadBtn.Size = ScaleSizeForCurrentDpi(160, 30);
+                    downloadBtn.Location = new Point(
+                        ScaleSizeForCurrentDpi(500, 0).Width - ScaleForCurrentDpi(160 + 8 + 88 + 16),
+                        ScaleForCurrentDpi(buttonY));
+                    downloadBtn.Anchor = AnchorStyles.Bottom;
+                    downloadBtn.DialogResult = DialogResult.Yes;
+
+                    closeBtn.Text = Resources.Merge_Cancel;
+                    closeBtn.Size = ScaleSizeForCurrentDpi(88, 30);
+                    closeBtn.Location = new Point(
+                        ScaleSizeForCurrentDpi(500, 0).Width - ScaleForCurrentDpi(88 + 16),
+                        ScaleForCurrentDpi(buttonY));
+                    closeBtn.Anchor = AnchorStyles.Bottom;
+                    closeBtn.DialogResult = DialogResult.Cancel;
+
+                    dialog.AcceptButton = downloadBtn;
+                    dialog.Controls.Add(downloadBtn);
+                }
+                else
+                {
+                    closeBtn.Text = LocalizedText("Dialog_Licenses_Close");
+                    closeBtn.Size = ScaleSizeForCurrentDpi(100, 30);
+                    closeBtn.Location = new Point(
+                        (ScaleSizeForCurrentDpi(500, 0).Width - ScaleSizeForCurrentDpi(100, 0).Width) / 2,
+                        ScaleForCurrentDpi(buttonY));
+                    closeBtn.Anchor = AnchorStyles.Bottom;
+                    closeBtn.DialogResult = DialogResult.OK;
+                    dialog.AcceptButton = closeBtn;
+                }
+
+                dialog.CancelButton = closeBtn;
+                dialog.Controls.Add(versionLabel);
+                dialog.Controls.Add(changesHdr);
+                dialog.Controls.Add(changesBox);
+                dialog.Controls.Add(closeBtn);
+
+                ApplyThemeToDialog(dialog);
+
+                return dialog.ShowDialog(this);
+            }
+        }
+
         private void PDFForm_Shown(object sender, EventArgs e)
         {
             ApplyRightPanelDividerFromSettings();
             PromptMaintenanceRecoveryIfAvailable();
             UpdateLeftPanelWidth();
-            Task.Run(() => CheckForNewVersion(UpdateCheckSource.Startup));
+            if (!SuppressStartupUpdateCheck)
+            {
+                Task.Run(() => CheckForNewVersion(UpdateCheckSource.Startup));
+            }
             Task.Run(() => RefreshLicenseStatusFromServer());
         }
 
@@ -17295,6 +17919,7 @@ namespace AnonPDF
             ApplyDangerButtonTheme(clearSelectionButton, theme);
             ApplyThemeToMaintenanceCountdownLabel();
             ApplyThemeToObjectSelectionInfoLabel();
+            ApplyThemeToIndexingStatusLabel();
             UpdateObjectSelectionInfoLabel();
             ApplyTitleBarColor();
             UpdateSaveGroupState();
@@ -17422,6 +18047,39 @@ namespace AnonPDF
                 : theme.PanelBackColor;
         }
 
+        private DialogTheme CreateDialogTheme()
+        {
+            UiThemePalette theme = CurrentTheme;
+            return new DialogTheme
+            {
+                WindowBackColor = theme.WindowBackColor,
+                PanelBackColor = theme.PanelBackColor,
+                SectionBackColor = theme.SectionBackColor,
+                InputBackColor = GetInputBackColor(theme),
+                BorderColor = theme.BorderColor,
+                TextPrimaryColor = theme.TextPrimaryColor,
+                TextSecondaryColor = theme.TextSecondaryColor,
+                SelectionBackColor = theme.SelectionBackColor,
+                SelectionForeColor = theme.SelectionForeColor,
+                SecondaryButtonBackColor = theme.SecondaryButtonBackColor,
+                SecondaryButtonForeColor = theme.SecondaryButtonForeColor
+            };
+        }
+
+        private ContextMenuStrip CreateThemedMenu()
+        {
+            var menu = new ContextMenuStrip();
+            menu.Renderer = new ToolStripProfessionalRenderer(new ThemedColorTable(CurrentTheme));
+            menu.ForeColor = CurrentTheme.TextPrimaryColor;
+            menu.BackColor = CurrentTheme.WindowBackColor;
+            return menu;
+        }
+
+        private void ApplyThemeToDialog(Form dialog, params Control[] preserveBackColorControls)
+        {
+            DialogThemeApplier.ApplyTo(dialog, CreateDialogTheme(), preserveBackColorControls);
+        }
+
         private static void ApplyIconButtonTheme(Button button, UiThemePalette theme)
         {
             if (button == null)
@@ -17464,6 +18122,8 @@ namespace AnonPDF
             themeForestGreenMenuItem.Checked = currentThemeKind == UiThemeKind.ForestGreen;
             themeGraphiteDarkMenuItem.Checked = currentThemeKind == UiThemeKind.GraphiteDark;
             themeOledDarkTealMenuItem.Checked = currentThemeKind == UiThemeKind.OledDarkTeal;
+            themeBlackYellowHighContrastMenuItem.Checked = currentThemeKind == UiThemeKind.BlackYellowHighContrast;
+            themeBlackWhiteHighContrastMenuItem.Checked = currentThemeKind == UiThemeKind.BlackWhiteHighContrast;
         }
 
         private static void ApplyMenuItemTheme(ToolStripItemCollection items, UiThemePalette theme)
@@ -17556,11 +18216,63 @@ namespace AnonPDF
             int extra = mainAppSplitContainer.Panel1.VerticalScroll.Visible
                 ? SystemInformation.VerticalScrollBarWidth + LeftPanelScrollbarPadding
                 : 0;
-            int desiredWidth = LeftPanelBaseWidth + extra;
+            int desiredWidth = scaledLeftPanelBaseWidth + extra;
+            int minW = mainAppSplitContainer.Panel1MinSize;
+            int maxW = mainAppSplitContainer.Width - mainAppSplitContainer.Panel2MinSize - mainAppSplitContainer.SplitterWidth;
+            if (maxW < minW) maxW = minW;
+            desiredWidth = Math.Max(minW, Math.Min(desiredWidth, maxW));
             if (mainAppSplitContainer.SplitterDistance != desiredWidth)
             {
                 mainAppSplitContainer.SplitterDistance = desiredWidth;
             }
+        }
+
+        private float GetDpiScale()
+        {
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+                return g.DpiX / 96f;
+        }
+
+        private int ScaleForCurrentDpi(int value)
+        {
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+                return (int)(value * g.DpiX / 96f);
+        }
+
+        private Size ScaleSizeForCurrentDpi(int w, int h)
+        {
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float s = g.DpiX / 96f;
+                return new Size((int)(w * s), (int)(h * s));
+            }
+        }
+
+        internal static void SetupDpi(Form form)
+        {
+            form.AutoScaleDimensions = new SizeF(6F, 13F);
+            form.AutoScaleMode = AutoScaleMode.Font;
+        }
+
+        internal static int ScaleForDpiStatic(int value)
+        {
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+                return (int)(value * g.DpiX / 96f);
+        }
+
+        internal static Size ScaleSizeForDpiStatic(int w, int h)
+        {
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float s = g.DpiX / 96f;
+                return new Size((int)(w * s), (int)(h * s));
+            }
+        }
+
+        private static float GetCurrentDpiX()
+        {
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+                return g.DpiX;
         }
 
         private void UpdateSaveGroupState()
@@ -17591,6 +18303,21 @@ namespace AnonPDF
 
         private void PDFForm_Load(object sender, EventArgs e)
         {
+            // Scale splitter distances for current DPI
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                float scale = g.DpiX / 96f;
+                scaledLeftPanelBaseWidth = (int)(LeftPanelBaseWidth * scale);
+                annotationsIconSize = (int)(22 * scale);
+                formSplitContainer.Panel2MinSize = 180;
+                // Keep thumbnail caption font at a fixed physical size regardless of DPI
+                if (thumbnailsListView != null && pagesListView != null)
+                {
+                    float baseFontSize = pagesListView.Font.Size / scale;
+                    thumbnailsListView.Font = new Font(pagesListView.Font.FontFamily, baseFontSize, pagesListView.Font.Style);
+                }
+            }
+
             // Replace Panel2 with a ZoomPanel wrapper
             ZoomPanel zoomPanel = new ZoomPanel
             {
@@ -17598,7 +18325,7 @@ namespace AnonPDF
                 AutoScroll = true,
                 Visible = false,
             };
-            
+
 
             // Move all existing controls from Panel2 into ZoomPanel
             while (mainAppSplitContainer.Panel2.Controls.Count > 0)
@@ -17743,6 +18470,7 @@ namespace AnonPDF
 
             using (var dialog = new TutorialBrowserForm(catalog, tutorialDir))
             {
+                ApplyThemeToDialog(dialog);
                 dialog.ShowDialog(this);
             }
 
@@ -17780,7 +18508,8 @@ namespace AnonPDF
                 snapshot = null;
             }
 
-            quickStartTutorialOverlay = new QuickStartTutorialOverlay(markerRadioButton, boxRadioButton, pdfViewer, buttonRedactText, snapshot);
+            quickStartTutorialOverlay = new QuickStartTutorialOverlay(cursorRadioButton, markerRadioButton, boxRadioButton, pdfViewer, buttonRedactText, snapshot);
+            quickStartTutorialOverlay.ApplyTheme(CreateDialogTheme());
             quickStartTutorialOverlay.Dismissed += (_, __) => CompleteQuickStartTutorial();
             Controls.Add(quickStartTutorialOverlay);
             quickStartTutorialOverlay.BringToFront();
@@ -18199,6 +18928,74 @@ namespace AnonPDF
             return false;
         }
 
+        public void SetIntegrationMode(string pdfOutputPath)
+        {
+            integrationPdfOutputPath = pdfOutputPath;
+            ApplyIntegrationModeUi();
+        }
+
+        private void ApplyIntegrationModeUi()
+        {
+            if (string.IsNullOrEmpty(integrationPdfOutputPath)) return;
+            openPdfToolStripMenuItem.Enabled = false;
+            openProjectToolStripMenuItem.Enabled = false;
+            loadPdfButton.Enabled = false;
+            openProjectButton.Enabled = false;
+            Text = Text + " [Integracja eDOK]";
+        }
+
+        public void SetAutoSavePngPath(string pngOutputPath)
+        {
+            autoSavePngOutputPath = pngOutputPath;
+            if (string.IsNullOrEmpty(pngOutputPath))
+                return;
+            // Stage 1: poll until the base PDF page image is ready (set by pagingTimer).
+            var pollTimer = new System.Windows.Forms.Timer { Interval = 300 };
+            pollTimer.Tick += (_, __) =>
+            {
+                if (pdfViewer?.Image == null)
+                    return;
+                pollTimer.Stop();
+                pollTimer.Dispose();
+                // Stage 2: give WPF rich-text rendering time to complete before capturing.
+                var captureTimer = new System.Windows.Forms.Timer { Interval = 1500 };
+                captureTimer.Tick += (s2, e2) =>
+                {
+                    captureTimer.Stop();
+                    captureTimer.Dispose();
+                    string path = autoSavePngOutputPath;
+                    autoSavePngOutputPath = null;
+                    if (string.IsNullOrEmpty(path))
+                        return;
+                    try { SaveCurrentViewToFile(path); }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine("PNG save error: " + ex.Message); }
+                    suppressCloseConfirmation = true;
+                    Close();
+                };
+                captureTimer.Start();
+            };
+            pollTimer.Start();
+        }
+
+        public void RotateCurrentPageBy(int degrees)
+        {
+            degrees = NormalizeRotation(degrees);
+            int steps = degrees / 90;
+            for (int i = 0; i < steps; i++)
+                RotateCurrentPageClockwise();
+        }
+
+        public void GoToPage(int pageNumber)
+        {
+            if (pdf == null || pageNumber < 1 || pageNumber > numPages) return;
+            currentPage = pageNumber;
+            ReloadRefreshCurrentPage();
+            UpdateNavigationButtons(currentPage);
+            UpdateSelectionNavigationButtons();
+            UpdateSearchNavigationButtons();
+            SyncPagesListSelectionToCurrentPage(ensureVisible: true);
+        }
+
         public void Panel2_MouseWheel(MouseEventArgs e)
         {
             // If PDF is not loaded, do nothing.
@@ -18268,7 +19065,7 @@ namespace AnonPDF
                 pendingScaleFactor = newScale;
 
                 zoomPending = true;
-            
+
 
                 // (F) Restart timer â€“ if subsequent events appear quickly, timer will restart
                 zoomTimer.Stop();
@@ -18846,7 +19643,7 @@ namespace AnonPDF
                 {
                     // Standard mode: redaction at PDF level using PdfCleanUpTool.
                     byte[] pdfBytes = ExtractPageToBytes(currentPage);
-                        
+
                     using (MemoryStream inputMemoryStream = new MemoryStream(pdfBytes))
                     using (MemoryStream outputMemoryStream = new MemoryStream())
                     {
@@ -18912,9 +19709,17 @@ namespace AnonPDF
             ZoomPanel panel = mainAppSplitContainer.Panel2.Controls[0] as ZoomPanel;
             if (!(panel is ZoomPanel)) return;
 
-            // 1) Calculate dynamically min and max scale for THIS page
-            int panelWidth = panel.ClientSize.Width;
-            int panelHeight = panel.ClientSize.Height;
+            // Use form-level dimensions which are properly auto-scaled by AutoScaleMode.Font,
+            // rather than panel.ClientSize which may not be laid out yet on initial launch.
+            int leftWidth = mainAppSplitContainer.Panel1.Width;
+            int splitterW = mainAppSplitContainer.SplitterWidth;
+            int panelWidth = mainAppSplitContainer.Width - leftWidth - splitterW;
+            int panelHeight = mainAppSplitContainer.Panel2.Height;
+
+            if (DebugLogEnabled)
+            {
+                LogDebug($"CalcScale panelW={panelWidth} panelH={panelHeight} leftW={leftWidth} formW={mainAppSplitContainer.Width} panelCS={panel.ClientSize.Width}x{panel.ClientSize.Height}");
+            }
 
             var pageSize = GetPageSizeWithOffset(pageNumber);
             float pageW = pageSize.Width;
@@ -19189,7 +19994,7 @@ namespace AnonPDF
 
             pageNumberTextBox.Text = pageNumber.ToString();
             numPagesLabel.Text = "/  " + numPages.ToString(CultureInfo.CurrentCulture);
-            
+
             UpdateZoomButtons();
         }
 
@@ -19214,7 +20019,7 @@ namespace AnonPDF
                 if (int.TryParse(pageNumberTextBox.Text, out int pageNumber) && (pageNumber > 0) && (pageNumber <= numPages))
                 {
                     // Here your logic, e.g. go to specific page:
-                    
+
                     currentPage = pageNumber;
                     if ((string)filterComboBox.SelectedItem == allComboItem)
                     {
@@ -19280,7 +20085,7 @@ namespace AnonPDF
             string[] tokensToRemove =
             {
                 "semi condensed",
-                "semicondensed",                
+                "semicondensed",
                 "semi expanded",
                 "semiexpanded",
                 "narrow",
@@ -20816,15 +21621,15 @@ namespace AnonPDF
                 //bool hasSearchResults = ((PageItemStatus)currentItem.Tag).HasSearchResults;
                 //bool markedForDeletion = ((PageItemStatus)currentItem.Tag).MarkedForDeletion;
                 //bool hasObjects = ((PageItemStatus)currentItem.Tag).HasObjects;
-                
+
                 status.HasSelections = false;
-                
+
 
                 if ((string)filterComboBox.SelectedItem == allComboItem)
                 {
                     ListViewItem currentItem = pagesListView.Items[currentPage - 1];
                     UpdateItemTag(currentItem, currentPage, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects, invalidateStaticThumbnailOverlays: false, invalidateThumbnail: false);
-                    
+
                 }
                 else
                 {
@@ -20912,8 +21717,8 @@ namespace AnonPDF
 
             using (Form prompt = new Form())
             {
-                prompt.Width = 400;
-                prompt.Height = 150;
+                prompt.Width = ScaleForCurrentDpi(400);
+                prompt.Height = ScaleForCurrentDpi(150);
                 if (iChangeRemoveDialog || !string.IsNullOrEmpty(pwd))
                 {
                     prompt.Text = Resources.PwdPrompt_Title_CanChangeRemove;
@@ -20921,20 +21726,22 @@ namespace AnonPDF
                 {
                     prompt.Text = Resources.PwdPrompt_Title_Enter;
                 }
-                    
+
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
                 prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.MaximizeBox = false;
                 prompt.MinimizeBox = false;
 
-                Label textLabel = new Label() { Left = 10, Top = 20, AutoSize = true, Text = Resources.PwdPrompt_Label_Password };
-                TextBox inputBox = new TextBox() { Left = 70, Top = 18, Width = 300, UseSystemPasswordChar = true, Text = pwd };
-                Button confirmation = new Button() { Text = Resources.Merge_OK, Left = 300, Width = 70, Top = 50, DialogResult = DialogResult.OK };
+                Label textLabel = new Label() { Left = ScaleForCurrentDpi(10), Top = ScaleForCurrentDpi(20), AutoSize = true, Text = Resources.PwdPrompt_Label_Password };
+                TextBox inputBox = new TextBox() { Left = ScaleForCurrentDpi(70), Top = ScaleForCurrentDpi(18), Width = ScaleForCurrentDpi(300), UseSystemPasswordChar = true, Text = pwd };
+                Button confirmation = new Button() { Text = Resources.Merge_OK, Left = ScaleForCurrentDpi(300), Width = ScaleForCurrentDpi(70), Top = ScaleForCurrentDpi(50), DialogResult = DialogResult.OK };
 
                 prompt.Controls.Add(textLabel);
                 prompt.Controls.Add(inputBox);
                 prompt.Controls.Add(confirmation);
                 prompt.AcceptButton = confirmation;
+
+                ApplyThemeToDialog(prompt);
 
                 try
                 {
@@ -21023,6 +21830,7 @@ namespace AnonPDF
 
         LogDebug($"LoadPdf path={inputPdfPath} password={(string.IsNullOrEmpty(userPassword) ? "no" : "yes")}");
 
+            isLoadingPdf = true;
             pdfCleanUpToolError = false;
             groupBoxFilter.Visible = false;
             pagesTabControl.Visible = false;
@@ -21075,7 +21883,7 @@ namespace AnonPDF
 
             ClearSearchResult();
 
-            
+
             allPageStatuses.Clear();
 
             // Fill list with e.g. 10 pages
@@ -21101,31 +21909,46 @@ namespace AnonPDF
             }
 
             InitializeThumbnailPanelItems();
-            
+
             groupBoxFilter.Visible = true;
             groupBoxFilter.Refresh();
             pagesTabControl.Visible = true;
             ApplyRightPanelTabSelectionFromSettings();
             EnsureThumbnailGeneration();
+            isLoadingPdf = false;
+            currentPage = Math.Max(1, Math.Min(currentPage, numPages));
             pagesListView.Items[currentPage - 1].Selected = true;
             pagesListView.Items[currentPage - 1].EnsureVisible();
             SelectThumbnailItemForCurrentPage(ensureVisible: true);
             // Do not rely only on ListView selection events when loading a new file.
             ReloadRefreshCurrentPage();
 
+            // Start background indexing and OCR so search and cursor mode are ready immediately
+            cursorRadioButton.Enabled = false;
+            ShowIndexingStatus(LocalizedText("Msg_CursorModeUnavailable"));
+            backgroundIndexingCts?.Cancel();
+            backgroundIndexingCts?.Dispose();
+            backgroundIndexingCts = new System.Threading.CancellationTokenSource();
+            var cts = backgroundIndexingCts;
+            Task.Run(() => PdfTextSearcher.CachePdfText(inputPdfPath, userPassword, cts.Token), cts.Token)
+                .ContinueWith(_ =>
+                {
+                    BeginInvoke((Action)(() =>
+                    {
+                        if (!cts.IsCancellationRequested &&
+                            !isApplicationClosing && !IsDisposed && !Disposing)
+                        {
+                            HideIndexingStatus();
+                            cursorRadioButton.Enabled = true;
+                        }
+                    }));
+                });
+
             groupBoxSelections.Enabled = true;
             groupBoxPagesToRemove.Enabled = true;
-            if (PdfDocumentContainsText())
-            {
-                groupBoxSearch.Enabled = true;
-                personalDataButton.Enabled = true;
-            }
-            else
-            {
-                groupBoxSearch.Enabled = false;
-                personalDataButton.Enabled = false;
-            }
-            
+            groupBoxSearch.Enabled = true;
+            personalDataButton.Enabled = true;
+
             saveProjectAsButton.Enabled = true;
             buttonRedactText.Enabled = true;
             colorCheckBox.Enabled = true;
@@ -21133,7 +21956,7 @@ namespace AnonPDF
             setSavePassword.Enabled = true;
             openSavedPDFCheckBox.Enabled = true;
             safeModeCheckBox.Enabled = true;
-            
+
             saveProjectAsMenuItem.Enabled = true;
             savePdfMenuItem.Enabled = true;
             if (savePdfPageRangeMenuItem != null)
@@ -21188,7 +22011,7 @@ namespace AnonPDF
             saveProjectButton.Enabled = false;
             saveProjectMenuItem.Enabled = false;
             ResetUndoRedoHistory(resetSavedStateSignature: true);
-            
+
             UpdateSaveGroupState();
             UpdateOptionsGroupState();
 
@@ -21208,6 +22031,7 @@ namespace AnonPDF
             }
             finally
             {
+                isLoadingPdf = false;
                 EndBusyCursor();
             }
         }
@@ -21328,8 +22152,8 @@ namespace AnonPDF
         {
             using (Form prompt = new Form())
             {
-                prompt.Width = 430;
-                prompt.Height = 170;
+                prompt.Width = ScaleForCurrentDpi(430);
+                prompt.Height = ScaleForCurrentDpi(170);
                 prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
                 prompt.MinimizeBox = false;
@@ -21337,16 +22161,16 @@ namespace AnonPDF
                 prompt.ShowInTaskbar = false;
                 prompt.Text = Resources.Title_Confirmation;
 
-                int iconSize = 32;
+                int iconSize = ScaleForCurrentDpi(32);
                 int iconTextGap = 4;
-                int contentWidth = 332;
-                int contentLeft = Math.Max(12, (prompt.ClientSize.Width - contentWidth) / 2);
+                int contentWidth = ScaleForCurrentDpi(332);
+                int contentLeft = Math.Max(ScaleForCurrentDpi(12), (prompt.ClientSize.Width - contentWidth) / 2);
                 float messageFontSize = prompt.Font.Size + 1.5f;
 
                 PictureBox iconPictureBox = new PictureBox
                 {
                     Left = contentLeft,
-                    Top = 20,
+                    Top = ScaleForCurrentDpi(20),
                     Width = iconSize,
                     Height = iconSize,
                     SizeMode = PictureBoxSizeMode.CenterImage,
@@ -21356,9 +22180,9 @@ namespace AnonPDF
                 Label textLabel = new Label
                 {
                     Left = contentLeft + iconSize + iconTextGap,
-                    Top = 12,
+                    Top = ScaleForCurrentDpi(12),
                     Width = contentWidth - iconSize - iconTextGap,
-                    Height = 50,
+                    Height = ScaleForCurrentDpi(50),
                     AutoSize = false,
                     TextAlign = ContentAlignment.MiddleLeft,
                     Font = new Font(prompt.Font.FontFamily, messageFontSize, FontStyle.Regular),
@@ -21368,20 +22192,20 @@ namespace AnonPDF
                 Button saveButton = new Button
                 {
                     Text = GetCloseProjectSaveButtonText(),
-                    Width = 100,
-                    Height = 28
+                    Width = ScaleForCurrentDpi(100),
+                    Height = ScaleForCurrentDpi(28)
                 };
                 Button dontSaveButton = new Button
                 {
                     Text = GetCloseProjectDontSaveButtonText(),
-                    Width = 110,
-                    Height = 28
+                    Width = ScaleForCurrentDpi(110),
+                    Height = ScaleForCurrentDpi(28)
                 };
                 Button cancelButton = new Button
                 {
                     Text = GetCloseProjectCancelButtonText(),
-                    Width = 100,
-                    Height = 28
+                    Width = ScaleForCurrentDpi(100),
+                    Height = ScaleForCurrentDpi(28)
                 };
 
                 FlowLayoutPanel buttonsPanel = new FlowLayoutPanel
@@ -21397,8 +22221,8 @@ namespace AnonPDF
                 buttonsPanel.Controls.Add(dontSaveButton);
                 buttonsPanel.Controls.Add(cancelButton);
                 Size panelSize = buttonsPanel.PreferredSize;
-                buttonsPanel.Left = Math.Max(12, (prompt.ClientSize.Width - panelSize.Width) / 2);
-                buttonsPanel.Top = 82;
+                buttonsPanel.Left = Math.Max(ScaleForCurrentDpi(12), (prompt.ClientSize.Width - panelSize.Width) / 2);
+                buttonsPanel.Top = ScaleForCurrentDpi(82);
 
                 CloseProjectDecision decision = CloseProjectDecision.Cancel;
                 saveButton.Click += (_, __) =>
@@ -21426,6 +22250,8 @@ namespace AnonPDF
                 prompt.AcceptButton = saveButton;
                 prompt.CancelButton = cancelButton;
 
+                ApplyThemeToDialog(prompt);
+
                 DialogResult result = prompt.ShowDialog(this);
                 if (result != DialogResult.OK)
                 {
@@ -21440,8 +22266,8 @@ namespace AnonPDF
         {
             using (Form prompt = new Form())
             {
-                prompt.Width = 430;
-                prompt.Height = 170;
+                prompt.Width = ScaleForCurrentDpi(430);
+                prompt.Height = ScaleForCurrentDpi(170);
                 prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
                 prompt.MinimizeBox = false;
@@ -21449,16 +22275,16 @@ namespace AnonPDF
                 prompt.ShowInTaskbar = false;
                 prompt.Text = Resources.Title_Confirmation;
 
-                int iconSize = 32;
+                int iconSize = ScaleForCurrentDpi(32);
                 int iconTextGap = 4;
-                int contentWidth = 332;
-                int contentLeft = Math.Max(12, (prompt.ClientSize.Width - contentWidth) / 2);
+                int contentWidth = ScaleForCurrentDpi(332);
+                int contentLeft = Math.Max(ScaleForCurrentDpi(12), (prompt.ClientSize.Width - contentWidth) / 2);
                 float messageFontSize = prompt.Font.Size + 1.5f;
 
                 PictureBox iconPictureBox = new PictureBox
                 {
                     Left = contentLeft,
-                    Top = 20,
+                    Top = ScaleForCurrentDpi(20),
                     Width = iconSize,
                     Height = iconSize,
                     SizeMode = PictureBoxSizeMode.CenterImage,
@@ -21468,9 +22294,9 @@ namespace AnonPDF
                 Label textLabel = new Label
                 {
                     Left = contentLeft + iconSize + iconTextGap,
-                    Top = 12,
+                    Top = ScaleForCurrentDpi(12),
                     Width = contentWidth - iconSize - iconTextGap,
-                    Height = 50,
+                    Height = ScaleForCurrentDpi(50),
                     AutoSize = false,
                     TextAlign = ContentAlignment.MiddleLeft,
                     Font = new Font(prompt.Font.FontFamily, messageFontSize, FontStyle.Regular),
@@ -21480,14 +22306,14 @@ namespace AnonPDF
                 Button confirmButton = new Button
                 {
                     Text = GetCloseAppConfirmButtonText(),
-                    Width = 100,
-                    Height = 28
+                    Width = ScaleForCurrentDpi(100),
+                    Height = ScaleForCurrentDpi(28)
                 };
                 Button cancelButton = new Button
                 {
                     Text = GetCloseProjectCancelButtonText(),
-                    Width = 100,
-                    Height = 28
+                    Width = ScaleForCurrentDpi(100),
+                    Height = ScaleForCurrentDpi(28)
                 };
 
                 FlowLayoutPanel buttonsPanel = new FlowLayoutPanel
@@ -21502,8 +22328,8 @@ namespace AnonPDF
                 buttonsPanel.Controls.Add(confirmButton);
                 buttonsPanel.Controls.Add(cancelButton);
                 Size panelSize = buttonsPanel.PreferredSize;
-                buttonsPanel.Left = Math.Max(12, (prompt.ClientSize.Width - panelSize.Width) / 2);
-                buttonsPanel.Top = 82;
+                buttonsPanel.Left = Math.Max(ScaleForCurrentDpi(12), (prompt.ClientSize.Width - panelSize.Width) / 2);
+                buttonsPanel.Top = ScaleForCurrentDpi(82);
 
                 confirmButton.Click += (_, __) =>
                 {
@@ -21521,6 +22347,8 @@ namespace AnonPDF
                 prompt.Controls.Add(buttonsPanel);
                 prompt.AcceptButton = confirmButton;
                 prompt.CancelButton = cancelButton;
+
+                ApplyThemeToDialog(prompt);
 
                 return prompt.ShowDialog(this) == DialogResult.OK;
             }
@@ -21594,6 +22422,8 @@ namespace AnonPDF
             pagingTimer.Stop();
             zoomTimer.Stop();
             CancelPreviewRender();
+            backgroundIndexingCts?.Cancel();
+            HideIndexingStatus();
 
             pdf = null;
             inputPdfPath = string.Empty;
@@ -21887,11 +22717,44 @@ namespace AnonPDF
 
             foreach (var annotation in textAnnotations.Where(a => a.PageNumber == currentPage))
             {
+                // Plain text: AnnotationBounds.W/H are stored in pixels at the DPI of the
+                // Graphics.FromHwnd() context at creation time, which may differ from
+                // pdfViewer.CreateGraphics().DpiX used here. Re-measure content at current
+                // physical DPI so the PDF-pt conversion is correct and the stored bounds stay
+                // consistent with future draw-time measurements.
+                float localPxToPtX;
+                float localPxToPtY;
+                float boundsWidthPx;
+                float boundsHeightPx;
+                if (!IsRichTextMode(annotation))
+                {
+                    float currentDpiX = GetCurrentDpiX();
+                    localPxToPtX = 72f / currentDpiX;
+                    localPxToPtY = localPxToPtX;
+                    SizeF contentSz = GetAnnotationPlainContentSize(annotation.AnnotationText, annotation.AnnotationFont);
+                    float pad = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth)
+                               + NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
+                    float outerNaturalW = contentSz.Width + 2f * pad;
+                    float outerNaturalH = contentSz.Height + 2f * pad;
+                    // At 90°/270° annotation rotation AnnotationBounds.W/H are swapped vs natural orientation.
+                    int annRot = NormalizeRotation(annotation.AnnotationRotation);
+                    bool swapped = annRot == 90 || annRot == 270;
+                    boundsWidthPx = swapped ? outerNaturalH : outerNaturalW;
+                    boundsHeightPx = swapped ? outerNaturalW : outerNaturalH;
+                }
+                else
+                {
+                    localPxToPtX = pxToPtX;
+                    localPxToPtY = pxToPtY;
+                    boundsWidthPx = annotation.AnnotationBounds.Width;
+                    boundsHeightPx = annotation.AnnotationBounds.Height;
+                }
+
                 RectangleF boundsPt = new RectangleF(
                     annotation.AnnotationBounds.X,
                     annotation.AnnotationBounds.Y,
-                    annotation.AnnotationBounds.Width * pxToPtX,
-                    annotation.AnnotationBounds.Height * pxToPtY
+                    boundsWidthPx * localPxToPtX,
+                    boundsHeightPx * localPxToPtY
                 );
 
                 boundsPt = RotateRectClockwise(boundsPt, pageSize.Width, pageSize.Height);
@@ -21899,15 +22762,15 @@ namespace AnonPDF
                 annotation.AnnotationBounds = new RectangleF(
                     boundsPt.X,
                     boundsPt.Y,
-                    boundsPt.Width / pxToPtX,
-                    boundsPt.Height / pxToPtY
+                    boundsPt.Width / localPxToPtX,
+                    boundsPt.Height / localPxToPtY
                 );
 
                 if (annotation.HasLeaderArrow)
                 {
-                    PointF leaderEndPt = new PointF(annotation.LeaderEndPoint.X * pxToPtX, annotation.LeaderEndPoint.Y * pxToPtY);
+                    PointF leaderEndPt = new PointF(annotation.LeaderEndPoint.X * localPxToPtX, annotation.LeaderEndPoint.Y * localPxToPtY);
                     leaderEndPt = new PointF(pageSize.Height - leaderEndPt.Y, leaderEndPt.X);
-                    annotation.LeaderEndPoint = new PointF(leaderEndPt.X / pxToPtX, leaderEndPt.Y / pxToPtY);
+                    annotation.LeaderEndPoint = new PointF(leaderEndPt.X / localPxToPtX, leaderEndPt.Y / localPxToPtY);
                     annotation.LeaderAnchorKind = GetClosestTextLeaderAnchorKind(annotation, annotation.LeaderEndPoint);
                 }
 
@@ -22154,6 +23017,15 @@ namespace AnonPDF
 
             if (!EnsureInterestSubjectForRequiredBases())
             {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(integrationPdfOutputPath))
+            {
+                SaveRedactedPdfToFile(integrationPdfOutputPath, additionalPagesToRemove: null);
+                MessageBox.Show(this,
+                    string.Format("Plik PDF zapisany:\n{0}", integrationPdfOutputPath),
+                    "eDOK – zapisano", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -24885,6 +25757,7 @@ namespace AnonPDF
             selectedRasterObject = null;
             selectedArrowObject = null;
             selectedVectorShape = null;
+            selectedRedactionBlock = null;
             ResetGroupMoveState();
             ResetTextRotationInteractionState();
             ResetRasterInteractionState();
@@ -25671,7 +26544,7 @@ namespace AnonPDF
             return source.Clone(rect, PixelFormat.Format32bppArgb);
         }
 
-        private bool TryCreateShapeIconBitmap(VectorShapeType shapeType, int pixelSize, out Bitmap bitmap)
+        private bool TryCreateShapeIconBitmap(VectorShapeType shapeType, int pixelSize, System.Drawing.Color color, out Bitmap bitmap)
         {
             bitmap = null;
             if (pixelSize < 8)
@@ -25685,7 +26558,7 @@ namespace AnonPDF
                 return false;
             }
 
-            return TryCreateMaterialIconBitmap(codePoint.Value, pixelSize, System.Drawing.Color.Black, out bitmap);
+            return TryCreateMaterialIconBitmap(codePoint.Value, pixelSize, color, out bitmap);
         }
 
         private bool TryCreateMaterialIconBitmap(int codePoint, int pixelSize, System.Drawing.Color color, out Bitmap bitmap)
@@ -25790,11 +26663,11 @@ namespace AnonPDF
                 prompt.Text = GetShapeToolDialogTitle();
                 prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
-                prompt.MinimizeBox = false;
+                                prompt.MinimizeBox = false;
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
-                prompt.Width = 620;
-                prompt.Height = 460;
+                prompt.Width = ScaleForCurrentDpi(620);
+                prompt.Height = ScaleForCurrentDpi(460);
                 prompt.BackColor = theme.SectionBackColor;
                 prompt.ForeColor = theme.TextPrimaryColor;
 
@@ -25802,18 +26675,18 @@ namespace AnonPDF
 
                 var labelShapes = new Label
                 {
-                    Left = 12,
-                    Top = 12,
-                    Width = 560,
+                    Left = ScaleForCurrentDpi(12),
+                    Top = ScaleForCurrentDpi(12),
+                    Width = ScaleForCurrentDpi(560),
                     Text = LocalizedText("Vector_Dialog_ShapeLabel")
                 };
 
                 var shapesPanel = new FlowLayoutPanel
                 {
-                    Left = 12,
-                    Top = 34,
-                    Width = 584,
-                    Height = 74,
+                    Left = ScaleForCurrentDpi(12),
+                    Top = ScaleForCurrentDpi(34),
+                    Width = ScaleForCurrentDpi(584),
+                    Height = ScaleForCurrentDpi(74),
                     WrapContents = false,
                     Padding = new Padding(0)
                 };
@@ -25825,6 +26698,7 @@ namespace AnonPDF
                 bool useMaterialIcons = TryGetShapeIconFontFamily(out ignoredShapeIconFamily);
                 var shapeButtonToolTip = new ToolTip();
                 var shapeButtonImages = new List<Image>();
+                var themedShapeButtonImages = new Dictionary<Tuple<VectorShapeType, int>, Image>();
                 Action refreshShapeButtons = null;
                 prompt.Disposed += (_, __) => shapeButtonToolTip?.Dispose();
                 prompt.Disposed += (_, __) =>
@@ -25834,12 +26708,29 @@ namespace AnonPDF
                         img?.Dispose();
                     }
                 };
+                Image GetShapeButtonIcon(VectorShapeType shapeType, System.Drawing.Color iconColor)
+                {
+                    var key = Tuple.Create(shapeType, iconColor.ToArgb());
+                    if (themedShapeButtonImages.TryGetValue(key, out Image existingImage))
+                    {
+                        return existingImage;
+                    }
+
+                    if (TryCreateShapeIconBitmap(shapeType, ScaleForCurrentDpi(30), iconColor, out Bitmap iconBitmap))
+                    {
+                        themedShapeButtonImages[key] = iconBitmap;
+                        shapeButtonImages.Add(iconBitmap);
+                        return iconBitmap;
+                    }
+
+                    return null;
+                }
                 foreach (VectorShapeType shapeType in Enum.GetValues(typeof(VectorShapeType)))
                 {
                     var button = new Button
                     {
-                        Width = 60,
-                        Height = 60,
+                        Width = ScaleForCurrentDpi(60),
+                        Height = ScaleForCurrentDpi(60),
                         Margin = new Padding(2),
                         Padding = new Padding(0),
                         Text = string.Empty,
@@ -25857,11 +26748,9 @@ namespace AnonPDF
                     button.BackColor = theme.SecondaryButtonBackColor;
                     button.ForeColor = theme.SecondaryButtonForeColor;
                     shapeButtonToolTip.SetToolTip(button, GetShapeTypeInputTooltip(shapeType));
-                    if (useMaterialIcons && TryCreateShapeIconBitmap(shapeType, 30, out Bitmap iconBitmap))
+                    if (useMaterialIcons)
                     {
-                        button.Image = iconBitmap;
                         button.ImageAlign = ContentAlignment.MiddleCenter;
-                        shapeButtonImages.Add(iconBitmap);
                     }
                     else
                     {
@@ -25885,14 +26774,14 @@ namespace AnonPDF
                     shapesPanel.Controls.Add(button);
                 }
 
-                var labelStrokeColor = new Label { Left = 12, Top = 120, Width = 120, Text = LocalizedText("Vector_Dialog_StrokeColor") };
+                var labelStrokeColor = new Label { Left = ScaleForCurrentDpi(12), Top = ScaleForCurrentDpi(120), Width = ScaleForCurrentDpi(120), Text = LocalizedText("Vector_Dialog_StrokeColor") };
                 System.Drawing.Color strokeBaseColor = System.Drawing.Color.FromArgb(working.StrokeColorArgb);
                 var buttonStrokeColor = new Button
                 {
-                    Left = 140,
-                    Top = 116,
-                    Width = 140,
-                    Height = 26,
+                    Left = ScaleForCurrentDpi(140),
+                    Top = ScaleForCurrentDpi(116),
+                    Width = ScaleForCurrentDpi(140),
+                    Height = ScaleForCurrentDpi(26),
                     BackColor = System.Drawing.Color.FromArgb(strokeBaseColor.R, strokeBaseColor.G, strokeBaseColor.B)
                 };
                 buttonStrokeColor.Click += (_, __) =>
@@ -25908,21 +26797,21 @@ namespace AnonPDF
                         }
                     }
                 };
-                var checkNoStrokeColor = new CheckBox
+                var checkNoStrokeColor = new ThemedCheckBox
                 {
-                    Left = 140,
-                    Top = 146,
-                    Width = 180,
+                    Left = ScaleForCurrentDpi(140),
+                    Top = ScaleForCurrentDpi(146),
+                    Width = ScaleForCurrentDpi(180),
                     Text = LocalizedText("Vector_Dialog_NoStrokeColor"),
                     Checked = !HasVisibleVectorColor(working.StrokeColorArgb)
                 };
 
-                var labelStrokeWidth = new Label { Left = 300, Top = 120, Width = 95, Text = LocalizedText("Vector_Dialog_StrokeWidth") };
+                var labelStrokeWidth = new Label { Left = ScaleForCurrentDpi(300), Top = ScaleForCurrentDpi(120), Width = ScaleForCurrentDpi(95), Text = LocalizedText("Vector_Dialog_StrokeWidth") };
                 var numericStrokeWidth = new NumericUpDown
                 {
-                    Left = 398,
-                    Top = 116,
-                    Width = 70,
+                    Left = ScaleForCurrentDpi(398),
+                    Top = ScaleForCurrentDpi(116),
+                    Width = ScaleForCurrentDpi(70),
                     DecimalPlaces = 1,
                     Minimum = 0.5m,
                     Maximum = 24,
@@ -25935,12 +26824,12 @@ namespace AnonPDF
                     notifyShapePreviewChanged?.Invoke();
                 };
 
-                var labelStrokeStyle = new Label { Left = 482, Top = 120, Width = 60, Text = LocalizedText("Vector_Dialog_StrokeStyle") };
+                var labelStrokeStyle = new Label { Left = ScaleForCurrentDpi(482), Top = ScaleForCurrentDpi(120), Width = ScaleForCurrentDpi(60), Text = LocalizedText("Vector_Dialog_StrokeStyle") };
                 var comboStrokeStyle = new ComboBox
                 {
-                    Left = 540,
-                    Top = 116,
-                    Width = 56,
+                    Left = ScaleForCurrentDpi(540),
+                    Top = ScaleForCurrentDpi(116),
+                    Width = ScaleForCurrentDpi(56),
                     DropDownStyle = ComboBoxStyle.DropDownList
                 };
                 comboStrokeStyle.DropDownWidth = 170;
@@ -25968,14 +26857,14 @@ namespace AnonPDF
                         break;
                 }
 
-                var labelFillColor = new Label { Left = 12, Top = 184, Width = 120, Text = LocalizedText("Vector_Dialog_FillColor") };
+                var labelFillColor = new Label { Left = ScaleForCurrentDpi(12), Top = ScaleForCurrentDpi(184), Width = ScaleForCurrentDpi(120), Text = LocalizedText("Vector_Dialog_FillColor") };
                 System.Drawing.Color fillBaseColor = System.Drawing.Color.FromArgb(working.FillColorArgb);
                 var buttonFillColor = new Button
                 {
-                    Left = 140,
-                    Top = 180,
-                    Width = 140,
-                    Height = 26,
+                    Left = ScaleForCurrentDpi(140),
+                    Top = ScaleForCurrentDpi(180),
+                    Width = ScaleForCurrentDpi(140),
+                    Height = ScaleForCurrentDpi(26),
                     BackColor = System.Drawing.Color.FromArgb(fillBaseColor.R, fillBaseColor.G, fillBaseColor.B)
                 };
                 buttonFillColor.Click += (_, __) =>
@@ -25991,33 +26880,33 @@ namespace AnonPDF
                         }
                     }
                 };
-                var checkNoFillColor = new CheckBox
+                var checkNoFillColor = new ThemedCheckBox
                 {
-                    Left = 140,
-                    Top = 210,
-                    Width = 200,
+                    Left = ScaleForCurrentDpi(140),
+                    Top = ScaleForCurrentDpi(210),
+                    Width = ScaleForCurrentDpi(200),
                     Text = LocalizedText("Vector_Dialog_NoFillColor"),
                     Checked = !HasVisibleVectorColor(working.FillColorArgb)
                 };
 
-                var labelFillOpacity = new Label { Left = 300, Top = 184, Width = 95, Text = LocalizedText("Vector_Dialog_FillOpacity") };
+                var labelFillOpacity = new Label { Left = ScaleForCurrentDpi(300), Top = ScaleForCurrentDpi(184), Width = ScaleForCurrentDpi(95), Text = LocalizedText("Vector_Dialog_FillOpacity") };
                 var numericFillOpacity = new NumericUpDown
                 {
-                    Left = 398,
-                    Top = 180,
-                    Width = 70,
+                    Left = ScaleForCurrentDpi(398),
+                    Top = ScaleForCurrentDpi(180),
+                    Width = ScaleForCurrentDpi(70),
                     DecimalPlaces = 0,
                     Minimum = 0,
                     Maximum = 100,
                     Increment = 5,
                     Value = (decimal)Math.Round(NormalizeVectorFillOpacity(working.FillOpacity) * 100f)
                 };
-                var labelFillPattern = new Label { Left = 482, Top = 184, Width = 60, Text = LocalizedText("Vector_Dialog_FillPattern") };
+                var labelFillPattern = new Label { Left = ScaleForCurrentDpi(482), Top = ScaleForCurrentDpi(184), Width = ScaleForCurrentDpi(60), Text = LocalizedText("Vector_Dialog_FillPattern") };
                 var comboFillPattern = new ComboBox
                 {
-                    Left = 540,
-                    Top = 180,
-                    Width = 56,
+                    Left = ScaleForCurrentDpi(540),
+                    Top = ScaleForCurrentDpi(180),
+                    Width = ScaleForCurrentDpi(56),
                     DropDownStyle = ComboBoxStyle.DropDownList
                 };
                 comboFillPattern.DropDownWidth = 170;
@@ -26045,13 +26934,13 @@ namespace AnonPDF
                 {
                     patternBaseColor = System.Drawing.Color.Black;
                 }
-                var labelFillPatternColor = new Label { Left = 482, Top = 214, Width = 60, Text = LocalizedText("Vector_Dialog_FillPatternColor") };
+                var labelFillPatternColor = new Label { Left = ScaleForCurrentDpi(482), Top = ScaleForCurrentDpi(214), Width = ScaleForCurrentDpi(60), Text = LocalizedText("Vector_Dialog_FillPatternColor") };
                 var buttonFillPatternColor = new Button
                 {
-                    Left = 540,
-                    Top = 210,
-                    Width = 56,
-                    Height = 26,
+                    Left = ScaleForCurrentDpi(540),
+                    Top = ScaleForCurrentDpi(210),
+                    Width = ScaleForCurrentDpi(56),
+                    Height = ScaleForCurrentDpi(26),
                     BackColor = System.Drawing.Color.FromArgb(patternBaseColor.R, patternBaseColor.G, patternBaseColor.B)
                 };
                 buttonFillPatternColor.Click += (_, __) =>
@@ -26084,77 +26973,77 @@ namespace AnonPDF
                 };
                 numericFillOpacity.ValueChanged += (_, __) => notifyShapePreviewChanged?.Invoke();
                 comboStrokeStyle.SelectedIndexChanged += (_, __) => notifyShapePreviewChanged?.Invoke();
-                var labelStartEnding = new Label { Left = 12, Top = 248, Width = 120, Text = LocalizedText("Vector_Dialog_LineStartEnding") };
+                var labelStartEnding = new Label { Left = ScaleForCurrentDpi(12), Top = ScaleForCurrentDpi(248), Width = ScaleForCurrentDpi(120), Text = LocalizedText("Vector_Dialog_LineStartEnding") };
                 var comboStartEnding = new ComboBox
                 {
-                    Left = 140,
-                    Top = 244,
-                    Width = 140,
+                    Left = ScaleForCurrentDpi(140),
+                    Top = ScaleForCurrentDpi(244),
+                    Width = ScaleForCurrentDpi(140),
                     DropDownStyle = ComboBoxStyle.DropDownList
                 };
                 AddVectorLineEndingItems(comboStartEnding);
                 comboStartEnding.SelectedIndex = GetVectorLineEndingComboIndex(working.StartEnding);
 
-                var labelEndEnding = new Label { Left = 300, Top = 248, Width = 110, Text = LocalizedText("Vector_Dialog_LineEndEnding") };
+                var labelEndEnding = new Label { Left = ScaleForCurrentDpi(300), Top = ScaleForCurrentDpi(248), Width = ScaleForCurrentDpi(110), Text = LocalizedText("Vector_Dialog_LineEndEnding") };
                 var comboEndEnding = new ComboBox
                 {
-                    Left = 412,
-                    Top = 244,
-                    Width = 184,
+                    Left = ScaleForCurrentDpi(412),
+                    Top = ScaleForCurrentDpi(244),
+                    Width = ScaleForCurrentDpi(184),
                     DropDownStyle = ComboBoxStyle.DropDownList
                 };
                 AddVectorLineEndingItems(comboEndEnding);
                 comboEndEnding.SelectedIndex = GetVectorLineEndingComboIndex(working.EndEnding);
 
-                var labelStartEndingPrimary = new Label { Left = 12, Top = 278, Width = 120 };
+                var labelStartEndingPrimary = new Label { Left = ScaleForCurrentDpi(12), Top = ScaleForCurrentDpi(278), Width = 120 };
                 var numericStartEndingPrimary = new NumericUpDown
                 {
-                    Left = 140,
-                    Top = 274,
-                    Width = 70,
+                    Left = ScaleForCurrentDpi(140),
+                    Top = ScaleForCurrentDpi(274),
+                    Width = ScaleForCurrentDpi(70),
                     DecimalPlaces = 1,
                     Minimum = 0,
                     Maximum = 240,
                     Increment = 1
                 };
-                var labelStartEndingSecondary = new Label { Left = 12, Top = 308, Width = 120 };
+                var labelStartEndingSecondary = new Label { Left = ScaleForCurrentDpi(12), Top = ScaleForCurrentDpi(308), Width = 120 };
                 var numericStartEndingSecondary = new NumericUpDown
                 {
-                    Left = 140,
-                    Top = 304,
-                    Width = 70,
+                    Left = ScaleForCurrentDpi(140),
+                    Top = ScaleForCurrentDpi(304),
+                    Width = ScaleForCurrentDpi(70),
                     DecimalPlaces = 1,
                     Minimum = 0,
                     Maximum = 179,
                     Increment = 1
                 };
-                var labelEndEndingPrimary = new Label { Left = 300, Top = 278, Width = 110 };
+                var labelEndEndingPrimary = new Label { Left = ScaleForCurrentDpi(300), Top = ScaleForCurrentDpi(278), Width = 110 };
                 var numericEndEndingPrimary = new NumericUpDown
                 {
-                    Left = 412,
-                    Top = 274,
-                    Width = 70,
+                    Left = ScaleForCurrentDpi(412),
+                    Top = ScaleForCurrentDpi(274),
+                    Width = ScaleForCurrentDpi(70),
                     DecimalPlaces = 1,
                     Minimum = 0,
                     Maximum = 240,
                     Increment = 1
                 };
-                var labelEndEndingSecondary = new Label { Left = 300, Top = 308, Width = 110 };
+                var labelEndEndingSecondary = new Label { Left = ScaleForCurrentDpi(300), Top = ScaleForCurrentDpi(308), Width = 110 };
                 var numericEndEndingSecondary = new NumericUpDown
                 {
-                    Left = 412,
-                    Top = 304,
-                    Width = 70,
+                    Left = ScaleForCurrentDpi(412),
+                    Top = ScaleForCurrentDpi(304),
+                    Width = ScaleForCurrentDpi(70),
                     DecimalPlaces = 1,
                     Minimum = 0,
                     Maximum = 179,
                     Increment = 1
                 };
-                var checkLimitRasterView = new CheckBox
+                var checkLimitRasterView = new ThemedCheckBox
                 {
-                    Left = 12,
-                    Top = 338,
-                    Width = 220,
+                    Left = ScaleForCurrentDpi(12),
+                    Top = ScaleForCurrentDpi(338),
+                    Width = ScaleForCurrentDpi(220),
                     Text = LocalizedText("Vector_Dialog_LimitRasterView"),
                     Checked = working.LimitsRasterView
                 };
@@ -26174,6 +27063,17 @@ namespace AnonPDF
                 VectorLineEndingKind GetSelectedEndEndingKind()
                 {
                     return ParseVectorLineEndingKind(GetSelectedVectorLineEndingValue(comboEndEnding));
+                }
+
+                void SetDialogLabelState(Label label, bool active)
+                {
+                    if (label == null)
+                    {
+                        return;
+                    }
+
+                    label.Enabled = true;
+                    label.ForeColor = active ? theme.TextPrimaryColor : theme.TextSecondaryColor;
                 }
 
                 void UpdateLineEndingSizeControls()
@@ -26217,13 +27117,13 @@ namespace AnonPDF
 
                         bool supportsLineEndings = selectedShape == VectorShapeType.Polyline;
                         bool hasStroke = !checkNoStrokeColor.Checked;
-                        labelStartEndingPrimary.Enabled = supportsLineEndings && hasStroke && startPrimaryEnabled;
+                        SetDialogLabelState(labelStartEndingPrimary, supportsLineEndings && hasStroke && startPrimaryEnabled);
                         numericStartEndingPrimary.Enabled = supportsLineEndings && hasStroke && startPrimaryEnabled;
-                        labelStartEndingSecondary.Enabled = supportsLineEndings && hasStroke && startSecondaryEnabled;
+                        SetDialogLabelState(labelStartEndingSecondary, supportsLineEndings && hasStroke && startSecondaryEnabled);
                         numericStartEndingSecondary.Enabled = supportsLineEndings && hasStroke && startSecondaryEnabled;
-                        labelEndEndingPrimary.Enabled = supportsLineEndings && hasStroke && endPrimaryEnabled;
+                        SetDialogLabelState(labelEndEndingPrimary, supportsLineEndings && hasStroke && endPrimaryEnabled);
                         numericEndEndingPrimary.Enabled = supportsLineEndings && hasStroke && endPrimaryEnabled;
-                        labelEndEndingSecondary.Enabled = supportsLineEndings && hasStroke && endSecondaryEnabled;
+                        SetDialogLabelState(labelEndEndingSecondary, supportsLineEndings && hasStroke && endSecondaryEnabled);
                         numericEndEndingSecondary.Enabled = supportsLineEndings && hasStroke && endSecondaryEnabled;
                     }
                     finally
@@ -26411,23 +27311,23 @@ namespace AnonPDF
                     bool hasPattern = hasFill && comboFillPattern.SelectedIndex > 0;
 
                     buttonStrokeColor.Enabled = hasStroke;
-                    labelStrokeWidth.Enabled = hasStroke;
+                    SetDialogLabelState(labelStrokeWidth, hasStroke);
                     numericStrokeWidth.Enabled = hasStroke;
-                    labelStrokeStyle.Enabled = hasStroke;
+                    SetDialogLabelState(labelStrokeStyle, hasStroke);
                     comboStrokeStyle.Enabled = hasStroke;
 
-                    labelFillColor.Enabled = supportsFill;
+                    SetDialogLabelState(labelFillColor, supportsFill);
                     checkNoFillColor.Enabled = supportsFill;
                     buttonFillColor.Enabled = hasFill;
-                    labelFillOpacity.Enabled = hasFill;
+                    SetDialogLabelState(labelFillOpacity, hasFill);
                     numericFillOpacity.Enabled = hasFill;
-                    labelFillPattern.Enabled = hasFill;
+                    SetDialogLabelState(labelFillPattern, hasFill);
                     comboFillPattern.Enabled = hasFill;
-                    labelFillPatternColor.Enabled = hasPattern;
+                    SetDialogLabelState(labelFillPatternColor, hasPattern);
                     buttonFillPatternColor.Enabled = hasPattern;
-                    labelStartEnding.Enabled = supportsLineEndings && hasStroke;
+                    SetDialogLabelState(labelStartEnding, supportsLineEndings && hasStroke);
                     comboStartEnding.Enabled = supportsLineEndings && hasStroke;
-                    labelEndEnding.Enabled = supportsLineEndings && hasStroke;
+                    SetDialogLabelState(labelEndEnding, supportsLineEndings && hasStroke);
                     comboEndEnding.Enabled = supportsLineEndings && hasStroke;
                     checkLimitRasterView.Enabled = supportsRasterClip;
                     if (!supportsRasterClip)
@@ -26453,7 +27353,17 @@ namespace AnonPDF
                         currentButton.Padding = isSelected
                             ? new Padding(1, 1, 0, 0)
                             : new Padding(0);
-                        currentButton.ForeColor = currentButton.Enabled ? theme.SecondaryButtonForeColor : theme.TextSecondaryColor;
+                        System.Drawing.Color iconColor = currentButton.Enabled
+                            ? (isSelected ? theme.SelectionForeColor : theme.SecondaryButtonForeColor)
+                            : theme.TextSecondaryColor;
+                        currentButton.ForeColor = iconColor;
+                        if (useMaterialIcons)
+                        {
+                            currentButton.Image = GetShapeButtonIcon(pair.Key, iconColor);
+                            currentButton.Text = currentButton.Image == null
+                                ? GetShapeTypeDisplayName(pair.Key)
+                                : string.Empty;
+                        }
                     }
                 };
 
@@ -26498,9 +27408,10 @@ namespace AnonPDF
 
                 var buttonRestoreDefaults = new Button
                 {
-                    Left = 212,
-                    Top = 368,
-                    Width = 140,
+                    Left = ScaleForCurrentDpi(212),
+                    Top = ScaleForCurrentDpi(368),
+                    Width = ScaleForCurrentDpi(140),
+                    Height = ScaleForCurrentDpi(28),
                     Text = GetRestoreSettingsButtonText()
                 };
                 buttonRestoreDefaults.Click += (_, __) =>
@@ -26509,8 +27420,60 @@ namespace AnonPDF
                     notifyShapePreviewChanged?.Invoke();
                 };
 
-                var buttonOk = new Button { Left = 364, Top = 368, Width = 110, Text = "OK", DialogResult = DialogResult.OK };
-                var buttonCancel = new Button { Left = 486, Top = 368, Width = 110, Text = GetCancelButtonText(), DialogResult = DialogResult.Cancel };
+                var buttonOk = new Button { Left = ScaleForCurrentDpi(364), Top = ScaleForCurrentDpi(368), Width = ScaleForCurrentDpi(110), Height = ScaleForCurrentDpi(28), Text = "OK", DialogResult = DialogResult.OK };
+                var buttonCancel = new Button { Left = ScaleForCurrentDpi(486), Top = ScaleForCurrentDpi(368), Width = ScaleForCurrentDpi(110), Height = ScaleForCurrentDpi(28), Text = GetCancelButtonText(), DialogResult = DialogResult.Cancel };
+
+                shapesPanel.BackColor = theme.SectionBackColor;
+                foreach (Label label in new[]
+                {
+                    labelShapes,
+                    labelStrokeColor,
+                    labelStrokeWidth,
+                    labelStrokeStyle,
+                    labelFillColor,
+                    labelFillOpacity,
+                    labelFillPattern,
+                    labelFillPatternColor,
+                    labelStartEnding,
+                    labelEndEnding,
+                    labelStartEndingPrimary,
+                    labelStartEndingSecondary,
+                    labelEndEndingPrimary,
+                    labelEndEndingSecondary
+                })
+                {
+                    label.BackColor = theme.SectionBackColor;
+                    label.ForeColor = theme.TextSecondaryColor;
+                }
+
+                foreach (CheckBox checkBox in new[] { checkNoStrokeColor, checkNoFillColor, checkLimitRasterView })
+                {
+                    checkBox.BackColor = theme.SectionBackColor;
+                    checkBox.ForeColor = theme.TextPrimaryColor;
+                    checkBox.UseVisualStyleBackColor = false;
+                    if (checkBox is ThemedCheckBox themedCheckBox)
+                    {
+                        themedCheckBox.DisabledForeColor = theme.TextSecondaryColor;
+                        themedCheckBox.AccentColor = theme.SelectionBackColor;
+                        themedCheckBox.BorderColor = theme.BorderColor;
+                    }
+                }
+
+                foreach (ComboBox comboBox in new[] { comboStrokeStyle, comboFillPattern, comboStartEnding, comboEndEnding })
+                {
+                    comboBox.BackColor = GetInputBackColor(theme);
+                    comboBox.ForeColor = theme.TextPrimaryColor;
+                }
+
+                foreach (NumericUpDown numeric in new[] { numericStrokeWidth, numericFillOpacity, numericStartEndingPrimary, numericStartEndingSecondary, numericEndEndingPrimary, numericEndEndingSecondary })
+                {
+                    numeric.BackColor = GetInputBackColor(theme);
+                    numeric.ForeColor = theme.TextPrimaryColor;
+                }
+
+                ApplySecondaryButtonTheme(buttonRestoreDefaults, theme);
+                ApplySecondaryButtonTheme(buttonOk, theme);
+                ApplySecondaryButtonTheme(buttonCancel, theme);
 
                 prompt.Controls.Add(labelShapes);
                 prompt.Controls.Add(shapesPanel);
@@ -26568,7 +27531,17 @@ namespace AnonPDF
                         pair.Value.Padding = isSelected
                             ? new Padding(1, 1, 0, 0)
                             : new Padding(0);
-                        pair.Value.ForeColor = pair.Value.Enabled ? theme.SecondaryButtonForeColor : theme.TextSecondaryColor;
+                        System.Drawing.Color iconColor = pair.Value.Enabled
+                            ? (isSelected ? theme.SelectionForeColor : theme.SecondaryButtonForeColor)
+                            : theme.TextSecondaryColor;
+                        pair.Value.ForeColor = iconColor;
+                        if (useMaterialIcons)
+                        {
+                            pair.Value.Image = GetShapeButtonIcon(pair.Key, iconColor);
+                            pair.Value.Text = pair.Value.Image == null
+                                ? GetShapeTypeDisplayName(pair.Key)
+                                : string.Empty;
+                        }
                     }
                 }
 
@@ -26633,6 +27606,7 @@ namespace AnonPDF
             currentSelection = RectangleF.Empty;
             ResetRedactionResizeState();
             suppressRedactionModeTracking = true;
+            cursorRadioButton.Checked = false;
             markerRadioButton.Checked = false;
             boxRadioButton.Checked = false;
             suppressRedactionModeTracking = false;
@@ -26646,17 +27620,27 @@ namespace AnonPDF
             }
 
             isMarkerCtrlBoxMode = false;
-            bool restoreMarker = lastManualRedactionModeIsMarker ?? hitBlock.IsMarkerSelection;
             suppressRedactionModeTracking = true;
-            markerRadioButton.Checked = restoreMarker;
-            boxRadioButton.Checked = !restoreMarker;
+            if (hitBlock.IsCursorSelection)
+            {
+                cursorRadioButton.Checked = true;
+                markerRadioButton.Checked = false;
+                boxRadioButton.Checked = false;
+            }
+            else
+            {
+                bool restoreMarker = lastManualRedactionMode != RedactionMode.Box && (lastManualRedactionMode == RedactionMode.Marker || hitBlock.IsMarkerSelection);
+                cursorRadioButton.Checked = false;
+                markerRadioButton.Checked = restoreMarker;
+                boxRadioButton.Checked = !restoreMarker;
+            }
             suppressRedactionModeTracking = false;
             return true;
         }
 
         private bool IsRedactionSelectionModeEnabled()
         {
-            return markerRadioButton.Checked || boxRadioButton.Checked;
+            return cursorRadioButton.Checked || markerRadioButton.Checked || boxRadioButton.Checked;
         }
 
         private static bool DoesGraphicsPathIntersectRectangle(GraphicsPath path, RectangleF rectangle)
@@ -27210,30 +28194,34 @@ namespace AnonPDF
             return true;
         }
 
+        private void CursorRadioButton_CheckedChanged(object sender, EventArgs e)
+        {
+            if (!suppressRedactionModeTracking && cursorRadioButton.Checked)
+            {
+                lastManualRedactionMode = RedactionMode.Cursor;
+                SaveDefaultRedactionModeUserSetting("Cursor");
+            }
+            if (cursorRadioButton.Checked) UpdatePdfViewerToolCursor();
+        }
+
         private void MarkerRadioButton_CheckedChanged(object sender, EventArgs e)
         {
             if (!suppressRedactionModeTracking && markerRadioButton.Checked)
             {
-                lastManualRedactionModeIsMarker = true;
+                lastManualRedactionMode = RedactionMode.Marker;
+                SaveDefaultRedactionModeUserSetting("Marker");
             }
-
-            if (markerRadioButton.Checked)
-            {
-                UpdatePdfViewerToolCursor();
-            }
+            if (markerRadioButton.Checked) UpdatePdfViewerToolCursor();
         }
 
         private void BoxRadioButton_CheckedChanged(object sender, EventArgs e)
         {
             if (!suppressRedactionModeTracking && boxRadioButton.Checked)
             {
-                lastManualRedactionModeIsMarker = false;
+                lastManualRedactionMode = RedactionMode.Box;
+                SaveDefaultRedactionModeUserSetting("Box");
             }
-
-            if (boxRadioButton.Checked)
-            {
-                UpdatePdfViewerToolCursor();
-            }
+            if (boxRadioButton.Checked) UpdatePdfViewerToolCursor();
         }
 
         private void EndVectorShapeCreationMode(bool keepDefaults = true)
@@ -27636,7 +28624,8 @@ namespace AnonPDF
                     }
                 }
 
-                if (TryRestoreRedactionSelectionModeFromHitBlock(e.Location))
+                if (GetSelectableObjectsAtPoint(e.Location, dpiX, dpiY).Count == 0 &&
+                    TryRestoreRedactionSelectionModeFromHitBlock(e.Location))
                 {
                     ResetObjectSelectionCycle();
                     ResetRasterInteractionState();
@@ -27767,6 +28756,7 @@ namespace AnonPDF
 
                 if (TryHandleAnnotationIconMouseDown(e.Location, dpiX, dpiY))
                 {
+                    selectedRedactionBlock = null;
                     selectedArrowObject = null;
                     ResetArrowInteractionState();
                     ClearArrowIconClickState();
@@ -27781,6 +28771,7 @@ namespace AnonPDF
 
                 if (TryHandleSelectedVectorShapeMouseDown(e.Location))
                 {
+                    selectedRedactionBlock = null;
                     selectedArrowObject = null;
                     ResetArrowInteractionState();
                     ClearArrowIconClickState();
@@ -27799,6 +28790,7 @@ namespace AnonPDF
 
                 if (TryHandleSelectedArrowMouseDown(e.Location))
                 {
+                    selectedRedactionBlock = null;
                     selectedTextAnnotation = null;
                     selectedRasterObject = null;
                     ResetRasterInteractionState();
@@ -27816,6 +28808,7 @@ namespace AnonPDF
 
                 if (TryHandleSelectedRasterMouseDown(e.Location))
                 {
+                    selectedRedactionBlock = null;
                     selectedArrowObject = null;
                     ResetArrowInteractionState();
                     ClearArrowIconClickState();
@@ -27898,6 +28891,51 @@ namespace AnonPDF
                 annotationToMove = null;
                 isMoving = false;
                 textMoveMouseOffset = PointF.Empty;
+                if (cursorRadioButton.Checked)
+                {
+                    if (TryGetWordBoundsAtPoint(e.Location, out RectangleF wordBounds))
+                    {
+                        // Refine bounds using precise glyph data (same mechanism as grey preview)
+                        if (TryRefineWordBoundsWithGlyphData(wordBounds, wordBounds, out RectangleF refined))
+                        {
+                            wordBounds = refined;
+                        }
+
+                        BeginUndoCapture("Add cursor selection");
+                        var block = new RedactionBlock(wordBounds, currentPage)
+                        {
+                            IsCursorSelection = true,
+                            LayerId = GetResolvedActiveLayerId()
+                        };
+                        StampRedactionBlockCreated(block);
+                        NormalizeRedactionBlockMetadata(block);
+                        redactionBlocks.Add(block);
+                        selectedRedactionBlock = block;
+                        InvalidateThumbnailRedactionOverlay(currentPage);
+                        InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
+                        TryComputeRedactionPreviewRects(block);
+                        CommitUndoCapture();
+                        PageItemStatus st = allPageStatuses[currentPage - 1];
+                        st.HasSelections = true;
+                        if ((string)filterComboBox.SelectedItem == allComboItem)
+                        {
+                            var item = pagesListView.Items[currentPage - 1];
+                            UpdateItemTag(item, currentPage, st.HasSelections, st.HasSearchResults, st.MarkedForDeletion, st.HasObjects, invalidateStaticThumbnailOverlays: false, invalidateThumbnail: false);
+                            pagesListView.Invalidate(item.Bounds);
+                        }
+                        else ApplyFilter((string)filterComboBox.SelectedItem);
+                        clearPageButton.Enabled = true;
+                        projectWasChangedAfterLastSave = true;
+                        saveProjectButton.Enabled = true;
+                        saveProjectMenuItem.Enabled = true;
+                        pdfViewer.Invalidate();
+                    }
+                    else
+                    {
+                        pdfViewer.Invalidate();
+                    }
+                    return;
+                }
                 TryRestoreRedactionSelectionModeFromHitBlock(e.Location);
                 isDrawing = true;
                 if (IsRedactionSelectionModeEnabled())
@@ -28575,7 +29613,7 @@ namespace AnonPDF
 
             if (Control.MouseButtons == MouseButtons.None)
             {
-                if (isCommentCreationMode || IsRedactionSelectionModeEnabled())
+            if (isCommentCreationMode || IsRedactionSelectionModeEnabled())
                 {
                     if (!TryUpdateRedactionHoverCursor(e.Location))
                     {
@@ -28763,10 +29801,10 @@ namespace AnonPDF
                 return;
             }
 
-             
+
             //if ((string)filterComboBox.SelectedItem == allComboItem)
             //{
-            
+
 
             PageItemStatus status = allPageStatuses[currentPage - 1];
             if (IsCurrentPageMarkedForDeletion() && (e.Button == MouseButtons.Left || e.Button == MouseButtons.Right))
@@ -29286,8 +30324,8 @@ namespace AnonPDF
                                 InvalidateThumbnailRedactionOverlay(currentPage);
                                 InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
                                 TryComputeRedactionPreviewRects(createdBlock);
-                                
-                                
+
+
 
                                 status.HasSelections = true;
 
@@ -29325,7 +30363,7 @@ namespace AnonPDF
                                 InvalidateThumbnailPage(currentPage, invalidateStaticOverlays: false);
                                 TryComputeRedactionPreviewRects(createdBlock);
 
-                                
+
                                 status.HasSelections = true;
 
                                 if ((string)filterComboBox.SelectedItem == allComboItem)
@@ -29340,7 +30378,7 @@ namespace AnonPDF
                                     ApplyFilter((string)filterComboBox.SelectedItem);
                                 }
 
-                                
+
                                 projectWasChangedAfterLastSave = true;
                                 saveProjectButton.Enabled = true;
                                 saveProjectMenuItem.Enabled = true;
@@ -29809,13 +30847,13 @@ namespace AnonPDF
                 prompt.MinimizeBox = false;
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
-                prompt.ClientSize = new Size(460, 310);
+                prompt.ClientSize = ScaleSizeForCurrentDpi(460, 310);
 
                 var label = new Label
                 {
                     Text = GetCommentDialogLabelText(),
                     AutoSize = true,
-                    Location = new Point(12, 12)
+                    Location = new Point(ScaleForCurrentDpi(12), ScaleForCurrentDpi(12))
                 };
 
                 var textBox = new TextBox
@@ -29823,8 +30861,8 @@ namespace AnonPDF
                     Multiline = true,
                     AcceptsReturn = true,
                     ScrollBars = ScrollBars.Vertical,
-                    Location = new Point(12, 34),
-                    Size = new Size(prompt.ClientSize.Width - 24, 160),
+                    Location = new Point(ScaleForCurrentDpi(12), ScaleForCurrentDpi(34)),
+                    Size = new Size(prompt.ClientSize.Width - 24, ScaleForCurrentDpi(160)),
                     Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom,
                     Text = initialValue ?? string.Empty
                 };
@@ -29833,22 +30871,22 @@ namespace AnonPDF
                 {
                     Text = GetCommentHighlightColorLabelText(),
                     AutoSize = true,
-                    Location = new Point(12, 202)
+                    Location = new Point(ScaleForCurrentDpi(12), ScaleForCurrentDpi(202))
                 };
 
                 var highlightPreview = new Panel
                 {
                     BackColor = initialHighlightColor,
                     BorderStyle = BorderStyle.FixedSingle,
-                    Location = new Point(160, 198),
-                    Size = new Size(28, 24)
+                    Location = new Point(ScaleForCurrentDpi(160), ScaleForCurrentDpi(198)),
+                    Size = new Size(ScaleForCurrentDpi(28), ScaleForCurrentDpi(24))
                 };
 
                 var highlightButton = new Button
                 {
                     Text = GetChooseColorText(),
-                    Size = new Size(98, 26),
-                    Location = new Point(196, 197)
+                    Size = new Size(ScaleForCurrentDpi(98), ScaleForCurrentDpi(26)),
+                    Location = new Point(ScaleForCurrentDpi(196), ScaleForCurrentDpi(197))
                 };
                 highlightButton.Click += (_, __) =>
                 {
@@ -29867,22 +30905,22 @@ namespace AnonPDF
                 {
                     Text = GetCommentTextColorLabelText(),
                     AutoSize = true,
-                    Location = new Point(12, 233)
+                    Location = new Point(ScaleForCurrentDpi(12), ScaleForCurrentDpi(233))
                 };
 
                 var textColorPreview = new Panel
                 {
                     BackColor = initialTextColor,
                     BorderStyle = BorderStyle.FixedSingle,
-                    Location = new Point(160, 229),
-                    Size = new Size(28, 24)
+                    Location = new Point(ScaleForCurrentDpi(160), ScaleForCurrentDpi(229)),
+                    Size = new Size(ScaleForCurrentDpi(28), ScaleForCurrentDpi(24))
                 };
 
                 var textColorButton = new Button
                 {
                     Text = GetChooseColorText(),
-                    Size = new Size(98, 26),
-                    Location = new Point(196, 228)
+                    Size = new Size(ScaleForCurrentDpi(98), ScaleForCurrentDpi(26)),
+                    Location = new Point(ScaleForCurrentDpi(196), ScaleForCurrentDpi(228))
                 };
                 textColorButton.Click += (_, __) =>
                 {
@@ -29900,8 +30938,8 @@ namespace AnonPDF
                 var restoreButton = new Button
                 {
                     Text = GetRestoreSettingsButtonText(),
-                    Size = new Size(138, 32),
-                    Location = new Point(12, prompt.ClientSize.Height - 44),
+                    Size = new Size(ScaleForCurrentDpi(138), ScaleForCurrentDpi(32)),
+                    Location = new Point(ScaleForCurrentDpi(12), prompt.ClientSize.Height - ScaleForCurrentDpi(44)),
                     Anchor = AnchorStyles.Left | AnchorStyles.Bottom
                 };
                 restoreButton.Click += (_, __) =>
@@ -29915,8 +30953,8 @@ namespace AnonPDF
                 {
                     Text = Resources.Merge_OK,
                     DialogResult = DialogResult.OK,
-                    Size = new Size(100, 32),
-                    Location = new Point(prompt.ClientSize.Width - 212, prompt.ClientSize.Height - 44),
+                    Size = new Size(ScaleForCurrentDpi(100), ScaleForCurrentDpi(32)),
+                    Location = new Point(prompt.ClientSize.Width - ScaleForCurrentDpi(212), prompt.ClientSize.Height - ScaleForCurrentDpi(44)),
                     Anchor = AnchorStyles.Right | AnchorStyles.Bottom
                 };
 
@@ -29924,8 +30962,8 @@ namespace AnonPDF
                 {
                     Text = Resources.Merge_Cancel,
                     DialogResult = DialogResult.Cancel,
-                    Size = new Size(100, 32),
-                    Location = new Point(prompt.ClientSize.Width - 106, prompt.ClientSize.Height - 44),
+                    Size = new Size(ScaleForCurrentDpi(100), ScaleForCurrentDpi(32)),
+                    Location = new Point(prompt.ClientSize.Width - ScaleForCurrentDpi(106), prompt.ClientSize.Height - ScaleForCurrentDpi(44)),
                     Anchor = AnchorStyles.Right | AnchorStyles.Bottom
                 };
 
@@ -29943,6 +30981,8 @@ namespace AnonPDF
                 // Enter in multiline textbox inserts a new line instead of closing dialog.
                 prompt.AcceptButton = null;
                 prompt.CancelButton = cancelButton;
+
+                ApplyThemeToDialog(prompt, highlightPreview, textColorPreview);
 
                 if (prompt.ShowDialog(this) != DialogResult.OK)
                 {
@@ -30129,7 +31169,7 @@ namespace AnonPDF
                 return false;
             }
 
-            var menu = new ContextMenuStrip();
+            var menu = CreateThemedMenu();
             menu.Items.Add(GetEditCommentContextMenuText(), null, (_, __) => EditCommentAnnotation(comment));
             menu.Items.Add(BuildMoveToLayerMenuItem(comment.LayerId, targetLayerId => MoveObjectToLayerFromContext(comment, targetLayerId)));
             menu.Items.Add(new ToolStripSeparator());
@@ -30203,7 +31243,7 @@ namespace AnonPDF
                     ? GetLayerIdForGenericObject(selectedObjects.FirstOrDefault())
                     : null;
 
-                var groupMenu = new ContextMenuStrip();
+                var groupMenu = CreateThemedMenu();
                 var copySelectedItem = new ToolStripMenuItem(Resources.Menu_CopyToClipboard);
                 copySelectedItem.Click += (_, __) => TryCopySelectedObjectsToClipboard();
                 groupMenu.Items.Add(copySelectedItem);
@@ -30222,7 +31262,7 @@ namespace AnonPDF
 
             string duplicateGroupId = GetDuplicateGroupIdForObject(hitObject);
 
-            var menu = new ContextMenuStrip();
+            var menu = CreateThemedMenu();
             var duplicateObjectItem = new ToolStripMenuItem(GetDuplicateObjectContextMenuText())
             {
                 Enabled = numPages > 1
@@ -30307,9 +31347,9 @@ namespace AnonPDF
                 return false;
             }
 
-            var menu = new ContextMenuStrip();
+            var menu = CreateThemedMenu();
             menu.Items.Add(GetDeleteSelectionContextMenuText(), null, (_, __) => RemoveRedactionBlock(block));
-            menu.Items.Add(Resources.Menu_CopyToClipboard, null, (_, __) => CopyRedactionBlockToClipboard(block));
+            menu.Items.Add(Resources.Menu_CopyToClipboard, null, async (_, __) => await RunCopyRedactionBlockToClipboardAsync(block));
             var duplicateSelectionMenuItem = new ToolStripMenuItem(GetDuplicateSelectionContextMenuText())
             {
                 Enabled = numPages > 1
@@ -30421,7 +31461,22 @@ namespace AnonPDF
             return true;
         }
 
-        private void CopyRedactionBlockToClipboard(RedactionBlock block)
+        private async Task RunCopyRedactionBlockToClipboardAsync(RedactionBlock block)
+        {
+            try
+            {
+                await CopyRedactionBlockToClipboardAsync(block);
+            }
+            catch (Exception ex)
+            {
+                LogOcrDiagnostic(
+                    $"Copy redaction block async failed type={ex.GetType().FullName} msg={ex.Message} stack={ex}",
+                    force: true);
+                MessageBox.Show(this, string.Format(Resources.Err_OCR, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private async Task CopyRedactionBlockToClipboardAsync(RedactionBlock block)
         {
             if (block == null || string.IsNullOrWhiteSpace(inputPdfPath) || !File.Exists(inputPdfPath))
             {
@@ -30440,7 +31495,7 @@ namespace AnonPDF
                         {
                             string diagnosticContext =
                                 $"context-menu;page={block.PageNumber};marker={block.IsMarkerSelection};bounds={FormatRectFInvariant(block.Bounds)}";
-                            extractedText = OcrFromBitmap(bmp, diagnosticContext);
+                            extractedText = await OcrFromBitmapAsync(bmp, diagnosticContext);
                         }
                     }
                 }
@@ -30833,7 +31888,7 @@ namespace AnonPDF
 
             iText.Kernel.Geom.Rectangle sourceRect = ConvertToItTextRectangle(pdfCoords);
             // Grey preview must keep membership from the same glyph qualification path as pdfSweep.
-            // Marker preview may refine visual bounds in a second step, but only for already selected glyphs.
+            // PDFium refinement provides tighter glyph bounds that properly cover diacritics.
             List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetPdfCleanUpPreviewRectsForBlock(page, block, sourceRect);
 
             return pdfLineRects
@@ -30859,7 +31914,7 @@ namespace AnonPDF
                 PdfTextExtractor.GetTextFromPage(page, strategy);
                 if (strategy.TryGetCleanedGlyphInfos(out List<PdfCleanUpPreviewTextExtractionStrategy.CleanedGlyphInfo> glyphInfos))
                 {
-                    if (block?.IsMarkerSelection == true &&
+                    if (block != null &&
                         TryRefineMarkerPreviewGlyphRectsWithPdfium(block.PageNumber, glyphInfos, out List<iText.Kernel.Geom.Rectangle> refinedGlyphRects))
                     {
                         return refinedGlyphRects;
@@ -31556,7 +32611,7 @@ namespace AnonPDF
             List<float> gdiLineWidthsPt = new List<float>();
             string normalizedText = textValue.Replace("\r\n", "\n").Replace("\r", "\n");
             string[] lines = normalizedText.Split(new[] { '\n' }, StringSplitOptions.None);
-            using (Graphics g = pdfViewer.CreateGraphics())
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
             {
                 dpiX = g.DpiX;
                 dpiY = g.DpiY;
@@ -31588,6 +32643,14 @@ namespace AnonPDF
                 annotation.AnnotationBounds.Y,
                 annotation.AnnotationBounds.Width * scaleX,
                 annotation.AnnotationBounds.Height * scaleY);
+            if (DebugLogEnabled && isRichAnnotation)
+            {
+                LogDebug(
+                    $"TextPdfBounds id={annotation.Id} " +
+                    $"annotBounds=({annotation.AnnotationBounds.X:F1},{annotation.AnnotationBounds.Y:F1},{annotation.AnnotationBounds.Width:F1},{annotation.AnnotationBounds.Height:F1}) " +
+                    $"scaledBounds=({scaledAnnotationBounds.X:F2},{scaledAnnotationBounds.Y:F2},{scaledAnnotationBounds.Width:F2},{scaledAnnotationBounds.Height:F2}) " +
+                    $"dpiScale={dpiX:F0}");
+            }
             float framePaddingXPt = GetAnnotationInnerFrameMargin(annotation) * scaleX;
             float framePaddingYPt = GetAnnotationInnerFrameMargin(annotation) * scaleY;
             System.Drawing.Color annotationBorderColor = GetAnnotationBorderColor(annotation);
@@ -31666,7 +32729,8 @@ namespace AnonPDF
             {
                 LogDebug(
                     $"TextPdfMetrics annotation={annotation.Id ?? "-"} font={annotation.AnnotationFont?.FontFamily?.Name}@{fontSize:0.###} " +
-                    $"gdiAscentPt={gdiAscentPt:0.###} pdfAscentPt={maxPdfAscentPt:0.###} pdfDescentPt={minPdfDescentPt:0.###} lineHeightPt={lineHeightPt:0.###} rich={isRichAnnotation}");
+                    $"gdiAscentPt={gdiAscentPt:0.###} pdfAscentPt={maxPdfAscentPt:0.###} pdfDescentPt={minPdfDescentPt:0.###} lineHeightPt={lineHeightPt:0.###} rich={isRichAnnotation} " +
+                    $"dpiX={dpiX:F0} dpiY={dpiY:F0} boundsW={annotation.AnnotationBounds.Width:F1} boundsH={annotation.AnnotationBounds.Height:F1}");
             }
 
             SizeF contentSize = isRichAnnotation
@@ -31676,6 +32740,15 @@ namespace AnonPDF
             float contentHeightPt = contentSize.Height * scaleY;
             float layoutWidth = contentWidthPt + (2f * framePaddingXPt);
             float layoutHeight = contentHeightPt + (2f * framePaddingYPt);
+            if (DebugLogEnabled && isRichAnnotation)
+            {
+                LogDebug(
+                    $"TextPdfExport id={annotation.Id} scaleX={scaleX:F4} scaleY={scaleY:F4} " +
+                    $"contentSize=({contentSize.Width:F1},{contentSize.Height:F1}) " +
+                    $"contentPt=({contentWidthPt:F2},{contentHeightPt:F2}) " +
+                    $"layoutPt=({layoutWidth:F2},{layoutHeight:F2}) " +
+                    $"framePad=({framePaddingXPt:F2},{framePaddingYPt:F2})");
+            }
             if (isRichAnnotation)
             {
                 contentWidthPt = Math.Max(1f, contentWidthPt);
@@ -31706,6 +32779,17 @@ namespace AnonPDF
                 TryBuildSharedRichLayout(annotation, out sharedRichLayout) &&
                 sharedRichLayout != null)
             {
+                if (DebugLogEnabled)
+                {
+                    LogDebug(
+                        $"TextPdfLayout id={annotation.Id} " +
+                        $"lineCount={sharedRichLayout.Lines.Count} " +
+                        $"layoutLineH={sharedRichLayout.LineHeight:F3} " +
+                        $"contentH={sharedRichLayout.ContentHeight:F3} " +
+                        $"refInkTop={sharedRichLayout.ReferenceInkTop:F3} " +
+                        $"contentPt=({contentWidthPt:F2},{contentHeightPt:F2}) " +
+                        $"layoutPt=({layoutWidth:F2},{layoutHeight:F2})");
+                }
                 if (!TryBuildRichHtmlPdfRenderResult(
                     annotation,
                     contentWidthPt,
@@ -34004,6 +35088,11 @@ namespace AnonPDF
 
             try
             {
+                bool isRich = IsRichTextMode(annotation);
+                float annotationBorderWidth = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth);
+                float annotationFrameMargin = NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
+                SizeF contentSize = GetInteractiveAwareAnnotationContentSize(annotation);
+
                 System.Drawing.Rectangle rect = new System.Drawing.Rectangle(
                     (int)(annotation.AnnotationBounds.X * scaleFactor),
                     (int)(annotation.AnnotationBounds.Y * scaleFactor),
@@ -34011,18 +35100,25 @@ namespace AnonPDF
                     (int)(annotation.AnnotationBounds.Height * scaleFactor * 72f / graphics.DpiY)
                 );
 
+                if (DebugLogEnabled)
+                {
+                    LogDebug(
+                        $"RichTextDraw page={annotation.PageNumber} id={annotation.Id} isRich={(isRich?1:0)} " +
+                        $"sf={scaleFactor:F3} dpiX={graphics.DpiX:F0} dpiY={graphics.DpiY:F0} " +
+                        $"bounds=({annotation.AnnotationBounds.X:F1},{annotation.AnnotationBounds.Y:F1},{annotation.AnnotationBounds.Width:F1},{annotation.AnnotationBounds.Height:F1}) " +
+                        $"rect=({rect.X},{rect.Y},{rect.Width},{rect.Height}) " +
+                        $"contentSize=({contentSize.Width:F1},{contentSize.Height:F1}) " +
+                        $"fontSize={annotation.AnnotationFont?.Size ?? -1:F1}");
+                }
+
                 bool isSelectedAnnotation = IsTextAnnotationSelected(annotation);
                 System.Drawing.Color annotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
                 System.Drawing.Color annotationBorderColor = GetAnnotationBorderColor(annotation);
                 System.Drawing.Color leaderLineColor = GetEffectiveTextLeaderLineColor(annotation);
-                bool isRich = IsRichTextMode(annotation);
-                float annotationBorderWidth = NormalizeAnnotationBorderWidth(annotation.AnnotationBorderWidth);
                 float annotationBorderWidthPx = GetAnnotationBorderWidthScreenPx(annotation.AnnotationBorderWidth, scaleFactor, graphics.DpiX, graphics.DpiY);
-                float annotationFrameMargin = NormalizeAnnotationFrameMargin(annotation.AnnotationFrameMargin);
                 float framePaddingX = (annotationBorderWidth + annotationFrameMargin) * scaleFactor * 72f / graphics.DpiX;
                 float framePaddingY = (annotationBorderWidth + annotationFrameMargin) * scaleFactor * 72f / graphics.DpiY;
                 int annotationRotation = NormalizeRotation(annotation.AnnotationRotation);
-                SizeF contentSize = GetInteractiveAwareAnnotationContentSize(annotation);
                 float contentWidth = contentSize.Width * scaleFactor * 72f / graphics.DpiX;
                 float contentHeight = contentSize.Height * scaleFactor * 72f / graphics.DpiY;
                 int richPreviewWidthPx = Math.Max(1, (int)Math.Ceiling(Math.Max(1f, contentWidth)));
@@ -34246,7 +35342,6 @@ namespace AnonPDF
                     };
                 }
 
-                float dpiCorrection = 72f / graphics.DpiY;
                 float layoutWidth = contentWidth + (2f * framePaddingX);
                 float layoutHeight = contentHeight + (2f * framePaddingY);
 
@@ -34315,20 +35410,26 @@ namespace AnonPDF
                             var textState = graphics.Save();
                             if (useFramedRasterRotateDraw)
                             {
-                                graphics.TranslateTransform(
-                                    rect.X + (rect.Width / 2f),
-                                    rect.Y + (rect.Height / 2f));
+                                // Pivot at the visual center of rect (rect already holds the current
+                                // page-orientation dimensions after RotateCurrentPageClockwise).
+                                // Back-translate and draw-rect use the BITMAP dimensions (layoutWidth ×
+                                // layoutHeight), which are swapped vs rect at 90°/270° because
+                                // TryGetApproximateRichContentSizeFromBounds returns natural-orientation
+                                // content dims.
+                                float framePivotX = rect.X + rect.Width / 2f;
+                                float framePivotY = rect.Y + rect.Height / 2f;
+                                graphics.TranslateTransform(framePivotX, framePivotY);
                                 graphics.RotateTransform(annotationRotation);
                                 graphics.TranslateTransform(
-                                    -(rect.Width / 2f),
-                                    -(rect.Height / 2f));
+                                    -(layoutWidth / 2f),
+                                    -(layoutHeight / 2f));
                                 graphics.DrawImage(
                                     richBitmap,
                                     BuildDestinationParallelogram(
                                         0f,
                                         0f,
-                                        Math.Max(1f, rect.Width),
-                                        Math.Max(1f, rect.Height)),
+                                        Math.Max(1f, layoutWidth),
+                                        Math.Max(1f, layoutHeight)),
                                     richSourceRect,
                                     GraphicsUnit.Pixel,
                                     richImageAttributes);
@@ -34433,6 +35534,7 @@ namespace AnonPDF
 
                 using (SolidBrush brush = new SolidBrush(annotation.AnnotationColor))
                 {
+                    float dpiCorrection = 72f / graphics.DpiY;
                     float scaledFontSize = annotation.AnnotationFont.Size * scaleFactor * dpiCorrection;
                     using (Font scaledFont = new Font(annotation.AnnotationFont.FontFamily, scaledFontSize, annotation.AnnotationFont.Style))
                     {
@@ -35402,12 +36504,69 @@ namespace AnonPDF
             graphics.DrawImageUnscaled(redactionPreviewOverlayBitmap, 0, 0);
         }
 
+        private void DrawOcrDebugBoxes(Graphics graphics)
+        {
+            if (!DebugLogEnabled || graphics == null || string.IsNullOrWhiteSpace(inputPdfPath))
+            {
+                return;
+            }
+
+            List<TextLocation> rawOcrBoxes = PdfTextSearcher.GetRawOcrDebugLocations(inputPdfPath, currentPage);
+            List<TextLocation> ocrBoxes = PdfTextSearcher.GetOcrDebugLocations(inputPdfPath, currentPage);
+            if ((rawOcrBoxes == null || rawOcrBoxes.Count == 0) &&
+                (ocrBoxes == null || ocrBoxes.Count == 0))
+            {
+                return;
+            }
+
+            int rotation = GetEffectiveRotationDegrees(currentPage);
+            DrawOcrDebugBoxSet(graphics, rawOcrBoxes, rotation, System.Drawing.Color.FromArgb(210, 0, 190, 80), Math.Max(1f, scaleFactor * 0.8f));
+            DrawOcrDebugBoxSet(graphics, ocrBoxes, rotation, System.Drawing.Color.FromArgb(190, 0, 170, 255), Math.Max(1f, scaleFactor * 0.8f));
+        }
+
+        private void DrawOcrDebugBoxSet(Graphics graphics, List<TextLocation> boxes, int rotation, System.Drawing.Color color, float penWidth)
+        {
+            if (graphics == null || boxes == null || boxes.Count == 0)
+            {
+                return;
+            }
+
+            using (var pen = new Pen(color, penWidth))
+            {
+                foreach (TextLocation location in boxes)
+                {
+                    if (location?.Rect == null)
+                    {
+                        continue;
+                    }
+
+                    RectangleF pdfRect = new RectangleF(
+                        location.Rect.GetX(),
+                        location.Rect.GetY(),
+                        location.Rect.GetWidth(),
+                        location.Rect.GetHeight());
+                    RectangleF viewRect = ConvertPdfToViewCoordinates(pdfRect, currentPage, rotation);
+                    RectangleF scaledRect = new RectangleF(
+                        viewRect.X * scaleFactor,
+                        viewRect.Y * scaleFactor,
+                        viewRect.Width * scaleFactor,
+                        viewRect.Height * scaleFactor);
+
+                    if (scaledRect.Width > 0f && scaledRect.Height > 0f)
+                    {
+                        graphics.DrawRectangle(pen, scaledRect.X, scaledRect.Y, scaledRect.Width, scaledRect.Height);
+                    }
+                }
+            }
+        }
+
         private void OnPaint(object sender, PaintEventArgs e)
         {
             Dictionary<string, int> previewBasisNumberMap = BuildLegalBasisFootnoteNumberMap(
                 redactionBlocks.Where(block => block != null && block.PageNumber == currentPage && IsLayerVisible(block.LayerId)));
 
             DrawRedactionPreviewTextOverlay(e.Graphics);
+            DrawOcrDebugBoxes(e.Graphics);
 
             // Drawing saved redaction blocks for current page
             foreach (var block in redactionBlocks.Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId)))
@@ -35675,12 +36834,21 @@ namespace AnonPDF
                     float sc_y = pdfCoordinates.Y * scaleFactor;
                     float sc_w = pdfCoordinates.Width * scaleFactor;
                     float sc_h = pdfCoordinates.Height * scaleFactor;
-                    float highlightPad = Math.Max(2f, Math.Min(sc_w, sc_h) * 0.35f);
+
+                    float draw_y = sc_y;
+                    float draw_h = sc_h;
+                    if (draw_h < 4f)
+                    {
+                        draw_h = Math.Max(12f, sc_w * 0.2f);
+                        draw_y -= draw_h * 0.8f;
+                    }
+
+                    float highlightPad = Math.Max(2f, Math.Min(sc_w, draw_h) * 0.35f);
                     RectangleF primaryHighlightRect = new RectangleF(
                         sc_x - highlightPad,
-                        sc_y - highlightPad,
+                        draw_y - highlightPad,
                         sc_w + (highlightPad * 2f),
-                        sc_h + (highlightPad * 2f));
+                        draw_h + (highlightPad * 2f));
 
                     using (Pen pen = new Pen(highlightColor, 3))
                     {
@@ -35692,12 +36860,12 @@ namespace AnonPDF
                     {
                         // If this is currently selected location, change color to gray
                         highlightColor = System.Drawing.Color.FromArgb(255, 128, 128, 128);
-                        float selectedPad = highlightPad * 2f;
+                        float selectedPad = highlightPad + Math.Max(4f, Math.Min(sc_w, draw_h) * 0.1f);
                         RectangleF selectedHighlightRect = new RectangleF(
                             sc_x - selectedPad,
-                            sc_y - selectedPad,
+                            draw_y - selectedPad,
                             sc_w + (selectedPad * 2f),
-                            sc_h + (selectedPad * 2f));
+                            draw_h + (selectedPad * 2f));
 
                         using (Pen pen = new Pen(highlightColor, 3))
                         {
@@ -35926,6 +37094,7 @@ namespace AnonPDF
                 }
 
                 int desiredRightPanelWidth = Properties.Settings.Default.RightPanelWidth;
+                desiredRightPanelWidth = Math.Max(desiredRightPanelWidth, formSplitContainer.Panel2MinSize);
                 if (desiredRightPanelWidth <= 0)
                 {
                     return;
@@ -37100,9 +38269,17 @@ namespace AnonPDF
             foreach (TextAnnotation annotation in textAnnotations.Where(annotation => annotation != null && annotation.PageNumber == pageNumber && IsLayerVisible(annotation.LayerId)))
             {
                 RectangleF textBounds;
+                bool fromAnnotationBounds = false;
                 if (!TryGetAnnotationTextFrameGeometryDoc(annotation, out _, out RectangleF frameBounds, out _, out _))
                 {
                     textBounds = annotation.AnnotationBounds;
+                    fromAnnotationBounds = true;
+                    float dpiScale = GetCurrentDpiX() / 96f;
+                    if (dpiScale > 1.001f)
+                    {
+                        textBounds.Width /= dpiScale;
+                        textBounds.Height /= dpiScale;
+                    }
                     if (textBounds.IsEmpty)
                     {
                         continue;
@@ -37114,6 +38291,27 @@ namespace AnonPDF
                 }
 
                 RectangleF thumbnailRect = ConvertDocumentRectToThumbnailRectangle(textBounds, transform);
+                if (DebugLogEnabled)
+                {
+                    LogDebug(
+                        $"ThumbOverlay id={annotation.Id} fromBounds={fromAnnotationBounds} " +
+                        $"textBounds=({textBounds.X:F1},{textBounds.Y:F1},{textBounds.Width:F1},{textBounds.Height:F1}) " +
+                        $"thumbRect=({thumbnailRect.X:F1},{thumbnailRect.Y:F1},{thumbnailRect.Width:F1},{thumbnailRect.Height:F1}) " +
+                        $"annotBounds=({annotation.AnnotationBounds.X:F1},{annotation.AnnotationBounds.Y:F1},{annotation.AnnotationBounds.Width:F1},{annotation.AnnotationBounds.Height:F1})");
+                }
+                if (fromAnnotationBounds)
+                {
+                    // AnnotationBounds.Width/Height use a different coordinate system
+                    // (72/Dpi factor relative to X/Y). Apply the same correction as the
+                    // viewer draw path so the thumbnail overlay doesn't appear 2x too large.
+                    float dpiCorrection = 72f / graphics.DpiX;
+                    float centerX = thumbnailRect.X + thumbnailRect.Width / 2f;
+                    float centerY = thumbnailRect.Y + thumbnailRect.Height / 2f;
+                    thumbnailRect.Width *= dpiCorrection;
+                    thumbnailRect.Height *= dpiCorrection;
+                    thumbnailRect.X = centerX - thumbnailRect.Width / 2f;
+                    thumbnailRect.Y = centerY - thumbnailRect.Height / 2f;
+                }
                 if (thumbnailRect.Width <= 0f || thumbnailRect.Height <= 0f)
                 {
                     continue;
@@ -37507,9 +38705,10 @@ namespace AnonPDF
 
         private void ThumbnailViewportTimer_Tick(object sender, EventArgs e)
         {
+            thumbnailViewportTimer?.Stop();
+
             if (isApplicationClosing || !CanUseThumbnailPanel())
             {
-                thumbnailViewportTimer?.Stop();
                 return;
             }
 
@@ -37621,6 +38820,9 @@ namespace AnonPDF
                 ControlPaint.DrawFocusRectangle(e.Graphics, e.Bounds, itemTextColor, itemBackColor);
             }
 
+            thumbnailViewportTimer?.Stop();
+            thumbnailViewportTimer?.Start();
+
         }
 
         private void ReloadRefreshCurrentPage()
@@ -37648,21 +38850,24 @@ namespace AnonPDF
 
         private void PagesListView_SelectedIndexChanged(object sender, EventArgs e)
         {
+            if (isLoadingPdf)
+                return;
+
             // If at least one element is selected
             if (pagesListView.SelectedItems.Count > 0)
             {
                 // Take the first selected item
                 ListViewItem selectedItem = pagesListView.SelectedItems[0];
-                // Item text, e.g. "Page 1"
-                //string text = selectedItem.Text;
-
 
                 // If we use Tag to store number:
-                currentPage = ((PageItemStatus)selectedItem.Tag).PageNumber;
+                int newPage = ((PageItemStatus)selectedItem.Tag).PageNumber;
+                if (newPage < 1 || newPage > allPageStatuses.Count)
+                    return;
+                currentPage = newPage;
 
                 ReloadRefreshCurrentPage();
 
-                
+
 
                 PageItemStatus status = allPageStatuses[currentPage - 1];
                 // Check whether current page has selections
@@ -37775,7 +38980,7 @@ namespace AnonPDF
 
         private void ZoomAtPanelCenter(bool zoomIn)
         {
-            // Assume "panel" is mainAppSplitContainer.Panel2 
+            // Assume "panel" is mainAppSplitContainer.Panel2
             // i ma AutoScroll = true.
             this.Cursor = Cursors.WaitCursor;
             ZoomPanel panel = mainAppSplitContainer.Panel2.Controls[0] as ZoomPanel;
@@ -37961,7 +39166,7 @@ namespace AnonPDF
                             return;
                         }
                     }
- 
+
                     ClearRedactionBlocks();
                     redactionBlocks = redactionBlocksJson;
                     foreach (var block in redactionBlocks)
@@ -37981,7 +39186,7 @@ namespace AnonPDF
                     pagesToRemove = pagesToRemoveJson;
 
                     ClearTextAnnotations();
-                    textAnnotations = textAnnotationsJson; 
+                    textAnnotations = textAnnotationsJson;
                     foreach (var annotation in textAnnotations)
                     {
                         EnsureTextAnnotationTimestamps(annotation);
@@ -39139,12 +40344,13 @@ namespace AnonPDF
             // Check if there is a search result on the current page preceding the current result.
             bool hasPrevSamePage = currentLocationIndex > 0 && searchLocations[currentLocationIndex - 1].PageNumber == currentPage;
             // Check if there is a result on earlier pages.
-            bool hasPrevOtherPage = searchLocations.Any(loc => loc.PageNumber < currentPage);
+            // searchLocations is sorted by page, so any entry before index 0 with a smaller page suffices.
+            bool hasPrevOtherPage = searchLocations[0].PageNumber < currentPage;
 
             // Check if there is a search result on the current page following the current result.
             bool hasNextSamePage = currentLocationIndex < searchLocations.Count - 1 && searchLocations[currentLocationIndex + 1].PageNumber == currentPage;
             // Check if there is a result on following pages.
-            bool hasNextOtherPage = searchLocations.Any(loc => loc.PageNumber > currentPage);
+            bool hasNextOtherPage = searchLocations[searchLocations.Count - 1].PageNumber > currentPage;
 
             // "First" is enabled when the current result is not the first globally.
             searchFirstButton.Enabled = currentLocationIndex > 0;
@@ -39679,16 +40885,16 @@ namespace AnonPDF
                 dialog.MinimizeBox = false;
                 dialog.MaximizeBox = true;
                 dialog.ShowInTaskbar = false;
-                dialog.Size = new Size(900, 640);
-                dialog.MinimumSize = new Size(700, 500);
+                dialog.ClientSize = ScaleSizeForCurrentDpi(900, 480);
+                dialog.MinimumSize = ScaleSizeForCurrentDpi(700, 380);
 
                 sourceLabel.AutoSize = true;
                 sourceLabel.Text = LocalizedText("Dialog_Licenses_Source");
-                sourceLabel.Location = new Point(12, 15);
+                sourceLabel.Location = new Point(ScaleForCurrentDpi(12), ScaleForCurrentDpi(15));
 
                 sourceComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
-                sourceComboBox.Location = new Point(130, 11);
-                sourceComboBox.Size = new Size(740, 24);
+                sourceComboBox.Location = new Point(ScaleForCurrentDpi(130), ScaleForCurrentDpi(11));
+                sourceComboBox.Size = ScaleSizeForCurrentDpi(740, 24);
                 sourceComboBox.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
                 sourceComboBox.Items.Add(LocalizedText("Dialog_Licenses_Option_License"));
                 sourceComboBox.Items.Add(LocalizedText("Dialog_Licenses_Option_ThirdParty"));
@@ -39698,13 +40904,13 @@ namespace AnonPDF
                 contentTextBox.ScrollBars = ScrollBars.Both;
                 contentTextBox.WordWrap = false;
                 contentTextBox.Font = new Font("Consolas", 10F, FontStyle.Regular, GraphicsUnit.Point);
-                contentTextBox.Location = new Point(12, 44);
-                contentTextBox.Size = new Size(858, 510);
+                contentTextBox.Location = new Point(ScaleForCurrentDpi(12), ScaleForCurrentDpi(44));
+                contentTextBox.Size = ScaleSizeForCurrentDpi(858, 370);
                 contentTextBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
 
                 closeButton.Text = LocalizedText("Dialog_Licenses_Close");
-                closeButton.Size = new Size(120, 32);
-                closeButton.Location = new Point(750, 562);
+                closeButton.Size = ScaleSizeForCurrentDpi(120, 32);
+                closeButton.Location = new Point(ScaleForCurrentDpi(750), ScaleForCurrentDpi(440));
                 closeButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
                 closeButton.DialogResult = DialogResult.OK;
 
@@ -39747,6 +40953,7 @@ namespace AnonPDF
                 dialog.Controls.Add(closeButton);
 
                 sourceComboBox.SelectedIndex = 0;
+                ApplyThemeToDialog(dialog);
                 dialog.ShowDialog(this);
             }
         }
@@ -39822,13 +41029,47 @@ namespace AnonPDF
                 aboutMessage += Environment.NewLine + updatesLine;
             }
 
-            // Display information in dialog box
-            MessageBox.Show(this,
-                aboutMessage,
-                Resources.Menu_Help_About,
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information
-            );
+            // Display information in a themed custom dialog
+            using (var dialog = new Form())
+            using (var textBox = new TextBox())
+            using (var okButton = new Button())
+            {
+                dialog.Text = Resources.Menu_Help_About;
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dialog.MinimizeBox = false;
+                dialog.MaximizeBox = false;
+                dialog.ShowInTaskbar = false;
+                dialog.ClientSize = ScaleSizeForCurrentDpi(480, 280);
+
+                textBox.Multiline = true;
+                textBox.ReadOnly = true;
+                textBox.ScrollBars = ScrollBars.Vertical;
+                textBox.WordWrap = true;
+                textBox.BorderStyle = BorderStyle.None;
+                textBox.Font = new Font(Font.FontFamily, 10f, FontStyle.Regular, GraphicsUnit.Point);
+                textBox.Location = new Point(ScaleForCurrentDpi(16), ScaleForCurrentDpi(16));
+                textBox.Size = ScaleSizeForCurrentDpi(448, 210);
+                textBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+                textBox.Text = aboutMessage;
+
+                okButton.Text = LocalizedText("Dialog_Licenses_Close");
+                okButton.Size = ScaleSizeForCurrentDpi(100, 32);
+                okButton.Location = new Point(
+                    (ScaleSizeForCurrentDpi(480, 0).Width - ScaleSizeForCurrentDpi(100, 0).Width) / 2,
+                    ScaleForCurrentDpi(236));
+                okButton.Anchor = AnchorStyles.Bottom;
+                okButton.DialogResult = DialogResult.OK;
+
+                dialog.AcceptButton = okButton;
+                dialog.CancelButton = okButton;
+                dialog.Controls.Add(textBox);
+                dialog.Controls.Add(okButton);
+
+                ApplyThemeToDialog(dialog);
+
+                dialog.ShowDialog(this);
+            }
         }
 
         private bool TryCancelActiveDrawActionWithEscape()
@@ -40142,7 +41383,7 @@ namespace AnonPDF
             {
                 if (IsTextInputFocused())
                 {
-                    return base.ProcessCmdKey(ref msg, keyData);
+                    return false;
                 }
 
                 BeginBusyCursor();
@@ -40163,7 +41404,7 @@ namespace AnonPDF
             {
                 if (IsTextInputFocused())
                 {
-                    return base.ProcessCmdKey(ref msg, keyData);
+                    return false;
                 }
 
                 BeginBusyCursor();
@@ -40217,7 +41458,7 @@ namespace AnonPDF
             {
                 if (IsTextInputFocused())
                 {
-                    return base.ProcessCmdKey(ref msg, keyData);
+                    return false;
                 }
 
                 SelectAllObjectsOnCurrentPage();
@@ -40228,7 +41469,7 @@ namespace AnonPDF
             {
                 if (IsTextInputFocused())
                 {
-                    return base.ProcessCmdKey(ref msg, keyData);
+                    return false;
                 }
 
                 AddArrowObject();
@@ -40237,9 +41478,15 @@ namespace AnonPDF
 
             if (keyData == (Keys.Control | Keys.F))
             {
+                FocusSearchTextBox();
+                return true;
+            }
+
+            if (keyData == (Keys.Control | Keys.Q))
+            {
                 if (IsTextInputFocused())
                 {
-                    return base.ProcessCmdKey(ref msg, keyData);
+                    return false;
                 }
 
                 AddShapeToolStripMenuItem_Click(this, EventArgs.Empty);
@@ -40250,7 +41497,7 @@ namespace AnonPDF
             {
                 if (IsTextInputFocused())
                 {
-                    return base.ProcessCmdKey(ref msg, keyData);
+                    return false;
                 }
 
                 BeginUndoCapture("Rotate page");
@@ -40263,7 +41510,7 @@ namespace AnonPDF
             {
                 if (IsTextInputFocused())
                 {
-                    return base.ProcessCmdKey(ref msg, keyData);
+                    return false;
                 }
 
                 AddRasterImageFromFileDialog();
@@ -40274,7 +41521,7 @@ namespace AnonPDF
             {
                 if (IsTextInputFocused())
                 {
-                    return base.ProcessCmdKey(ref msg, keyData);
+                    return false;
                 }
 
                 if (TryCopySelectedObjectsToClipboard())
@@ -40282,7 +41529,7 @@ namespace AnonPDF
                     return true;
                 }
 
-                CopyTextsFromAllSelectionsOnCurrentPage();
+                _ = RunCopyTextsFromAllSelectionsOnCurrentPageAsync();
                 return true;
             }
 
@@ -40290,7 +41537,7 @@ namespace AnonPDF
             {
                 if (IsTextInputFocused())
                 {
-                    return base.ProcessCmdKey(ref msg, keyData);
+                    return false;
                 }
 
                 BeginUndoCapture("Paste object");
@@ -40724,6 +41971,7 @@ namespace AnonPDF
                     ApplyArrowObjectDialogChanges(arrowObject, dlg, updateThumbnail: false);
                 };
 
+                dlg.ApplyDialogTheme(CreateDialogTheme());
                 if (dlg.ShowDialog(this) != DialogResult.OK)
                 {
                     arrowObject.LineColorArgb = originalLineColorArgb;
@@ -42819,7 +44067,7 @@ namespace AnonPDF
             selectedVectorShape = target;
             ClearGroupSelection();
 
-            var menu = new ContextMenuStrip();
+            var menu = CreateThemedMenu();
             var addNodeItem = new ToolStripMenuItem(LocalizedText("Vector_Context_AddNode"))
             {
                 Enabled = hasSegment
@@ -43642,32 +44890,32 @@ namespace AnonPDF
                     : dialogTitle;
                 prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
-                prompt.ClientSize = new Size(370, 130);
+                prompt.ClientSize = ScaleSizeForCurrentDpi(370, 130);
                 prompt.MinimizeBox = false;
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
 
                 var rangeLabel = new Label
                 {
-                    Left = 18,
-                    Top = 18,
+                    Left = ScaleForCurrentDpi(18),
+                    Top = ScaleForCurrentDpi(18),
                     AutoSize = true,
                     Text = GetDuplicateSelectionRangeText(),
                 };
 
                 var fromPageLabel = new Label
                 {
-                    Left = 150,
-                    Top = 20,
+                    Left = ScaleForCurrentDpi(150),
+                    Top = ScaleForCurrentDpi(20),
                     AutoSize = true,
                     Text = GetDuplicateSelectionFromPageText()
                 };
 
                 var fromPageInput = new NumericUpDown
                 {
-                    Left = 180,
-                    Top = 16,
-                    Width = 70,
+                    Left = ScaleForCurrentDpi(180),
+                    Top = ScaleForCurrentDpi(16),
+                    Width = ScaleForCurrentDpi(70),
                     Minimum = 1,
                     Maximum = totalPages,
                     Value = normalizedDefaultFrom
@@ -43675,17 +44923,17 @@ namespace AnonPDF
 
                 var toPageLabel = new Label
                 {
-                    Left = 258,
-                    Top = 20,
+                    Left = ScaleForCurrentDpi(258),
+                    Top = ScaleForCurrentDpi(20),
                     AutoSize = true,
                     Text = GetDuplicateSelectionToPageText()
                 };
 
                 var toPageInput = new NumericUpDown
                 {
-                    Left = 286,
-                    Top = 16,
-                    Width = 66,
+                    Left = ScaleForCurrentDpi(286),
+                    Top = ScaleForCurrentDpi(16),
+                    Width = ScaleForCurrentDpi(66),
                     Minimum = 1,
                     Maximum = totalPages,
                     Value = normalizedDefaultTo
@@ -43693,18 +44941,20 @@ namespace AnonPDF
 
                 var buttonOk = new Button
                 {
-                    Left = 176,
-                    Top = 84,
-                    Width = 84,
+                    Left = ScaleForCurrentDpi(176),
+                    Top = ScaleForCurrentDpi(84),
+                    Width = ScaleForCurrentDpi(84),
+                    Height = ScaleForCurrentDpi(28),
                     DialogResult = DialogResult.OK,
                     Text = Resources.Merge_OK
                 };
 
                 var buttonCancel = new Button
                 {
-                    Left = 268,
-                    Top = 84,
-                    Width = 84,
+                    Left = ScaleForCurrentDpi(268),
+                    Top = ScaleForCurrentDpi(84),
+                    Width = ScaleForCurrentDpi(84),
+                    Height = ScaleForCurrentDpi(28),
                     DialogResult = DialogResult.Cancel,
                     Text = Resources.Merge_Cancel
                 };
@@ -43733,6 +44983,8 @@ namespace AnonPDF
                 prompt.Controls.Add(buttonCancel);
                 prompt.AcceptButton = buttonOk;
                 prompt.CancelButton = buttonCancel;
+
+                ApplyThemeToDialog(prompt);
 
                 if (prompt.ShowDialog(this) != DialogResult.OK)
                 {
@@ -44123,6 +45375,7 @@ namespace AnonPDF
             isMoving = false;
             textMoveMouseOffset = PointF.Empty;
 
+            selectedRedactionBlock = null;
             SelectSingleObject(hitObject);
 
             if (hitObject is TextAnnotation hitAnnotation)
@@ -45460,10 +46713,11 @@ namespace AnonPDF
             return true;
         }
 
-        private static void DrawIconButton(Graphics graphics, Rectangle buttonRect, string iconCode)
+        private void DrawIconButton(Graphics graphics, Rectangle buttonRect, string iconCode)
         {
-            System.Drawing.Color buttonBackground = SystemColors.Control;
-            System.Drawing.Color buttonBorder = System.Drawing.Color.DarkGray;
+            System.Drawing.Color buttonBackground = CurrentTheme.SecondaryButtonBackColor;
+            System.Drawing.Color buttonBorder = CurrentTheme.BorderColor;
+            System.Drawing.Color iconColor = CurrentTheme.SecondaryButtonForeColor;
 
             using (SolidBrush bgBrush = new SolidBrush(buttonBackground))
             {
@@ -45490,7 +46744,7 @@ namespace AnonPDF
                     Alignment = StringAlignment.Center,
                     LineAlignment = StringAlignment.Center
                 };
-                using (SolidBrush iconBrush = new SolidBrush(SystemColors.ControlText))
+                using (SolidBrush iconBrush = new SolidBrush(iconColor))
                 {
                     Rectangle shiftedRect = new Rectangle(
                         buttonRect.X + 1,
@@ -45855,8 +47109,12 @@ namespace AnonPDF
                 return false;
             }
 
-            const float logicalScaleX = 72f / 96f;
-            const float logicalScaleY = 72f / 96f;
+            float logicalScaleX, logicalScaleY;
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero))
+            {
+                logicalScaleX = 72f / g.DpiX;
+                logicalScaleY = 72f / g.DpiY;
+            }
             int rotation = NormalizeRotation(annotation.AnnotationRotation);
             SizeF contentSize = IsRichTextMode(annotation) &&
                 TryGetApproximateRichContentSizeFromBounds(annotation, out SizeF approximateContentSize)
@@ -45960,17 +47218,21 @@ namespace AnonPDF
 
             float rectWidth = Math.Max(1f, screenRect.Width);
             float rectHeight = Math.Max(1f, screenRect.Height);
-            float scaleX = rectWidth / Math.Max(1f, bitmap.Width);
-            float scaleY = rectHeight / Math.Max(1f, bitmap.Height);
+            float bitmapWidth = Math.Max(1f, bitmap.Width);
+            float bitmapHeight = Math.Max(1f, bitmap.Height);
+
+            // Keep localFrameRect in bitmap pixel space — the same space the drawing code uses
+            // (useFramedRasterRotateDraw pivots at rectCenter and back-translates by bitmap.Width/2,
+            // bitmap.Height/2, so we must center on those halves here too).
             RectangleF localFrameRect = RectangleF.FromLTRB(
-                Math.Max(0f, visibleBounds.Left * scaleX),
-                Math.Max(0f, visibleBounds.Top * scaleY),
-                Math.Min(rectWidth, visibleBounds.Right * scaleX),
-                Math.Min(rectHeight, visibleBounds.Bottom * scaleY));
+                Math.Max(0f, visibleBounds.Left),
+                Math.Max(0f, visibleBounds.Top),
+                Math.Min(bitmapWidth, visibleBounds.Right),
+                Math.Min(bitmapHeight, visibleBounds.Bottom));
 
             if (localFrameRect.Width <= 0.5f || localFrameRect.Height <= 0.5f)
             {
-                localFrameRect = new RectangleF(0f, 0f, rectWidth, rectHeight);
+                localFrameRect = new RectangleF(0f, 0f, bitmapWidth, bitmapHeight);
             }
 
             PointF rectCenter = new PointF(
@@ -45979,11 +47241,13 @@ namespace AnonPDF
             float angleRad = (float)(NormalizeRotation(rotation) * Math.PI / 180.0);
             float cos = (float)Math.Cos(angleRad);
             float sin = (float)Math.Sin(angleRad);
+            float halfBitmapW = bitmapWidth / 2f;
+            float halfBitmapH = bitmapHeight / 2f;
 
             PointF TransformPoint(float x, float y)
             {
-                float dx = x - (rectWidth / 2f);
-                float dy = y - (rectHeight / 2f);
+                float dx = x - halfBitmapW;
+                float dy = y - halfBitmapH;
                 return new PointF(
                     rectCenter.X + (dx * cos) - (dy * sin),
                     rectCenter.Y + (dx * sin) + (dy * cos));
@@ -46050,29 +47314,7 @@ namespace AnonPDF
                     out frameTopMid);
             }
 
-            bool useInteractionSnapshotOuterFrame =
-                IsRichTextMode(annotation) &&
-                annotation == annotationToScale &&
-                isScalingTextAnnotation &&
-                textRotationInteractionChanged &&
-                richTextInteractionPreviewArmed &&
-                activeTextInteractionPreviewIncludesFrame &&
-                activeTextInteractionPreviewBitmap != null;
-
-            if (useInteractionSnapshotOuterFrame)
-            {
-                return TryBuildVisibleFramedBitmapScreenGeometry(
-                    activeTextInteractionPreviewBitmap,
-                    GetAnnotationScreenRect(annotation, dpiX, dpiY),
-                    NormalizeRotation(annotation.AnnotationRotation),
-                    out frameCorners,
-                    out frameBounds,
-                    out frameCenter,
-                    out frameTopMid);
-            }
-
-            if (!useInteractionSnapshotOuterFrame &&
-                IsRichTextMode(annotation) &&
+            if (IsRichTextMode(annotation) &&
                 TryGetRichPreviewInkFrameGeometryForContentSize(
                     annotation,
                     dpiX,
@@ -46179,21 +47421,19 @@ namespace AnonPDF
             {
                 float rectWidth = Math.Max(1f, rect.Width);
                 float rectHeight = Math.Max(1f, rect.Height);
-                float localScaleX = rectWidth / Math.Max(1f, layoutWidth);
-                float localScaleY = rectHeight / Math.Max(1f, layoutHeight);
                 PointF rectCenter = new PointF(
                     rect.X + (rectWidth / 2f),
                     rect.Y + (rectHeight / 2f));
                 float angleRadForCache = (float)(rotation * Math.PI / 180.0);
                 float cacheCos = (float)Math.Cos(angleRadForCache);
                 float cacheSin = (float)Math.Sin(angleRadForCache);
+                float halfLayoutW = layoutWidth / 2f;
+                float halfLayoutH = layoutHeight / 2f;
 
                 PointF TransformFramedCachePoint(float x, float y)
                 {
-                    float screenLocalX = x * localScaleX;
-                    float screenLocalY = y * localScaleY;
-                    float dx = screenLocalX - (rectWidth / 2f);
-                    float dy = screenLocalY - (rectHeight / 2f);
+                    float dx = x - halfLayoutW;
+                    float dy = y - halfLayoutH;
                     return new PointF(
                         rectCenter.X + (dx * cacheCos) - (dy * cacheSin),
                         rectCenter.Y + (dx * cacheSin) + (dy * cacheCos));
@@ -47691,6 +48931,7 @@ namespace AnonPDF
                     ApplyRasterObjectDialogChanges(rasterObject, dlg, updateThumbnail: false);
                 };
 
+                dlg.ApplyDialogTheme(CreateDialogTheme());
                 if (dlg.ShowDialog(this) != DialogResult.OK)
                 {
                     return;
@@ -48623,6 +49864,7 @@ namespace AnonPDF
             IEnumerable<string> preselected = hasCustomSignatureSelection ? signaturesToRemove : null;
             using (SelectSignaturesDialog dlg = new SelectSignaturesDialog(signatures, preselected))
             {
+                ApplyThemeToDialog(dlg);
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     signaturesToRemove = dlg.SelectedFieldNames;
@@ -48710,7 +49952,7 @@ namespace AnonPDF
             Properties.Settings.Default.LastOpenSavedPDFCheckBoxState = openSavedPDFCheckBox.Checked;
             Properties.Settings.Default.Save();
         }
-        
+
 
         private void SafeModeCheckBox_CheckedChanged(object sender, EventArgs e)
         {
@@ -48847,7 +50089,7 @@ namespace AnonPDF
                 props.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
             }
 
-            
+
 
             using (PdfReader reader = new PdfReader(inputPdf, props).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
             using (iText.Kernel.Pdf.PdfDocument srcDoc = new iText.Kernel.Pdf.PdfDocument(reader))
@@ -51525,6 +52767,7 @@ namespace AnonPDF
             // Display dialog with page range, where maximum range is based on numPages variable.
             using (DeletePagesDialog dlg = new DeletePagesDialog(numPages))
             {
+                ApplyThemeToDialog(dlg);
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     PageItemStatus status;
@@ -51537,8 +52780,8 @@ namespace AnonPDF
                         // For example, you can add these pages to pagesToRemove set:
                         for (int i = dlg.StartPage; i <= dlg.EndPage; i++)
                         {
-                            
-                            
+
+
                             if (step == i)
                             {
                                 step += dlg.Step;
@@ -51586,14 +52829,14 @@ namespace AnonPDF
                             //ListViewItem item = pagesListView.Items[i - 1];
                             //int pageNumber = ((PageItemStatus)item.Tag).PageNumber;
                             //bool hasSelections = ((PageItemStatus)item.Tag).HasSelections;
-                            
+
                             status.MarkedForDeletion = false;
                             if ((string)filterComboBox.SelectedItem == allComboItem)
                             {
                                 // only refresh this row
                                 ListViewItem currentItem = pagesListView.Items[i - 1];
                                 UpdateItemTag(currentItem, pageNumber, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
-                                
+
                             }
                             pagesToRemove.Remove(i);
                         }
@@ -51604,7 +52847,7 @@ namespace AnonPDF
                     {
                         ApplyFilter((string)filterComboBox.SelectedItem);
                     }
-                        
+
                     pagesListView.Invalidate();
                     UpdateNavigationButtons(currentPage);
                 }
@@ -51663,6 +52906,7 @@ namespace AnonPDF
                 {
                     pagesListView.Items[currentPage - 1].Selected = true;
                     pagesListView.Items[currentPage - 1].EnsureVisible();
+                    ReloadRefreshCurrentPage();
                 } else
                 {
                     ListViewItem currentItem = FindListViewItemByPageNumber(currentPage);
@@ -51702,33 +52946,39 @@ namespace AnonPDF
                 searchTextBox.SelectAll();
                 searchTextBox.Focus();
                 searchResultLabel.Text = LocalizedFormat("Search_ResultCount", searchLocations.Count);
-                foreach (var itemSl in searchLocations)
+
+                // Collect unique pages to avoid thousands of per-result ListView updates
+                // which would freeze the UI thread on large documents.
+                HashSet<int> pagesWithResults = new HashSet<int>(
+                    searchLocations.OfType<TextLocation>().Select(loc => loc.PageNumber));
+
+                bool showAll = (string)filterComboBox.SelectedItem == allComboItem;
+                if (showAll)
                 {
-                    if (itemSl is TextLocation searchLocation)
+                    pagesListView.BeginUpdate();
+                    try
                     {
-                        int pageNumber = searchLocation.PageNumber;
-                        //UpdateItemTag(item, pageNumber, hasSelections, true, markedForDeletion, hasObjects);
-                        
-
-                        PageItemStatus status = allPageStatuses[pageNumber - 1];
-                        status.HasSearchResults = true;
-
-                        if ((string)filterComboBox.SelectedItem == allComboItem)
+                        foreach (int pageNumber in pagesWithResults)
                         {
+                            PageItemStatus status = allPageStatuses[pageNumber - 1];
+                            status.HasSearchResults = true;
                             ListViewItem currentItem = pagesListView.Items[pageNumber - 1];
                             UpdateItemTag(currentItem, pageNumber, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
-                            pagesListView.Invalidate(currentItem.Bounds);
                         }
-
                     }
-
-                    
-
+                    finally
+                    {
+                        pagesListView.EndUpdate();
+                    }
                 }
-
-                if ((string)filterComboBox.SelectedItem != allComboItem)
+                else
                 {
-                    // rebuild list according to filter
+                    foreach (int pageNumber in pagesWithResults)
+                    {
+                        PageItemStatus status = allPageStatuses[pageNumber - 1];
+                        status.HasSearchResults = true;
+                    }
+                    // Rebuild list according to current filter
                     ApplyFilter((string)filterComboBox.SelectedItem);
                 }
 
@@ -51759,6 +53009,12 @@ namespace AnonPDF
         private void SearchTextBox_Click(object sender, EventArgs e)
         {
             // Select all text in the field
+            searchTextBox.SelectAll();
+        }
+
+        private void FocusSearchTextBox()
+        {
+            searchTextBox.Focus();
             searchTextBox.SelectAll();
         }
 
@@ -51848,36 +53104,46 @@ namespace AnonPDF
         {
             personalDataButton.Enabled = false;
             ClearSearchResult();
-            
+
             groupBoxSearch.Enabled = false;
             searchLocations = await Task.Run(() => PdfTextSearcher.FindTextLocations(inputPdfPath, "", true, userPassword, this));
             groupBoxSearch.Enabled = true;
             searchResultLabel.Text = LocalizedFormat("Search_ResultCount", searchLocations.Count);
-            
 
+            // Batch update: collect unique pages first to avoid per-result ListView calls
+            // which freeze the UI on documents with hundreds of pages / thousands of hits.
+            HashSet<int> pagesWithResults = new HashSet<int>(
+                searchLocations.OfType<TextLocation>().Select(loc => loc.PageNumber));
 
-            foreach (var itemSl in searchLocations)
+            bool showAll = (string)filterComboBox.SelectedItem == allComboItem;
+            if (showAll)
             {
-                if (itemSl is TextLocation searchLocation)
+                pagesListView.BeginUpdate();
+                try
                 {
-                    int pageNumber = searchLocation.PageNumber;
-                    PageItemStatus status = allPageStatuses[pageNumber - 1];
-                    
-                    status.HasSearchResults = true;
-                    if ((string)filterComboBox.SelectedItem == allComboItem)
+                    foreach (int pageNumber in pagesWithResults)
                     {
+                        PageItemStatus status = allPageStatuses[pageNumber - 1];
+                        status.HasSearchResults = true;
                         ListViewItem item = pagesListView.Items[pageNumber - 1];
                         UpdateItemTag(item, pageNumber, status.HasSelections, status.HasSearchResults, status.MarkedForDeletion, status.HasObjects);
-                        pagesListView.Invalidate(item.Bounds);
                     }
-                    else
-                    {
-                        // rebuild list according to filter
-                        ApplyFilter((string)filterComboBox.SelectedItem);
-                    }
-
+                }
+                finally
+                {
+                    pagesListView.EndUpdate();
                 }
             }
+            else
+            {
+                foreach (int pageNumber in pagesWithResults)
+                {
+                    PageItemStatus status = allPageStatuses[pageNumber - 1];
+                    status.HasSearchResults = true;
+                }
+                ApplyFilter((string)filterComboBox.SelectedItem);
+            }
+
             personalDataButton.Enabled = true;
             pdfViewer.Invalidate();
             if (searchLocations.Count == 0)
@@ -51887,7 +53153,7 @@ namespace AnonPDF
             }
             else
             {
-                
+
                 GoToLocation(0);
             }
 
@@ -51922,12 +53188,12 @@ namespace AnonPDF
             }
 
         }
- 
+
 
         private void SearchClearButton_Click(object sender, EventArgs e)
         {
             ClearSearchResult();
-            
+
             searchResultLabel.Text = string.Empty;
             UpdateSearchNavigationButtons();
             pdfViewer.Invalidate();
@@ -51938,7 +53204,7 @@ namespace AnonPDF
             return new iText.Kernel.Geom.Rectangle(rectF.X, rectF.Y, rectF.Width, rectF.Height);
         }
 
-        
+
 
         private System.Drawing.RectangleF ConvertToItTextRectangleF(iText.Kernel.Geom.Rectangle rect)
         {
@@ -52273,11 +53539,13 @@ namespace AnonPDF
         {
             if (!EnsureCurrentPageEditable(true))
             {
+                Debug.WriteLine("SearchToSelection: EnsureCurrentPageEditable returned false, aborting.");
                 return;
             }
 
             // Get search results for the current page
             var currentPageSearchResults = searchLocations.Where(loc => loc.PageNumber == currentPage).ToList();
+            Debug.WriteLine($"SearchToSelection: currentPage={currentPage} searchLocations.Count={searchLocations.Count} currentPageResults={currentPageSearchResults.Count}");
             if (currentPageSearchResults.Count == 0)
             {
                 MessageBox.Show(this, Resources.Msg_NoSearchResultsOnPage, Resources.Title_Info, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -52288,15 +53556,38 @@ namespace AnonPDF
             var convertedResults = currentPageSearchResults.Select(result =>
             {
                 int rotation = GetEffectiveRotationDegrees(result.PageNumber);
-                                                    // Subtract correction from width to remove excess letter
                 var screenRect = new System.Drawing.RectangleF(
-                    result.Rect.GetX() + searchWidthCorrection,
+                    result.Rect.GetX(),
                     result.Rect.GetY(),
-                    result.Rect.GetWidth() - 2 * searchWidthCorrection,
+                    result.Rect.GetWidth(),
                     result.Rect.GetHeight());
                 // Convert rectangle from iText layout to layout used by redactionBlocks
                 var convertedRect = ConvertPdfToViewCoordinates(screenRect, result.PageNumber, rotation);
-                return new { result.PageNumber, ConvertedRect = convertedRect };
+
+                // For pages with rotation=90/270 iText reports text Width=0 (characters
+                // share the same X coordinate; the span is encoded in Height).  After the
+                // axis swap in ConvertPdfToViewCoordinates this means Height=0.
+                // Apply the same fallback the yellow-highlight drawing code uses:
+                // derive the missing dimension from the other one (ratio 0.2×) and shift
+                // the origin so the text sits inside the block.
+                float crX = convertedRect.X;
+                float crY = convertedRect.Y;
+                float crW = convertedRect.Width;
+                float crH = convertedRect.Height;
+                if (crH < 1f && crW > 0f)
+                {
+                    crH = crW * 0.2f;
+                    crY -= crH * 0.8f;
+                }
+                else if (crW < 1f && crH > 0f)
+                {
+                    crW = crH * 0.2f;
+                    crX -= crW * 0.8f;
+                }
+                convertedRect = new System.Drawing.RectangleF(crX, crY, crW, crH);
+
+                Debug.WriteLine($"SearchToSelection: result pdfRect={screenRect} rotation={rotation} isOcr={result.IsOcr} -> convertedRect={convertedRect}");
+                return new { result.PageNumber, ConvertedRect = convertedRect, result.IsOcr };
             }).ToList();
 
             // Check whether the current page already has at least one block matching search results
@@ -52307,6 +53598,7 @@ namespace AnonPDF
 
             if (alreadyAdded)
             {
+                Debug.WriteLine($"SearchToSelection: alreadyAdded=true, removing {convertedResults.Count} blocks.");
                 // Remove blocks that correspond to search results
                 redactionBlocks.RemoveAll(rb => rb.PageNumber == currentPage &&
                     convertedResults.Any(cr => RectEquals(
@@ -52317,19 +53609,22 @@ namespace AnonPDF
             }
             else
             {
+                Debug.WriteLine($"SearchToSelection: alreadyAdded=false, adding {convertedResults.Count} blocks.");
                 // Add each search result to redactionBlocks
                 foreach (var cr in convertedResults)
                 {
-                    // Search results are treated as marker selections (fixed thickness),
-                    // so PDF cleanup stays exact but visual overlay can expand to full text bounds.
+                    // For pages with embedded native text layer (incl. invisible OCR-pre-processed scans),
+                    // always use full-area box redactions so the underlying scan pixels are fully covered.
                     var createdBlock = CreateRedactionBlockWithAutomaticClassification(
                         cr.ConvertedRect,
                         cr.PageNumber,
-                        isMarkerSelection: true);
+                        isMarkerSelection: false);
+                    Debug.WriteLine($"SearchToSelection: adding block Bounds={createdBlock.Bounds} Page={createdBlock.PageNumber}");
                     redactionBlocks.Add(createdBlock);
                     InvalidateThumbnailRedactionOverlay(cr.PageNumber);
                     TryComputeRedactionPreviewRects(createdBlock);
                 }
+                RefreshRedactionPreviewForCurrentPage();
             }
 
             if (convertedResults.Count>0)
@@ -52343,7 +53638,7 @@ namespace AnonPDF
 
             // Update tag of current list item (example UpdateItemTag method)
             status.HasSelections = redactionBlocks.Any(rb => rb.PageNumber == currentPage);
-            
+
             if ((string)filterComboBox.SelectedItem == allComboItem)
             {
                 ListViewItem currentItem = pagesListView.Items[currentPage - 1];
@@ -52466,7 +53761,7 @@ namespace AnonPDF
             }
         }
 
-        public string OcrFromBitmap(Bitmap bitmap, string diagnosticContext = null)
+        public async Task<string> OcrFromBitmapAsync(Bitmap bitmap, string diagnosticContext = null)
         {
             string result = string.Empty;
 
@@ -52478,39 +53773,15 @@ namespace AnonPDF
                     return string.Empty;
                 }
 
-                string exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
-                string exeDir = System.IO.Path.GetDirectoryName(exePath);
-                string tessDataPath = System.IO.Path.Combine(exeDir, "tessdata");
-
                 LogOcrDiagnostic(
                     $"OCR start context={diagnosticContext ?? "-"} bitmap={bitmap.Width}x{bitmap.Height} " +
                     $"pixelFormat={bitmap.PixelFormat} dpi={bitmap.HorizontalResolution:0.###}x{bitmap.VerticalResolution:0.###} " +
-                    $"is64BitProcess={Environment.Is64BitProcess} os='{Environment.OSVersion}' " +
-                    $"exeDir='{exeDir}' tessdata='{tessDataPath}' tessdataExists={Directory.Exists(tessDataPath)} " +
-                    $"traineddata={GetOcrTessDataSummary(tessDataPath)}");
+                    $"is64BitProcess={Environment.Is64BitProcess} os='{Environment.OSVersion}' engine=Windows.Media.Ocr");
 
-                using (var ms = new MemoryStream())
-                {
-                    bitmap.Save(ms, ImageFormat.Png);
-                    ms.Position = 0;
-                    LogOcrDiagnostic(
-                        $"OCR bitmap serialized context={diagnosticContext ?? "-"} bytes={ms.Length}");
-
-                    using (var pixImage = TesseractOCR.Pix.Image.LoadFromMemory(ms))
-                    {
-                        LogOcrDiagnostic($"OCR pix loaded context={diagnosticContext ?? "-"}");
-                        using (var engine = new Engine(tessDataPath, TesseractOCR.Enums.Language.Polish, TesseractOCR.Enums.EngineMode.Default))
-                        {
-                            LogOcrDiagnostic($"OCR engine initialized context={diagnosticContext ?? "-"} language=Polish mode=Default");
-                            using (var page = engine.Process(pixImage))
-                            {
-                                result = page.Text ?? string.Empty;
-                                LogOcrDiagnostic(
-                                    $"OCR finished context={diagnosticContext ?? "-"} resultLength={result.Length}");
-                            }
-                        }
-                    }
-                }
+                var ocrResult = await PdfTextSearcher.RecognizeBitmapTextWithWindowsOcrAsync(bitmap);
+                result = ocrResult.Text ?? string.Empty;
+                LogOcrDiagnostic(
+                    $"OCR finished context={diagnosticContext ?? "-"} language={ocrResult.LanguageTag ?? "-"} resultLength={(result ?? string.Empty).Length}");
             }
             catch (Exception ex)
             {
@@ -52546,21 +53817,36 @@ namespace AnonPDF
                     (int)Math.Round(pdfCoordinates.Width),
                     (int)Math.Round(pdfCoordinates.Height)
                 );
-                
-                
+
+
                 //var strategy = new FilteredTextEventListener(
                 //    new LocationTextExtractionStrategy(), filter
-                
+
 
                 CustomTextExtractionStrategy strategy = new CustomTextExtractionStrategy(rectangle);
                 PdfTextExtractor.GetTextFromPage(page, strategy);
-                
+
                 return strategy.GetResultantText();
             }
         }
 
 
-        public void CopyTextsFromAllSelectionsOnCurrentPage()
+        private async Task RunCopyTextsFromAllSelectionsOnCurrentPageAsync()
+        {
+            try
+            {
+                await CopyTextsFromAllSelectionsOnCurrentPageAsync();
+            }
+            catch (Exception ex)
+            {
+                LogOcrDiagnostic(
+                    $"Copy selections failed type={ex.GetType().FullName} msg={ex.Message} stack={ex}",
+                    force: true);
+                MessageBox.Show(this, string.Format(Resources.Err_OCR, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        public async Task CopyTextsFromAllSelectionsOnCurrentPageAsync()
         {
             // Collect all selections for the current page
             var blocks = redactionBlocks
@@ -52574,55 +53860,62 @@ namespace AnonPDF
                 return;
             }
 
+            BeginBusyCursor();
             List<string> allExtractedTexts = new List<string>();
-
-            for (int blockIndex = 0; blockIndex < blocks.Count; blockIndex++)
+            try
             {
-                RedactionBlock block = blocks[blockIndex];
-                try
+                for (int blockIndex = 0; blockIndex < blocks.Count; blockIndex++)
                 {
-                    LogOcrDiagnostic(
-                        $"Copy selection start index={blockIndex} page={block.PageNumber} marker={block.IsMarkerSelection} " +
-                        $"bounds={FormatRectFInvariant(block.Bounds)} layer={NormalizeLayerIdValue(block.LayerId)}");
-
-                    string text = ExtractTextFromRectangle(inputPdfPath, block);
-                    LogOcrDiagnostic(
-                        $"Copy selection extracted text index={blockIndex} page={block.PageNumber} textLength={(text ?? string.Empty).Length}");
-
-                    if (string.IsNullOrWhiteSpace(text))
+                    RedactionBlock block = blocks[blockIndex];
+                    try
                     {
-                        using (Bitmap bmp = ExtractBitmapFromRectangle(block.PageNumber, block.Bounds))
+                        LogOcrDiagnostic(
+                            $"Copy selection start index={blockIndex} page={block.PageNumber} marker={block.IsMarkerSelection} " +
+                            $"bounds={FormatRectFInvariant(block.Bounds)} layer={NormalizeLayerIdValue(block.LayerId)}");
+
+                        string text = ExtractTextFromRectangle(inputPdfPath, block);
+                        LogOcrDiagnostic(
+                            $"Copy selection extracted text index={blockIndex} page={block.PageNumber} textLength={(text ?? string.Empty).Length}");
+
+                        if (string.IsNullOrWhiteSpace(text))
                         {
-                            if (bmp != null)
+                            using (Bitmap bmp = ExtractBitmapFromRectangle(block.PageNumber, block.Bounds))
                             {
-                                string diagnosticContext =
-                                    $"copy-index={blockIndex};page={block.PageNumber};marker={block.IsMarkerSelection};bounds={FormatRectFInvariant(block.Bounds)}";
-                                text = OcrFromBitmap(bmp, diagnosticContext);
-                            }
-                            else
-                            {
-                                LogOcrDiagnostic(
-                                    $"Copy selection OCR skipped null crop index={blockIndex} page={block.PageNumber} " +
-                                    $"bounds={FormatRectFInvariant(block.Bounds)}",
-                                    force: true);
+                                if (bmp != null)
+                                {
+                                    string diagnosticContext =
+                                        $"copy-index={blockIndex};page={block.PageNumber};marker={block.IsMarkerSelection};bounds={FormatRectFInvariant(block.Bounds)}";
+                                    text = await OcrFromBitmapAsync(bmp, diagnosticContext);
+                                }
+                                else
+                                {
+                                    LogOcrDiagnostic(
+                                        $"Copy selection OCR skipped null crop index={blockIndex} page={block.PageNumber} " +
+                                        $"bounds={FormatRectFInvariant(block.Bounds)}",
+                                        force: true);
+                                }
                             }
                         }
-                    }
 
-                    text = text ?? string.Empty;
-                    allExtractedTexts.Add(text.Trim());
-                    LogOcrDiagnostic(
-                        $"Copy selection done index={blockIndex} page={block.PageNumber} finalTextLength={text.Trim().Length}");
+                        text = text ?? string.Empty;
+                        allExtractedTexts.Add(text.Trim());
+                        LogOcrDiagnostic(
+                            $"Copy selection done index={blockIndex} page={block.PageNumber} finalTextLength={text.Trim().Length}");
+                    }
+                    catch (Exception ex)
+                    {
+                        LogOcrDiagnostic(
+                            $"Copy selection failed index={blockIndex} page={block.PageNumber} marker={block.IsMarkerSelection} " +
+                            $"bounds={FormatRectFInvariant(block.Bounds)} type={ex.GetType().FullName} msg={ex.Message} stack={ex}",
+                            force: true);
+                        allExtractedTexts.Add(string.Empty);
+                        MessageBox.Show(this, string.Format(Resources.Err_OCR, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
                 }
-                catch (Exception ex)
-                {
-                    LogOcrDiagnostic(
-                        $"Copy selection failed index={blockIndex} page={block.PageNumber} marker={block.IsMarkerSelection} " +
-                        $"bounds={FormatRectFInvariant(block.Bounds)} type={ex.GetType().FullName} msg={ex.Message} stack={ex}",
-                        force: true);
-                    allExtractedTexts.Add(string.Empty);
-                    MessageBox.Show(this, string.Format(Resources.Err_OCR, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+            }
+            finally
+            {
+                EndBusyCursor();
             }
 
             // Concatenate all results with two CRLF characters
@@ -52798,7 +54091,7 @@ namespace AnonPDF
                 return;
             }
 
-            CopyTextsFromAllSelectionsOnCurrentPage();
+            _ = RunCopyTextsFromAllSelectionsOnCurrentPageAsync();
         }
 
         private void ExportGraphicsToolStripMenuItem_Click(object sender, EventArgs e)
@@ -52930,6 +54223,9 @@ namespace AnonPDF
 
         [JsonIgnore]
         public float CachedRichHtmlRenderTargetHeightPt { get; set; }
+
+        [JsonIgnore]
+        public float MeasuredAtDpi { get; set; }
 
         public TextAnnotation()
         {
@@ -53063,6 +54359,7 @@ namespace AnonPDF
         private Button btnOK;
         private Button btnCancel;
         private System.Drawing.Color lastBackgroundColorBeforeTransparent = System.Drawing.Color.White;
+        private DialogTheme dialogTheme;
 
         // Properties that allow reading values set by the user
         public string AnnotationText { get; set; }
@@ -53091,6 +54388,8 @@ namespace AnonPDF
 
         public EditTextDialog()
         {
+            AutoScaleDimensions = new SizeF(6F, 13F);
+            AutoScaleMode = AutoScaleMode.Font;
 
             // Set default values if nothing was set previously
             if (AnnotationText == null) AnnotationText = "";
@@ -53128,16 +54427,20 @@ namespace AnonPDF
             this.Text = Resources.EditText_Title;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
-            this.ClientSize = new Size(420, 716);
+            this.ClientSize = PDFForm.ScaleSizeForDpiStatic(430, 730);
             this.MaximizeBox = false;
-            this.MinimizeBox = false;
+                        this.MinimizeBox = false;
+            this.AutoScroll = true;
+            this.AutoScrollMargin = new Size(0, PDFForm.ScaleForDpiStatic(16));
+            int maxH = Screen.GetWorkingArea(this).Height - 80;
+            if (this.Height > maxH) this.Height = maxH;
 
             // Label: "Enter text:"
             lblText = new Label
             {
                 Text = Resources.EditText_LabelText,
                 AutoSize = true,
-                Location = new Point(10, 10)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(10))
             };
 
             // TextBox - multiline for entering content
@@ -53145,8 +54448,8 @@ namespace AnonPDF
             {
                 Multiline = true,
                 ScrollBars = RichTextBoxScrollBars.Both,
-                Location = new Point(10, 30),
-                Size = new Size(400, 100),
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(30)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(100)),
                 WordWrap = false,
                 Font = new Font("Segoe UI", 12f, FontStyle.Regular, GraphicsUnit.Point)
             };
@@ -53157,14 +54460,14 @@ namespace AnonPDF
             {
                 Text = GetRichModeLabelText(),
                 AutoSize = true,
-                Location = new Point(10, 138)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(138))
             };
             chkRichTextMode.CheckedChanged += RichModeCheckedChanged;
 
             richTextToolbarPanel = new FlowLayoutPanel
             {
-                Location = new Point(10, 160),
-                Size = new Size(400, 32),
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(160)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(32)),
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 Visible = false
@@ -53173,7 +54476,7 @@ namespace AnonPDF
             btnBold = new Button
             {
                 Text = "B",
-                Size = new Size(32, 28),
+                Size = new Size(PDFForm.ScaleForDpiStatic(32), PDFForm.ScaleForDpiStatic(28)),
                 Font = new Font(Font, FontStyle.Bold),
                 TabStop = false
             };
@@ -53182,7 +54485,7 @@ namespace AnonPDF
             btnItalic = new Button
             {
                 Text = "I",
-                Size = new Size(32, 28),
+                Size = new Size(PDFForm.ScaleForDpiStatic(32), PDFForm.ScaleForDpiStatic(28)),
                 Font = new Font(Font, FontStyle.Italic),
                 TabStop = false
             };
@@ -53191,7 +54494,7 @@ namespace AnonPDF
             btnUnderline = new Button
             {
                 Text = "U",
-                Size = new Size(32, 28),
+                Size = new Size(PDFForm.ScaleForDpiStatic(32), PDFForm.ScaleForDpiStatic(28)),
                 Font = new Font(Font, FontStyle.Underline),
                 TabStop = false
             };
@@ -53200,7 +54503,7 @@ namespace AnonPDF
             btnRichTextColor = new Button
             {
                 Text = GetChooseColorButtonText(),
-                Size = new Size(90, 28),
+                Size = new Size(PDFForm.ScaleForDpiStatic(90), PDFForm.ScaleForDpiStatic(28)),
                 TabStop = false
             };
             btnRichTextColor.Click += BtnRichTextColor_Click;
@@ -53221,8 +54524,8 @@ namespace AnonPDF
             btnFont = new Button
             {
                 Text = Resources.EditText_ButtonFont,
-                Location = new Point(10, 198),
-                Size = new Size(100, 30)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(198)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(100), PDFForm.ScaleForDpiStatic(30))
             };
             btnFont.Click += BtnFont_Click;
 
@@ -53231,7 +54534,7 @@ namespace AnonPDF
             {
                 Text = FormatResource("EditText_FontDisplay", AnnotationFont.FontFamily.Name, AnnotationFont.Size),
                 AutoSize = true,
-                Location = new Point(120, 205)
+                Location = new Point(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(205))
             };
 
             // Button to choose color
@@ -53239,14 +54542,14 @@ namespace AnonPDF
             {
                 Text = GetTextColorLabelText(),
                 AutoSize = true,
-                Location = new Point(10, 237)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(237))
             };
 
             btnColor = new Button
             {
                 Text = Resources.EditText_ButtonColor,
-                Location = new Point(145, 230),
-                Size = new Size(120, 30)
+                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(230)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(30))
             };
             btnColor.Click += BtnColor_Click;
 
@@ -53254,14 +54557,14 @@ namespace AnonPDF
             {
                 Text = GetBackgroundColorLabelText(),
                 AutoSize = true,
-                Location = new Point(10, 271)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(271))
             };
 
             btnBackgroundColor = new Button
             {
                 Text = GetChooseColorButtonText(),
-                Location = new Point(145, 264),
-                Size = new Size(120, 30)
+                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(264)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(30))
             };
             btnBackgroundColor.Click += BtnBackgroundColor_Click;
 
@@ -53269,7 +54572,7 @@ namespace AnonPDF
             {
                 Text = GetNoBackgroundLabelText(),
                 AutoSize = true,
-                Location = new Point(276, 271)
+                Location = new Point(PDFForm.ScaleForDpiStatic(276), PDFForm.ScaleForDpiStatic(271))
             };
             chkNoBackgroundColor.CheckedChanged += NoBackgroundColorCheckedChanged;
 
@@ -53277,14 +54580,14 @@ namespace AnonPDF
             {
                 Text = GetResourceText("EditText_LabelBorderColor"),
                 AutoSize = true,
-                Location = new Point(10, 305)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(305))
             };
 
             btnBorderColor = new Button
             {
                 Text = GetChooseColorButtonText(),
-                Location = new Point(145, 298),
-                Size = new Size(120, 30)
+                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(298)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(30))
             };
             btnBorderColor.Click += BtnBorderColor_Click;
 
@@ -53292,12 +54595,12 @@ namespace AnonPDF
             {
                 Text = GetResourceText("EditText_LabelBorderWidth"),
                 AutoSize = true,
-                Location = new Point(10, 339)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(339))
             };
             nudBorderWidth = new NumericUpDown
             {
-                Location = new Point(145, 336),
-                Size = new Size(80, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(336)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
                 DecimalPlaces = 3,
                 Minimum = 0,
                 Maximum = 24,
@@ -53309,12 +54612,12 @@ namespace AnonPDF
             {
                 Text = GetResourceText("EditText_LabelFrameMargin"),
                 AutoSize = true,
-                Location = new Point(235, 339)
+                Location = new Point(PDFForm.ScaleForDpiStatic(235), PDFForm.ScaleForDpiStatic(339))
             };
             nudFrameMargin = new NumericUpDown
             {
-                Location = new Point(330, 336),
-                Size = new Size(80, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(336)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
                 DecimalPlaces = 1,
                 Minimum = 0,
                 Maximum = 120,
@@ -53326,7 +54629,7 @@ namespace AnonPDF
             {
                 Text = GetResourceText("EditText_CheckLeaderArrow"),
                 AutoSize = true,
-                Location = new Point(10, 370)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(370))
             };
             chkLeaderArrow.CheckedChanged += (_, __) =>
             {
@@ -53338,12 +54641,12 @@ namespace AnonPDF
             {
                 Text = GetResourceText("EditText_LabelLeaderLineWidth"),
                 AutoSize = true,
-                Location = new Point(10, 402)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(402))
             };
             nudLeaderLineWidth = new NumericUpDown
             {
-                Location = new Point(145, 399),
-                Size = new Size(80, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(399)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
                 DecimalPlaces = 1,
                 Minimum = 0.5m,
                 Maximum = 24,
@@ -53355,12 +54658,12 @@ namespace AnonPDF
             {
                 Text = GetResourceText("EditText_LabelLeaderHeadLength"),
                 AutoSize = true,
-                Location = new Point(235, 402)
+                Location = new Point(PDFForm.ScaleForDpiStatic(235), PDFForm.ScaleForDpiStatic(402))
             };
             nudLeaderHeadLength = new NumericUpDown
             {
-                Location = new Point(330, 399),
-                Size = new Size(80, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(399)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
                 DecimalPlaces = 1,
                 Minimum = 4,
                 Maximum = 120,
@@ -53372,12 +54675,12 @@ namespace AnonPDF
             {
                 Text = GetResourceText("EditText_LabelLeaderHeadWidth"),
                 AutoSize = true,
-                Location = new Point(10, 430)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(430))
             };
             nudLeaderHeadWidth = new NumericUpDown
             {
-                Location = new Point(145, 427),
-                Size = new Size(80, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(427)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
                 DecimalPlaces = 1,
                 Minimum = 4,
                 Maximum = 120,
@@ -53389,15 +54692,15 @@ namespace AnonPDF
             groupBoxAlignment = new GroupBox
             {
                 Text = Resources.EditText_GroupAlignment,
-                Location = new Point(10, 462),
-                Size = new Size(400, 50)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(462)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(50))
             };
 
             // RadioButton for left alignment
             rbLeft = new RadioButton
             {
                 Text = Resources.EditText_AlignLeft,
-                Location = new Point(10, 20),
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(20)),
                 AutoSize = true,
                 Checked = true
             };
@@ -53406,7 +54709,7 @@ namespace AnonPDF
             rbCenter = new RadioButton
             {
                 Text = Resources.EditText_AlignCenter,
-                Location = new Point(150, 20),
+                Location = new Point(PDFForm.ScaleForDpiStatic(150), PDFForm.ScaleForDpiStatic(20)),
                 AutoSize = true
             };
 
@@ -53414,7 +54717,7 @@ namespace AnonPDF
             rbRight = new RadioButton
             {
                 Text = Resources.EditText_AlignRight,
-                Location = new Point(290, 20),
+                Location = new Point(PDFForm.ScaleForDpiStatic(290), PDFForm.ScaleForDpiStatic(20)),
                 AutoSize = true
             };
 
@@ -53430,14 +54733,14 @@ namespace AnonPDF
             groupBoxRotation = new GroupBox
             {
                 Text = Resources.EditText_GroupRotation,
-                Location = new Point(10, 522),
-                Size = new Size(400, 55)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(522)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(55))
             };
 
             lblRotation = new Label
             {
                 Text = Resources.EditText_RotationLabel,
-                Location = new Point(10, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(22)),
                 AutoSize = true
             };
 
@@ -53447,15 +54750,15 @@ namespace AnonPDF
                 Maximum = 359,
                 Increment = 1,
                 Value = NormalizeAngle(AnnotationRotation),
-                Location = new Point(90, 18),
-                Size = new Size(70, 22)
+                Location = new Point(PDFForm.ScaleForDpiStatic(90), PDFForm.ScaleForDpiStatic(18)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(70), PDFForm.ScaleForDpiStatic(22))
             };
             nudRotation.ValueChanged += RotationValueChanged;
 
             rotationPresetPanel = new FlowLayoutPanel
             {
-                Location = new Point(170, 18),
-                Size = new Size(220, 28),
+                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(18)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(220), PDFForm.ScaleForDpiStatic(28)),
                 AutoSize = false,
                 WrapContents = false,
                 FlowDirection = FlowDirection.LeftToRight,
@@ -53469,7 +54772,7 @@ namespace AnonPDF
                 {
                     Text = preset.ToString(CultureInfo.InvariantCulture),
                     Tag = preset,
-                    Size = new Size(34, 24),
+                    Size = new Size(PDFForm.ScaleForDpiStatic(34), PDFForm.ScaleForDpiStatic(24)),
                     Margin = new Padding(2, 0, 0, 0),
                     TabStop = false
                 };
@@ -53485,8 +54788,8 @@ namespace AnonPDF
             groupBoxSymbols = new GroupBox
             {
                 Text = Resources.EditText_GroupSymbols,
-                Location = new Point(10, 592),
-                Size = new Size(400, 65)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(592)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(65))
             };
 
             symbolsPanel = new FlowLayoutPanel
@@ -53516,7 +54819,7 @@ namespace AnonPDF
                 Button btnSymbol = new Button
                 {
                     Text = symbol,
-                    Size = new Size(32, 28),
+                    Size = new Size(PDFForm.ScaleForDpiStatic(32), PDFForm.ScaleForDpiStatic(28)),
                     Margin = new Padding(4, 0, 0, 0),
                     TabStop = false
                 };
@@ -53529,8 +54832,8 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(240, 678),
-                Size = new Size(80, 30),
+                Location = new Point(PDFForm.ScaleForDpiStatic(240), PDFForm.ScaleForDpiStatic(678)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.OK
             };
             btnOK.Click += BtnOK_Click;
@@ -53538,16 +54841,16 @@ namespace AnonPDF
             btnRestoreDefaults = new Button
             {
                 Text = GetResourceText("UI_Button_RestoreSettings"),
-                Location = new Point(90, 678),
-                Size = new Size(140, 30)
+                Location = new Point(PDFForm.ScaleForDpiStatic(90), PDFForm.ScaleForDpiStatic(678)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(140), PDFForm.ScaleForDpiStatic(30))
             };
             btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
 
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(330, 678),
-                Size = new Size(80, 30),
+                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(678)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.Cancel
             };
 
@@ -53583,7 +54886,7 @@ namespace AnonPDF
             this.Controls.Add(btnOK);
             this.Controls.Add(btnCancel);
 
-            
+
             this.CancelButton = btnCancel;
             this.AcceptButton = null;
         }
@@ -53606,6 +54909,17 @@ namespace AnonPDF
             }
 
             ApplyEditorDisplayFormatting(normalizeRichContent: IsRichTextMode);
+            if (dialogTheme != null)
+            {
+                ApplyDialogTheme(dialogTheme);
+            }
+        }
+
+        internal void ApplyDialogTheme(DialogTheme theme)
+        {
+            dialogTheme = theme;
+            DialogThemeApplier.ApplyTo(this, theme, txtText, btnRichTextColor, btnColor, btnBackgroundColor, btnBorderColor);
+            UpdateColorControls();
         }
 
         private void BtnRestoreDefaults_Click(object sender, EventArgs e)
@@ -53778,7 +55092,8 @@ namespace AnonPDF
 
         private void UpdateColorControls()
         {
-            if (lblTextColor != null) lblTextColor.ForeColor = SystemColors.ControlText;
+            System.Drawing.Color labelColor = dialogTheme?.TextSecondaryColor ?? SystemColors.ControlText;
+            if (lblTextColor != null) lblTextColor.ForeColor = labelColor;
 
             if (btnColor != null)
             {
@@ -53788,7 +55103,7 @@ namespace AnonPDF
                 btnColor.UseVisualStyleBackColor = false;
             }
 
-            if (lblBackgroundColor != null) lblBackgroundColor.ForeColor = SystemColors.ControlText;
+            if (lblBackgroundColor != null) lblBackgroundColor.ForeColor = labelColor;
 
             if (btnBackgroundColor != null)
             {
@@ -53802,6 +55117,7 @@ namespace AnonPDF
                 btnBackgroundColor.Enabled = chkNoBackgroundColor == null || !chkNoBackgroundColor.Checked;
             }
 
+            if (lblBorderColor != null) lblBorderColor.ForeColor = labelColor;
             if (btnBorderColor != null)
             {
                 System.Drawing.Color previewColor = AnnotationBorderColor.A > 0
@@ -53866,7 +55182,7 @@ namespace AnonPDF
 
         private void UpdateFontDisplay()
         {
-            
+
             string fontStyles = "";
             if (AnnotationFont.Bold)
                 fontStyles += "B";
@@ -54404,9 +55720,12 @@ namespace AnonPDF
         public Func<string> SelectReplacementImage { get; set; }
         public Action ApplyChanges { get; set; }
         public Action<EditRasterDialog> RestoreDefaultsAction { get; set; }
+        private DialogTheme dialogTheme;
 
         public EditRasterDialog()
         {
+            AutoScaleDimensions = new SizeF(6F, 13F);
+            AutoScaleMode = AutoScaleMode.Font;
             InitializeComponents();
         }
 
@@ -54415,26 +55734,26 @@ namespace AnonPDF
             Text = Resources.EditRaster_Title;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
-            Width = 430;
-            Height = 470;
+            Width = PDFForm.ScaleForDpiStatic(430);
+            Height = PDFForm.ScaleForDpiStatic(470);
             MaximizeBox = false;
             MinimizeBox = false;
 
             groupGeometry = new GroupBox
             {
                 Text = Resources.EditRaster_GroupGeometry,
-                Location = new Point(10, 10),
-                Size = new Size(394, 110)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(10)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(110))
             };
 
-            lblX = new Label { Text = Resources.EditRaster_LabelX, Location = new Point(12, 27), AutoSize = true };
-            nudX = BuildNumberInput(60, 24, -100000m, 100000m, 2);
-            lblY = new Label { Text = Resources.EditRaster_LabelY, Location = new Point(205, 27), AutoSize = true };
-            nudY = BuildNumberInput(250, 24, -100000m, 100000m, 2);
-            lblWidth = new Label { Text = Resources.EditRaster_LabelWidth, Location = new Point(12, 67), AutoSize = true };
-            nudWidth = BuildNumberInput(60, 64, 1m, 100000m, 2);
-            lblHeight = new Label { Text = Resources.EditRaster_LabelHeight, Location = new Point(205, 67), AutoSize = true };
-            nudHeight = BuildNumberInput(250, 64, 1m, 100000m, 2);
+            lblX = new Label { Text = Resources.EditRaster_LabelX, Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(27)), AutoSize = true };
+            nudX = BuildNumberInput(PDFForm.ScaleForDpiStatic(60), PDFForm.ScaleForDpiStatic(24), -100000m, 100000m, 2);
+            lblY = new Label { Text = Resources.EditRaster_LabelY, Location = new Point(PDFForm.ScaleForDpiStatic(205), PDFForm.ScaleForDpiStatic(27)), AutoSize = true };
+            nudY = BuildNumberInput(PDFForm.ScaleForDpiStatic(250), PDFForm.ScaleForDpiStatic(24), -100000m, 100000m, 2);
+            lblWidth = new Label { Text = Resources.EditRaster_LabelWidth, Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(67)), AutoSize = true };
+            nudWidth = BuildNumberInput(PDFForm.ScaleForDpiStatic(60), PDFForm.ScaleForDpiStatic(64), 1m, 100000m, 2);
+            lblHeight = new Label { Text = Resources.EditRaster_LabelHeight, Location = new Point(PDFForm.ScaleForDpiStatic(205), PDFForm.ScaleForDpiStatic(67)), AutoSize = true };
+            nudHeight = BuildNumberInput(PDFForm.ScaleForDpiStatic(250), PDFForm.ScaleForDpiStatic(64), 1m, 100000m, 2);
             nudX.ValueChanged += AnyControlValueChanged;
             nudY.ValueChanged += AnyControlValueChanged;
             nudWidth.ValueChanged += NudWidth_ValueChanged;
@@ -54452,14 +55771,14 @@ namespace AnonPDF
             groupRotation = new GroupBox
             {
                 Text = Resources.EditRaster_GroupRotation,
-                Location = new Point(10, 128),
-                Size = new Size(394, 58)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(128)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(58))
             };
 
             lblRotation = new Label
             {
                 Text = Resources.EditRaster_RotationLabel,
-                Location = new Point(12, 25),
+                Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(25)),
                 AutoSize = true
             };
             nudRotation = new NumericUpDown
@@ -54467,14 +55786,14 @@ namespace AnonPDF
                 Minimum = 0,
                 Maximum = 359,
                 Increment = 1,
-                Location = new Point(70, 21),
-                Size = new Size(64, 22)
+                Location = new Point(PDFForm.ScaleForDpiStatic(70), PDFForm.ScaleForDpiStatic(21)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(64), PDFForm.ScaleForDpiStatic(22))
             };
             nudRotation.ValueChanged += AnyControlValueChanged;
             rotationPresetPanel = new FlowLayoutPanel
             {
-                Location = new Point(145, 20),
-                Size = new Size(240, 26),
+                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(20)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(240), PDFForm.ScaleForDpiStatic(26)),
                 AutoSize = false,
                 WrapContents = false,
                 FlowDirection = FlowDirection.LeftToRight,
@@ -54488,7 +55807,7 @@ namespace AnonPDF
                 {
                     Text = preset.ToString(CultureInfo.InvariantCulture),
                     Tag = preset,
-                    Size = new Size(34, 24),
+                    Size = new Size(PDFForm.ScaleForDpiStatic(34), PDFForm.ScaleForDpiStatic(24)),
                     Margin = new Padding(2, 0, 0, 0),
                     TabStop = false
                 };
@@ -54503,33 +55822,33 @@ namespace AnonPDF
             groupOptions = new GroupBox
             {
                 Text = Resources.EditRaster_GroupOptions,
-                Location = new Point(10, 194),
-                Size = new Size(394, 86)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(194)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(86))
             };
             chkLockAspect = new CheckBox
             {
                 Text = Resources.EditRaster_CheckLockAspect,
-                Location = new Point(12, 24),
+                Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(24)),
                 AutoSize = true
             };
             chkLockAspect.CheckedChanged += ChkLockAspect_CheckedChanged;
             chkLocked = new CheckBox
             {
                 Text = Resources.EditRaster_CheckLocked,
-                Location = new Point(190, 24),
+                Location = new Point(PDFForm.ScaleForDpiStatic(190), PDFForm.ScaleForDpiStatic(24)),
                 AutoSize = true
             };
             chkTransparentBackground = new CheckBox
             {
                 Text = Resources.EditRaster_CheckTransparentBackground,
-                Location = new Point(12, 56),
+                Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(56)),
                 AutoSize = true
             };
             chkTransparentBackground.CheckedChanged += AnyControlValueChanged;
             lblOpacity = new Label
             {
                 Text = Resources.EditRaster_LabelOpacity,
-                Location = new Point(190, 56),
+                Location = new Point(PDFForm.ScaleForDpiStatic(190), PDFForm.ScaleForDpiStatic(56)),
                 AutoSize = true
             };
             nudOpacity = new NumericUpDown
@@ -54538,8 +55857,8 @@ namespace AnonPDF
                 Maximum = 100,
                 DecimalPlaces = 0,
                 Increment = 1,
-                Location = new Point(300, 52),
-                Size = new Size(70, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(300), PDFForm.ScaleForDpiStatic(52)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(70), PDFForm.ScaleForDpiStatic(22)),
                 ThousandsSeparator = false
             };
             nudOpacity.ValueChanged += AnyControlValueChanged;
@@ -54553,34 +55872,34 @@ namespace AnonPDF
             groupSource = new GroupBox
             {
                 Text = Resources.EditRaster_GroupSource,
-                Location = new Point(10, 288),
-                Size = new Size(394, 86)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(288)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(86))
             };
             lblSourceValue = new Label
             {
-                Location = new Point(12, 25),
-                Size = new Size(250, 18),
+                Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(25)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(250), PDFForm.ScaleForDpiStatic(18)),
                 AutoEllipsis = true
             };
             btnReplaceImage = new Button
             {
                 Text = Resources.EditRaster_ButtonReplaceImage,
-                Location = new Point(268, 18),
-                Size = new Size(116, 28)
+                Location = new Point(PDFForm.ScaleForDpiStatic(268), PDFForm.ScaleForDpiStatic(18)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(116), PDFForm.ScaleForDpiStatic(28))
             };
             btnReplaceImage.Click += BtnReplaceImage_Click;
             btnResetAspect = new Button
             {
                 Text = Resources.EditRaster_ButtonResetAspect,
-                Location = new Point(268, 50),
-                Size = new Size(116, 28)
+                Location = new Point(PDFForm.ScaleForDpiStatic(268), PDFForm.ScaleForDpiStatic(50)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(116), PDFForm.ScaleForDpiStatic(28))
             };
             btnResetAspect.Click += BtnResetAspect_Click;
             btnResetOneToOne = new Button
             {
                 Text = Resources.EditRaster_ButtonResetOneToOne,
-                Location = new Point(212, 50),
-                Size = new Size(50, 28)
+                Location = new Point(PDFForm.ScaleForDpiStatic(212), PDFForm.ScaleForDpiStatic(50)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(50), PDFForm.ScaleForDpiStatic(28))
             };
             btnResetOneToOne.Click += BtnResetOneToOne_Click;
             groupSource.Controls.Add(lblSourceValue);
@@ -54591,8 +55910,8 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(238, 386),
-                Size = new Size(80, 30),
+                Location = new Point(PDFForm.ScaleForDpiStatic(238), PDFForm.ScaleForDpiStatic(386)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.OK
             };
             btnOK.Click += BtnOK_Click;
@@ -54600,16 +55919,16 @@ namespace AnonPDF
             btnRestoreDefaults = new Button
             {
                 Text = Resources.ResourceManager.GetString("UI_Button_RestoreSettings", Resources.Culture ?? CultureInfo.CurrentUICulture) ?? "UI_Button_RestoreSettings",
-                Location = new Point(92, 386),
-                Size = new Size(136, 30)
+                Location = new Point(PDFForm.ScaleForDpiStatic(92), PDFForm.ScaleForDpiStatic(386)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(136), PDFForm.ScaleForDpiStatic(30))
             };
             btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
 
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(324, 386),
-                Size = new Size(80, 30),
+                Location = new Point(PDFForm.ScaleForDpiStatic(324), PDFForm.ScaleForDpiStatic(386)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.Cancel
             };
 
@@ -54630,7 +55949,7 @@ namespace AnonPDF
             return new NumericUpDown
             {
                 Location = new Point(x, y),
-                Size = new Size(120, 22),
+                Size = new Size(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(22)),
                 Minimum = min,
                 Maximum = max,
                 DecimalPlaces = decimals,
@@ -54663,8 +55982,15 @@ namespace AnonPDF
             UpdateSourceLabel();
 
             SyncPropertiesFromControls();
+            ApplyDialogTheme(dialogTheme);
             suppressAutoApply = false;
             suppressDimensionSync = false;
+        }
+
+        internal void ApplyDialogTheme(DialogTheme theme)
+        {
+            dialogTheme = theme;
+            DialogThemeApplier.ApplyTo(this, theme);
         }
 
         private static decimal ClampDecimal(decimal value, decimal min, decimal max)
@@ -55060,6 +56386,7 @@ namespace AnonPDF
         private Button btnOK;
         private Button btnCancel;
         private bool suppressAutoApply;
+        private DialogTheme dialogTheme;
 
         public System.Drawing.Color ArrowColor { get; set; } = System.Drawing.Color.Red;
         public float ThicknessValue { get; set; } = 3f;
@@ -55078,23 +56405,23 @@ namespace AnonPDF
 
         private void InitializeComponents()
         {
-            Text = "Edytuj strzalke";
+            Text = Resources.EditArrow_Title;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
-            Width = 360;
-            Height = 350;
+            Width = PDFForm.ScaleForDpiStatic(360);
+            Height = PDFForm.ScaleForDpiStatic(350);
             MaximizeBox = false;
             MinimizeBox = false;
 
-            Label lblColor = new Label { Text = "Kolor:", Location = new Point(16, 22), AutoSize = true };
-            btnColor = new Button { Location = new Point(170, 16), Size = new Size(160, 28), Text = "Wybierz kolor" };
+            Label lblColor = new Label { Text = Resources.EditArrow_Color, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(22)), AutoSize = true };
+            btnColor = new Button { Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(16)), Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(28)), Text = Resources.EditArrow_ChooseColor };
             btnColor.Click += BtnColor_Click;
 
-            Label lblThickness = new Label { Text = "Grubosc linii:", Location = new Point(16, 64), AutoSize = true };
+            Label lblThickness = new Label { Text = Resources.EditArrow_LineThickness, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(64)), AutoSize = true };
             nudThickness = new NumericUpDown
             {
-                Location = new Point(170, 60),
-                Size = new Size(160, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(60)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
                 Minimum = 1,
                 Maximum = 24,
                 DecimalPlaces = 1,
@@ -55102,15 +56429,15 @@ namespace AnonPDF
             };
             nudThickness.ValueChanged += (_, __) => TryApplyChanges();
 
-            Label lblBorderColor = new Label { Text = "Kolor ramki:", Location = new Point(16, 100), AutoSize = true };
-            btnBorderColor = new Button { Location = new Point(170, 94), Size = new Size(160, 28), Text = "Wybierz kolor" };
+            Label lblBorderColor = new Label { Text = Resources.EditArrow_BorderColor, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(100)), AutoSize = true };
+            btnBorderColor = new Button { Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(94)), Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(28)), Text = Resources.EditArrow_ChooseColor };
             btnBorderColor.Click += BtnBorderColor_Click;
 
-            Label lblBorderWidth = new Label { Text = "Grubosc ramki:", Location = new Point(16, 136), AutoSize = true };
+            Label lblBorderWidth = new Label { Text = Resources.EditArrow_BorderThickness, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(136)), AutoSize = true };
             nudBorderWidth = new NumericUpDown
             {
-                Location = new Point(170, 132),
-                Size = new Size(160, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(132)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
                 Minimum = 0,
                 Maximum = 24,
                 DecimalPlaces = 3,
@@ -55118,11 +56445,11 @@ namespace AnonPDF
             };
             nudBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
 
-            Label lblHeadLength = new Label { Text = "Dlugosc grotu:", Location = new Point(16, 172), AutoSize = true };
+            Label lblHeadLength = new Label { Text = Resources.EditArrow_HeadLength, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(172)), AutoSize = true };
             nudHeadLength = new NumericUpDown
             {
-                Location = new Point(170, 168),
-                Size = new Size(160, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(168)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
                 Minimum = 4,
                 Maximum = 120,
                 DecimalPlaces = 1,
@@ -55130,11 +56457,11 @@ namespace AnonPDF
             };
             nudHeadLength.ValueChanged += (_, __) => TryApplyChanges();
 
-            Label lblHeadWidth = new Label { Text = "Szerokosc grotu:", Location = new Point(16, 208), AutoSize = true };
+            Label lblHeadWidth = new Label { Text = Resources.EditArrow_HeadWidth, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(208)), AutoSize = true };
             nudHeadWidth = new NumericUpDown
             {
-                Location = new Point(170, 204),
-                Size = new Size(160, 22),
+                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(204)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
                 Minimum = 4,
                 Maximum = 120,
                 DecimalPlaces = 1,
@@ -55144,8 +56471,8 @@ namespace AnonPDF
 
             chkLocked = new CheckBox
             {
-                Text = "Zablokuj obiekt",
-                Location = new Point(16, 240),
+                Text = Resources.EditRaster_CheckLocked,
+                Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(240)),
                 AutoSize = true
             };
             chkLocked.CheckedChanged += (_, __) => TryApplyChanges();
@@ -55153,8 +56480,8 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(166, 262),
-                Size = new Size(80, 30),
+                Location = new Point(PDFForm.ScaleForDpiStatic(166), PDFForm.ScaleForDpiStatic(262)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.OK
             };
             btnOK.Click += BtnOK_Click;
@@ -55162,16 +56489,16 @@ namespace AnonPDF
             btnRestoreDefaults = new Button
             {
                 Text = Resources.ResourceManager.GetString("UI_Button_RestoreSettings", Resources.Culture ?? CultureInfo.CurrentUICulture) ?? "UI_Button_RestoreSettings",
-                Location = new Point(16, 262),
-                Size = new Size(140, 30)
+                Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(262)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(140), PDFForm.ScaleForDpiStatic(30))
             };
             btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
 
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(252, 262),
-                Size = new Size(80, 30),
+                Location = new Point(PDFForm.ScaleForDpiStatic(252), PDFForm.ScaleForDpiStatic(262)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.Cancel
             };
 
@@ -55210,11 +56537,32 @@ namespace AnonPDF
                 nudHeadWidth.Value = ClampValue((decimal)HeadWidthValue, nudHeadWidth.Minimum, nudHeadWidth.Maximum);
                 chkLocked.Checked = IsLocked;
                 SyncPropertiesFromControls();
+                ApplyDialogTheme(dialogTheme);
             }
             finally
             {
                 suppressAutoApply = false;
             }
+        }
+
+        internal void ApplyDialogTheme(DialogTheme theme)
+        {
+            dialogTheme = theme;
+            DialogThemeApplier.ApplyTo(this, theme, btnColor, btnBorderColor);
+            if (btnColor != null)
+            {
+                btnColor.ForeColor = GetContrastingTextColor(btnColor.BackColor);
+            }
+            if (btnBorderColor != null)
+            {
+                btnBorderColor.ForeColor = GetContrastingTextColor(btnBorderColor.BackColor);
+            }
+        }
+
+        private static System.Drawing.Color GetContrastingTextColor(System.Drawing.Color color)
+        {
+            int luminance = (int)((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B));
+            return luminance >= 140 ? System.Drawing.Color.Black : System.Drawing.Color.White;
         }
 
         private static decimal ClampValue(decimal value, decimal min, decimal max)
@@ -55239,6 +56587,7 @@ namespace AnonPDF
                 {
                     ArrowColor = colorDialog.Color;
                     btnColor.BackColor = ArrowColor;
+                    btnColor.ForeColor = GetContrastingTextColor(ArrowColor);
                     TryApplyChanges();
                 }
             }
@@ -55253,6 +56602,7 @@ namespace AnonPDF
                 {
                     BorderColor = colorDialog.Color;
                     btnBorderColor.BackColor = BorderColor;
+                    btnBorderColor.ForeColor = GetContrastingTextColor(BorderColor);
                     TryApplyChanges();
                 }
             }
@@ -55276,6 +56626,8 @@ namespace AnonPDF
             {
                 btnColor.BackColor = ArrowColor;
                 btnBorderColor.BackColor = BorderColor;
+                btnColor.ForeColor = GetContrastingTextColor(ArrowColor);
+                btnBorderColor.ForeColor = GetContrastingTextColor(BorderColor);
                 nudThickness.Value = ClampValue((decimal)ThicknessValue, nudThickness.Minimum, nudThickness.Maximum);
                 nudBorderWidth.Value = ClampValue((decimal)BorderWidthValue, nudBorderWidth.Minimum, nudBorderWidth.Maximum);
                 nudHeadLength.Value = ClampValue((decimal)HeadLengthValue, nudHeadLength.Minimum, nudHeadLength.Maximum);
@@ -55341,56 +56693,42 @@ namespace AnonPDF
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
-            this.MinimizeBox = false;
-            this.Width = 400;
-            this.Height = 280;
+                        this.MinimizeBox = false;
+            this.AutoScroll = true;
+            int maxH = Screen.GetWorkingArea(this).Height - 80;
+            if (this.Height > maxH) this.Height = maxH;
+            this.Width = PDFForm.ScaleForDpiStatic(400);
+            this.Height = PDFForm.ScaleForDpiStatic(280);
 
             // Label for file
             lblFile = new Label
             {
                 Text = Resources.Split_FileLabel,
                 AutoSize = true,
-                Location = new Point(10, 20)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(20))
             };
 
             // Text field with selected path (read-only)
             txtFilePath = new TextBox
             {
-                Location = new Point(10, 45),
-                Width = 280,
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(45)),
+                Width = PDFForm.ScaleForDpiStatic(240),
                 Text = SelectedFile,
                 ReadOnly = true
             };
-
-            // "Browse" button to open OpenFileDialog
-            btnBrowse = new Button
-            {
-                Text = Resources.Split_Browse,
-                Location = new Point(300, 43)
-            };
-            btnBrowse.Click += BtnBrowse_Click;
 
             // Label to display page count
             lblPageCount = new Label
             {
                 Text = string.Format(Resources.Split_PageCountLabel, DocumentPageCount),
                 AutoSize = true,
-                Location = new Point(10, 75)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(75))
             };
 
-            // Label for page numbers to split
-            lblPages = new Label
-            {
-                Text = Resources.Split_PagesLabel,
-                AutoSize = true,
-                Location = new Point(10, 100)
-            };
-
-            // Text field for entering page numbers
             txtPageNumbers = new TextBox
             {
-                Location = new Point(10, 125),
-                Width = 360
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(125)),
+                Width = PDFForm.ScaleForDpiStatic(360)
             };
 
             // Label for the step value
@@ -55398,14 +56736,39 @@ namespace AnonPDF
             {
                 Text = Resources.Split_StepLabel,
                 AutoSize = true,
-                Location = new Point(10, 160)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(160))
             };
 
             nudStep = new NumericUpDown
             {
-                Location = new Point(140, 160),
+                Location = new Point(PDFForm.ScaleForDpiStatic(140), PDFForm.ScaleForDpiStatic(160)),
                 Minimum = 0,
-                Width = 50,
+                Width = PDFForm.ScaleForDpiStatic(50),
+                Value = 0
+            };
+
+            // "Browse" button to open OpenFileDialog
+            btnBrowse = new Button
+            {
+                Text = Resources.Split_Browse,
+                Location = new Point(PDFForm.ScaleForDpiStatic(260), PDFForm.ScaleForDpiStatic(43)),
+                Width = PDFForm.ScaleForDpiStatic(110),
+                Height = PDFForm.ScaleForDpiStatic(28)
+            };
+            btnBrowse.Click += BtnBrowse_Click;
+
+            // Text field for entering page numbers
+            txtPageNumbers = new TextBox
+            {
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(125)),
+                Width = PDFForm.ScaleForDpiStatic(360)
+            };
+
+            nudStep = new NumericUpDown
+            {
+                Location = new Point(PDFForm.ScaleForDpiStatic(130), PDFForm.ScaleForDpiStatic(160)),
+                Minimum = 0,
+                Width = PDFForm.ScaleForDpiStatic(70),
                 Value = 0
             };
 
@@ -55413,7 +56776,35 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(210, 200),
+                Location = new Point(PDFForm.ScaleForDpiStatic(190), PDFForm.ScaleForDpiStatic(200)),
+                Width = PDFForm.ScaleForDpiStatic(80),
+                Height = PDFForm.ScaleForDpiStatic(28),
+                DialogResult = DialogResult.OK
+            };
+
+            // Label to display page count
+            lblPageCount = new Label
+            {
+                Text = string.Format(Resources.Split_PageCountLabel, DocumentPageCount),
+                AutoSize = true,
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(75))
+            };
+
+            // Label for page numbers to split
+            lblPages = new Label
+            {
+                Text = Resources.Split_PagesLabel,
+                AutoSize = true,
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(100))
+            };
+
+            // OK button
+            btnOK = new Button
+            {
+                Text = Resources.Merge_OK,
+                Location = new Point(PDFForm.ScaleForDpiStatic(190), PDFForm.ScaleForDpiStatic(200)),
+                Width = PDFForm.ScaleForDpiStatic(80),
+                Height = PDFForm.ScaleForDpiStatic(28),
                 DialogResult = DialogResult.OK
             };
             btnOK.Click += BtnOK_Click;
@@ -55422,7 +56813,9 @@ namespace AnonPDF
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(300, 200),
+                Location = new Point(PDFForm.ScaleForDpiStatic(280), PDFForm.ScaleForDpiStatic(200)),
+                Width = PDFForm.ScaleForDpiStatic(80),
+                Height = PDFForm.ScaleForDpiStatic(28),
                 DialogResult = DialogResult.Cancel
             };
 
@@ -55460,7 +56853,7 @@ namespace AnonPDF
                         var props = new ReaderProperties();
                         //if (!string.IsNullOrEmpty(userPassword))
                         //{
-                        
+
                         //}
                         using (PdfReader reader = new PdfReader(SelectedFile, props).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
                         using (iText.Kernel.Pdf.PdfDocument pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
@@ -55506,7 +56899,7 @@ namespace AnonPDF
                     return;
                 }
             }
-            
+
             // Ensure page numbers are unique and sorted
             PageNumbers = parsedNumbers.Distinct().OrderBy(n => n).ToList();
             Step = (int)nudStep.Value;
@@ -55547,29 +56940,29 @@ namespace AnonPDF
         private void InitializeComponent()
         {
             this.Text = Resources.Merge_Title;
-            this.Size = new System.Drawing.Size(580, 400);
+            this.Size = PDFForm.ScaleSizeForDpiStatic(580, 400);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterScreen;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
-            
+
 
             listBoxFiles = new ListBox
             {
-                Location = new System.Drawing.Point(20, 20),
-                Size = new System.Drawing.Size(400, 280),
+                Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(20), PDFForm.ScaleForDpiStatic(20)),
+                Size = PDFForm.ScaleSizeForDpiStatic(400, 280),
                 HorizontalScrollbar = true,
                 SelectionMode = SelectionMode.MultiExtended
             };
 
-            buttonAddFiles = new Button { Text = Resources.Merge_AddFiles, Location = new System.Drawing.Point(440, 20), Width = 100 };
-            buttonAddDirectory = new Button { Text = Resources.Merge_AddDirectory, Location = new System.Drawing.Point(440, 60), Width = 100 };
-            buttonRemove = new Button { Text = Resources.Merge_RemoveSelected, Location = new System.Drawing.Point(440, 100), Width = 100 };
-            buttonClearAll = new Button { Text = Resources.Merge_ClearList, Location = new System.Drawing.Point(440, 140), Width = 100 };
-            buttonUp = new Button { Text = Resources.Merge_Up, Location = new System.Drawing.Point(440, 180), Width = 100 };
-            buttonDown = new Button { Text = Resources.Merge_Down, Location = new System.Drawing.Point(440, 220), Width = 100 };
-            buttonMerge = new Button { Text = Resources.Merge_OK, Location = new System.Drawing.Point(300, 320), Width = 100 };
-            buttonCancel = new Button { Text = Resources.Merge_Cancel, Location = new System.Drawing.Point(440, 320), Width = 100, DialogResult = DialogResult.Cancel };
+            buttonAddFiles = new Button { Text = Resources.Merge_AddFiles, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(20)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
+            buttonAddDirectory = new Button { Text = Resources.Merge_AddDirectory, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(60)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
+            buttonRemove = new Button { Text = Resources.Merge_RemoveSelected, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(100)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
+            buttonClearAll = new Button { Text = Resources.Merge_ClearList, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(140)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
+            buttonUp = new Button { Text = Resources.Merge_Up, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(180)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
+            buttonDown = new Button { Text = Resources.Merge_Down, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(220)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
+            buttonMerge = new Button { Text = Resources.Merge_OK, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(300), PDFForm.ScaleForDpiStatic(320)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
+            buttonCancel = new Button { Text = Resources.Merge_Cancel, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(320)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28), DialogResult = DialogResult.Cancel };
 
             this.Controls.Add(listBoxFiles);
             this.Controls.Add(buttonAddFiles);
@@ -55891,12 +57284,16 @@ namespace AnonPDF
         public int PageNumber { get; set; }
         public int PageRotation { get; set; }
         public iText.Kernel.Geom.Rectangle Rect { get; set; }
+        public bool IsOcr { get; set; }
+        public bool IsExactOcrWord { get; set; }
 
-        public TextLocation(int pageNumber, int pageRotation, iText.Kernel.Geom.Rectangle rect)
+        public TextLocation(int pageNumber, int pageRotation, iText.Kernel.Geom.Rectangle rect, bool isOcr = false, bool isExactOcrWord = false)
         {
             PageNumber = pageNumber;
             PageRotation = pageRotation;
             Rect = rect;
+            IsOcr = isOcr;
+            IsExactOcrWord = isExactOcrWord;
         }
 
         public override string ToString()
@@ -55942,6 +57339,8 @@ namespace AnonPDF
         [JsonIgnore]
         public List<System.Drawing.RectangleF> PreviewTextRectsPdf { get; set; }
 
+        public bool IsCursorSelection { get; set; }
+
         public RedactionBlock()
         {
             LayerId = PDFForm.DefaultLayerId;
@@ -55952,6 +57351,7 @@ namespace AnonPDF
             MatchedTag = null;
             InterestSubject = null;
             IsMarkerSelection = false;
+            IsCursorSelection = false;
             DuplicateGroupId = null;
             CreatedAtUtc = DateTime.MinValue;
             UpdatedAtUtc = DateTime.MinValue;
@@ -56019,8 +57419,8 @@ namespace AnonPDF
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
-            this.Width = 520;
-            this.Height = 360;
+            this.Width = PDFForm.ScaleForDpiStatic(520);
+            this.Height = PDFForm.ScaleForDpiStatic(360);
 
             listView = new ListView
             {
@@ -56028,13 +57428,13 @@ namespace AnonPDF
                 CheckBoxes = true,
                 FullRowSelect = true,
                 GridLines = true,
-                Location = new Point(10, 10),
-                Size = new Size(480, 260)
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(10)),
+                Size = PDFForm.ScaleSizeForDpiStatic(480, 260)
             };
 
-            listView.Columns.Add(Resources.Signatures_Select_Column_Name, 180);
-            listView.Columns.Add(Resources.Signatures_Select_Column_Title, 140);
-            listView.Columns.Add(Resources.Signatures_Select_Column_Date, 140);
+            listView.Columns.Add(Resources.Signatures_Select_Column_Name, PDFForm.ScaleForDpiStatic(180));
+            listView.Columns.Add(Resources.Signatures_Select_Column_Title, PDFForm.ScaleForDpiStatic(140));
+            listView.Columns.Add(Resources.Signatures_Select_Column_Date, PDFForm.ScaleForDpiStatic(140));
 
             HashSet<string> preselected = null;
             if (preselectedFields != null)
@@ -56059,16 +57459,16 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(320, 280),
-                Size = new Size(80, 30),
+                Location = new Point(PDFForm.ScaleForDpiStatic(320), PDFForm.ScaleForDpiStatic(280)),
+                Size = PDFForm.ScaleSizeForDpiStatic(80, 30),
                 DialogResult = DialogResult.OK
             };
 
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(410, 280),
-                Size = new Size(80, 30),
+                Location = new Point(PDFForm.ScaleForDpiStatic(410), PDFForm.ScaleForDpiStatic(280)),
+                Size = PDFForm.ScaleSizeForDpiStatic(80, 30),
                 DialogResult = DialogResult.Cancel
             };
 
@@ -56345,8 +57745,8 @@ namespace AnonPDF
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
-            this.Width = 300;
-            this.Height = 300;
+            this.Width = PDFForm.ScaleForDpiStatic(300);
+            this.Height = PDFForm.ScaleForDpiStatic(300);
 
             errorProvider = new ErrorProvider
             {
@@ -56354,25 +57754,25 @@ namespace AnonPDF
             };
 
             // Labels and NumericUpDown controls to select page range
-            Label lblStart = new Label() { Text = Resources.Delete_Label_Start, Left = 20, Top = 20, Width = 120 };
-            nudStart = new NumericUpDown() { Left = 150, Top = 20, Width = 50,  Minimum = 1, Maximum = numPages, Value = 1 };
+            Label lblStart = new Label() { Text = Resources.Delete_Label_Start, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(20), Width = PDFForm.ScaleForDpiStatic(120) };
+            nudStart = new NumericUpDown() { Left = PDFForm.ScaleForDpiStatic(150), Top = PDFForm.ScaleForDpiStatic(20), Width = PDFForm.ScaleForDpiStatic(50), Height = PDFForm.ScaleForDpiStatic(22), Minimum = 1, Maximum = numPages, Value = 1 };
 
-            Label lblEnd = new Label() { Text = Resources.Delete_Label_End, Left = 20, Top = 60, Width = 120 };
-            nudEnd = new NumericUpDown() { Left = 150, Top = 60, Width = 50, Minimum = 1, Maximum = numPages, Value = numPages };
+            Label lblEnd = new Label() { Text = Resources.Delete_Label_End, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(60), Width = PDFForm.ScaleForDpiStatic(120) };
+            nudEnd = new NumericUpDown() { Left = PDFForm.ScaleForDpiStatic(150), Top = PDFForm.ScaleForDpiStatic(60), Width = PDFForm.ScaleForDpiStatic(50), Height = PDFForm.ScaleForDpiStatic(22), Minimum = 1, Maximum = numPages, Value = numPages };
 
-            Label lblStep = new Label() { Text = Resources.Delete_Label_Step, Left = 20, Top = 100, Width = 120 };
-            nudStep = new NumericUpDown() { Left = 150, Top = 100, Width = 50, Minimum = 0, Maximum = numPages, Value = 1 };
+            Label lblStep = new Label() { Text = Resources.Delete_Label_Step, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(100), Width = PDFForm.ScaleForDpiStatic(120) };
+            nudStep = new NumericUpDown() { Left = PDFForm.ScaleForDpiStatic(150), Top = PDFForm.ScaleForDpiStatic(100), Width = PDFForm.ScaleForDpiStatic(50), Height = PDFForm.ScaleForDpiStatic(22), Minimum = 0, Maximum = numPages, Value = 1 };
 
-            // Two RadioButtons â€” one to apply, one to cancel the selection
-            rbApply = new RadioButton() { Text = Resources.Delete_Radio_Apply, Left = 20, Top = 140, Width = 200 };
-            rbCancel = new RadioButton() { Text = Resources.Delete_Radio_Cancel, Left = 20, Top = 170, Width = 200 };
+            // Two RadioButtons — one to apply, one to cancel the selection
+            rbApply = new RadioButton() { Text = Resources.Delete_Radio_Apply, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(140), Width = PDFForm.ScaleForDpiStatic(200) };
+            rbCancel = new RadioButton() { Text = Resources.Delete_Radio_Cancel, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(170), Width = PDFForm.ScaleForDpiStatic(200) };
 
             // By default set that we want to apply selection
             rbApply.Checked = true;
 
             // OK and Cancel buttons
-            btnOK = new Button() { Text = Resources.Merge_OK, Left = 50, Width = 80, Top = 210, DialogResult = DialogResult.OK };
-            btnCancel = new Button() { Text = Resources.Merge_Cancel, Left = 150, Width = 80, Top = 210, DialogResult = DialogResult.Cancel };
+            btnOK = new Button() { Text = Resources.Merge_OK, Left = PDFForm.ScaleForDpiStatic(50), Width = PDFForm.ScaleForDpiStatic(80), Height = PDFForm.ScaleForDpiStatic(28), Top = PDFForm.ScaleForDpiStatic(210), DialogResult = DialogResult.OK };
+            btnCancel = new Button() { Text = Resources.Merge_Cancel, Left = PDFForm.ScaleForDpiStatic(150), Width = PDFForm.ScaleForDpiStatic(80), Height = PDFForm.ScaleForDpiStatic(28), Top = PDFForm.ScaleForDpiStatic(210), DialogResult = DialogResult.Cancel };
 
             // Add controls to the form
             this.Controls.Add(lblStart);
@@ -56456,25 +57856,127 @@ namespace AnonPDF
     public class PdfTextSearcher
     {
         private static readonly string PDDServerUrl = "";
+        private const int MinimumNativeTextCharactersToSkipOcr = 40;
+        private const float OcrSearchHorizontalPaddingRatio = 0.03f;
+        private const float OcrSearchRightPaddingRatio = 0.16f;
+        private const float OcrSearchVerticalPaddingRatio = 0.08f;
+        private const float OcrSearchMinimumHorizontalPadding = 0.5f;
+        private const float OcrSearchMinimumRightPadding = 1.5f;
+        private const float OcrSearchMinimumVerticalPadding = 1.0f;
         // Cache for processed lines by file path
         private static readonly Dictionary<string, List<CachedLine>> _lineCache = new Dictionary<string, List<CachedLine>>();
 
-        
+
 
         // Structure storing line data
-        private class CachedLine
+        internal class CachedLine
         {
             public int PageNumber { get; set; }
             public int PageRotation { get; set; }
             public string Text { get; set; } = "";
             public float YPosition { get; set; }
             public List<CharacterInfo> Characters { get; set; } = new List<CharacterInfo>();
+            public bool IsOcr { get; set; }
+            public float PageWidth { get; set; }
+            public float PageHeight { get; set; }
+            public List<KernelGeom.Rectangle> OcrWordBounds { get; set; } = new List<KernelGeom.Rectangle>();
+            public List<KernelGeom.Rectangle> RawOcrWordBounds { get; set; } = new List<KernelGeom.Rectangle>();
+            public List<OcrWordInfo> OcrWords { get; set; } = new List<OcrWordInfo>();
         }
 
-        private class CharacterInfo
+        internal class CharacterInfo
         {
             public char Char { get; set; }
             public KernelGeom.Rectangle BoundingBox { get; set; }
+        }
+
+        internal class OcrWordInfo
+        {
+            public string Text { get; set; } = "";
+            public int StartIndex { get; set; }
+            public int Length { get; set; }
+            public KernelGeom.Rectangle BoundingBox { get; set; }
+        }
+
+        private sealed class OcrCandidateImageInfo
+        {
+            public KernelGeom.Rectangle BoundsPdf { get; set; }
+            public int PixelWidth { get; set; }
+            public int PixelHeight { get; set; }
+        }
+
+        private sealed class OcrCandidateImageExtractionListener : IEventListener
+        {
+            private readonly List<OcrCandidateImageInfo> images = new List<OcrCandidateImageInfo>();
+            private readonly double pageArea;
+
+            public OcrCandidateImageExtractionListener(KernelGeom.Rectangle pageSize)
+            {
+                pageArea = pageSize == null
+                    ? 1d
+                    : Math.Max(1d, pageSize.GetWidth() * pageSize.GetHeight());
+            }
+
+            public IReadOnlyList<OcrCandidateImageInfo> Images => images;
+
+            public void EventOccurred(IEventData data, EventType type)
+            {
+                if (type != EventType.RENDER_IMAGE || !(data is ImageRenderInfo imageInfo))
+                {
+                    return;
+                }
+
+                try
+                {
+                    PdfImageXObject pdfImage = imageInfo.GetImage();
+                    if (pdfImage == null)
+                    {
+                        return;
+                    }
+
+                    iText.Kernel.Geom.Matrix ctm = imageInfo.GetImageCtm();
+                    iText.Kernel.Geom.Vector p0 = new iText.Kernel.Geom.Vector(0, 0, 1).Cross(ctm);
+                    iText.Kernel.Geom.Vector p1 = new iText.Kernel.Geom.Vector(1, 0, 1).Cross(ctm);
+                    iText.Kernel.Geom.Vector p2 = new iText.Kernel.Geom.Vector(0, 1, 1).Cross(ctm);
+                    iText.Kernel.Geom.Vector p3 = new iText.Kernel.Geom.Vector(1, 1, 1).Cross(ctm);
+
+                    float minX = Math.Min(Math.Min(p0.Get(iText.Kernel.Geom.Vector.I1), p1.Get(iText.Kernel.Geom.Vector.I1)), Math.Min(p2.Get(iText.Kernel.Geom.Vector.I1), p3.Get(iText.Kernel.Geom.Vector.I1)));
+                    float maxX = Math.Max(Math.Max(p0.Get(iText.Kernel.Geom.Vector.I1), p1.Get(iText.Kernel.Geom.Vector.I1)), Math.Max(p2.Get(iText.Kernel.Geom.Vector.I1), p3.Get(iText.Kernel.Geom.Vector.I1)));
+                    float minY = Math.Min(Math.Min(p0.Get(iText.Kernel.Geom.Vector.I2), p1.Get(iText.Kernel.Geom.Vector.I2)), Math.Min(p2.Get(iText.Kernel.Geom.Vector.I2), p3.Get(iText.Kernel.Geom.Vector.I2)));
+                    float maxY = Math.Max(Math.Max(p0.Get(iText.Kernel.Geom.Vector.I2), p1.Get(iText.Kernel.Geom.Vector.I2)), Math.Max(p2.Get(iText.Kernel.Geom.Vector.I2), p3.Get(iText.Kernel.Geom.Vector.I2)));
+
+                    float width = maxX - minX;
+                    float height = maxY - minY;
+                    if (width <= 0f || height <= 0f)
+                    {
+                        return;
+                    }
+
+                    int pixelWidth = (int)Math.Round(pdfImage.GetWidth());
+                    int pixelHeight = (int)Math.Round(pdfImage.GetHeight());
+                    double coverage = (width * height) / pageArea;
+                    if (pixelWidth < 20 || pixelHeight < 10 || width < 12f || height < 8f || coverage < 0.0005d)
+                    {
+                        return;
+                    }
+
+                    images.Add(new OcrCandidateImageInfo
+                    {
+                        BoundsPdf = new KernelGeom.Rectangle(minX, minY, width, height),
+                        PixelWidth = pixelWidth,
+                        PixelHeight = pixelHeight
+                    });
+                }
+                catch
+                {
+                    // Ignore malformed image events and keep extracting the rest.
+                }
+            }
+
+            public ICollection<EventType> GetSupportedEvents()
+            {
+                return new List<EventType> { EventType.RENDER_IMAGE };
+            }
         }
 
         public static event Action<string> OnCacheStatusChanged;
@@ -56503,7 +58005,51 @@ namespace AnonPDF
             return SearchInCachedLines(pdfPath, searchText, searchPersonalData, owner);
         }
 
-        private static void CacheLines(string pdfPath, string userPassword)
+        public static List<TextLocation> GetOcrDebugLocations(string pdfPath, int pageNumber)
+        {
+            return GetOcrDebugLocations(pdfPath, pageNumber, rawOcrBounds: false);
+        }
+
+        public static List<TextLocation> GetRawOcrDebugLocations(string pdfPath, int pageNumber)
+        {
+            return GetOcrDebugLocations(pdfPath, pageNumber, rawOcrBounds: true);
+        }
+
+        private static List<TextLocation> GetOcrDebugLocations(string pdfPath, int pageNumber, bool rawOcrBounds)
+        {
+            var locations = new List<TextLocation>();
+            if (string.IsNullOrWhiteSpace(pdfPath) || pageNumber < 1)
+            {
+                return locations;
+            }
+
+            if (!_lineCache.TryGetValue(pdfPath, out List<CachedLine> cachedLines) || cachedLines == null)
+            {
+                return locations;
+            }
+
+            foreach (CachedLine line in cachedLines.Where(line => line != null && line.IsOcr && line.PageNumber == pageNumber))
+            {
+                List<KernelGeom.Rectangle> sourceBoxes = rawOcrBounds ? line.RawOcrWordBounds : line.OcrWordBounds;
+                List<KernelGeom.Rectangle> boxes = sourceBoxes != null && sourceBoxes.Count > 0
+                    ? sourceBoxes
+                    : new List<KernelGeom.Rectangle> { GetTextFragmentRectangle(line, 0, line.Text?.Length ?? 0) };
+
+                foreach (KernelGeom.Rectangle rect in boxes)
+                {
+                    if (rect == null || rect.GetWidth() <= 0f || rect.GetHeight() <= 0f)
+                    {
+                        continue;
+                    }
+
+                    locations.Add(new TextLocation(line.PageNumber, line.PageRotation, rect, isOcr: true));
+                }
+            }
+
+            return locations;
+        }
+
+        private static void CacheLines(string pdfPath, string userPassword, System.Threading.CancellationToken cancellationToken = default)
         {
             var lines = new List<CachedLine>();
 
@@ -56518,6 +58064,7 @@ namespace AnonPDF
             {
                 for (int page = 1; page <= pdfDoc.GetNumberOfPages(); page++)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     var pageObj = pdfDoc.GetPage(page);
                     int rotation = pageObj.GetRotation();
                     var strategy = new LineExtractionStrategy(page, rotation);
@@ -56528,10 +58075,1328 @@ namespace AnonPDF
                     lines.AddRange(strategy.ExtractedLines);
                     OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_IndexPage", page));
                 }
+
+                AppendOcrLinesForPagesWithoutNativeText(pdfPath, userPassword, pdfDoc, lines, cancellationToken);
             }
             OnCacheStatusChanged?.Invoke(string.Empty);
             // Save in cache
+            OnCacheStatusChanged?.Invoke(string.Empty);
+            // Save in cache
             _lineCache[pdfPath] = lines;
+        }
+
+        private static void AppendOcrLinesForPagesWithoutNativeText(
+            string pdfPath,
+            string userPassword,
+            iText.Kernel.Pdf.PdfDocument pdfDoc,
+            List<CachedLine> lines,
+            System.Threading.CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath) || pdfDoc == null || lines == null)
+            {
+                return;
+            }
+
+            HashSet<int> pagesWithNativeText = new HashSet<int>(
+                lines
+                    .Where(line => !string.IsNullOrWhiteSpace(line.Text))
+                    .GroupBy(line => line.PageNumber)
+                    .Where(group => group.Sum(line => (line.Text ?? string.Empty).Trim().Length) >= MinimumNativeTextCharactersToSkipOcr)
+                    .Select(group => group.Key));
+
+            try
+            {
+                JObject debugRoot = CreateOcrDebugRoot(pdfPath);
+                JArray debugPages = (JArray)debugRoot["pages"];
+                JArray skippedPages = (JArray)debugRoot["skippedPagesWithNativeText"];
+
+                using (var pdfiumDoc = new PDFiumSharp.PdfDocument(pdfPath, userPassword))
+                {
+                    OcrEngine engine = CreateWindowsOcrEngine();
+                    if (engine == null)
+                    {
+                        Debug.WriteLine("OCR skipped: Windows OCR engine is not available.");
+                        return;
+                    }
+
+                    for (int pageNumber = 1; pageNumber <= pdfDoc.GetNumberOfPages(); pageNumber++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var pageObj = pdfDoc.GetPage(pageNumber);
+                        bool pageHasNativeText = pagesWithNativeText.Contains(pageNumber);
+                        List<KernelGeom.Rectangle> ocrImageBounds = GetOcrCandidateImageBounds(pageObj);
+                        if (pageHasNativeText && ocrImageBounds.Count == 0)
+                        {
+                            skippedPages.Add(pageNumber);
+                            continue;
+                        }
+
+                        OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_OcrPage", pageNumber));
+
+                        using (Bitmap pageBitmap = RenderPdfPageForOcr(pdfiumDoc.Pages[pageNumber - 1]))
+                        {
+                            if (pageBitmap == null)
+                            {
+                                continue;
+                            }
+
+                            int rotation = pageObj.GetRotation();
+                            KernelGeom.Rectangle pageSize = pageObj.GetPageSize();
+                            List<CachedLine> ocrLines = RecognizeOcrLinesWithWindowsOcr(engine, pageBitmap, pageNumber, rotation, pageSize, out JObject debugPage).ToList();
+                            if (pageHasNativeText)
+                            {
+                                ocrLines = ocrLines
+                                    .Where(line => IntersectsAnyOcrImageBounds(line, ocrImageBounds))
+                                    .ToList();
+                            }
+
+                            lines.AddRange(ocrLines);
+                            if (debugPage != null)
+                            {
+                                debugPage["pageHasNativeText"] = pageHasNativeText;
+                                debugPage["ocrImageBounds"] = new JArray(ocrImageBounds.Select(CreatePdfBoundsJson));
+                                debugPage["indexedLineCount"] = ocrLines.Count;
+                                debugPages.Add(debugPage);
+                            }
+                        }
+                    }
+                }
+
+                WriteOcrDebugJson(pdfPath, debugRoot);
+            }
+            catch (Exception ex)
+            {
+                // OCR is an auxiliary search index. Native PDF text search must continue even if OCR fails.
+                Debug.WriteLine("OCR cache failed: " + ex);
+            }
+        }
+
+
+        private static JObject CreateOcrDebugRoot(string pdfPath)
+        {
+            return new JObject
+            {
+                ["sourcePdf"] = pdfPath ?? string.Empty,
+                ["generatedAtUtc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
+                ["engine"] = "Windows.Media.Ocr",
+                ["language"] = "PolishPreferred",
+                ["notes"] = "Diagnostic OCR dump. Contains recognized text and geometry; do not store with production projects.",
+                ["skippedPagesWithNativeText"] = new JArray(),
+                ["pages"] = new JArray()
+            };
+        }
+
+        private static void WriteOcrDebugJson(string pdfPath, JObject debugRoot)
+        {
+            if (!PDFForm.IsDiagnosticModeEnabled || string.IsNullOrWhiteSpace(pdfPath) || debugRoot == null)
+            {
+                return;
+            }
+
+            try
+            {
+                string directory = Path.GetDirectoryName(pdfPath);
+                if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+                {
+                    return;
+                }
+
+                string fileName = Path.GetFileNameWithoutExtension(pdfPath) + ".ocr-debug.json";
+                string outputPath = Path.Combine(directory, fileName);
+                File.WriteAllText(outputPath, debugRoot.ToString(Formatting.Indented), new System.Text.UTF8Encoding(false));
+                Debug.WriteLine("OCR debug JSON saved: " + outputPath);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("OCR debug JSON save failed: " + ex);
+            }
+        }
+
+        private static List<KernelGeom.Rectangle> GetOcrCandidateImageBounds(iText.Kernel.Pdf.PdfPage page)
+        {
+            var result = new List<KernelGeom.Rectangle>();
+            if (page == null)
+            {
+                return result;
+            }
+
+            try
+            {
+                var listener = new OcrCandidateImageExtractionListener(page.GetPageSize());
+                var processor = new PdfCanvasProcessor(listener);
+                processor.ProcessPageContent(page);
+
+                result.AddRange(listener.Images
+                    .Where(image => image?.BoundsPdf != null)
+                    .Select(image => image.BoundsPdf));
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("OCR image bounds extraction failed: " + ex);
+            }
+
+            return result;
+        }
+
+        private static string GetTessDataPath()
+        {
+            string exePath = Assembly.GetExecutingAssembly().Location;
+            string exeDir = Path.GetDirectoryName(exePath);
+            return string.IsNullOrWhiteSpace(exeDir)
+                ? null
+                : Path.Combine(exeDir, "tessdata");
+        }
+
+        private static Bitmap RenderPdfPageForOcr(PDFiumSharp.PdfPage page)
+        {
+            if (page == null || page.Width <= 0 || page.Height <= 0)
+            {
+                return null;
+            }
+
+            const float dpi = 300f;
+            int bitmapWidth = Math.Max(1, (int)Math.Ceiling(page.Width * dpi / 72f));
+            int bitmapHeight = Math.Max(1, (int)Math.Ceiling(page.Height * dpi / 72f));
+
+            using (var pdfBitmap = new PDFiumSharp.PDFiumBitmap(bitmapWidth, bitmapHeight, true))
+            {
+                pdfBitmap.FillRectangle(0, 0, bitmapWidth, bitmapHeight, 0xFFFFFFFF);
+                page.Render(renderTarget: pdfBitmap, flags: PDFiumSharp.Enums.RenderingFlags.Annotations);
+
+                using (var ms = new MemoryStream())
+                {
+                    pdfBitmap.Save(ms);
+                    ms.Position = 0;
+                    using (var image = DrawingImage.FromStream(ms))
+                    {
+                        return new Bitmap(image);
+                    }
+                }
+            }
+        }
+
+        private static Bitmap RenderPdfRegionForOcr(PDFiumSharp.PdfPage page, KernelGeom.Rectangle region)
+        {
+            if (page == null || page.Width <= 0 || page.Height <= 0 || region == null)
+            {
+                return null;
+            }
+
+            const float dpi = 300f;
+            float scale = dpi / 72f;
+            int fullWidth = Math.Max(1, (int)Math.Ceiling(page.Width * scale));
+            int fullHeight = Math.Max(1, (int)Math.Ceiling(page.Height * scale));
+
+            // Clamp region to page bounds
+            float rx = Math.Max(0, region.GetX());
+            float ry = Math.Max(0, region.GetY());
+            float rw = Math.Min(region.GetWidth(), (float)page.Width - rx);
+            float rh = Math.Min(region.GetHeight(), (float)page.Height - ry);
+            if (rw <= 0 || rh <= 0)
+                return null;
+
+            int cropX = (int)Math.Floor(rx * scale);
+            int cropY = (int)Math.Floor(ry * scale);
+            int cropW = Math.Max(1, (int)Math.Ceiling(rw * scale));
+            int cropH = Math.Max(1, (int)Math.Ceiling(rh * scale));
+            cropW = Math.Min(cropW, fullWidth - cropX);
+            cropH = Math.Min(cropH, fullHeight - cropY);
+
+            using (var pdfBitmap = new PDFiumSharp.PDFiumBitmap(fullWidth, fullHeight, true))
+            {
+                pdfBitmap.FillRectangle(0, 0, fullWidth, fullHeight, 0xFFFFFFFF);
+                page.Render(renderTarget: pdfBitmap, flags: PDFiumSharp.Enums.RenderingFlags.Annotations);
+
+                using (var ms = new MemoryStream())
+                {
+                    pdfBitmap.Save(ms);
+                    ms.Position = 0;
+                    using (var fullImage = DrawingImage.FromStream(ms))
+                    using (var fullBitmap = new Bitmap(fullImage))
+                    {
+                        if (cropX + cropW > fullBitmap.Width || cropY + cropH > fullBitmap.Height)
+                            return null;
+                        var cropped = fullBitmap.Clone(
+                            new System.Drawing.Rectangle(cropX, cropY, cropW, cropH),
+                            fullBitmap.PixelFormat);
+                        return cropped;
+                    }
+                }
+            }
+        }
+
+        private static OcrEngine CreateWindowsOcrEngine()
+        {
+            try
+            {
+                var polishLanguage = OcrEngine.AvailableRecognizerLanguages
+                    .FirstOrDefault(language =>
+                        string.Equals(language.LanguageTag, "pl", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(language.LanguageTag, "pl-PL", StringComparison.OrdinalIgnoreCase));
+
+                if (polishLanguage != null)
+                {
+                    OcrEngine polishEngine = OcrEngine.TryCreateFromLanguage(polishLanguage);
+                    if (polishEngine != null)
+                    {
+                        return polishEngine;
+                    }
+                }
+
+                return OcrEngine.TryCreateFromUserProfileLanguages();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Windows OCR engine initialization failed: " + ex);
+                return null;
+            }
+        }
+
+        public static async Task<(string Text, string LanguageTag)> RecognizeBitmapTextWithWindowsOcrAsync(Bitmap bitmap)
+        {
+            if (bitmap == null)
+            {
+                return (string.Empty, string.Empty);
+            }
+
+            OcrEngine engine = CreateWindowsOcrEngine();
+            if (engine == null)
+            {
+                Debug.WriteLine("Windows OCR skipped: engine is not available.");
+                return (string.Empty, string.Empty);
+            }
+
+            string languageTag = engine.RecognizerLanguage?.LanguageTag ?? string.Empty;
+            string tempImagePath = null;
+            try
+            {
+                tempImagePath = Path.Combine(Path.GetTempPath(), "AnonPDFPro-ocr-crop-" + Guid.NewGuid().ToString("N") + ".png");
+                bitmap.Save(tempImagePath, ImageFormat.Png);
+
+                OcrResult result = await RecognizeWindowsOcrAsync(engine, tempImagePath);
+
+                return (result?.Text ?? string.Empty, languageTag);
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(tempImagePath))
+                {
+                    try
+                    {
+                        File.Delete(tempImagePath);
+                    }
+                    catch
+                    {
+                        // OCR temp file cleanup must not break copy/search.
+                    }
+                }
+            }
+        }
+
+        private static IEnumerable<CachedLine> RecognizeOcrLinesWithWindowsOcr(
+            OcrEngine engine,
+            Bitmap bitmap,
+            int pageNumber,
+            int pageRotation,
+            KernelGeom.Rectangle pageSize,
+            out JObject debugPage)
+        {
+            var result = new List<CachedLine>();
+            debugPage = CreateOcrDebugPage(pageNumber, pageRotation, pageSize, bitmap);
+            if (engine == null || bitmap == null || pageSize == null || bitmap.Width <= 0 || bitmap.Height <= 0)
+            {
+                return result;
+            }
+
+            string tempImagePath = null;
+            try
+            {
+                tempImagePath = Path.Combine(Path.GetTempPath(), "AnonPDFPro-ocr-" + Guid.NewGuid().ToString("N") + ".png");
+                bitmap.Save(tempImagePath, ImageFormat.Png);
+
+                OcrResult page = RecognizeWindowsOcrAsync(engine, tempImagePath)
+                    .GetAwaiter()
+                    .GetResult();
+
+                debugPage["engine"] = "Windows.Media.Ocr";
+                debugPage["language"] = engine.RecognizerLanguage?.LanguageTag ?? string.Empty;
+                debugPage["text"] = page?.Text ?? string.Empty;
+                debugPage["textAngle"] = page?.TextAngle == null ? null : JToken.FromObject(page.TextAngle.Value);
+                JArray debugBlocks = (JArray)debugPage["blocks"];
+
+                if (page == null)
+                {
+                    return result;
+                }
+
+                int rank = 0;
+                int lineIndex = 0;
+                foreach (OcrLine textLine in page.Lines)
+                {
+                    Windows.Foundation.Rect? lineBounds = GetWindowsOcrLineBounds(textLine);
+                    JObject debugLine = CreateWindowsOcrElementJson(
+                        "line",
+                        ++rank,
+                        lineIndex,
+                        textLine.Text,
+                        null,
+                        lineBounds,
+                        pageSize,
+                        bitmap.Width,
+                        bitmap.Height,
+                        pageRotation);
+                    JArray debugWords = new JArray();
+                    debugLine["words"] = debugWords;
+                    debugBlocks.Add(debugLine);
+
+                    int wordIndex = 0;
+                    foreach (OcrWord word in textLine.Words)
+                    {
+                        JObject debugWord = CreateWindowsOcrElementJson(
+                            "word",
+                            ++rank,
+                            wordIndex,
+                            word.Text,
+                            null,
+                            word.BoundingRect,
+                            pageSize,
+                            bitmap.Width,
+                            bitmap.Height,
+                            pageRotation);
+                        debugWords.Add(debugWord);
+                        wordIndex++;
+                    }
+
+                    CachedLine cachedLine = CreateCachedLineFromWindowsOcrLine(
+                        textLine,
+                        pageNumber,
+                        pageRotation,
+                        pageSize,
+                        bitmap.Width,
+                        bitmap.Height,
+                        page.TextAngle);
+
+                    if (cachedLine != null && !string.IsNullOrWhiteSpace(cachedLine.Text))
+                    {
+                        result.Add(cachedLine);
+                    }
+
+                    lineIndex++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Windows OCR page recognition failed: " + ex);
+                debugPage["error"] = ex.ToString();
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(tempImagePath))
+                {
+                    try
+                    {
+                        File.Delete(tempImagePath);
+                    }
+                    catch
+                    {
+                        // Diagnostic OCR temp file cleanup must not break search.
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private static async Task<OcrResult> RecognizeWindowsOcrAsync(OcrEngine engine, string imagePath)
+        {
+            StorageFile file = await StorageFile.GetFileFromPathAsync(imagePath);
+            using (IRandomAccessStream stream = await file.OpenAsync(FileAccessMode.Read))
+            {
+                BitmapDecoder decoder = await BitmapDecoder.CreateAsync(stream);
+                SoftwareBitmap softwareBitmap = await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
+                return await engine.RecognizeAsync(softwareBitmap);
+            }
+        }
+
+        private static Windows.Foundation.Rect? GetWindowsOcrLineBounds(OcrLine line)
+        {
+            if (line == null || line.Words == null || line.Words.Count == 0)
+            {
+                return null;
+            }
+
+            double left = double.MaxValue;
+            double top = double.MaxValue;
+            double right = double.MinValue;
+            double bottom = double.MinValue;
+
+            foreach (OcrWord word in line.Words)
+            {
+                Windows.Foundation.Rect rect = word.BoundingRect;
+                left = Math.Min(left, rect.X);
+                top = Math.Min(top, rect.Y);
+                right = Math.Max(right, rect.X + rect.Width);
+                bottom = Math.Max(bottom, rect.Y + rect.Height);
+            }
+
+            if (left == double.MaxValue || top == double.MaxValue || right <= left || bottom <= top)
+            {
+                return null;
+            }
+
+            return new Windows.Foundation.Rect(left, top, right - left, bottom - top);
+        }
+
+        private static JObject CreateWindowsOcrElementJson(
+            string level,
+            int rank,
+            int index,
+            string text,
+            float? confidence,
+            Windows.Foundation.Rect? bounds,
+            KernelGeom.Rectangle pageSize,
+            int bitmapWidth,
+            int bitmapHeight,
+            int rotation)
+        {
+            var item = new JObject
+            {
+                ["level"] = level ?? string.Empty,
+                ["rank"] = rank,
+                ["index"] = index,
+                ["text"] = text ?? string.Empty,
+                ["confidence"] = confidence == null ? null : JToken.FromObject(confidence.Value)
+            };
+
+            item["bounds"] = bounds.HasValue
+                ? CreateWindowsOcrBoundsJson(bounds.Value, pageSize, bitmapWidth, bitmapHeight, rotation)
+                : null;
+
+            return item;
+        }
+
+        private static JObject CreateWindowsOcrBoundsJson(
+            Windows.Foundation.Rect ocrRect,
+            KernelGeom.Rectangle pageSize,
+            int bitmapWidth,
+            int bitmapHeight,
+            int rotation)
+        {
+            var item = new JObject
+            {
+                ["ocrPixels"] = new JObject
+                {
+                    ["x"] = ocrRect.X,
+                    ["y"] = ocrRect.Y,
+                    ["width"] = ocrRect.Width,
+                    ["height"] = ocrRect.Height
+                }
+            };
+
+            if (pageSize != null && bitmapWidth > 0 && bitmapHeight > 0)
+            {
+                KernelGeom.Rectangle pdfRect = ConvertWindowsOcrRectToPdfRect(ocrRect, pageSize, bitmapWidth, bitmapHeight, rotation);
+                item["pdf"] = CreatePdfBoundsJson(pdfRect);
+            }
+            else
+            {
+                item["pdf"] = null;
+            }
+
+            return item;
+        }
+
+        private static CachedLine CreateCachedLineFromWindowsOcrLine(
+            OcrLine textLine,
+            int pageNumber,
+            int pageRotation,
+            KernelGeom.Rectangle pageSize,
+            int bitmapWidth,
+            int bitmapHeight,
+            double? textAngleDegrees)
+        {
+            if (textLine == null || textLine.Words == null || textLine.Words.Count == 0 || pageSize == null)
+            {
+                return null;
+            }
+
+            Windows.Foundation.Rect? lineBounds = GetWindowsOcrLineBounds(textLine);
+            if (!lineBounds.HasValue)
+            {
+                return null;
+            }
+            KernelGeom.Rectangle lineRect = ConvertWindowsOcrRectToPdfRect(lineBounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
+            var cachedLine = new CachedLine
+            {
+                PageNumber = pageNumber,
+                PageRotation = pageRotation,
+                YPosition = lineRect.GetY(),
+                IsOcr = true,
+                PageWidth = pageSize.GetWidth(),
+                PageHeight = pageSize.GetHeight()
+            };
+
+            bool hasWords = false;
+            float previousRight = lineRect.GetX();
+
+            foreach (OcrWord word in textLine.Words)
+            {
+                string wordText = (word.Text ?? string.Empty).Trim();
+                if (string.IsNullOrWhiteSpace(wordText))
+                {
+                    continue;
+                }
+
+                Windows.Foundation.Rect correctedOcrRect = MapWindowsOcrRectToOriginalImageRect(
+                    word.BoundingRect,
+                    bitmapWidth,
+                    bitmapHeight,
+                    textAngleDegrees);
+                KernelGeom.Rectangle rawWordRect = ConvertWindowsOcrRectToPdfRect(correctedOcrRect, pageSize, bitmapWidth, bitmapHeight, pageRotation);
+                cachedLine.RawOcrWordBounds.Add(rawWordRect);
+
+                KernelGeom.Rectangle wordRect = rawWordRect;
+                cachedLine.OcrWordBounds.Add(wordRect);
+                if (hasWords)
+                {
+                    AppendOcrSpace(cachedLine, previousRight, wordRect.GetX(), wordRect.GetY(), wordRect.GetHeight());
+                }
+
+                int wordStartIndex = cachedLine.Text.Length;
+                AppendOcrWord(cachedLine, wordText, wordRect);
+                int wordLength = cachedLine.Text.Length - wordStartIndex;
+                if (wordLength > 0)
+                {
+                    cachedLine.OcrWords.Add(new OcrWordInfo
+                    {
+                        Text = wordText,
+                        StartIndex = wordStartIndex,
+                        Length = wordLength,
+                        BoundingBox = wordRect
+                    });
+                }
+
+                previousRight = wordRect.GetX() + wordRect.GetWidth();
+                hasWords = true;
+            }
+
+            return cachedLine;
+        }
+
+        private static IEnumerable<CachedLine> RecognizeOcrLines(
+            Engine engine,
+            Bitmap bitmap,
+            int pageNumber,
+            int pageRotation,
+            KernelGeom.Rectangle pageSize,
+            out JObject debugPage)
+        {
+            var result = new List<CachedLine>();
+            debugPage = CreateOcrDebugPage(pageNumber, pageRotation, pageSize, bitmap);
+            if (engine == null || bitmap == null || pageSize == null || bitmap.Width <= 0 || bitmap.Height <= 0)
+            {
+                return result;
+            }
+
+            using (var ms = new MemoryStream())
+            {
+                bitmap.Save(ms, ImageFormat.Png);
+                ms.Position = 0;
+
+                using (var pixImage = TesseractOCR.Pix.Image.LoadFromMemory(ms))
+                using (var page = engine.Process(pixImage, TesseractOCR.Enums.PageSegMode.Auto))
+                {
+                    debugPage["text"] = page.Text ?? string.Empty;
+                    debugPage["meanConfidence"] = page.MeanConfidence;
+                    JArray debugBlocks = (JArray)debugPage["blocks"];
+                    int rank = 0;
+                    int blockIndex = 0;
+                    foreach (var block in page.Layout)
+                    {
+                        JObject debugBlock = CreateOcrElementJson(
+                            "block",
+                            ++rank,
+                            blockIndex,
+                            block.Text,
+                            block.Confidence,
+                            block.BoundingBox,
+                            pageSize,
+                            bitmap.Width,
+                            bitmap.Height,
+                            pageRotation);
+                        debugBlock["blockType"] = block.BlockType.ToString();
+                        JArray debugParagraphs = new JArray();
+                        debugBlock["paragraphs"] = debugParagraphs;
+                        debugBlocks.Add(debugBlock);
+
+                        int paragraphIndex = 0;
+                        foreach (var paragraph in block.Paragraphs)
+                        {
+                            JObject debugParagraph = CreateOcrElementJson(
+                                "paragraph",
+                                ++rank,
+                                paragraphIndex,
+                                paragraph.Text,
+                                paragraph.Confidence,
+                                paragraph.BoundingBox,
+                                pageSize,
+                                bitmap.Width,
+                                bitmap.Height,
+                                pageRotation);
+                            JArray debugLines = new JArray();
+                            debugParagraph["lines"] = debugLines;
+                            debugParagraphs.Add(debugParagraph);
+
+                            int lineIndex = 0;
+                            foreach (var textLine in paragraph.TextLines)
+                            {
+                                JObject debugLine = CreateOcrElementJson(
+                                    "line",
+                                    ++rank,
+                                    lineIndex,
+                                    textLine.Text,
+                                    textLine.Confidence,
+                                    textLine.BoundingBox,
+                                    pageSize,
+                                    bitmap.Width,
+                                    bitmap.Height,
+                                    pageRotation);
+                                JArray debugWords = new JArray();
+                                debugLine["words"] = debugWords;
+                                debugLines.Add(debugLine);
+
+                                int wordIndex = 0;
+                                foreach (var word in textLine.Words)
+                                {
+                                    JObject debugWord = CreateOcrElementJson(
+                                        "word",
+                                        ++rank,
+                                        wordIndex,
+                                        word.Text,
+                                        word.Confidence,
+                                        word.BoundingBox,
+                                        pageSize,
+                                        bitmap.Width,
+                                        bitmap.Height,
+                                        pageRotation);
+                                    JArray debugSymbols = new JArray();
+                                    debugWord["symbols"] = debugSymbols;
+                                    debugWords.Add(debugWord);
+
+                                    int symbolIndex = 0;
+                                    foreach (var symbol in word.Symbols)
+                                    {
+                                        JObject debugSymbol = CreateOcrElementJson(
+                                            "symbol",
+                                            ++rank,
+                                            symbolIndex,
+                                            symbol.Text,
+                                            symbol.Confidence,
+                                            symbol.BoundingBox,
+                                            pageSize,
+                                            bitmap.Width,
+                                            bitmap.Height,
+                                            pageRotation);
+                                        debugSymbols.Add(debugSymbol);
+                                        symbolIndex++;
+                                    }
+
+                                    wordIndex++;
+                                }
+
+                                CachedLine cachedLine = CreateCachedLineFromOcrTextLine(
+                                    textLine,
+                                    pageNumber,
+                                    pageRotation,
+                                    pageSize,
+                                    bitmap.Width,
+                                    bitmap.Height);
+
+                                if (cachedLine != null && !string.IsNullOrWhiteSpace(cachedLine.Text))
+                                {
+                                    result.Add(cachedLine);
+                                }
+
+                                lineIndex++;
+                            }
+
+                            paragraphIndex++;
+                        }
+
+                        blockIndex++;
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        private static JObject CreateOcrDebugPage(int pageNumber, int pageRotation, KernelGeom.Rectangle pageSize, Bitmap bitmap)
+        {
+            return new JObject
+            {
+                ["pageNumber"] = pageNumber,
+                ["pageRotation"] = pageRotation,
+                ["bitmap"] = bitmap == null
+                    ? null
+                    : new JObject
+                    {
+                        ["width"] = bitmap.Width,
+                        ["height"] = bitmap.Height,
+                        ["horizontalDpi"] = bitmap.HorizontalResolution,
+                        ["verticalDpi"] = bitmap.VerticalResolution
+                    },
+                ["pdfPageBounds"] = pageSize == null
+                    ? null
+                    : CreatePdfBoundsJson(pageSize),
+                ["blocks"] = new JArray()
+            };
+        }
+
+        private static JObject CreateOcrElementJson(
+            string level,
+            int rank,
+            int index,
+            string text,
+            float confidence,
+            TesseractOCR.Rect? bounds,
+            KernelGeom.Rectangle pageSize,
+            int bitmapWidth,
+            int bitmapHeight,
+            int pageRotation)
+        {
+            var item = new JObject
+            {
+                ["level"] = level ?? string.Empty,
+                ["rank"] = rank,
+                ["index"] = index,
+                ["text"] = text ?? string.Empty,
+                ["confidence"] = confidence
+            };
+
+            if (bounds.HasValue)
+            {
+                item["bounds"] = CreateOcrBoundsJson(bounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
+            }
+            else
+            {
+                item["bounds"] = null;
+            }
+
+            return item;
+        }
+
+        private static JObject CreateOcrBoundsJson(
+            TesseractOCR.Rect ocrRect,
+            KernelGeom.Rectangle pageSize,
+            int bitmapWidth,
+            int bitmapHeight,
+            int pageRotation)
+        {
+            var item = new JObject
+            {
+                ["ocrPixels"] = new JObject
+                {
+                    ["x1"] = ocrRect.X1,
+                    ["y1"] = ocrRect.Y1,
+                    ["x2"] = ocrRect.X2,
+                    ["y2"] = ocrRect.Y2,
+                    ["width"] = ocrRect.Width,
+                    ["height"] = ocrRect.Height
+                }
+            };
+
+            if (pageSize != null && bitmapWidth > 0 && bitmapHeight > 0)
+            {
+                KernelGeom.Rectangle pdfRect = ConvertOcrRectToPdfRect(ocrRect, pageSize, bitmapWidth, bitmapHeight, pageRotation);
+                item["pdf"] = CreatePdfBoundsJson(pdfRect);
+            }
+            else
+            {
+                item["pdf"] = null;
+            }
+
+            return item;
+        }
+
+        private static JObject CreatePdfBoundsJson(KernelGeom.Rectangle rect)
+        {
+            if (rect == null)
+            {
+                return null;
+            }
+
+            return new JObject
+            {
+                ["x"] = rect.GetX(),
+                ["y"] = rect.GetY(),
+                ["width"] = rect.GetWidth(),
+                ["height"] = rect.GetHeight(),
+                ["left"] = rect.GetLeft(),
+                ["right"] = rect.GetRight(),
+                ["bottom"] = rect.GetBottom(),
+                ["top"] = rect.GetTop()
+            };
+        }
+
+        private static CachedLine CreateCachedLineFromOcrTextLine(
+            TesseractOCR.Layout.TextLine textLine,
+            int pageNumber,
+            int pageRotation,
+            KernelGeom.Rectangle pageSize,
+            int bitmapWidth,
+            int bitmapHeight)
+        {
+            if (textLine == null)
+            {
+                return null;
+            }
+
+            var lineBounds = textLine.BoundingBox;
+            if (!lineBounds.HasValue)
+            {
+                return null;
+            }
+
+            KernelGeom.Rectangle lineRect = ConvertOcrRectToPdfRect(lineBounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
+            var cachedLine = new CachedLine
+            {
+                PageNumber = pageNumber,
+                PageRotation = pageRotation,
+                YPosition = lineRect.GetY(),
+                IsOcr = true,
+                PageWidth = pageSize.GetWidth(),
+                PageHeight = pageSize.GetHeight()
+            };
+
+            bool hasWords = false;
+            float previousRight = lineRect.GetX();
+
+            foreach (var word in textLine.Words)
+            {
+                string wordText = word.Text ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(wordText))
+                {
+                    continue;
+                }
+
+                var wordBounds = word.BoundingBox;
+                if (!wordBounds.HasValue)
+                {
+                    continue;
+                }
+
+                KernelGeom.Rectangle wordRect = ConvertOcrRectToPdfRect(wordBounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
+                cachedLine.OcrWordBounds.Add(wordRect);
+                if (hasWords)
+                {
+                    AppendOcrSpace(cachedLine, previousRight, wordRect.GetX(), wordRect.GetY(), wordRect.GetHeight());
+                }
+
+                int wordStartIndex = cachedLine.Text.Length;
+                if (!AppendOcrWordFromSymbols(cachedLine, word, pageSize, bitmapWidth, bitmapHeight, pageRotation))
+                {
+                    AppendOcrWord(cachedLine, wordText.Trim(), wordRect);
+                }
+                int wordLength = cachedLine.Text.Length - wordStartIndex;
+                if (wordLength > 0)
+                {
+                    cachedLine.OcrWords.Add(new OcrWordInfo
+                    {
+                        Text = wordText.Trim(),
+                        StartIndex = wordStartIndex,
+                        Length = wordLength,
+                        BoundingBox = wordRect
+                    });
+                }
+                previousRight = wordRect.GetX() + wordRect.GetWidth();
+                hasWords = true;
+            }
+
+            if (!hasWords)
+            {
+                string fallbackText = (textLine.Text ?? string.Empty).Trim();
+                cachedLine.OcrWordBounds.Add(lineRect);
+                int wordStartIndex = cachedLine.Text.Length;
+                AppendOcrWord(cachedLine, fallbackText, lineRect);
+                int wordLength = cachedLine.Text.Length - wordStartIndex;
+                if (wordLength > 0)
+                {
+                    cachedLine.OcrWords.Add(new OcrWordInfo
+                    {
+                        Text = cachedLine.Text.Substring(wordStartIndex, wordLength),
+                        StartIndex = wordStartIndex,
+                        Length = wordLength,
+                        BoundingBox = lineRect
+                    });
+                }
+            }
+
+            return cachedLine;
+        }
+
+        private static KernelGeom.Rectangle ConvertOcrRectToPdfRect(
+            TesseractOCR.Rect ocrRect,
+            KernelGeom.Rectangle pageSize,
+            int bitmapWidth,
+            int bitmapHeight,
+            int pageRotation)
+        {
+            float pageWidth = pageSize.GetWidth();
+            float pageHeight = pageSize.GetHeight();
+
+            int rotation = (pageRotation % 360 + 360) % 360;
+            float visWidth = (rotation == 90 || rotation == 270) ? pageHeight : pageWidth;
+            float visHeight = (rotation == 90 || rotation == 270) ? pageWidth : pageHeight;
+
+            double x_v = ocrRect.X1 * (double)visWidth / bitmapWidth;
+            double y_v = ocrRect.Y1 * (double)visHeight / bitmapHeight;
+            double w_v = ocrRect.Width * (double)visWidth / bitmapWidth;
+            double h_v = ocrRect.Height * (double)visHeight / bitmapHeight;
+
+            double x_n, y_n, w_n, h_n;
+            switch (rotation)
+            {
+                case 90:
+                    x_n = y_v;
+                    y_n = x_v;
+                    w_n = h_v;
+                    h_n = w_v;
+                    break;
+                case 180:
+                    x_n = visWidth - x_v - w_v;
+                    y_n = y_v;
+                    w_n = w_v;
+                    h_n = h_v;
+                    break;
+                case 270:
+                    x_n = visHeight - y_v - h_v;
+                    y_n = visWidth - x_v - w_v;
+                    w_n = h_v;
+                    h_n = w_v;
+                    break;
+                default:
+                    x_n = x_v;
+                    y_n = visHeight - y_v - h_v;
+                    w_n = w_v;
+                    h_n = h_v;
+                    break;
+            }
+
+            return new KernelGeom.Rectangle((float)x_n, (float)y_n, (float)Math.Max(0.1, w_n), (float)Math.Max(0.1, h_n));
+        }
+
+        private static KernelGeom.Rectangle ConvertWindowsOcrRectToPdfRect(
+            Windows.Foundation.Rect ocrRect,
+            KernelGeom.Rectangle pageSize,
+            int bitmapWidth,
+            int bitmapHeight,
+            int pageRotation)
+        {
+            float pageWidth = pageSize.GetWidth();
+            float pageHeight = pageSize.GetHeight();
+
+            int rotation = (pageRotation % 360 + 360) % 360;
+            float visWidth = (rotation == 90 || rotation == 270) ? pageHeight : pageWidth;
+            float visHeight = (rotation == 90 || rotation == 270) ? pageWidth : pageHeight;
+
+            double x_v = ocrRect.X * (double)visWidth / bitmapWidth;
+            double y_v = ocrRect.Y * (double)visHeight / bitmapHeight;
+            double w_v = ocrRect.Width * (double)visWidth / bitmapWidth;
+            double h_v = ocrRect.Height * (double)visHeight / bitmapHeight;
+
+            double x_n, y_n, w_n, h_n;
+            switch (rotation)
+            {
+                case 90:
+                    x_n = y_v;
+                    y_n = x_v;
+                    w_n = h_v;
+                    h_n = w_v;
+                    break;
+                case 180:
+                    x_n = visWidth - x_v - w_v;
+                    y_n = y_v;
+                    w_n = w_v;
+                    h_n = h_v;
+                    break;
+                case 270:
+                    x_n = visHeight - y_v - h_v;
+                    y_n = visWidth - x_v - w_v;
+                    w_n = h_v;
+                    h_n = w_v;
+                    break;
+                default:
+                    x_n = x_v;
+                    y_n = visHeight - y_v - h_v;
+                    w_n = w_v;
+                    h_n = h_v;
+                    break;
+            }
+
+            return new KernelGeom.Rectangle((float)x_n, (float)y_n, (float)Math.Max(0.1, w_n), (float)Math.Max(0.1, h_n));
+        }
+
+        private static Windows.Foundation.Rect MapWindowsOcrRectToOriginalImageRect(
+            Windows.Foundation.Rect ocrRect,
+            int imageWidth,
+            int imageHeight,
+            double? textAngleDegrees)
+        {
+            if (imageWidth <= 0 || imageHeight <= 0 || ocrRect.Width <= 0d || ocrRect.Height <= 0d)
+            {
+                return ocrRect;
+            }
+
+            double angle = textAngleDegrees.HasValue
+                ? -textAngleDegrees.Value * Math.PI / 180d
+                : 0d;
+
+            if (Math.Abs(angle) < 0.000001d)
+            {
+                return ocrRect;
+            }
+
+            double cosA = Math.Cos(angle);
+            double sinA = Math.Sin(angle);
+            double centerX = imageWidth / 2d;
+            double centerY = imageHeight / 2d;
+
+            System.Drawing.PointF p0 = MapWindowsOcrPointToOriginalImage(ocrRect.X, ocrRect.Y, centerX, centerY, cosA, sinA);
+            System.Drawing.PointF p1 = MapWindowsOcrPointToOriginalImage(ocrRect.X + ocrRect.Width, ocrRect.Y, centerX, centerY, cosA, sinA);
+            System.Drawing.PointF p2 = MapWindowsOcrPointToOriginalImage(ocrRect.X + ocrRect.Width, ocrRect.Y + ocrRect.Height, centerX, centerY, cosA, sinA);
+            System.Drawing.PointF p3 = MapWindowsOcrPointToOriginalImage(ocrRect.X, ocrRect.Y + ocrRect.Height, centerX, centerY, cosA, sinA);
+
+            double left = Math.Min(Math.Min(p0.X, p1.X), Math.Min(p2.X, p3.X));
+            double top = Math.Min(Math.Min(p0.Y, p1.Y), Math.Min(p2.Y, p3.Y));
+            double right = Math.Max(Math.Max(p0.X, p1.X), Math.Max(p2.X, p3.X));
+            double bottom = Math.Max(Math.Max(p0.Y, p1.Y), Math.Max(p2.Y, p3.Y));
+
+            left = Math.Max(0d, left);
+            top = Math.Max(0d, top);
+            right = Math.Min(imageWidth, right);
+            bottom = Math.Min(imageHeight, bottom);
+
+            if (right <= left || bottom <= top)
+            {
+                return ocrRect;
+            }
+
+            return new Windows.Foundation.Rect(left, top, right - left, bottom - top);
+        }
+
+        private static System.Drawing.PointF MapWindowsOcrPointToOriginalImage(
+            double x,
+            double y,
+            double centerX,
+            double centerY,
+            double cosA,
+            double sinA)
+        {
+            double dx = x - centerX;
+            double dy = y - centerY;
+            return new System.Drawing.PointF(
+                (float)(centerX + (dx * cosA) + (dy * sinA)),
+                (float)(centerY - (dx * sinA) + (dy * cosA)));
+        }
+
+        private static bool IntersectsAnyOcrImageBounds(CachedLine line, List<KernelGeom.Rectangle> imageBounds)
+        {
+            if (line == null || imageBounds == null || imageBounds.Count == 0)
+            {
+                return false;
+            }
+
+            KernelGeom.Rectangle lineBounds = GetCachedLineBounds(line);
+            if (lineBounds == null)
+            {
+                return false;
+            }
+
+            return imageBounds.Any(imageRect => RectanglesIntersectWithTolerance(lineBounds, imageRect, 1.5f));
+        }
+
+        internal static KernelGeom.Rectangle GetCachedLineBounds(CachedLine line)
+        {
+            if (line == null)
+            {
+                return null;
+            }
+
+            IEnumerable<KernelGeom.Rectangle> rects = line.OcrWordBounds != null && line.OcrWordBounds.Count > 0
+                ? line.OcrWordBounds
+                : line.Characters?.Select(ch => ch.BoundingBox);
+
+            if (rects == null)
+            {
+                return null;
+            }
+
+            bool hasRect = false;
+            float left = float.MaxValue;
+            float right = float.MinValue;
+            float bottom = float.MaxValue;
+            float top = float.MinValue;
+
+            foreach (KernelGeom.Rectangle rect in rects)
+            {
+                if (rect == null || rect.GetWidth() <= 0f || rect.GetHeight() <= 0f)
+                {
+                    continue;
+                }
+
+                hasRect = true;
+                left = Math.Min(left, rect.GetLeft());
+                right = Math.Max(right, rect.GetRight());
+                bottom = Math.Min(bottom, rect.GetBottom());
+                top = Math.Max(top, rect.GetTop());
+            }
+
+            if (!hasRect || right <= left || top <= bottom)
+            {
+                return null;
+            }
+
+            return new KernelGeom.Rectangle(left, bottom, right - left, top - bottom);
+        }
+
+        private static bool RectanglesIntersectWithTolerance(KernelGeom.Rectangle a, KernelGeom.Rectangle b, float tolerance)
+        {
+            if (a == null || b == null)
+            {
+                return false;
+            }
+
+            float aLeft = a.GetLeft() - tolerance;
+            float aRight = a.GetRight() + tolerance;
+            float aBottom = a.GetBottom() - tolerance;
+            float aTop = a.GetTop() + tolerance;
+            float bLeft = b.GetLeft();
+            float bRight = b.GetRight();
+            float bBottom = b.GetBottom();
+            float bTop = b.GetTop();
+
+            return aLeft < bRight && aRight > bLeft && aBottom < bTop && aTop > bBottom;
+        }
+
+        private static void AppendOcrSpace(CachedLine line, float previousRight, float nextLeft, float y, float height)
+        {
+            if (line == null)
+            {
+                return;
+            }
+
+            float gap = Math.Max(0.1f, nextLeft - previousRight);
+            line.Text += " ";
+            line.Characters.Add(new CharacterInfo
+            {
+                Char = ' ',
+                BoundingBox = new KernelGeom.Rectangle(previousRight, y, gap, Math.Max(0.1f, height))
+            });
+        }
+
+        private static bool AppendOcrWordFromSymbols(
+            CachedLine line,
+            TesseractOCR.Layout.Word word,
+            KernelGeom.Rectangle pageSize,
+            int bitmapWidth,
+            int bitmapHeight,
+            int pageRotation)
+        {
+            if (line == null || word == null || pageSize == null || bitmapWidth <= 0 || bitmapHeight <= 0)
+            {
+                return false;
+            }
+
+            string wordText = (word.Text ?? string.Empty).Trim();
+            if (string.IsNullOrEmpty(wordText))
+            {
+                return false;
+            }
+
+            var symbolCharacters = new List<CharacterInfo>();
+            int beforeCount = line.Characters.Count;
+            foreach (var symbol in word.Symbols)
+            {
+                string symbolText = symbol.Text ?? string.Empty;
+                if (string.IsNullOrEmpty(symbolText))
+                {
+                    continue;
+                }
+
+                var symbolBounds = symbol.BoundingBox;
+                if (!symbolBounds.HasValue)
+                {
+                    continue;
+                }
+
+                KernelGeom.Rectangle symbolRect = ConvertOcrRectToPdfRect(symbolBounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
+                if (symbolRect == null || symbolRect.GetWidth() <= 0f || symbolRect.GetHeight() <= 0f)
+                {
+                    continue;
+                }
+
+                AppendOcrWordToCharacters(symbolCharacters, symbolText, symbolRect);
+            }
+
+            if (symbolCharacters.Count != wordText.Length)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < wordText.Length; i++)
+            {
+                symbolCharacters[i].Char = wordText[i];
+            }
+
+            line.Text += wordText;
+            line.Characters.AddRange(symbolCharacters);
+            return line.Characters.Count > beforeCount;
+        }
+
+        private static void AppendOcrWord(CachedLine line, string text, KernelGeom.Rectangle rect)
+        {
+            if (line == null || string.IsNullOrEmpty(text) || rect == null)
+            {
+                return;
+            }
+
+            float charWidth = Math.Max(0.1f, rect.GetWidth() / Math.Max(1, text.Length));
+            for (int i = 0; i < text.Length; i++)
+            {
+                line.Text += text[i];
+                line.Characters.Add(new CharacterInfo
+                {
+                    Char = text[i],
+                    BoundingBox = new KernelGeom.Rectangle(
+                        rect.GetX() + (charWidth * i),
+                        rect.GetY(),
+                        charWidth,
+                        Math.Max(0.1f, rect.GetHeight()))
+                });
+            }
+        }
+
+        private static void AppendOcrWordToCharacters(List<CharacterInfo> characters, string text, KernelGeom.Rectangle rect)
+        {
+            if (characters == null || string.IsNullOrEmpty(text) || rect == null)
+            {
+                return;
+            }
+
+            float charWidth = Math.Max(0.1f, rect.GetWidth() / Math.Max(1, text.Length));
+            for (int i = 0; i < text.Length; i++)
+            {
+                characters.Add(new CharacterInfo
+                {
+                    Char = text[i],
+                    BoundingBox = new KernelGeom.Rectangle(
+                        rect.GetX() + (charWidth * i),
+                        rect.GetY(),
+                        charWidth,
+                        Math.Max(0.1f, rect.GetHeight()))
+                });
+            }
         }
 
         // Funkcja do odczytu text na podstawie line_number
@@ -56541,28 +59406,39 @@ namespace AnonPDF
             var locations = new List<TextLocation> { };
             var cachedLines = _lineCache[pdfPath];
             string searchTextLower = searchText.ToLowerInvariant();
-            
+
             int cnt = 0;
+            int lastReportedPage = -1;
             foreach (var line in cachedLines)
             {
-                
+
                 string textLower = line.Text.ToLowerInvariant();
-                OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_SearchPage", line.PageNumber));
+                if (line.PageNumber != lastReportedPage)
+                {
+                    lastReportedPage = line.PageNumber;
+                    OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_SearchPage", line.PageNumber));
+                }
                 if (searchPersonalData)
                 {
                     SearchPersonalData(line, locations);
                 }
                 else if (textLower.Contains(searchTextLower))
                 {
+                    HashSet<int> exactOcrWordMatchStarts = AddExactOcrWordMatches(line, searchText, locations);
                     // TODO: add per-line search progress notification
                     int startIndex = textLower.IndexOf(searchTextLower, StringComparison.CurrentCultureIgnoreCase);
                     while (startIndex >= 0)
                     {
-                        KernelGeom.Rectangle textRect = GetTextFragmentRectangle(line, startIndex, searchText.Length);
+                        if (exactOcrWordMatchStarts != null && exactOcrWordMatchStarts.Contains(startIndex))
+                        {
+                            startIndex = textLower.IndexOf(searchTextLower, startIndex + 1, StringComparison.CurrentCultureIgnoreCase);
+                            continue;
+                        }
+
+                        KernelGeom.Rectangle textRect = GetSearchResultRectangle(line, startIndex, searchText.Length);
                         if (textRect != null)
                         {
-                            KernelGeom.Rectangle adjustedRect = AdjustRectangleForRotation(textRect, line.PageRotation);
-                            locations.Add(new TextLocation(line.PageNumber, line.PageRotation, adjustedRect));
+                            locations.Add(new TextLocation(line.PageNumber, line.PageRotation, textRect, line.IsOcr));
                         }
                         startIndex = textLower.IndexOf(searchTextLower, startIndex + 1, StringComparison.CurrentCultureIgnoreCase);
                     }
@@ -56650,11 +59526,10 @@ namespace AnonPDF
 
                                 while (startIndex >= 0)
                                 {
-                                    var textRect = GetTextFragmentRectangle(cachedLine, startIndex, entityText.Length);
+                                    var textRect = GetSearchResultRectangle(cachedLine, startIndex, entityText.Length);
                                     if (textRect != null)
                                     {
-                                        var adjustedRect = AdjustRectangleForRotation(textRect, cachedLine.PageRotation);
-                                        locations.Add(new TextLocation(cachedLine.PageNumber, cachedLine.PageRotation, adjustedRect));
+                                        locations.Add(new TextLocation(cachedLine.PageNumber, cachedLine.PageRotation, textRect, cachedLine.IsOcr));
                                     }
                                     startIndex = textLower.IndexOf(entityLower, startIndex + 1, StringComparison.CurrentCultureIgnoreCase);
                                 }
@@ -56667,10 +59542,250 @@ namespace AnonPDF
                     .OrderBy(loc => loc.PageNumber)
                     .ThenByDescending(loc => loc.Rect.GetY())
                     .ToList();
+
+                var deduplicatedLocations = new List<TextLocation>();
+                foreach (var loc in locations)
+                {
+                    bool isDuplicate = false;
+                    for (int i = 0; i < deduplicatedLocations.Count; i++)
+                    {
+                        var existing = deduplicatedLocations[i];
+
+                        float x1 = loc.Rect.GetX();
+                        float y1 = loc.Rect.GetY();
+                        float w1 = loc.Rect.GetWidth();
+                        float h1 = loc.Rect.GetHeight();
+
+                        float x2 = existing.Rect.GetX();
+                        float y2 = existing.Rect.GetY();
+                        float w2 = existing.Rect.GetWidth();
+                        float h2 = existing.Rect.GetHeight();
+
+                        float cx1 = x1 + w1 / 2f;
+                        float cy1 = y1 + h1 / 2f;
+                        float cx2 = x2 + w2 / 2f;
+                        float cy2 = y2 + h2 / 2f;
+
+                        float toleranceX = Math.Max(15f, w2 * 0.5f);
+                        float toleranceY = Math.Max(15f, h2 * 0.8f);
+
+                        if (loc.PageNumber == existing.PageNumber &&
+                            Math.Abs(cx1 - cx2) < toleranceX &&
+                            Math.Abs(cy1 - cy2) < toleranceY)
+                        {
+                            if (h1 > h2)
+                            {
+                                deduplicatedLocations[i] = loc;
+                            }
+                            else if (h1 == h2 && w1 > w2)
+                            {
+                                deduplicatedLocations[i] = loc;
+                            }
+                            isDuplicate = true;
+                            break;
+                        }
+                    }
+                    if (!isDuplicate)
+                    {
+                        deduplicatedLocations.Add(loc);
+                    }
+                }
+                locations = deduplicatedLocations;
             }
             OnCacheStatusChanged?.Invoke(string.Empty);
 
+            // Sort results by page then by position (top-to-bottom) so
+            // navigation follows the visual reading order regardless of
+            // whether results come from native text or OCR lines.
+            locations = locations
+                .OrderBy(loc => loc.PageNumber)
+                .ThenByDescending(loc => loc.Rect.GetY())
+                .ToList();
+
             return locations;
+        }
+
+        private static HashSet<int> AddExactOcrWordMatches(CachedLine line, string searchText, List<TextLocation> locations)
+        {
+            if (line?.IsOcr != true ||
+                line.OcrWords == null ||
+                line.OcrWords.Count == 0 ||
+                string.IsNullOrWhiteSpace(searchText) ||
+                locations == null)
+            {
+                return null;
+            }
+
+            var matchedStarts = new HashSet<int>();
+            string normalizedSearchText = searchText.Trim();
+            foreach (OcrWordInfo word in line.OcrWords)
+            {
+                if (word == null ||
+                    word.BoundingBox == null ||
+                    word.BoundingBox.GetWidth() <= 0f ||
+                    word.BoundingBox.GetHeight() <= 0f ||
+                    string.IsNullOrWhiteSpace(word.Text))
+                {
+                    continue;
+                }
+
+                if (!string.Equals(word.Text.Trim(), normalizedSearchText, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                locations.Add(new TextLocation(line.PageNumber, line.PageRotation, word.BoundingBox, isOcr: true, isExactOcrWord: true));
+                matchedStarts.Add(word.StartIndex);
+            }
+
+            return matchedStarts.Count > 0 ? matchedStarts : null;
+        }
+
+        private static void AddOcrManualSearchMatches(CachedLine line, string searchText, List<TextLocation> locations)
+        {
+            if (line == null || !line.IsOcr || string.IsNullOrWhiteSpace(line.Text) || string.IsNullOrWhiteSpace(searchText) || locations == null)
+            {
+                return;
+            }
+
+            string normalizedLine = BuildOcrManualSearchText(line.Text, removeAtSign: false, out List<int> lineIndexes);
+            string normalizedSearch = BuildOcrManualSearchText(searchText, removeAtSign: false, out _);
+            int added = AddOcrManualSearchMatchesFromNormalizedText(
+                line,
+                normalizedLine,
+                lineIndexes,
+                normalizedSearch,
+                locations,
+                expandMissingAtSign: false);
+
+            if (added > 0 || normalizedSearch.IndexOf('@') < 0)
+            {
+                return;
+            }
+
+            string normalizedLineWithoutAt = BuildOcrManualSearchText(line.Text, removeAtSign: true, out List<int> lineIndexesWithoutAt);
+            string normalizedSearchWithoutAt = BuildOcrManualSearchText(searchText, removeAtSign: true, out _);
+            if (normalizedSearchWithoutAt.Length < 2)
+            {
+                return;
+            }
+
+            AddOcrManualSearchMatchesFromNormalizedText(
+                line,
+                normalizedLineWithoutAt,
+                lineIndexesWithoutAt,
+                normalizedSearchWithoutAt,
+                locations,
+                expandMissingAtSign: true);
+        }
+
+        private static int AddOcrManualSearchMatchesFromNormalizedText(
+            CachedLine line,
+            string normalizedLine,
+            List<int> originalIndexes,
+            string normalizedSearch,
+            List<TextLocation> locations,
+            bool expandMissingAtSign)
+        {
+            if (line == null ||
+                string.IsNullOrEmpty(normalizedLine) ||
+                string.IsNullOrEmpty(normalizedSearch) ||
+                originalIndexes == null ||
+                originalIndexes.Count != normalizedLine.Length ||
+                locations == null)
+            {
+                return 0;
+            }
+
+            int added = 0;
+            int startIndex = normalizedLine.IndexOf(normalizedSearch, StringComparison.OrdinalIgnoreCase);
+            while (startIndex >= 0)
+            {
+                if (startIndex + normalizedSearch.Length <= originalIndexes.Count)
+                {
+                    int originalStart = originalIndexes[startIndex];
+                    int originalEnd = originalIndexes[startIndex + normalizedSearch.Length - 1] + 1;
+                    int originalLength = originalEnd - originalStart;
+                    if (originalStart >= 0 && originalLength > 0)
+                    {
+                        KernelGeom.Rectangle textRect = GetSearchResultRectangle(line, originalStart, originalLength);
+                        if (expandMissingAtSign)
+                        {
+                            textRect = ExpandOcrRectangleForMissingAtSign(textRect, line);
+                        }
+
+                        if (textRect != null)
+                        {
+                            locations.Add(new TextLocation(line.PageNumber, line.PageRotation, textRect, isOcr: true));
+                            added++;
+                        }
+                    }
+                }
+
+                startIndex = normalizedLine.IndexOf(normalizedSearch, startIndex + 1, StringComparison.OrdinalIgnoreCase);
+            }
+
+            return added;
+        }
+
+        private static string BuildOcrManualSearchText(string text, bool removeAtSign, out List<int> originalIndexes)
+        {
+            originalIndexes = new List<int>();
+            if (string.IsNullOrEmpty(text))
+            {
+                return string.Empty;
+            }
+
+            var builder = new System.Text.StringBuilder(text.Length);
+            for (int i = 0; i < text.Length; i++)
+            {
+                char ch = NormalizeOcrManualSearchChar(text[i]);
+                if (char.IsWhiteSpace(ch) || (removeAtSign && ch == '@'))
+                {
+                    continue;
+                }
+
+                builder.Append(char.ToLowerInvariant(ch));
+                originalIndexes.Add(i);
+            }
+
+            return builder.ToString();
+        }
+
+        private static char NormalizeOcrManualSearchChar(char ch)
+        {
+            switch (ch)
+            {
+                case '＠':
+                case '©':
+                case '®':
+                case '§':
+                    return '@';
+                case '．':
+                case '·':
+                case '•':
+                case '‚':
+                    return '.';
+                default:
+                    return ch;
+            }
+        }
+
+        private static KernelGeom.Rectangle ExpandOcrRectangleForMissingAtSign(KernelGeom.Rectangle rect, CachedLine line)
+        {
+            if (rect == null)
+            {
+                return null;
+            }
+
+            float extraRight = Math.Max(2f, rect.GetHeight() * 0.75f);
+            float right = rect.GetX() + rect.GetWidth() + extraRight;
+            if (line != null && line.PageWidth > 0f)
+            {
+                right = Math.Min(line.PageWidth, right);
+            }
+
+            return new KernelGeom.Rectangle(rect.GetX(), rect.GetY(), Math.Max(rect.GetWidth(), right - rect.GetX()), rect.GetHeight());
         }
 
         private static DialogResult ShowMessageBox(
@@ -56698,14 +59813,32 @@ namespace AnonPDF
         {
             if (pdfPath == null)
             {
-                // Clear entire cache
                 _lineCache.Clear();
             }
             else
             {
-                // Clear cache only for specified file
                 _lineCache.Remove(pdfPath);
             }
+        }
+
+        public static void CachePdfText(string pdfPath, string userPassword)
+        {
+            CachePdfText(pdfPath, userPassword, System.Threading.CancellationToken.None);
+        }
+
+        public static void CachePdfText(string pdfPath, string userPassword, System.Threading.CancellationToken cancellationToken)
+        {
+            if (!_lineCache.ContainsKey(pdfPath))
+            {
+                CacheLines(pdfPath, userPassword, cancellationToken);
+            }
+        }
+
+        internal static List<CachedLine> GetCachedLines(string pdfPath)
+        {
+            if (_lineCache.TryGetValue(pdfPath, out var lines))
+                return lines;
+            return new List<CachedLine>();
         }
 
         private class LineExtractionStrategy : LocationTextExtractionStrategy
@@ -56774,27 +59907,90 @@ namespace AnonPDF
         private static void SearchPersonalData(CachedLine line, List<TextLocation> locations)
         {
             string text = line.Text;
-            Console.WriteLine(text);
+            int len = text.Length;
+            bool[] matched = len > 0 ? new bool[len] : null;
+
+            // Debug: dump every line that contains digits to help diagnose regex misses
+            if (text.Any(char.IsDigit) && (text.Contains("1020") || text.Contains("4795") || text.Contains("8496") || text.Contains("3420")))
+            {
+                Debug.WriteLine($"SEARCH_LINE page={line.PageNumber} text='{text}' hex={BitConverter.ToString(System.Text.Encoding.UTF8.GetBytes(text)).Replace("-", " ")} len={text.Length} ocr={line.IsOcr}");
+            }
+
             foreach (Match match in PeselPattern.Matches(text))
             {
-                if (ValidatePesel(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                    AddLocationForMatch(line, match, locations);
+                if (!Overlaps(matched, match) && ValidatePesel(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
             }
             foreach (Match match in PropertyRegisterPattern.Matches(text))
             {
-                if (ValidatePropertyRegister(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                    AddLocationForMatch(line, match, locations);
+                if (!Overlaps(matched, match) && ValidatePropertyRegister(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
             }
             foreach (Match match in IdCardPattern.Matches(text))
             {
-                if (ValidateIdCard(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                    AddLocationForMatch(line, match, locations);
+                if (!Overlaps(matched, match) && ValidateIdCard(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
             }
             foreach (Match match in EmailPattern.Matches(text))
             {
-                AddLocationForMatch(line, match, locations);
+                if (!Overlaps(matched, match))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
+            }
+            foreach (Match match in NipPattern.Matches(text))
+            {
+                if (!Overlaps(matched, match) && ValidateNip(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
+            }
+            foreach (Match match in RegonPattern.Matches(text))
+            {
+                if (!Overlaps(matched, match) && ValidateRegon(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
+            }
+            foreach (Match match in KrsPattern.Matches(text))
+            {
+                if (!Overlaps(matched, match) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
+            }
+            foreach (Match match in PostalCodePattern.Matches(text))
+            {
+                if (!Overlaps(matched, match) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
+            }
+            foreach (Match match in BankAccountPattern.Matches(text))
+            {
+                Debug.WriteLine($"BankAccountPattern found: '{match.Value}' (len={match.Value.Length})");
+                if (!Overlaps(matched, match) && ValidateBankAccount(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
+                {
+                    Debug.WriteLine($"BankAccount validated: '{match.Value}'");
+                    MarkMatched(matched, match); AddLocationForMatch(line, match, locations);
+                }
+            }
+            foreach (Match match in VinPattern.Matches(text))
+            {
+                if (!Overlaps(matched, match) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
+            }
+            foreach (Match match in UrlPattern.Matches(text))
+            {
+                if (!Overlaps(matched, match))
+                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
             }
 
+        }
+
+        private static bool Overlaps(bool[] matched, Match m)
+        {
+            if (matched == null) return false;
+            for (int i = m.Index; i < m.Index + m.Length && i < matched.Length; i++)
+                if (matched[i]) return true;
+            return false;
+        }
+
+        private static void MarkMatched(bool[] matched, Match m)
+        {
+            if (matched == null) return;
+            for (int i = m.Index; i < m.Index + m.Length && i < matched.Length; i++)
+                matched[i] = true;
         }
 
         private static bool IsIdentifierMatchGeometryCompact(CachedLine line, int startIndex, int length)
@@ -56845,12 +60041,100 @@ namespace AnonPDF
 
         private static void AddLocationForMatch(CachedLine line, Match match, List<TextLocation> locations)
         {
-            KernelGeom.Rectangle textRect = GetTextFragmentRectangle(line, match.Index, match.Length);
+            KernelGeom.Rectangle textRect = GetSearchResultRectangle(line, match.Index, match.Length);
             if (textRect != null)
             {
-                KernelGeom.Rectangle adjustedRect = AdjustRectangleForRotation(textRect, line.PageRotation);
-                locations.Add(new TextLocation(line.PageNumber, line.PageRotation, adjustedRect));
+                locations.Add(new TextLocation(line.PageNumber, line.PageRotation, textRect, line.IsOcr));
             }
+        }
+
+        private static KernelGeom.Rectangle GetSearchResultRectangle(CachedLine line, int startIndex, int length)
+        {
+            if (line?.IsOcr == true && TryGetExactOcrWordRectangle(line, startIndex, length, out KernelGeom.Rectangle exactWordRect))
+            {
+                return exactWordRect;
+            }
+
+            KernelGeom.Rectangle textRect = GetTextFragmentRectangle(line, startIndex, length);
+            if (textRect == null || line?.IsOcr != true)
+            {
+                return textRect;
+            }
+
+            return ExpandOcrTextFragmentRectangle(line, startIndex, length, textRect);
+        }
+
+        private static bool TryGetExactOcrWordRectangle(
+            CachedLine line,
+            int startIndex,
+            int length,
+            out KernelGeom.Rectangle rectangle)
+        {
+            rectangle = null;
+            if (line?.OcrWords == null || line.OcrWords.Count == 0 || startIndex < 0 || length <= 0)
+            {
+                return false;
+            }
+
+            foreach (OcrWordInfo word in line.OcrWords)
+            {
+                if (word == null ||
+                    word.BoundingBox == null ||
+                    word.BoundingBox.GetWidth() <= 0f ||
+                    word.BoundingBox.GetHeight() <= 0f)
+                {
+                    continue;
+                }
+
+                if (word.StartIndex == startIndex && word.Length == length)
+                {
+                    rectangle = word.BoundingBox;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static KernelGeom.Rectangle ExpandOcrTextFragmentRectangle(
+            CachedLine line,
+            int startIndex,
+            int length,
+            KernelGeom.Rectangle fallbackRect)
+        {
+            if (line == null || fallbackRect == null)
+            {
+                return fallbackRect;
+            }
+
+            float padX = Math.Max(OcrSearchMinimumHorizontalPadding, fallbackRect.GetHeight() * OcrSearchHorizontalPaddingRatio);
+            float padRight = Math.Max(OcrSearchMinimumRightPadding, fallbackRect.GetHeight() * OcrSearchRightPaddingRatio);
+            float padY = Math.Max(OcrSearchMinimumVerticalPadding, fallbackRect.GetHeight() * OcrSearchVerticalPaddingRatio);
+            float left = fallbackRect.GetX() - padX;
+            float bottom = fallbackRect.GetY() - padY;
+            float right = fallbackRect.GetX() + fallbackRect.GetWidth() + padRight;
+            float top = fallbackRect.GetY() + fallbackRect.GetHeight() + padY;
+
+            if (line.PageWidth > 0f)
+            {
+                left = Math.Max(0f, left);
+                right = Math.Min(line.PageWidth, right);
+            }
+
+            if (line.PageHeight > 0f)
+            {
+                bottom = Math.Max(0f, bottom);
+                top = Math.Min(line.PageHeight, top);
+            }
+
+            float width = right - left;
+            float height = top - bottom;
+            if (width <= 0f || height <= 0f)
+            {
+                return fallbackRect;
+            }
+
+            return new KernelGeom.Rectangle(left, bottom, width, height);
         }
 
         private static KernelGeom.Rectangle GetTextFragmentRectangle(CachedLine line, int startIndex, int length)
@@ -56879,12 +60163,17 @@ namespace AnonPDF
         }
 
         // Patterns for personal data
-        private static readonly Regex PeselPattern = new Regex(@"\d{11}");
-        private static readonly Regex PropertyRegisterPattern = new Regex(@"([A-Z]{2}\d{1}[A-Z0-9]{1})/\d{8}/\d{1}");
-        private static readonly Regex IdCardPattern = new Regex(@"[A-Z]{3}\s?\d{6}");
+        private static readonly Regex PeselPattern = new Regex(@"\b\d{11}\b");
+        private static readonly Regex PropertyRegisterPattern = new Regex(@"\b([A-Z]{2}\d{1}[A-Z0-9]{1})/\d{8}/\d{1}\b");
+        private static readonly Regex IdCardPattern = new Regex(@"\b[A-Z]{3}\s?\d{6}\b");
         private static readonly Regex EmailPattern = new Regex(@"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}");
-        private static readonly Regex NipPattern = new Regex(@"\b\d{10}\b");
+        private static readonly Regex NipPattern = new Regex(@"\b\d{3}[- ]?\d{2,3}[- ]?\d{2,3}[- ]?\d{2,3}\b");
         private static readonly Regex RegonPattern = new Regex(@"\b\d{9}(?:\d{5})?\b");
+        private static readonly Regex PostalCodePattern = new Regex(@"(?<!\d)[0-9]{2}-[0-9]{3}(?!\d)");
+        private static readonly Regex BankAccountPattern = new Regex(@"[0-9]{2}(?:\s?[0-9]{4}){6}");
+        private static readonly Regex VinPattern = new Regex(@"\b[A-HJ-NPR-Z0-9]{17}\b");
+        private static readonly Regex UrlPattern = new Regex(@"https?://[^\s]{4,}");
+        private static readonly Regex KrsPattern = new Regex(@"\b\d{10}\b");
 
         internal static IReadOnlyList<string> DetectIdentifierTags(string text)
         {
@@ -56922,6 +60211,31 @@ namespace AnonPDF
             if (RegonPattern.Matches(text).Cast<Match>().Any(match => ValidateRegon(match.Value)))
             {
                 detectedTags.Add("REGON");
+            }
+
+            if (KrsPattern.IsMatch(text))
+            {
+                detectedTags.Add("KRS");
+            }
+
+            if (PostalCodePattern.IsMatch(text))
+            {
+                detectedTags.Add("POSTAL_CODE");
+            }
+
+            if (BankAccountPattern.Matches(text).Cast<Match>().Any(match => ValidateBankAccount(match.Value)))
+            {
+                detectedTags.Add("BANK_ACCOUNT");
+            }
+
+            if (VinPattern.IsMatch(text))
+            {
+                detectedTags.Add("VIN");
+            }
+
+            if (UrlPattern.IsMatch(text))
+            {
+                detectedTags.Add("URL");
             }
 
             return detectedTags;
@@ -57082,7 +60396,9 @@ namespace AnonPDF
 
         private static bool ValidateNip(string value)
         {
-            if (string.IsNullOrWhiteSpace(value) || value.Length != 10 || !value.All(char.IsDigit))
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            string digits = new string(value.Where(c => char.IsDigit(c)).ToArray());
+            if (digits.Length != 10 || !digits.All(char.IsDigit))
             {
                 return false;
             }
@@ -57091,7 +60407,7 @@ namespace AnonPDF
             int sum = 0;
             for (int i = 0; i < 9; i++)
             {
-                sum += (value[i] - '0') * weights[i];
+                sum += (digits[i] - '0') * weights[i];
             }
 
             int checksum = sum % 11;
@@ -57100,7 +60416,7 @@ namespace AnonPDF
                 return false;
             }
 
-            return checksum == (value[9] - '0');
+            return checksum == (digits[9] - '0');
         }
 
         private static bool ValidateRegon(string value)
@@ -57149,34 +60465,60 @@ namespace AnonPDF
             return false;
         }
 
-        private static KernelGeom.Rectangle AdjustRectangleForRotation(KernelGeom.Rectangle rect, int rotation)
+        private static bool ValidateBankAccount(string value)
         {
-            if (rotation == 0 || rotation == 360)
-                return rect;
-            if (rotation == 90)
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            string digits = value.Replace(" ", "");
+            Debug.WriteLine($"ValidateBankAccount: input='{value}' digits='{digits}' len={digits.Length}");
+            if (digits.Length < 26 || !digits.All(char.IsDigit))
             {
-                float newX = rect.GetY();
-                float newY = -rect.GetX() - rect.GetWidth();
-                float newWidth = rect.GetHeight();
-                float newHeight = rect.GetWidth();
-                return new KernelGeom.Rectangle(newX, newY, newWidth, newHeight);
+                Debug.WriteLine($"ValidateBankAccount: rejected (len={digits.Length} allDigits={digits.All(char.IsDigit)})");
+                return false;
             }
-            else if (rotation == 180)
+
+            // Try as Polish NRB (26 digits): prepend "PL" implicitly for IBAN check
+            if (digits.Length == 26)
             {
-                float newX = -rect.GetX() - rect.GetWidth();
-                float newY = -rect.GetY() - rect.GetHeight();
-                return new KernelGeom.Rectangle(newX, newY, rect.GetWidth(), rect.GetHeight());
+                // IBAN: "PL" + digits → replace P=25, L=21 → "2521" + digits
+                // Move first 6 chars (2521 + first 2 digits of NRB) to end
+                string ibanDigits = "2521" + digits;
+                string reordered = ibanDigits.Substring(6) + ibanDigits.Substring(0, 6);
+                long rem97 = Mod97(reordered);
+                Debug.WriteLine($"ValidateBankAccount: NRB reordered='{reordered}' mod97={rem97}");
+                if (rem97 == 1) return true;
             }
-            else if (rotation == 270)
+
+            // Try as raw IBAN (may start with letters)
+            string clean = new string(value.Where(c => char.IsLetterOrDigit(c)).ToArray()).ToUpperInvariant();
+            if (clean.Length >= 5 && clean.Take(2).All(char.IsLetter))
             {
-                float newX = -rect.GetY() - rect.GetHeight();
-                float newY = rect.GetX();
-                float newWidth = rect.GetHeight();
-                float newHeight = rect.GetWidth();
-                return new KernelGeom.Rectangle(newX, newY, newWidth, newHeight);
+                string reorderedIban = clean.Substring(4) + clean.Substring(0, 4);
+                // Convert letters to numbers
+                var sb = new System.Text.StringBuilder();
+                foreach (char c in reorderedIban)
+                {
+                    if (char.IsLetter(c))
+                        sb.Append((c - 'A' + 10).ToString());
+                    else
+                        sb.Append(c);
+                }
+                if (Mod97(sb.ToString()) == 1) return true;
             }
-            return rect;
+
+            return false;
         }
+
+        private static long Mod97(string number)
+        {
+            long rem = 0;
+            for (int i = 0; i < number.Length; i++)
+            {
+                rem = (rem * 10 + (number[i] - '0')) % 97;
+            }
+            return rem;
+        }
+
+
     }
 
 

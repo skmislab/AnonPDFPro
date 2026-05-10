@@ -118,30 +118,16 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <metadata name="toolTip1.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>17, 17</value>
+    <value>182, 17</value>
   </metadata>
-  <metadata name="toolTip1.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>17, 17</value>
-  </metadata>
-  <data name="safeModeCheckBox.ToolTip" xml:space="preserve">
-    <value>Użyj tego trybu w przypadku występowania problemów z anonimizacją 
-lub gdy zależy Ci aby zozstał usunięty dokładnie zaznaczony za pomocą narzędzia Box tekst.
-Strony dokumentu zawierające zaznaczenia do anonimizacji będą zapisywane jako obraz.
-</value>
-  </data>
-  <data name="markerRadioButton.ToolTip" xml:space="preserve">
-    <value>Opcja dedykowana do dokumentów tekstowych.
-Aby zaznaczyć linię tekstu - kliknij lewym przyciskiem myszy, przeciągnij i puść.
-Aby rozciągnąć w dół lub w górę przytrzymaj przycisk CTRL.
-Aby usunąć - kliknij prawym przyciskiem myszki na zaznaczeniu.
-
-</value>
-  </data>
   <metadata name="menuStrip1.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
-    <value>114, 17</value>
+    <value>280, 17</value>
+  </metadata>
+  <metadata name="thumbnailsImageList.TrayLocation" type="System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
+    <value>17, 17</value>
   </metadata>
   <metadata name="$this.TrayHeight" type="System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
-    <value>70</value>
+    <value>30</value>
   </metadata>
   <assembly alias="System.Drawing" name="System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a" />
   <data name="$this.Icon" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">

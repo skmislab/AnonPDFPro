@@ -19,6 +19,7 @@ namespace AnonPDF
             public string[] Lines { get; set; }
         }
 
+        private readonly Control cursorRadioButton;
         private readonly Control markerRadioButton;
         private readonly Control boxRadioButton;
         private readonly Control savePdfButton;
@@ -32,9 +33,13 @@ namespace AnonPDF
         private int currentStepIndex;
         private Rectangle cardBounds = Rectangle.Empty;
         private readonly List<Rectangle> stepBounds = new List<Rectangle>();
+        private readonly float dpiScale;
+        private DialogTheme _theme;
+        private static readonly Color HighlightYellow = Color.FromArgb(224, 188, 0);
 
-        internal QuickStartTutorialOverlay(Control markerRadioButton, Control boxRadioButton, Control pdfViewer, Control savePdfButton, Bitmap backgroundSnapshot)
+        internal QuickStartTutorialOverlay(Control cursorRadioButton, Control markerRadioButton, Control boxRadioButton, Control pdfViewer, Control savePdfButton, Bitmap backgroundSnapshot)
         {
+            this.cursorRadioButton = cursorRadioButton;
             this.markerRadioButton = markerRadioButton;
             this.boxRadioButton = boxRadioButton;
             this.pdfViewer = pdfViewer;
@@ -51,6 +56,9 @@ namespace AnonPDF
             TabStop = false;
             Dock = DockStyle.Fill;
 
+            using (var g = Graphics.FromHwnd(IntPtr.Zero))
+                dpiScale = g.DpiX / 96f;
+
             steps = new List<TutorialStep>
             {
                 new TutorialStep
@@ -59,7 +67,8 @@ namespace AnonPDF
                     Lines = new[]
                     {
                         Tr("QuickStart_Step1_Line1"),
-                        Tr("QuickStart_Step1_Line2")
+                        Tr("QuickStart_Step1_Line2"),
+                        Tr("QuickStart_Step1_Line3")
                     }
                 },
                 new TutorialStep
@@ -84,8 +93,8 @@ namespace AnonPDF
             backButton = new Button
             {
                 Text = Tr("QuickStart_Button_Back"),
-                Width = 110,
-                Height = 32,
+                Width = (int)(110 * dpiScale),
+                Height = (int)(32 * dpiScale),
                 Font = new Font(Font.FontFamily, 10f, FontStyle.Regular)
             };
             backButton.Click += (_, __) =>
@@ -103,8 +112,8 @@ namespace AnonPDF
             nextButton = new Button
             {
                 Text = Tr("QuickStart_Button_Next"),
-                Width = 110,
-                Height = 32,
+                Width = (int)(110 * dpiScale),
+                Height = (int)(32 * dpiScale),
                 Font = new Font(Font.FontFamily, 10f, FontStyle.Regular)
             };
             nextButton.Click += (_, __) =>
@@ -123,8 +132,8 @@ namespace AnonPDF
             cancelButton = new Button
             {
                 Text = Resources.ResourceManager.GetString("Dialog_Button_Cancel") ?? "Cancel",
-                Width = 110,
-                Height = 32,
+                Width = (int)(110 * dpiScale),
+                Height = (int)(32 * dpiScale),
                 Font = new Font(Font.FontFamily, 10f, FontStyle.Regular)
             };
             cancelButton.Click += (_, __) => Dismissed?.Invoke(this, EventArgs.Empty);
@@ -139,6 +148,19 @@ namespace AnonPDF
         }
 
         internal event EventHandler Dismissed;
+
+        internal void ApplyTheme(DialogTheme theme)
+        {
+            _theme = theme;
+            foreach (Button btn in new[] { backButton, cancelButton, nextButton })
+            {
+                btn.FlatStyle = FlatStyle.Flat;
+                btn.BackColor = theme.SecondaryButtonBackColor;
+                btn.ForeColor = theme.SecondaryButtonForeColor;
+                btn.FlatAppearance.BorderColor = theme.BorderColor;
+            }
+            Invalidate();
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -172,27 +194,37 @@ namespace AnonPDF
 
         private void UpdateLayout()
         {
-            int width = Math.Min(640, Math.Max(500, ClientSize.Width - 80));
-            int height = Math.Min(420, Math.Max(360, ClientSize.Height - 80));
+            int maxW = (int)(560 * dpiScale);
+            int maxH = (int)(400 * dpiScale);
+            int minW = (int)(440 * dpiScale);
+            int minH = (int)(300 * dpiScale);
+            int pad = (int)(80 * dpiScale);
+            int width = Math.Min(maxW, Math.Max(minW, ClientSize.Width - pad));
+            int height = Math.Min(maxH, Math.Max(minH, ClientSize.Height - pad));
             cardBounds = new Rectangle(
                 Math.Max(20, (ClientSize.Width - width) / 2),
-                Math.Max(20, (ClientSize.Height - height) / 2),
+                Math.Max(80, (ClientSize.Height - height) / 2 + (int)(60 * dpiScale)),
                 width,
                 height);
 
-            int buttonTop = cardBounds.Bottom - 48;
-            backButton.Location = new Point(cardBounds.Left + 24, buttonTop);
+            int buttonTop = cardBounds.Bottom - (int)(48 * dpiScale);
+            int margin = (int)(24 * dpiScale);
+            backButton.Location = new Point(cardBounds.Left + margin, buttonTop);
             cancelButton.Location = new Point((cardBounds.Left + cardBounds.Right - cancelButton.Width) / 2, buttonTop);
-            nextButton.Location = new Point(cardBounds.Right - nextButton.Width - 24, buttonTop);
+            nextButton.Location = new Point(cardBounds.Right - nextButton.Width - margin, buttonTop);
             Invalidate();
         }
 
         private void DrawCard(Graphics g)
         {
+            Color cardBack = _theme?.WindowBackColor ?? Color.White;
+            Color cardBorder = _theme != null ? Color.FromArgb(220, _theme.BorderColor) : Color.FromArgb(220, 208, 208, 208);
+            Color textPrimary = _theme?.TextPrimaryColor ?? Color.FromArgb(31, 42, 51);
+
             using (var path = BuildRoundedRectangle(cardBounds, 14))
             using (var shadowBrush = new SolidBrush(Color.FromArgb(35, 0, 0, 0)))
-            using (var cardBrush = new SolidBrush(Color.White))
-            using (var borderPen = new Pen(Color.FromArgb(220, 208, 208, 208), 1f))
+            using (var cardBrush = new SolidBrush(cardBack))
+            using (var borderPen = new Pen(cardBorder, 1f))
             {
                 using (var shadowPath = BuildRoundedRectangle(new Rectangle(cardBounds.X + 4, cardBounds.Y + 6, cardBounds.Width, cardBounds.Height), 14))
                 {
@@ -203,14 +235,18 @@ namespace AnonPDF
                 g.DrawPath(borderPen, path);
             }
 
-            var titleRect = new Rectangle(cardBounds.Left + 24, cardBounds.Top + 18, cardBounds.Width - 48, 26);
+            int stepTop;
             using (var titleFont = new Font(Font.FontFamily, 13f, FontStyle.Bold))
-            using (var titleBrush = new SolidBrush(Color.FromArgb(31, 42, 51)))
+            using (var titleBrush = new SolidBrush(textPrimary))
             {
+                Size titleSize = TextRenderer.MeasureText(
+                    g, Tr("QuickStart_Title"), titleFont,
+                    new Size(cardBounds.Width - 48, int.MaxValue),
+                    TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+                var titleRect = new Rectangle(cardBounds.Left + 24, cardBounds.Top + 18, cardBounds.Width - 48, titleSize.Height);
                 g.DrawString(Tr("QuickStart_Title"), titleFont, titleBrush, titleRect);
+                stepTop = titleRect.Bottom + 16;
             }
-
-            int stepTop = titleRect.Bottom + 16;
             int stepWidth = cardBounds.Width - 36;
             stepBounds.Clear();
 
@@ -228,27 +264,34 @@ namespace AnonPDF
         {
             if (active)
             {
-                using (var activeBrush = new SolidBrush(Color.FromArgb(255, 255, 246, 196)))
-                using (var activePen = new Pen(Color.FromArgb(245, 204, 102), 1.5f))
+                using (var activePen = new Pen(HighlightYellow, 3.5f))
                 using (var path = BuildRoundedRectangle(stepRect, 10))
                 {
-                    g.FillPath(activeBrush, path);
                     g.DrawPath(activePen, path);
                 }
             }
 
-            Rectangle titleRect = new Rectangle(stepRect.Left + 12, stepRect.Top + 8, stepRect.Width - 24, 22);
-            Rectangle lineRect = new Rectangle(stepRect.Left + 24, stepRect.Top + 34, stepRect.Width - 40, stepRect.Height - 42);
-
             using (var titleFont = new Font(Font.FontFamily, 9.5f, FontStyle.Bold))
             using (var bodyFont = new Font(Font.FontFamily, 9f, FontStyle.Regular))
             {
+                Size titleSize = TextRenderer.MeasureText(
+                    g, step.Title, titleFont,
+                    new Size(stepRect.Width - 48, int.MaxValue),
+                    TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+
+                Rectangle titleRect = new Rectangle(stepRect.Left + 12, stepRect.Top + 8, stepRect.Width - 24, titleSize.Height);
+                int lineStartY = titleRect.Bottom + 8;
+                Rectangle lineRect = new Rectangle(stepRect.Left + 24, lineStartY, stepRect.Width - 40, stepRect.Height - (lineStartY - stepRect.Top) - 8);
+
+                Color stepTitleColor = _theme?.TextPrimaryColor ?? Color.FromArgb(31, 42, 51);
+                Color stepBodyColor = _theme?.TextSecondaryColor ?? Color.FromArgb(70, 78, 87);
+
                 TextRenderer.DrawText(
                     g,
                     step.Title,
                     titleFont,
                     titleRect,
-                    Color.FromArgb(31, 42, 51),
+                    stepTitleColor,
                     TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
 
                 foreach (string line in step.Lines.Where(line => !string.IsNullOrWhiteSpace(line)))
@@ -266,7 +309,7 @@ namespace AnonPDF
                         "- " + line,
                         bodyFont,
                         currentLineRect,
-                        Color.FromArgb(70, 78, 87),
+                        stepBodyColor,
                         TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
 
                     lineRect.Y += measured.Height + 4;
@@ -335,14 +378,15 @@ namespace AnonPDF
 
         private void DrawModeHighlight(Graphics g)
         {
-            if (markerRadioButton == null || boxRadioButton == null || !markerRadioButton.Visible || !boxRadioButton.Visible)
+            if (cursorRadioButton == null || markerRadioButton == null || boxRadioButton == null || !markerRadioButton.Visible || !boxRadioButton.Visible)
             {
                 return;
             }
 
+            Rectangle cursorRect = cursorRadioButton.Visible ? RectangleToClient(cursorRadioButton.RectangleToScreen(cursorRadioButton.ClientRectangle)) : Rectangle.Empty;
             Rectangle markerRect = RectangleToClient(markerRadioButton.RectangleToScreen(markerRadioButton.ClientRectangle));
             Rectangle boxRect = RectangleToClient(boxRadioButton.RectangleToScreen(boxRadioButton.ClientRectangle));
-            Rectangle combined = Rectangle.Union(markerRect, boxRect);
+            Rectangle combined = cursorRadioButton.Visible ? Rectangle.Union(Rectangle.Union(cursorRect, markerRect), boxRect) : Rectangle.Union(markerRect, boxRect);
             combined.Inflate(10, 8);
             DrawHighlightFrame(g, combined);
         }
@@ -389,9 +433,16 @@ namespace AnonPDF
                 Math.Min(760, Math.Max(420, viewerRect.Width - 40)),
                 Math.Min(290, Math.Max(180, viewerRect.Height / 2)));
 
-            using (var panelBrush = new SolidBrush(Color.FromArgb(245, 255, 255, 255)))
+            Color previewBack = _theme != null
+                ? Color.FromArgb(245, _theme.SectionBackColor)
+                : Color.FromArgb(245, 255, 255, 255);
+            Color previewBorder = _theme != null
+                ? Color.FromArgb(220, _theme.BorderColor)
+                : Color.FromArgb(220, 208, 208, 208);
+
+            using (var panelBrush = new SolidBrush(previewBack))
             using (var shadowBrush = new SolidBrush(Color.FromArgb(40, 0, 0, 0)))
-            using (var borderPen = new Pen(Color.FromArgb(220, 208, 208, 208), 1f))
+            using (var borderPen = new Pen(previewBorder, 1f))
             {
                 Rectangle shadowRect = previewRect;
                 shadowRect.Offset(4, 5);
@@ -450,7 +501,7 @@ namespace AnonPDF
                 }
             }
 
-            using (var borderPen = new Pen(Color.FromArgb(224, 188, 0), 4f))
+            using (var borderPen = new Pen(HighlightYellow, 4f))
             {
                 g.DrawRectangle(borderPen, visibleRect);
             }

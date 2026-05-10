@@ -19,6 +19,7 @@ namespace AnonPDF
         private readonly bool canEditLocal;
         private readonly bool canEditGlobalScopes;
         private readonly bool canEditLocalScopes;
+        private readonly DialogTheme dialogTheme;
 
         private readonly TabControl tabControl;
         private readonly TabPage globalTabPage;
@@ -43,8 +44,10 @@ namespace AnonPDF
             bool canEditGlobalScopesEntries,
             bool canEditLocalScopesEntries,
             string globalFilePath,
-            string localFilePath)
+            string localFilePath,
+            DialogTheme dialogTheme = null)
         {
+            this.dialogTheme = dialogTheme;
             canEditGlobal = canEditGlobalEntries;
             canEditLocal = canEditLocalEntries;
             canEditGlobalScopes = canEditGlobalScopesEntries;
@@ -60,8 +63,8 @@ namespace AnonPDF
             MinimizeBox = false;
             MaximizeBox = true;
             ShowInTaskbar = false;
-            Size = new Size(1100, 620);
-            MinimumSize = new Size(900, 500);
+            Size = PDFForm.ScaleSizeForDpiStatic(900, 480);
+            MinimumSize = PDFForm.ScaleSizeForDpiStatic(700, 360);
 
             tabControl = new TabControl
             {
@@ -89,47 +92,47 @@ namespace AnonPDF
             addButton = new Button
             {
                 Text = Tr("Dodaj", "Add", "Hinzufuegen"),
-                Width = 120,
-                Height = 28
+                Width = PDFForm.ScaleForDpiStatic(120),
+                Height = PDFForm.ScaleForDpiStatic(28)
             };
             addButton.Click += AddButton_Click;
 
             editButton = new Button
             {
                 Text = Tr("Edytuj", "Edit", "Bearbeiten"),
-                Width = 120,
-                Height = 28
+                Width = PDFForm.ScaleForDpiStatic(120),
+                Height = PDFForm.ScaleForDpiStatic(28)
             };
             editButton.Click += EditButton_Click;
 
             deleteButton = new Button
             {
                 Text = Tr("Usuń", "Delete", "Loeschen"),
-                Width = 120,
-                Height = 28
+                Width = PDFForm.ScaleForDpiStatic(120),
+                Height = PDFForm.ScaleForDpiStatic(28)
             };
             deleteButton.Click += DeleteButton_Click;
 
             saveButton = new Button
             {
                 Text = Tr("Zapisz", "Save", "Speichern"),
-                Width = 120,
-                Height = 28
+                Width = PDFForm.ScaleForDpiStatic(120),
+                Height = PDFForm.ScaleForDpiStatic(28)
             };
             saveButton.Click += SaveButton_Click;
 
             cancelButton = new Button
             {
                 Text = Tr("Anuluj", "Cancel", "Abbrechen"),
-                Width = 120,
-                Height = 28,
+                Width = PDFForm.ScaleForDpiStatic(120),
+                Height = PDFForm.ScaleForDpiStatic(28),
                 DialogResult = DialogResult.Cancel
             };
 
             var leftButtonsPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Left,
-                Width = 420,
+                Width = PDFForm.ScaleForDpiStatic(420),
                 FlowDirection = FlowDirection.LeftToRight,
                 WrapContents = false,
                 Padding = new Padding(0),
@@ -142,7 +145,7 @@ namespace AnonPDF
             var rightButtonsPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Right,
-                Width = 260,
+                Width = PDFForm.ScaleForDpiStatic(260),
                 FlowDirection = FlowDirection.RightToLeft,
                 WrapContents = false,
                 Padding = new Padding(0),
@@ -165,13 +168,17 @@ namespace AnonPDF
                 RowCount = 2
             };
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, PDFForm.ScaleForDpiStatic(40)));
             layout.Controls.Add(tabControl, 0, 0);
             layout.Controls.Add(buttonsPanel, 0, 1);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
             CancelButton = cancelButton;
+
+            DialogThemeApplier.ApplyTo(this, dialogTheme);
+            UpdateStatusLabel(globalStatusLabel, globalFilePath, canEditGlobal);
+            UpdateStatusLabel(localStatusLabel, localFilePath, canEditLocal);
 
             saveButton.Enabled = canEditGlobal || canEditLocal;
             UpdateActionButtonsState();
@@ -233,7 +240,7 @@ namespace AnonPDF
         {
             return new Label
             {
-                Dock = DockStyle.Fill,
+                AutoSize = true,
                 AutoEllipsis = true,
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(4, 4, 4, 4)
@@ -286,7 +293,7 @@ namespace AnonPDF
             {
                 DataPropertyName = nameof(LegalBasisDefinition.RequiresInterestSubject),
                 HeaderText = Tr("Wymaga podmiotu", "Needs subject", "Subjekt erforderlich"),
-                Width = 130
+                Width = PDFForm.ScaleForDpiStatic(160)
             });
             grid.Columns.Add(new DataGridViewTextBoxColumn
             {
@@ -308,7 +315,9 @@ namespace AnonPDF
                 ? Tr("zapis dostępny", "write enabled", "schreibbar")
                 : Tr("tylko odczyt", "read only", "nur lesen");
             label.Text = string.Format(Tr("Plik: {0} ({1})", "File: {0} ({1})", "Datei: {0} ({1})"), path, mode);
-            label.ForeColor = canEdit ? SystemColors.ControlText : Color.DarkRed;
+            label.ForeColor = dialogTheme == null
+                ? (canEdit ? SystemColors.ControlText : Color.DarkRed)
+                : (canEdit ? dialogTheme.TextSecondaryColor : dialogTheme.TextPrimaryColor);
         }
 
         private BindingList<LegalBasisDefinition> GetCurrentBinding()
@@ -551,7 +560,8 @@ namespace AnonPDF
                 generatedId,
                 availableScopes,
                 Enumerable.Empty<string>(),
-                canEditScopes))
+                canEditScopes,
+                dialogTheme))
             {
                 if (editor.ShowDialog(this) != DialogResult.OK)
                 {
@@ -608,7 +618,8 @@ namespace AnonPDF
                 currentEntry.Id,
                 availableScopes,
                 selectedScopeIds,
-                canEditScopes))
+                canEditScopes,
+                dialogTheme))
             {
                 if (editor.ShowDialog(this) != DialogResult.OK)
                 {
@@ -876,7 +887,8 @@ namespace AnonPDF
             string fixedId,
             IEnumerable<ExclusionScopeDefinition> availableScopes,
             IEnumerable<string> selectedScopeIds,
-            bool canEditScopes)
+            bool canEditScopes,
+            DialogTheme dialogTheme = null)
         {
             canEditScopeAssignments = canEditScopes;
             Text = source == null
@@ -888,8 +900,8 @@ namespace AnonPDF
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
-            Width = 860;
-            Height = 700;
+            Width = PDFForm.ScaleForDpiStatic(780);
+            Height = PDFForm.ScaleForDpiStatic(510);
 
             var layout = new TableLayoutPanel
             {
@@ -898,13 +910,13 @@ namespace AnonPDF
                 RowCount = 8,
                 Padding = new Padding(10)
             };
-            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160f));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, PDFForm.ScaleForDpiStatic(160)));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 120f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 180f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, PDFForm.ScaleForDpiStatic(120)));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, PDFForm.ScaleForDpiStatic(180)));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
@@ -1024,7 +1036,6 @@ namespace AnonPDF
 
             scopesStatusLabel = new Label
             {
-                Dock = DockStyle.Fill,
                 AutoSize = true,
                 ForeColor = SystemColors.GrayText,
                 Text = canEditScopeAssignments
@@ -1038,8 +1049,8 @@ namespace AnonPDF
             {
                 Text = Tr("OK", "OK", "OK"),
                 DialogResult = DialogResult.None,
-                Width = 110,
-                Height = 28
+                Width = PDFForm.ScaleForDpiStatic(110),
+                Height = PDFForm.ScaleForDpiStatic(28)
             };
             okButton.Click += OkButton_Click;
 
@@ -1047,15 +1058,16 @@ namespace AnonPDF
             {
                 Text = Tr("Anuluj", "Cancel", "Abbrechen"),
                 DialogResult = DialogResult.Cancel,
-                Width = 110,
-                Height = 28
+                Width = PDFForm.ScaleForDpiStatic(110),
+                Height = PDFForm.ScaleForDpiStatic(28)
             };
 
             var buttonsPanel = new FlowLayoutPanel
             {
                 Dock = DockStyle.Bottom,
-                Height = 40,
-                FlowDirection = FlowDirection.RightToLeft
+                Height = PDFForm.ScaleForDpiStatic(40),
+                FlowDirection = FlowDirection.RightToLeft,
+                Padding = new Padding(0, 0, 10, 0)
             };
             buttonsPanel.Controls.Add(cancelButton);
             buttonsPanel.Controls.Add(okButton);
@@ -1065,6 +1077,8 @@ namespace AnonPDF
 
             AcceptButton = okButton;
             CancelButton = cancelButton;
+
+            DialogThemeApplier.ApplyTo(this, dialogTheme);
 
             idTextBox.Text = source == null
                 ? (fixedId ?? string.Empty)

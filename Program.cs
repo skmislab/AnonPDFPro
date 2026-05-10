@@ -49,7 +49,7 @@ namespace AnonPDF
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             EnsureContextMenuRegistration();
-            string startupInputPath = ParseStartupInputPath(args);
+            StartupOptions startupOptions = ParseStartupOptions(args);
             LicenseManager.Initialize(AppDomain.CurrentDomain.BaseDirectory);
             if (!ValidateRequiredLicenseFiles(out string licenseError))
             {
@@ -60,9 +60,14 @@ namespace AnonPDF
                     MessageBoxIcon.Error);
                 return;
             }
-            bool hasStartupInputPath = !string.IsNullOrWhiteSpace(startupInputPath);
+            bool hasStartupInputPath = !string.IsNullOrWhiteSpace(startupOptions.InputPath);
+            // Normal startup keeps SplashForm alive while PDFForm runs its first Load/Shown layout.
+            // Keep the same DPI bootstrap for command-line startup without showing the splash window.
+            SplashForm dpiBootstrapSplash = hasStartupInputPath ? new SplashForm() : null;
             SplashForm splash = hasStartupInputPath ? null : new SplashForm();
             var mainForm = new PDFForm(splash);
+            if (hasStartupInputPath)
+                mainForm.SuppressStartupUpdateCheck = true;
             if (splash != null)
             {
                 splash.OpenPdfRequested += (_, __) => mainForm.OpenPdfFromSplash();
@@ -75,11 +80,18 @@ namespace AnonPDF
 
             if (hasStartupInputPath)
             {
-                mainForm.Shown += (_, __) => mainForm.OpenInputPath(startupInputPath, suppressTutorial: true);
+                mainForm.Shown += (_, __) =>
+                {
+                    QueueStartupInputOpen(mainForm, startupOptions, dpiBootstrapSplash);
+                };
             }
 
             mainForm.FormClosed += (_, __) =>
             {
+                if (dpiBootstrapSplash != null && !dpiBootstrapSplash.IsDisposed)
+                {
+                    dpiBootstrapSplash.Dispose();
+                }
                 if (splash != null && !splash.IsDisposed)
                 {
                     splash.Close();
@@ -89,43 +101,107 @@ namespace AnonPDF
             Application.Run(mainForm);
         }
 
-        private static string ParseStartupInputPath(string[] args)
+        private static void QueueStartupInputOpen(PDFForm mainForm, StartupOptions startupOptions, SplashForm dpiBootstrapSplash)
         {
-            if (args == null || args.Length == 0)
+            // Match interactive startup: open the document after the first shown/layout pass has completed.
+            EventHandler idleHandler = null;
+            idleHandler = (_, __) =>
             {
-                return string.Empty;
-            }
-
-            foreach (string arg in args)
-            {
-                if (string.IsNullOrWhiteSpace(arg))
+                Application.Idle -= idleHandler;
+                try
                 {
-                    continue;
+                    OpenStartupInput(mainForm, startupOptions);
                 }
-
-                string trimmed = arg.Trim();
-                if (trimmed.StartsWith("--", StringComparison.Ordinal))
+                finally
                 {
-                    continue;
-                }
-
-                string extension = Path.GetExtension(trimmed);
-                if (string.Equals(extension, ".pdf", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(extension, ".app", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(extension, ".pap", StringComparison.OrdinalIgnoreCase))
-                {
-                    try
+                    if (dpiBootstrapSplash != null && !dpiBootstrapSplash.IsDisposed)
                     {
-                        return Path.GetFullPath(trimmed);
-                    }
-                    catch
-                    {
-                        return trimmed;
+                        dpiBootstrapSplash.Dispose();
                     }
                 }
+            };
+            Application.Idle += idleHandler;
+        }
+
+        private static void OpenStartupInput(PDFForm mainForm, StartupOptions startupOptions)
+        {
+            if (mainForm == null || mainForm.IsDisposed || mainForm.Disposing)
+            {
+                return;
             }
 
-            return string.Empty;
+            mainForm.OpenInputPath(startupOptions.InputPath, suppressTutorial: true);
+            if (startupOptions.PageNumber > 0)
+            {
+                mainForm.GoToPage(startupOptions.PageNumber);
+            }
+            if (startupOptions.RotateDegrees != 0)
+            {
+                mainForm.RotateCurrentPageBy(startupOptions.RotateDegrees);
+            }
+            if (!string.IsNullOrWhiteSpace(startupOptions.PdfOutputPath))
+            {
+                mainForm.SetIntegrationMode(startupOptions.PdfOutputPath);
+            }
+            if (!string.IsNullOrWhiteSpace(startupOptions.PngOutputPath))
+            {
+                mainForm.SetAutoSavePngPath(startupOptions.PngOutputPath);
+            }
+        }
+
+        private struct StartupOptions
+        {
+            public string InputPath;
+            public string PdfOutputPath;  // --pdfout
+            public string PngOutputPath;  // --pngout
+            public int RotateDegrees;     // --rotate <0|90|180|270>
+            public int PageNumber;        // --page <1-based page number>
+        }
+
+        private static StartupOptions ParseStartupOptions(string[] args)
+        {
+            var options = new StartupOptions();
+            if (args == null || args.Length == 0) return options;
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                string arg = args[i]?.Trim();
+                if (string.IsNullOrWhiteSpace(arg)) continue;
+
+                if (string.Equals(arg, "--pdfout", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    options.PdfOutputPath = args[++i]?.Trim();
+                    continue;
+                }
+                if (string.Equals(arg, "--pngout", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    options.PngOutputPath = args[++i]?.Trim();
+                    continue;
+                }
+                if (string.Equals(arg, "--rotate", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    if (int.TryParse(args[++i]?.Trim(), out int deg))
+                        options.RotateDegrees = deg;
+                    continue;
+                }
+                if (string.Equals(arg, "--page", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    if (int.TryParse(args[++i]?.Trim(), out int pg))
+                        options.PageNumber = pg;
+                    continue;
+                }
+                if (arg.StartsWith("--", StringComparison.Ordinal)) continue;
+
+                string ext = Path.GetExtension(arg);
+                if (string.IsNullOrEmpty(options.InputPath) &&
+                    (string.Equals(ext, ".pdf", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(ext, ".app", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(ext, ".pap", StringComparison.OrdinalIgnoreCase)))
+                {
+                    try { options.InputPath = Path.GetFullPath(arg); } catch { options.InputPath = arg; }
+                }
+            }
+            return options;
         }
 
         private static void EnsureContextMenuRegistration()

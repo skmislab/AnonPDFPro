@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -360,6 +361,252 @@ namespace AnonPDF
             }
 
             TextRenderer.DrawText(graphics, Text, Font, textRect, textColor, BackColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+        }
+    }
+
+    internal sealed class DialogTheme
+    {
+        public Color WindowBackColor { get; set; }
+        public Color PanelBackColor { get; set; }
+        public Color SectionBackColor { get; set; }
+        public Color InputBackColor { get; set; }
+        public Color BorderColor { get; set; }
+        public Color TextPrimaryColor { get; set; }
+        public Color TextSecondaryColor { get; set; }
+        public Color SelectionBackColor { get; set; }
+        public Color SelectionForeColor { get; set; }
+        public Color SecondaryButtonBackColor { get; set; }
+        public Color SecondaryButtonForeColor { get; set; }
+    }
+
+    internal static class DialogThemeApplier
+    {
+        public static void ApplyTo(Form form, DialogTheme theme, params Control[] preserveBackColorControls)
+        {
+            if (form == null || theme == null)
+            {
+                return;
+            }
+
+            var preserveBackColor = new HashSet<Control>(preserveBackColorControls ?? new Control[0]);
+            form.BackColor = theme.SectionBackColor;
+            form.ForeColor = theme.TextPrimaryColor;
+            ApplyToControls(form.Controls, theme, preserveBackColor);
+        }
+
+        private static void ApplyToControls(Control.ControlCollection controls, DialogTheme theme, HashSet<Control> preserveBackColor)
+        {
+            foreach (Control control in controls)
+            {
+                ApplyToControl(control, theme, preserveBackColor);
+                if (control.Controls.Count > 0)
+                {
+                    ApplyToControls(control.Controls, theme, preserveBackColor);
+                }
+            }
+        }
+
+        private static void ApplyToControl(Control control, DialogTheme theme, HashSet<Control> preserveBackColor)
+        {
+            if (control == null)
+            {
+                return;
+            }
+
+            if (control is DataGridView gridView)
+            {
+                ApplyToGrid(gridView, theme);
+                return;
+            }
+
+            if (control is Button button)
+            {
+                ApplyToButton(button, theme, preserveBackColor.Contains(button));
+                return;
+            }
+
+            if (control is ThemedCheckBox themedCheckBox)
+            {
+                ApplyToThemedCheckBox(themedCheckBox, theme);
+                return;
+            }
+
+            if (control is ThemedRadioButton themedRadioButton)
+            {
+                ApplyToThemedRadioButton(themedRadioButton, theme);
+                return;
+            }
+
+            if (control is CheckBox checkBox)
+            {
+                checkBox.BackColor = theme.SectionBackColor;
+                checkBox.ForeColor = checkBox.Enabled ? theme.TextPrimaryColor : theme.TextSecondaryColor;
+                checkBox.UseVisualStyleBackColor = false;
+                return;
+            }
+
+            if (control is RadioButton radioButton)
+            {
+                radioButton.BackColor = theme.SectionBackColor;
+                radioButton.ForeColor = radioButton.Enabled ? theme.TextPrimaryColor : theme.TextSecondaryColor;
+                radioButton.UseVisualStyleBackColor = false;
+                return;
+            }
+
+            if (control is Label label)
+            {
+                label.BackColor = label.Parent?.BackColor ?? theme.SectionBackColor;
+                label.ForeColor = label.Enabled ? theme.TextSecondaryColor : theme.TextSecondaryColor;
+                label.Enabled = true;
+                return;
+            }
+
+            if (control is GroupBox groupBox)
+            {
+                groupBox.BackColor = theme.SectionBackColor;
+                groupBox.ForeColor = groupBox.Enabled ? theme.TextPrimaryColor : theme.TextSecondaryColor;
+                if (groupBox is ThemedGroupBox themedGroupBox)
+                {
+                    themedGroupBox.DisabledForeColor = theme.TextSecondaryColor;
+                }
+                return;
+            }
+
+            if (control is TextBoxBase textBoxBase)
+            {
+                if (!preserveBackColor.Contains(textBoxBase))
+                {
+                    textBoxBase.BackColor = theme.InputBackColor;
+                    textBoxBase.ForeColor = theme.TextPrimaryColor;
+                }
+                return;
+            }
+
+            if (control is ComboBox comboBox)
+            {
+                comboBox.BackColor = theme.InputBackColor;
+                comboBox.ForeColor = theme.TextPrimaryColor;
+                return;
+            }
+
+            if (control is NumericUpDown numericUpDown)
+            {
+                numericUpDown.BackColor = theme.InputBackColor;
+                numericUpDown.ForeColor = theme.TextPrimaryColor;
+                return;
+            }
+
+            if (control is ListView listView)
+            {
+                listView.BackColor = theme.InputBackColor;
+                listView.ForeColor = theme.TextPrimaryColor;
+                return;
+            }
+
+            if (control is ListBox listBox)
+            {
+                listBox.BackColor = theme.InputBackColor;
+                listBox.ForeColor = theme.TextPrimaryColor;
+                return;
+            }
+
+            if (control is CheckedListBox checkedListBox)
+            {
+                checkedListBox.BackColor = theme.InputBackColor;
+                checkedListBox.ForeColor = theme.TextPrimaryColor;
+                return;
+            }
+
+            if (control is TabPage tabPage)
+            {
+                tabPage.BackColor = theme.SectionBackColor;
+                tabPage.ForeColor = theme.TextPrimaryColor;
+                return;
+            }
+
+            if (control is Panel || control is TableLayoutPanel || control is FlowLayoutPanel || control is TabControl)
+            {
+                if (!preserveBackColor.Contains(control))
+                {
+                    control.BackColor = theme.SectionBackColor;
+                }
+                control.ForeColor = theme.TextPrimaryColor;
+            }
+        }
+
+        private static void ApplyToButton(Button button, DialogTheme theme, bool preserveBackColor)
+        {
+            if (!preserveBackColor)
+            {
+                button.BackColor = theme.SecondaryButtonBackColor;
+                button.ForeColor = button.Enabled ? theme.SecondaryButtonForeColor : theme.TextSecondaryColor;
+            }
+            else
+            {
+                button.ForeColor = GetContrastingTextColor(button.BackColor);
+            }
+
+            button.FlatStyle = FlatStyle.Flat;
+            button.FlatAppearance.BorderColor = theme.BorderColor;
+            button.FlatAppearance.MouseOverBackColor = preserveBackColor
+                ? ControlPaint.Light(button.BackColor)
+                : theme.PanelBackColor;
+            button.FlatAppearance.MouseDownBackColor = theme.SelectionBackColor;
+            button.UseVisualStyleBackColor = false;
+        }
+
+        private static void ApplyToThemedCheckBox(ThemedCheckBox checkBox, DialogTheme theme)
+        {
+            checkBox.BackColor = checkBox.Parent?.BackColor ?? theme.SectionBackColor;
+            checkBox.ForeColor = theme.TextPrimaryColor;
+            checkBox.DisabledForeColor = theme.TextSecondaryColor;
+            checkBox.AccentColor = theme.SelectionBackColor;
+            checkBox.BorderColor = theme.BorderColor;
+            checkBox.UseVisualStyleBackColor = false;
+        }
+
+        private static void ApplyToThemedRadioButton(ThemedRadioButton radioButton, DialogTheme theme)
+        {
+            radioButton.BackColor = radioButton.Parent?.BackColor ?? theme.SectionBackColor;
+            radioButton.ForeColor = theme.TextPrimaryColor;
+            radioButton.DisabledForeColor = theme.TextSecondaryColor;
+            radioButton.AccentColor = theme.SelectionBackColor;
+            radioButton.BorderColor = theme.BorderColor;
+            radioButton.UseVisualStyleBackColor = false;
+        }
+
+        private static void ApplyToGrid(DataGridView gridView, DialogTheme theme)
+        {
+            gridView.BackgroundColor = theme.SectionBackColor;
+            gridView.GridColor = theme.BorderColor;
+            gridView.BorderStyle = BorderStyle.FixedSingle;
+            gridView.EnableHeadersVisualStyles = false;
+
+            gridView.ColumnHeadersDefaultCellStyle.BackColor = theme.PanelBackColor;
+            gridView.ColumnHeadersDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
+            gridView.ColumnHeadersDefaultCellStyle.SelectionBackColor = theme.SelectionBackColor;
+            gridView.ColumnHeadersDefaultCellStyle.SelectionForeColor = theme.SelectionForeColor;
+
+            gridView.RowHeadersDefaultCellStyle.BackColor = theme.PanelBackColor;
+            gridView.RowHeadersDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
+            gridView.RowHeadersDefaultCellStyle.SelectionBackColor = theme.SelectionBackColor;
+            gridView.RowHeadersDefaultCellStyle.SelectionForeColor = theme.SelectionForeColor;
+
+            gridView.DefaultCellStyle.BackColor = theme.InputBackColor;
+            gridView.DefaultCellStyle.ForeColor = theme.TextPrimaryColor;
+            gridView.DefaultCellStyle.SelectionBackColor = theme.SelectionBackColor;
+            gridView.DefaultCellStyle.SelectionForeColor = theme.SelectionForeColor;
+
+            gridView.AlternatingRowsDefaultCellStyle.BackColor = theme.PanelBackColor;
+            gridView.AlternatingRowsDefaultCellStyle.ForeColor = theme.TextPrimaryColor;
+            gridView.AlternatingRowsDefaultCellStyle.SelectionBackColor = theme.SelectionBackColor;
+            gridView.AlternatingRowsDefaultCellStyle.SelectionForeColor = theme.SelectionForeColor;
+        }
+
+        private static Color GetContrastingTextColor(Color color)
+        {
+            int luminance = (int)((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B));
+            return luminance >= 140 ? Color.Black : Color.White;
         }
     }
 }

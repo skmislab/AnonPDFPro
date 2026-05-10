@@ -92,6 +92,12 @@
   <data name="Theme_OledDarkTeal" xml:space="preserve">
     <value>Dark Teal</value>
   </data>
+  <data name="Theme_BlackYellowHighContrast" xml:space="preserve">
+    <value>Black-Yellow High Contrast</value>
+  </data>
+  <data name="Theme_BlackWhiteHighContrast" xml:space="preserve">
+    <value>Black-White High Contrast</value>
+  </data>
   <data name="Menu_Help" xml:space="preserve">
     <value>?</value>
   </data>
@@ -1124,6 +1130,9 @@ Please save your work and close the application.
   <data name="Msg_NewVersionDownload" xml:space="preserve">
     <value>Download link: {0}</value>
   </data>
+  <data name="Btn_Update_DownloadAndRun" xml:space="preserve">
+    <value>Download and run</value>
+  </data>
   <data name="Msg_UpdateLicenseOutOfRange" xml:space="preserve">
     <value>This version is newer than your support entitlement. A license for newer versions was not purchased.
 
@@ -1626,6 +1635,9 @@ Close the application and run the installer now?</value>
   <data name="CacheStatus_IndexPage" xml:space="preserve">
     <value>index page: {0}</value>
   </data>
+  <data name="CacheStatus_OcrPage" xml:space="preserve">
+    <value>OCR page: {0}</value>
+  </data>
   <data name="CacheStatus_SearchPage" xml:space="preserve">
     <value>search: {0}</value>
   </data>
@@ -1882,13 +1894,13 @@ Close the application and run the installer now?</value>
     <value>Quick start</value>
   </data>
   <data name="QuickStart_Step1_Title" xml:space="preserve">
-    <value>1. Choose Marker or Box mode</value>
+    <value>1. Select Cursor, Marker or Box mode</value>
   </data>
   <data name="QuickStart_Step1_Line1" xml:space="preserve">
-    <value>Marker is used to select a line of text.</value>
+    <value>Cursor selects a word on click</value>
   </data>
   <data name="QuickStart_Step1_Line2" xml:space="preserve">
-    <value>Box is used to select a rectangular area.</value>
+    <value>Marker precisely highlights lines of text</value>
   </data>
   <data name="QuickStart_Step2_Title" xml:space="preserve">
     <value>2. Select text fragments</value>
@@ -1940,5 +1952,51 @@ Close the application and run the installer now?</value>
   </data>
   <data name="FileAssociation_AppProjectDescription" xml:space="preserve">
     <value>AnonPDF Pro project</value>
+  </data>
+
+  <data name="EditArrow_Title" xml:space="preserve">
+    <value>Edit Arrow</value>
+  </data>
+  <data name="EditArrow_Color" xml:space="preserve">
+    <value>Color:</value>
+  </data>
+  <data name="EditArrow_ChooseColor" xml:space="preserve">
+    <value>Choose color</value>
+  </data>
+  <data name="EditArrow_LineThickness" xml:space="preserve">
+    <value>Line thickness:</value>
+  </data>
+  <data name="EditArrow_BorderColor" xml:space="preserve">
+    <value>Border color:</value>
+  </data>
+  <data name="EditArrow_BorderThickness" xml:space="preserve">
+    <value>Border thickness:</value>
+  </data>
+  <data name="EditArrow_HeadLength" xml:space="preserve">
+    <value>Head length:</value>
+  </data>
+  <data name="EditArrow_HeadWidth" xml:space="preserve">
+    <value>Head width:</value>
+  </data>
+
+
+  <data name="Menu_Search" xml:space="preserve">
+    <value>&amp;Search</value>
+  </data>
+
+  <data name="UI_Radio_Cursor" xml:space="preserve">
+    <value>&amp;Cursor</value>
+  </data>
+  <data name="Tooltip_Cursor" xml:space="preserve">
+    <value>Cursor mode - click on a word to select it</value>
+  </data>
+
+
+  <data name="Msg_CursorModeUnavailable" xml:space="preserve">
+    <value>Cursor mode unavailable</value>
+  </data>
+
+  <data name="QuickStart_Step1_Line3" xml:space="preserve">
+    <value>Box selects rectangular areas</value>
   </data>
 </root>
