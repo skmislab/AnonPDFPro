@@ -73,13 +73,17 @@ So suchen Sie im Dokument:
 
 > **1.** Geben Sie den Suchtext im linken Bereich ein und bestätigen Sie mit Enter.
 
-> **1.** Geben Sie den Suchtext im linken Bereich ein und best?tigen Sie mit Enter.
-
 > **2.** Wechseln Sie mit den Such-Navigationstasten zwischen Treffern.
 
-> **3.** Verwenden Sie die Schaltfl?che ?PESEL, KW usw.?, um zus?tzlich typische Identifikatoren zu erkennen.
+> **3.** Verwenden Sie die Schaltfläche `PESEL, KW usw.`, um zusätzliche Identifikatoren wie PESEL, Grundbuchnummer, Ausweisnummer, NIP, REGON, KRS, Bankkonto, E-Mail-Adresse, Postleitzahl, Internetadresse oder VIN zu erkennen.
 
-> **4.** ?ber die Schaltfl?che X kann ein Suchtreffer aus der Liste entfernt werden.
+> **4.** Mit `Suchergebnisse markieren...` können gefundene Treffer in Anonymisierungsmarkierungen umgewandelt werden.
+
+> **5.** Über die Schaltfläche X kann ein Suchtreffer aus der Liste entfernt werden.
+
+Die Suche funktioniert auch in gescannten Dokumenten und auf Bildern, die in einer PDF-Datei eingebettet sind. Bei solchen Dokumenten kann die Anwendung zuerst den Text für die Suche vorbereiten; dabei kann kurz eine Indizierungsinformation angezeigt werden.
+
+Wenn eine gescannte Seite leicht schief ist, versucht die Anwendung, die Positionen der Suchtreffer an die tatsächliche Textposition auf der Seite anzupassen.
 
 Zum Markieren eines Bereichs:
 
@@ -94,6 +98,8 @@ Zum Markieren eines Bereichs:
 > **5.** Lassen Sie die Maustaste los, um die Markierung zu Übernehmen.
 
 > **6.** Eine vorhandene Markierung entfernen Sie per Rechtsklick im markierten Bereich.
+
+Eine ausgewählte `Box`- oder `Marker`-Markierung kann auch mit der Taste `DELETE` entfernt werden. Im Cursor-Modus wählt ein Klick eine vorhandene Markierung aus, ohne eine neue Markierung zu zeichnen.
 
 ## 4.5 Vorschau der markierten Ausschlüsse
 
@@ -164,6 +170,8 @@ Ist diese Option aktiv, wird die gespeicherte PDF-Datei nach dem Export automati
 Ein gespeichertes Projekt kann jederzeit erneut geladen werden, um die Bearbeitung fortzusetzen.
 
 Wenn die im Projekt gespeicherte PDF-Datei unter dem ursprünglichen Pfad nicht verfügbar ist, sucht die Anwendung zusätzlich nach einer PDF-Datei mit demselben Namen im Ordner der `.app`-Projektdatei.
+
+Projektdateien mit der Erweiterung `.app` können in Windows mit AnonPDF Pro verknüpft werden, sodass sie direkt aus dem Datei-Explorer geöffnet werden können.
 
 ## 6.7 Anwendung schließen
 
@@ -263,6 +271,16 @@ Die Anwendung unterstützt Arbeitsebenen für Markierungen und Objekte.
 - Beim Projektimport bleiben die Zuordnungen von Objekten zu Ebenen erhalten.
 - Im Ebenendialog überschreibt die Option `Nur sichtbare Ebenen exportieren und drucken` die Einstellungen aus der Spalte `Export`.
 
+## 6.12 Darstellung und Barrierefreiheit
+
+- Im Menü `Optionen` kann das Anwendungsthema gewählt werden.
+- Es stehen auch kontrastreiche Themen zur Verfügung: Schwarz-Gelb und Schwarz-Weiß.
+- Die Anwendung passt die Größe der Oberfläche besser an die Windows-Anzeigeskalierung an.
+
+## 6.13 Aktuelle Ansicht speichern
+
+`Datei -> Aktuelle Ansicht speichern...` speichert die aktuell sichtbare Seitenansicht als PNG- oder BMP-Bilddatei. Gespeichert wird der sichtbare Vorschauzustand, zum Beispiel für Dokumentationszwecke oder zur schnellen Weitergabe eines Seitenbildes.
+
 # 7. Häufige Probleme und Hinweise
 
 ## 7.1 Ausgabe-PDF kann nicht gespeichert werden
@@ -295,7 +313,14 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Option `Seitenbereich als PDF speichern` im Menü `Datei`, standardmäßig mit der aktuellen Seite vorbelegt.
 - Drei Tabs auf der rechten Seite: `Seitenliste`, `Miniaturen` und `Ebenen`.
 - Dynamische Erzeugung von Miniaturen sowie Miniatur-Cache für bessere Leistung bei großen Dokumenten.
+- Verbesserte Aktualisierung der Miniaturen nach Änderung des Seitenfilters.
 - Miniaturen, die zusätzlich Markierungen, Kommentare, Objekte und zum Löschen markierte Seiten anzeigen.
+- Textsuche in gescannten Dokumenten und in Bildern, die in PDFs eingebettet sind.
+- Erkennung personenbezogener Daten und Identifikatoren auch in gescannten Dokumenten.
+- Umwandlung von Suchtreffern aus gescannten Seiten in Anonymisierungsmarkierungen.
+- Cursor-Modus zum sicheren Auswählen von Text, Markierungen und Objekten, ohne versehentlich neue Markierungen zu zeichnen.
+- Kontrastreiche Themen: Schwarz-Gelb und Schwarz-Weiß.
+- `Aktuelle Ansicht speichern...` im Menü `Datei`.
 - Speicherung des zuletzt gewählten rechten Tabs (`Seitenliste` / `Miniaturen` / `Ebenen`).
 - Speicherung der Breite des rechten Panels zwischen Programmstarts.
 - Speicherung und Wiederherstellung der Scroll-Positionen in den rechten Panels (`Seitenliste` und `Miniaturen`) beim Fortsetzen eines Projekts.

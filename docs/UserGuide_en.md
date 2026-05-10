@@ -12,7 +12,7 @@ AnonPDF Pro is a tool for partially or fully removing (redacting) selected conte
 
 > **2.** Make sure the required .NET Framework / .NET Runtime is installed (the exact version depends on the application build).
 
-> **3.** Start the application, e.g., from the desktop shortcut, the Start menu, or directly by running AnonPDF.exe.
+> **3.** Start the application, e.g., from the desktop shortcut, the Start menu, or directly by running AnonPDFPro.exe.
 
 > **4.** After launch, the main application window should open.
 
@@ -53,6 +53,10 @@ The main window consists of the following elements:
 
 > \- File: open a new PDF, save/open a redaction project, exit the application.
 
+> \- Search: quickly move focus to the search field.
+
+> \- Options: change appearance, language, and application behavior.
+
 > \- Help: open this user guide.
 
 - Right panel - contains the `Page List`, `Thumbnails`, and `Layers` tabs. You can quickly switch pages, thumbnails, and layer attributes there.
@@ -68,6 +72,8 @@ The main window consists of the following elements:
 - Page number input - a text box for jumping to a specific page by entering its number.
 - Redaction tool group:
 
+> \- Cursor mode - selects text, redaction areas, and objects without starting a new redaction area.
+
 > \- Marker mode - marks horizontal areas (e.g., narrow strips for removing single text lines).
 
 > \- Rectangle mode - marks any rectangular area.
@@ -78,13 +84,13 @@ The main window consists of the following elements:
 
 - Project I/O and PDF export controls:
 
-> \- Open project - loads a .pap project file containing saved redaction areas.
+> \- Open project - loads a .app project file containing saved redaction areas.
 
-> \- Open last PDF and project - loads the most recently used PDF and its .pap project.
+> \- Open last PDF and project - loads the most recently used PDF and its .app project.
 
-> \- Save project - saves the current selections to the active .pap project file.
+> \- Save project - saves the current selections to the active .app project file.
 
-> \- Save project as - saves the current selections to a new .pap file at a chosen location.
+> \- Save project as - saves the current selections to a new .app file at a chosen location.
 
 > \- Save PDF (redaction) - generates a new PDF file with the selected areas removed.
 
@@ -106,9 +112,15 @@ To search within the document:
 
 > **2.** Use the search navigation buttons to move between search results.
 
-> **3.** Use the "PESEL, KW etc." button to check whether the document contains Polish identifiers such as a PESEL number, a Land and Mortgage Register number (KW), or a Polish ID card number.
+> **3.** Use the "PESEL, KW etc." button to check whether the document contains identifiers such as PESEL, Land and Mortgage Register number, Polish ID card number, NIP, REGON, KRS, bank account number, email address, postal code, website address, or VIN.
 
-> **4.** To remove a search result, click the "X" button next to it.
+> **4.** Use the "Mark search results..." button to convert found results into redaction areas.
+
+> **5.** To remove a search result, click the "X" button next to it.
+
+Search also works in scanned documents and on images embedded in PDFs. For these documents, the application may first prepare the text for searching, so an indexing message may be visible for a short time.
+
+If a scanned page is slightly skewed, the application tries to align search result positions with the actual text location on the page.
 
 ## 4.4 Mark areas for redaction
 
@@ -130,13 +142,15 @@ To create a redaction area:
 
 > **8.** To remove an existing selection (for example, if you added it by accident), right-click inside the selection area.
 
+You can also remove a selected `box` or `marker` with the `DELETE` key. In Cursor mode, clicking an existing redaction area selects it without drawing a new area.
+
 ## 4.5 Preview pending redactions
 
 After you create a selection, the text that will be removed is immediately shaded gray in the preview.
 
 ## 4.6 Save your redaction project
 
-If you want to save the current selection state for later editing, choose Save project or Save project as and select where to store the .pap file. When you reopen the PDF and the corresponding .pap project, you can continue adding or adjusting redactions.
+If you want to save the current selection state for later editing, choose Save project or Save project as and select where to store the .app file. When you reopen the PDF and the corresponding .app project, you can continue adding or adjusting redactions.
 
 ## 4.7 Export (redact) the PDF
 
@@ -191,7 +205,9 @@ When "Preview after saving" is enabled, the application automatically opens the 
 
 ## 6.6 Loading a project
 
-You can load a .pap project file at any time (for example, prepared by another person or created earlier). This updates the selections in the application to match the loaded project.
+You can load a .app project file at any time (for example, prepared by another person or created earlier). This updates the selections in the application to match the loaded project.
+
+Project files with the `.app` extension can also be associated with AnonPDF Pro in Windows, so they can be opened directly from File Explorer.
 
 If the PDF path stored in the project is no longer available, the application also looks for a PDF file with the same name in the `.app` project folder.
 
@@ -204,6 +220,7 @@ When closing, the application may ask you to confirm exiting, especially if you 
 - "User Guide" - opens this help/instruction content.
 - "How to start?" - opens the short quick-start tutorial.
 - "About" - shows version information, author, and copyright.
+- The new version window can show a change summary and a download link or button when an update is available.
 
 ## 6.9 Creating and managing objects
 
@@ -275,6 +292,16 @@ The application supports working layers for redaction selections and objects.
 - Locked layers block moving, editing, scaling, and deleting objects.
 - Project import keeps object-to-layer assignments.
 
+## 6.12 Appearance and accessibility
+
+- You can choose the application theme from the `Options` menu.
+- High-contrast themes are available: black-yellow and black-white.
+- The application better adapts interface sizes to Windows display scaling.
+
+## 6.13 Save current view
+
+`File -> Save current view...` saves the currently visible page view to a PNG or BMP image file. This saves the preview image and can be useful for documenting work or quickly sharing a page snapshot.
+
 # 7. Common Issues and Tips
 
 ## 7.1 Cannot save the output PDF
@@ -282,9 +309,9 @@ The application supports working layers for redaction selections and objects.
 - Make sure the PDF is not open in another application. The system may block saving if the file is currently in use.
 - Choose a different output filename to avoid overwriting the original file.
 
-## 7.2 Invalid project file format (.pap)
+## 7.2 Invalid project file format (.app)
 
-Project files (.pap) store redaction areas as JSON internally. Make sure you open the correct project file for the currently loaded PDF.
+Project files (.app) store redaction areas as JSON internally. Make sure you open the correct project file for the currently loaded PDF.
 
 - If you see a message that the project contains more pages than the PDF, load the project into the matching PDF document.
 
@@ -309,7 +336,14 @@ Recent versions include:
 - `Save page range to PDF` in the `File` menu, with the current page prefilled by default.
 - Three right-side tabs: `Page List`, `Thumbnails`, and `Layers`.
 - Dynamic thumbnail generation plus thumbnail cache for better performance on large documents.
+- Improved thumbnail refresh after changing the page filter.
 - Thumbnails that also show redaction selections, comments, objects, and pages marked for deletion.
+- Text search in scanned documents and images embedded in PDFs.
+- Detection of personal data and identifiers also in scanned documents.
+- Converting search results from scanned pages into redaction areas.
+- Cursor mode for safely selecting text, redaction areas, and objects without accidentally drawing new redactions.
+- High-contrast themes: black-yellow and black-white.
+- `Save current view...` in the `File` menu.
 - Remembering the last selected right-side tab (`Page List` / `Thumbnails` / `Layers`).
 - Remembering right panel width between application launches.
 - Remembering and restoring scroll positions in right panels (`Page List` and `Thumbnails`) when resuming a project.

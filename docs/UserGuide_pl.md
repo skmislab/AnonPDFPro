@@ -51,6 +51,10 @@ Główne okno aplikacji składa się z następujących elementów:
 
 > \- Plik: umożliwia otwarcie nowego PDF, zapis/otwarcie projektu zaznaczeń redakcyjnych, wyjście z aplikacji.
 
+> \- Szukaj: pozwala szybko przejść do pola wyszukiwania.
+
+> \- Opcje: zawiera ustawienia wyglądu, języka i sposobu pracy aplikacji.
+
 > \- ?: wyświetla instrukcję użytkownika oraz informacje o aplikacji.
 
 - Prawy panel – zawiera zakładki `Lista stron`, `Miniatury` i `Warstwy`. Możesz tam szybko przełączać strony, miniatury oraz atrybuty warstw.
@@ -65,6 +69,8 @@ Główne okno aplikacji składa się z następujących elementów:
 
 - Pole tekstowe zmiany strony – służy do szybkiego przejścia do wybranej strony, wprowadzając jej numer.
 - Grupa narzędzi redakcji:
+
+> \- Tryb kursora – pozwala wybierać tekst, zaznaczenia i obiekty bez rozpoczynania nowego zaznaczenia anonimizacyjnego.
 
 > \- Tryb markera – pozwala zaznaczać poziome obszary (np. wąskie pasy do usuwania pojedynczych linii tekstu).
 
@@ -100,19 +106,25 @@ Użyj listy stron z lewej strony okna (lub przycisków „Następna”, „Poprz
 
 Aby wyszukać w dokumencie:
 
-> 1\. W lewym panelu wpisz wyszukiwany tekst i naciśnij ENTER, następnie użyj przycisków nawigacyjnych aby poruszać się po wynikach wyszukiwania
+> 1\. W lewym panelu wpisz wyszukiwany tekst i naciśnij ENTER.
 
 > 2\. Użyj przycisków nawigacyjnych, aby poruszać się po wynikach wyszukiwania.
 
-> 3\. Użyj przycisku „PESEL, KW itd.” aby sprawdzić dokument czy zawiera identyfikatory PESEL, numer Księgi Wieczystej lub numer dowodu osobistego
+> 3\. Użyj przycisku „PESEL, KW itd.”, aby sprawdzić, czy dokument zawiera dane takie jak PESEL, numer księgi wieczystej, numer dowodu osobistego, NIP, REGON, KRS, rachunek bankowy, adres e-mail, kod pocztowy, adres internetowy lub numer VIN.
 
-> 4\. Aby usunąć wynik wyszukiwania kliknij przycisk „X”
+> 4\. Użyj przycisku „Oznacz wyniki wyszukiwania...”, aby zamienić znalezione wyniki na zaznaczenia anonimizacyjne.
+
+> 5\. Aby usunąć wynik wyszukiwania, kliknij przycisk „X”.
+
+Wyszukiwanie działa także w dokumentach skanowanych oraz na obrazach osadzonych w PDF. Przy takich dokumentach aplikacja może najpierw przygotować tekst do wyszukiwania, dlatego przez chwilę może być widoczna informacja o indeksowaniu.
+
+Jeżeli zeskanowana strona jest lekko przekrzywiona, aplikacja stara się dopasować położenie wyników wyszukiwania do faktycznego miejsca tekstu na stronie.
 
 ## 4.4 Zaznaczanie obszarów do redakcji
 
 Aby utworzyć obszar redakcji:
 
-> 1\. Wybierz tryb markera lub prostokąta
+> 1\. Wybierz tryb markera lub prostokąta.
 
 > 2\. Naciśnij i przytrzymaj lewy przycisk myszy na podglądzie strony w miejscu, gdzie chcesz zaznaczyć zawartość.
 
@@ -127,6 +139,8 @@ Aby utworzyć obszar redakcji:
 > 7\. Kliknięcie na istniejącym zaznaczeniu wybiera je i pokazuje krótką informację u góry widoku. Nie rozpoczyna tworzenia kolejnego zaznaczenia wewnątrz już istniejącego.
 
 > 8\. Aby usunąć istniejące zaznaczenie (np. przypadkowo dodane), kliknij prawym przyciskiem myszy w jego obszarze.
+
+Wybrane zaznaczenie typu `box` lub `marker` można usunąć także klawiszem `DELETE`. W trybie kursora kliknięcie istniejącego zaznaczenia pozwala je wybrać bez rysowania nowego obszaru.
 
 ## 4.5 Podgląd po zmianach
 
@@ -193,6 +207,8 @@ Możesz w dowolnym momencie załadować gotowy plik .app z opisem redakcji (np. 
 
 Jeżeli zapisany w projekcie plik PDF nie jest dostępny pod oryginalną ścieżką, aplikacja spróbuje odnaleźć plik PDF o tej samej nazwie w katalogu projektu `.app`.
 
+Pliki projektu z rozszerzeniem `.app` mogą być skojarzone w Windows z AnonPDF Pro, dzięki czemu można je otwierać bezpośrednio z Eksploratora plików.
+
 ## 6.7 Zamykanie aplikacji
 
 Podczas zamykania aplikacja może zapytać, czy zapisać zmiany w projekcie ("Zapisz", "Nie zapisuj", "Anuluj").
@@ -202,6 +218,7 @@ Podczas zamykania aplikacja może zapytać, czy zapisać zmiany w projekcie ("Za
 - Menu \[?\] wyświetla instrukcję użytkownika oraz okno "O aplikacji".
 - Opcja `Jak zacząć?` uruchamia krótki samouczek startowy.
 - O aplikacji - wyświetla informacje o wersji, autorze i prawach autorskich.
+- Okno informacji o nowej wersji może pokazać opis zmian oraz link lub przycisk do pobrania aktualizacji, jeżeli jest dostępna.
 
 ## 6.9 Dodawanie i obsługa obiektów
 
@@ -275,6 +292,16 @@ Aplikacja obsługuje warstwy robocze dla anonimizacji i obiektów.
 - Zablokowane warstwy blokują przesuwanie, edycję, skalowanie i usuwanie obiektów.
 - Import projektu zachowuje przypisanie obiektów do warstw.
 
+## 6.12 Wygląd i dostępność
+
+- W menu `Opcje` można wybrać motyw aplikacji.
+- Dostępne są także motywy wysokiego kontrastu: czarno-żółty i czarno-biały.
+- Aplikacja lepiej dopasowuje rozmiary elementów do ustawień skalowania ekranu w systemie Windows.
+
+## 6.13 Zapis aktualnego widoku
+
+Opcja `Plik -> Zapisz aktualny widok...` pozwala zapisać aktualnie widoczną stronę do pliku graficznego PNG lub BMP. Jest to zapis widoku z podglądu, przydatny np. do dokumentacji pracy lub szybkiego przekazania obrazu strony.
+
 # 7. Najczęstsze problemy i wskazówki
 
 ## 7.1 Nie można zapisać pliku PDF
@@ -309,7 +336,14 @@ W ostatnich wersjach dodano m.in.:
 - Opcję `Zapisz zakres stron do PDF` (menu `Plik`) z domyślnym zakresem ustawionym na bieżącą stronę.
 - Trzy zakładki po prawej stronie: `Lista stron`, `Miniatury` i `Warstwy`.
 - Dynamiczne generowanie miniaturek stron oraz pamięć podręczną miniaturek dla szybszej pracy na dużych dokumentach.
+- Poprawione odświeżanie miniatur po zmianie filtra stron.
 - Miniatury pokazujące również zaznaczenia anonimizacji, komentarze, obiekty oraz strony oznaczone do usunięcia.
+- Wyszukiwanie tekstu w dokumentach skanowanych i na obrazach osadzonych w PDF.
+- Rozpoznawanie danych osobowych i identyfikatorów także w dokumentach skanowanych.
+- Zamianę wyników wyszukiwania ze skanów na zaznaczenia anonimizacyjne.
+- Tryb kursora do bezpiecznego wybierania tekstu, zaznaczeń i obiektów bez przypadkowego rysowania nowych zaznaczeń.
+- Motywy wysokiego kontrastu: czarno-żółty i czarno-biały.
+- Opcję `Zapisz aktualny widok...` w menu `Plik`.
 - Zapamiętywanie ostatnio wybranej zakładki po prawej stronie (`Lista stron` / `Miniatury` / `Warstwy`).
 - Zapamiętywanie szerokości prawego panelu między uruchomieniami aplikacji.
 - Zapamiętywanie i odtwarzanie pozycji przewijania w prawych panelach (`Lista stron` i `Miniatury`) po wznowieniu pracy z projektem.
