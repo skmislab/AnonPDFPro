@@ -32663,6 +32663,14 @@ namespace AnonPDF
             // PDFium refinement provides tighter glyph bounds that properly cover diacritics.
             List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetPdfCleanUpPreviewRectsForBlock(page, block, sourceRect);
 
+            // Pure scans have no native glyph layer, so the pdfSweep extraction above returns
+            // nothing. Fall back to the cached OCR word boxes so the touched text still greys
+            // out, consistent with what GetCachedTextInRect copies to the clipboard.
+            if (pdfLineRects.Count == 0)
+            {
+                pdfLineRects = GetOcrPreviewRectsForBlock(block, pdfCoords);
+            }
+
             return pdfLineRects
                 .Where(r => r != null && r.GetWidth() > 0f && r.GetHeight() > 0f)
                 .Select(ConvertToItTextRectangleF)
@@ -32704,6 +32712,64 @@ namespace AnonPDF
             }
 
             return new List<iText.Kernel.Geom.Rectangle>();
+        }
+
+        // Touched-text grey preview for pure scans (no native text layer): collect the cached
+        // OCR word boxes that overlap the selection. Bounds are already in PDF user space, matching
+        // the intersection test used by GetCachedTextInRect so the greyed words match the copied text.
+        private List<iText.Kernel.Geom.Rectangle> GetOcrPreviewRectsForBlock(RedactionBlock block, RectangleF pdfRect)
+        {
+            var result = new List<iText.Kernel.Geom.Rectangle>();
+            if (block == null || string.IsNullOrWhiteSpace(inputPdfPath))
+            {
+                return result;
+            }
+
+            List<PdfTextSearcher.CachedLine> lines;
+            try
+            {
+                lines = PdfTextSearcher.GetCachedLines(inputPdfPath);
+            }
+            catch
+            {
+                return result;
+            }
+
+            if (lines == null || lines.Count == 0)
+            {
+                return result;
+            }
+
+            float rx1 = pdfRect.Left, ry1 = pdfRect.Top;
+            float rx2 = pdfRect.Right, ry2 = pdfRect.Bottom;
+
+            foreach (var line in lines)
+            {
+                if (line == null || line.PageNumber != block.PageNumber || line.OcrWordBounds == null)
+                {
+                    continue;
+                }
+
+                foreach (var wb in line.OcrWordBounds)
+                {
+                    if (wb == null)
+                    {
+                        continue;
+                    }
+
+                    float wx1 = (float)wb.GetX(), wy1 = (float)wb.GetY();
+                    float wx2 = wx1 + (float)wb.GetWidth();
+                    float wy2 = wy1 + (float)wb.GetHeight();
+                    if (wx2 < rx1 || wx1 > rx2 || wy2 < ry1 || wy1 > ry2)
+                    {
+                        continue;
+                    }
+
+                    result.Add(wb);
+                }
+            }
+
+            return result;
         }
 
         [StructLayout(LayoutKind.Sequential)]
