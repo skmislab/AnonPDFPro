@@ -7,6 +7,7 @@ AnonPDF Pro is a Windows (WinForms) application for PDF anonymization. It lets y
 - Remove single pages or page ranges.
 - Text annotations with configurable font and position.
 - Text search and conversion of results into selections.
+- Redaction of raster images, including JPEG 2000 (JP2/JPX) via the bundled OpenJPEG-enabled pdfsweep build.
 - Display and report of digital signature status.
 
 ## Requirements & Build
@@ -63,7 +64,7 @@ After these changes, the internal iText `FontCache` exception will no longer sto
 
 ## License & Components
 - License: AGPL-3.0-or-later (see `LICENSE`).
-- Third-party components: iText 9 (AGPL-3.0), PDFium/PDFiumSharp, Newtonsoft.Json (MIT), BouncyCastle (MIT), TesseractOCR (.NET) (Apache-2.0). Details in `THIRD-PARTY-NOTICES.md`.
+- Third-party components: iText 9 (AGPL-3.0), itext.pdfsweep 5.0.6 (AGPL-3.0) — a custom build bundling OpenJPEG (`openjp2.dll`, BSD-2-Clause) for redaction of JPEG 2000 images, PDFium/PDFiumSharp, Newtonsoft.Json (MIT), BouncyCastle (MIT), TesseractOCR (.NET) (Apache-2.0). Details in `THIRD-PARTY-NOTICES.md`.
 
 ## Project Maintainer
 - Maintainer: Sławomir Klimek

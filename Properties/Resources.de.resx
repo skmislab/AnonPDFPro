@@ -302,6 +302,12 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="CacheStatus_SearchPage" xml:space="preserve">
     <value>durchsuche: {0}</value>
   </data>
+  <data name="CacheStatus_LocalNer" xml:space="preserve">
+    <value>Indizierung personenbezogener Daten</value>
+  </data>
+  <data name="CacheStatus_NerPreWarm" xml:space="preserve">
+    <value>PII-Plugin wird initialisiert</value>
+  </data>
   <data name="TextAnnotation_ToStringFormat" xml:space="preserve">
     <value>{0} - {1}, {2} pt, {3}, {4}, {5}, {6}</value>
   </data>
@@ -760,7 +766,133 @@ und dritten Punkt setzen.</value>
     <value>Deutsch</value>
   </data>
   <data name="Menu_Language_System" xml:space="preserve">
-    <value>Systemsprache verwenden</value>
+    <value>Automatisch</value>
+  </data>
+  <data name="Menu_Country" xml:space="preserve">
+    <value>Land</value>
+  </data>
+  <data name="Menu_Country_Auto" xml:space="preserve">
+    <value>Automatisch</value>
+  </data>
+  <data name="Menu_Country_Poland" xml:space="preserve">
+    <value>Polen</value>
+  </data>
+  <data name="Menu_Country_Germany" xml:space="preserve">
+    <value>Deutschland</value>
+  </data>
+  <data name="Scope_SCOPE_PERSON" xml:space="preserve">
+    <value>Personenname</value>
+  </data>
+  <data name="Scope_SCOPE_PESEL" xml:space="preserve">
+    <value>PESEL-Nummer (PL)</value>
+  </data>
+  <data name="Scope_SCOPE_IDENTITY_CARD" xml:space="preserve">
+    <value>Personalausweisnummer (PL)</value>
+  </data>
+  <data name="Scope_SCOPE_LOCATION" xml:space="preserve">
+    <value>Adresse / Standort</value>
+  </data>
+  <data name="Scope_SCOPE_POSTAL_CODE" xml:space="preserve">
+    <value>Postleitzahl</value>
+  </data>
+  <data name="Scope_SCOPE_EMAIL" xml:space="preserve">
+    <value>E-Mail-Adresse</value>
+  </data>
+  <data name="Scope_SCOPE_PHONE" xml:space="preserve">
+    <value>Telefonnummer</value>
+  </data>
+  <data name="Scope_SCOPE_URL" xml:space="preserve">
+    <value>URL-Adresse</value>
+  </data>
+  <data name="Scope_SCOPE_NIP" xml:space="preserve">
+    <value>NIP-Nummer (PL)</value>
+  </data>
+  <data name="Scope_SCOPE_REGON" xml:space="preserve">
+    <value>REGON-Nummer (PL)</value>
+  </data>
+  <data name="Scope_SCOPE_KRS" xml:space="preserve">
+    <value>KRS-Nummer (PL)</value>
+  </data>
+  <data name="Scope_SCOPE_BANK_ACCOUNT" xml:space="preserve">
+    <value>Bankkontonummer</value>
+  </data>
+  <data name="Scope_SCOPE_VIN" xml:space="preserve">
+    <value>Fahrzeug-VIN</value>
+  </data>
+  <data name="Scope_SCOPE_LAND_REGISTRY" xml:space="preserve">
+    <value>Grundbuchnummer (PL)</value>
+  </data>
+  <data name="Scope_SCOPE_STEUER_ID" xml:space="preserve">
+    <value>Steueridentifikationsnummer</value>
+  </data>
+  <data name="Scope_SCOPE_UST_ID" xml:space="preserve">
+    <value>Umsatzsteuer-ID</value>
+  </data>
+  <data name="Scope_SCOPE_HRB" xml:space="preserve">
+    <value>Handelsregisternummer</value>
+  </data>
+  <data name="Scope_SCOPE_ORG" xml:space="preserve">
+    <value>Organisation / Unternehmen</value>
+  </data>
+  <data name="Scope_SCOPE_DATE" xml:space="preserve">
+    <value>Datum</value>
+  </data>
+  <data name="Scope_SCOPE_AMOUNT" xml:space="preserve">
+    <value>Betrag / Geldwert</value>
+  </data>
+  <data name="Scope_SCOPE_LOAN_NUMBER" xml:space="preserve">
+    <value>Vertrags- / Kreditnummer</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_PERSON" xml:space="preserve">
+    <value>Vor- und/oder Nachname einer natürlichen Person</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_PESEL" xml:space="preserve">
+    <value>Polnische persönliche Identifikationsnummer (PESEL)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_IDENTITY_CARD" xml:space="preserve">
+    <value>Kennzeichen und Nummer des polnischen Personalausweises</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_LOCATION" xml:space="preserve">
+    <value>Wohnadresse, Geschäftssitz oder sonstiger Standort</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_POSTAL_CODE" xml:space="preserve">
+    <value>Postleitzahl oder PLZ mit Ortsname</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_EMAIL" xml:space="preserve">
+    <value>Elektronische Postanschrift</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_PHONE" xml:space="preserve">
+    <value>Festnetz- oder Mobiltelefonnummer</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_URL" xml:space="preserve">
+    <value>Internetadresse (URL)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_NIP" xml:space="preserve">
+    <value>Polnische Steuernummer (NIP)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_REGON" xml:space="preserve">
+    <value>Polnische nationale Unternehmensregisternummer (REGON)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_KRS" xml:space="preserve">
+    <value>Polnische Handelsregisternummer (KRS)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_BANK_ACCOUNT" xml:space="preserve">
+    <value>Bankkontonummer (NRB/IBAN)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_VIN" xml:space="preserve">
+    <value>Fahrzeugidentifikationsnummer (VIN)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_LAND_REGISTRY" xml:space="preserve">
+    <value>Polnische Grundbuchnummer</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_STEUER_ID" xml:space="preserve">
+    <value>Deutsche persönliche Steueridentifikationsnummer</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_UST_ID" xml:space="preserve">
+    <value>Deutsche Umsatzsteuer-Identifikationsnummer</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_HRB" xml:space="preserve">
+    <value>Deutsche Handelsregisternummer (HRA/HRB)</value>
   </data>
   <data name="Menu_Help_Help" xml:space="preserve">
     <value>Hilfe</value>
@@ -828,6 +960,69 @@ und dritten Punkt setzen.</value>
   <data name="UI_Tab_Thumbnails" xml:space="preserve">
     <value>Miniaturen</value>
   </data>
+  <data name="UI_Tab_Found" xml:space="preserve">
+    <value>Gefunden</value>
+  </data>
+  <data name="Found_SelectAll" xml:space="preserve">
+    <value>Alle markieren</value>
+  </data>
+  <data name="Found_DeselectAll" xml:space="preserve">
+    <value>Alle abwählen</value>
+  </data>
+  <data name="Found_PageHeader" xml:space="preserve">
+    <value>Seite {0}  ({1})</value>
+  </data>
+  <data name="Found_GroupOutOfBounds" xml:space="preserve">
+    <value>Außerhalb der Seite  ({0})</value>
+  </data>
+  <data name="Found_GroupAltText" xml:space="preserve">
+    <value>Alternativtext  ({0})</value>
+  </data>
+  <data name="Found_FilterBtn" xml:space="preserve">
+    <value>Filter</value>
+  </data>
+  <data name="Found_Filter_All" xml:space="preserve">
+    <value>Alle</value>
+  </data>
+  <data name="Found_Filter_Search" xml:space="preserve">
+    <value>Suche</value>
+  </data>
+  <data name="Found_Filter_OutOfBounds" xml:space="preserve">
+    <value>Außerhalb</value>
+  </data>
+  <data name="Found_Filter_AltText" xml:space="preserve">
+    <value>ALT-Text</value>
+  </data>
+  <data name="Found_Filter_Invert" xml:space="preserve">
+    <value>Auswahl umkehren</value>
+  </data>
+  <data name="AltEdit_Title" xml:space="preserve">
+    <value>Alternativtext bearbeiten</value>
+  </data>
+  <data name="AltEdit_Label" xml:space="preserve">
+    <value>Alternativtext:</value>
+  </data>
+  <data name="AltEdit_Clear" xml:space="preserve">
+    <value>Löschen</value>
+  </data>
+  <data name="AltEdit_MenuEdit" xml:space="preserve">
+    <value>Alternativtext bearbeiten</value>
+  </data>
+  <data name="AltEdit_MenuClear" xml:space="preserve">
+    <value>Alternativtext löschen</value>
+  </data>
+  <data name="AltDefault_Arrow" xml:space="preserve">
+    <value>Pfeil</value>
+  </data>
+  <data name="AltDefault_Image" xml:space="preserve">
+    <value>Bild</value>
+  </data>
+  <data name="AltDefault_Comment" xml:space="preserve">
+    <value>Kommentar</value>
+  </data>
+  <data name="AltDefault_TextLabel" xml:space="preserve">
+    <value>Textbeschriftung</value>
+  </data>
   <data name="UI_Tab_Layers" xml:space="preserve">
     <value>Ebenen</value>
   </data>
@@ -883,7 +1078,7 @@ und dritten Punkt setzen.</value>
     <value>Bericht</value>
   </data>
   <data name="UI_Button_PersonalData" xml:space="preserve">
-    <value>Identifikatoren</value>
+    <value>Personendaten</value>
   </data>
   <data name="UI_Filter_AllPages" xml:space="preserve">
     <value>Alle Seiten</value>
@@ -962,7 +1157,7 @@ Nochmal klicken, um Markierungen zu entfernen.</value>
     <value>Suchergebnisse löschen.</value>
   </data>
   <data name="Tooltip_PersonalData" xml:space="preserve">
-    <value>Nach Identifikatoren suchen (PESEL, Grundbuchnummer usw.).</value>
+    <value>Nach Identifikatoren, Personen, Adressen, Telefonnummern und Organisationen suchen.</value>
   </data>
   <data name="Tooltip_PreviewAfterSave" xml:space="preserve">
     <value>Gespeicherte PDF nach dem Speichern öffnen.</value>
@@ -1028,6 +1223,7 @@ Beschreibung: {4}
 
 Lizenzen und Komponenten:
 - iText 9 (AGPL-3.0)
+- OpenJPEG (BSD-2-Clause) – JPEG-2000-Unterstützung in iText pdfsweep
 - PDFiumSharp / PDFium
 - Newtonsoft.Json (MIT)
 - BouncyCastle (MIT)
@@ -1428,7 +1624,7 @@ Bitte speichern Sie Ihre Arbeit und schließen Sie die Anwendung.
     <value>Keine Änderungsliste verfügbar.</value>
   </data>
   <data name="Msg_NoIdentifiersFound" xml:space="preserve">
-    <value>Im Dokument wurden keine gültigen PESEL-, Grundbuchnummern oder andere Identifikatoren gefunden.</value>
+    <value>Keine personenbezogenen Daten oder Identifikatoren im Dokument gefunden.</value>
   </data>
   <data name="Msg_NoPasswordOpenCancelled" xml:space="preserve">
     <value>Kein Passwort angegeben — Öffnen abgebrochen.</value>

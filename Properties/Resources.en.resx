@@ -505,7 +505,133 @@ and a third arc point.</value>
     <value>German</value>
   </data>
   <data name="Menu_Language_System" xml:space="preserve">
-    <value>Use system language</value>
+    <value>Automatic</value>
+  </data>
+  <data name="Menu_Country" xml:space="preserve">
+    <value>Country</value>
+  </data>
+  <data name="Menu_Country_Auto" xml:space="preserve">
+    <value>Automatic</value>
+  </data>
+  <data name="Menu_Country_Poland" xml:space="preserve">
+    <value>Poland</value>
+  </data>
+  <data name="Menu_Country_Germany" xml:space="preserve">
+    <value>Germany</value>
+  </data>
+  <data name="Scope_SCOPE_PERSON" xml:space="preserve">
+    <value>Person name</value>
+  </data>
+  <data name="Scope_SCOPE_PESEL" xml:space="preserve">
+    <value>PESEL number</value>
+  </data>
+  <data name="Scope_SCOPE_IDENTITY_CARD" xml:space="preserve">
+    <value>ID card number</value>
+  </data>
+  <data name="Scope_SCOPE_LOCATION" xml:space="preserve">
+    <value>Address / location</value>
+  </data>
+  <data name="Scope_SCOPE_POSTAL_CODE" xml:space="preserve">
+    <value>Postal code</value>
+  </data>
+  <data name="Scope_SCOPE_EMAIL" xml:space="preserve">
+    <value>Email address</value>
+  </data>
+  <data name="Scope_SCOPE_PHONE" xml:space="preserve">
+    <value>Phone number</value>
+  </data>
+  <data name="Scope_SCOPE_URL" xml:space="preserve">
+    <value>URL address</value>
+  </data>
+  <data name="Scope_SCOPE_NIP" xml:space="preserve">
+    <value>NIP number</value>
+  </data>
+  <data name="Scope_SCOPE_REGON" xml:space="preserve">
+    <value>REGON number</value>
+  </data>
+  <data name="Scope_SCOPE_KRS" xml:space="preserve">
+    <value>KRS number</value>
+  </data>
+  <data name="Scope_SCOPE_BANK_ACCOUNT" xml:space="preserve">
+    <value>Bank account number</value>
+  </data>
+  <data name="Scope_SCOPE_VIN" xml:space="preserve">
+    <value>Vehicle VIN</value>
+  </data>
+  <data name="Scope_SCOPE_LAND_REGISTRY" xml:space="preserve">
+    <value>Land registry number</value>
+  </data>
+  <data name="Scope_SCOPE_STEUER_ID" xml:space="preserve">
+    <value>Tax ID number (DE)</value>
+  </data>
+  <data name="Scope_SCOPE_UST_ID" xml:space="preserve">
+    <value>VAT number (DE)</value>
+  </data>
+  <data name="Scope_SCOPE_HRB" xml:space="preserve">
+    <value>Commercial register number (DE)</value>
+  </data>
+  <data name="Scope_SCOPE_ORG" xml:space="preserve">
+    <value>Organization / entity</value>
+  </data>
+  <data name="Scope_SCOPE_DATE" xml:space="preserve">
+    <value>Date</value>
+  </data>
+  <data name="Scope_SCOPE_AMOUNT" xml:space="preserve">
+    <value>Amount / monetary value</value>
+  </data>
+  <data name="Scope_SCOPE_LOAN_NUMBER" xml:space="preserve">
+    <value>Contract / loan number</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_PERSON" xml:space="preserve">
+    <value>First and/or last name of a natural person</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_PESEL" xml:space="preserve">
+    <value>Polish Universal Electronic System for Registration of the Population number</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_IDENTITY_CARD" xml:space="preserve">
+    <value>Series and number of national identity card</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_LOCATION" xml:space="preserve">
+    <value>Home address, registered office or other location</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_POSTAL_CODE" xml:space="preserve">
+    <value>Postal code or postal code with locality name</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_EMAIL" xml:space="preserve">
+    <value>Electronic mail address</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_PHONE" xml:space="preserve">
+    <value>Landline or mobile phone number</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_URL" xml:space="preserve">
+    <value>Web address (URL)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_NIP" xml:space="preserve">
+    <value>Polish tax identification number (NIP)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_REGON" xml:space="preserve">
+    <value>Polish national business registry number (REGON)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_KRS" xml:space="preserve">
+    <value>Polish National Court Register number (KRS)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_BANK_ACCOUNT" xml:space="preserve">
+    <value>Bank account number (NRB/IBAN)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_VIN" xml:space="preserve">
+    <value>Vehicle Identification Number (VIN)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_LAND_REGISTRY" xml:space="preserve">
+    <value>Polish land and mortgage register number</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_STEUER_ID" xml:space="preserve">
+    <value>German personal tax identification number (Steueridentifikationsnummer)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_UST_ID" xml:space="preserve">
+    <value>German VAT identification number (Umsatzsteuer-Identifikationsnummer)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_HRB" xml:space="preserve">
+    <value>German commercial register number (Handelsregisternummer HRA/HRB)</value>
   </data>
   <data name="Menu_Help_Help" xml:space="preserve">
     <value>Help</value>
@@ -591,6 +717,69 @@ and a third arc point.</value>
   <data name="UI_Tab_Thumbnails" xml:space="preserve">
     <value>Thumbnails</value>
   </data>
+  <data name="UI_Tab_Found" xml:space="preserve">
+    <value>Found</value>
+  </data>
+  <data name="Found_SelectAll" xml:space="preserve">
+    <value>Select all</value>
+  </data>
+  <data name="Found_DeselectAll" xml:space="preserve">
+    <value>Deselect all</value>
+  </data>
+  <data name="Found_PageHeader" xml:space="preserve">
+    <value>Page {0}  ({1})</value>
+  </data>
+  <data name="Found_GroupOutOfBounds" xml:space="preserve">
+    <value>Outside page  ({0})</value>
+  </data>
+  <data name="Found_GroupAltText" xml:space="preserve">
+    <value>Alternative text  ({0})</value>
+  </data>
+  <data name="Found_FilterBtn" xml:space="preserve">
+    <value>Filter</value>
+  </data>
+  <data name="Found_Filter_All" xml:space="preserve">
+    <value>All</value>
+  </data>
+  <data name="Found_Filter_Search" xml:space="preserve">
+    <value>Search</value>
+  </data>
+  <data name="Found_Filter_OutOfBounds" xml:space="preserve">
+    <value>Outside page</value>
+  </data>
+  <data name="Found_Filter_AltText" xml:space="preserve">
+    <value>ALT text</value>
+  </data>
+  <data name="Found_Filter_Invert" xml:space="preserve">
+    <value>Invert selection</value>
+  </data>
+  <data name="AltEdit_Title" xml:space="preserve">
+    <value>Edit alternative text</value>
+  </data>
+  <data name="AltEdit_Label" xml:space="preserve">
+    <value>Alternative text:</value>
+  </data>
+  <data name="AltEdit_Clear" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+  <data name="AltEdit_MenuEdit" xml:space="preserve">
+    <value>Edit alternative text</value>
+  </data>
+  <data name="AltEdit_MenuClear" xml:space="preserve">
+    <value>Clear alternative text</value>
+  </data>
+  <data name="AltDefault_Arrow" xml:space="preserve">
+    <value>Arrow</value>
+  </data>
+  <data name="AltDefault_Image" xml:space="preserve">
+    <value>Image</value>
+  </data>
+  <data name="AltDefault_Comment" xml:space="preserve">
+    <value>Comment</value>
+  </data>
+  <data name="AltDefault_TextLabel" xml:space="preserve">
+    <value>Text label</value>
+  </data>
   <data name="UI_Tab_Layers" xml:space="preserve">
     <value>Layers</value>
   </data>
@@ -649,7 +838,7 @@ and a third arc point.</value>
     <value>Report</value>
   </data>
   <data name="UI_Button_PersonalData" xml:space="preserve">
-    <value>Identifiers</value>
+    <value>Personal data</value>
   </data>
   <data name="Merge_Title" xml:space="preserve">
     <value>Merge PDF files</value>
@@ -798,7 +987,7 @@ Click again to remove marks.</value>
     <value>Clear search results.</value>
   </data>
   <data name="Tooltip_PersonalData" xml:space="preserve">
-    <value>Search for identifiers (PESEL, land register no., etc.).</value>
+    <value>Search for identifiers, people, addresses, phone numbers and organizations.</value>
   </data>
   <data name="Tooltip_PreviewAfterSave" xml:space="preserve">
     <value>Open saved PDF after saving.</value>
@@ -1167,7 +1356,7 @@ Contact the application author.</value>
     <value>“{0}” not found.</value>
   </data>
   <data name="Msg_NoIdentifiersFound" xml:space="preserve">
-    <value>No valid PESEL, land-register numbers or other identifiers were found in the document.</value>
+    <value>No personal data or identifiers were found in the document.</value>
   </data>
   <data name="Msg_NoSearchResultsOnPage" xml:space="preserve">
     <value>No search results found on the current page.</value>
@@ -1358,6 +1547,7 @@ Description: {4}
 
 Licenses and components:
 - iText 9 (AGPL-3.0)
+- OpenJPEG (BSD-2-Clause) – JPEG 2000 support in iText pdfsweep
 - PDFiumSharp / PDFium
 - Newtonsoft.Json (MIT)
 - BouncyCastle (MIT)
@@ -1640,6 +1830,12 @@ Close the application and run the installer now?</value>
   </data>
   <data name="CacheStatus_SearchPage" xml:space="preserve">
     <value>search: {0}</value>
+  </data>
+  <data name="CacheStatus_LocalNer" xml:space="preserve">
+    <value>indexing personal data</value>
+  </data>
+  <data name="CacheStatus_NerPreWarm" xml:space="preserve">
+    <value>initializing PII plugin</value>
   </data>
   <data name="TextAnnotation_ToStringFormat" xml:space="preserve">
     <value>{0} - {1}, {2} pt, {3}, {4}, {5}, {6}</value>

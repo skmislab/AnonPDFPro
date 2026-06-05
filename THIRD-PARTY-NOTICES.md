@@ -11,14 +11,24 @@ to upstream sources.
     itext.pdfa, itext.pdfua, itext.sign, itext.styledxmlparser, itext.svg
 - itext.commons 9.5.0
 - itext.bouncy-castle-adapter 9.5.0
-- itext.pdfsweep 5.0.5
+- itext.pdfsweep 5.0.6
 License: GNU Affero General Public License v3.0 (AGPL-3.0)
+
+Note: `packages/itext.pdfsweep.5.0.6/lib/net461/` contains a custom build of
+itext.pdfsweep that bundles the OpenJPEG library (`openjp2.dll`) to enable
+redaction of JPEG 2000 (JP2/JPX) images. See the OpenJPEG section below.
 
 ## Apache-2.0 components
 - TesseractOCR 5.5.1 (.NET wrapper)
 - Material Design Icons Webfont (`materialdesignicons-subset.ttf`)
   - Used for vector shape picker icons in the UI.
 License: Apache License 2.0
+
+## OpenJPEG (bundled with itext.pdfsweep)
+- OpenJPEG (`openjp2.dll`) — bundled in
+  `packages/itext.pdfsweep.5.0.6/lib/net461/`, used by the custom itext.pdfsweep
+  build to support redaction of JPEG 2000 (JP2/JPX) images.
+License: BSD 2-Clause "Simplified" License.
 
 ## PDFium / PDFiumSharp
 - PDFium.WindowsV2 1.1.4 (native binaries)

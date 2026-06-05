@@ -334,5 +334,17 @@ namespace AnonPDF.Properties {
                 this["DefaultRedactionMode"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string PreferredCountry {
+            get {
+                return ((string)(this["PreferredCountry"]));
+            }
+            set {
+                this["PreferredCountry"] = value;
+            }
+        }
     }
 }

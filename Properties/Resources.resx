@@ -505,7 +505,133 @@ końcowy i trzeci punkt łuku.</value>
     <value>Niemiecki</value>
   </data>
   <data name="Menu_Language_System" xml:space="preserve">
-    <value>Użyj języka systemu</value>
+    <value>Automatycznie</value>
+  </data>
+  <data name="Menu_Country" xml:space="preserve">
+    <value>Kraj</value>
+  </data>
+  <data name="Menu_Country_Auto" xml:space="preserve">
+    <value>Automatycznie</value>
+  </data>
+  <data name="Menu_Country_Poland" xml:space="preserve">
+    <value>Polska</value>
+  </data>
+  <data name="Menu_Country_Germany" xml:space="preserve">
+    <value>Niemcy</value>
+  </data>
+  <data name="Scope_SCOPE_PERSON" xml:space="preserve">
+    <value>Imię i nazwisko</value>
+  </data>
+  <data name="Scope_SCOPE_PESEL" xml:space="preserve">
+    <value>Numer PESEL</value>
+  </data>
+  <data name="Scope_SCOPE_IDENTITY_CARD" xml:space="preserve">
+    <value>Numer dowodu osobistego</value>
+  </data>
+  <data name="Scope_SCOPE_LOCATION" xml:space="preserve">
+    <value>Adres / lokalizacja</value>
+  </data>
+  <data name="Scope_SCOPE_POSTAL_CODE" xml:space="preserve">
+    <value>Kod pocztowy</value>
+  </data>
+  <data name="Scope_SCOPE_EMAIL" xml:space="preserve">
+    <value>Adres e-mail</value>
+  </data>
+  <data name="Scope_SCOPE_PHONE" xml:space="preserve">
+    <value>Numer telefonu</value>
+  </data>
+  <data name="Scope_SCOPE_URL" xml:space="preserve">
+    <value>Adres URL</value>
+  </data>
+  <data name="Scope_SCOPE_NIP" xml:space="preserve">
+    <value>Numer NIP</value>
+  </data>
+  <data name="Scope_SCOPE_REGON" xml:space="preserve">
+    <value>Numer REGON</value>
+  </data>
+  <data name="Scope_SCOPE_KRS" xml:space="preserve">
+    <value>Numer KRS</value>
+  </data>
+  <data name="Scope_SCOPE_BANK_ACCOUNT" xml:space="preserve">
+    <value>Numer rachunku bankowego</value>
+  </data>
+  <data name="Scope_SCOPE_VIN" xml:space="preserve">
+    <value>Numer VIN pojazdu</value>
+  </data>
+  <data name="Scope_SCOPE_LAND_REGISTRY" xml:space="preserve">
+    <value>Numer księgi wieczystej</value>
+  </data>
+  <data name="Scope_SCOPE_STEUER_ID" xml:space="preserve">
+    <value>Numer identyfikacji podatkowej (DE)</value>
+  </data>
+  <data name="Scope_SCOPE_UST_ID" xml:space="preserve">
+    <value>Numer VAT (DE)</value>
+  </data>
+  <data name="Scope_SCOPE_HRB" xml:space="preserve">
+    <value>Numer w rejestrze handlowym (DE)</value>
+  </data>
+  <data name="Scope_SCOPE_ORG" xml:space="preserve">
+    <value>Organizacja / podmiot</value>
+  </data>
+  <data name="Scope_SCOPE_DATE" xml:space="preserve">
+    <value>Data</value>
+  </data>
+  <data name="Scope_SCOPE_AMOUNT" xml:space="preserve">
+    <value>Kwota / wartość pieniężna</value>
+  </data>
+  <data name="Scope_SCOPE_LOAN_NUMBER" xml:space="preserve">
+    <value>Numer umowy / kredytu</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_PERSON" xml:space="preserve">
+    <value>Imię i/lub nazwisko osoby fizycznej</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_PESEL" xml:space="preserve">
+    <value>Numer Powszechnego Elektronicznego Systemu Ewidencji Ludności</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_IDENTITY_CARD" xml:space="preserve">
+    <value>Seria i numer dowodu osobistego</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_LOCATION" xml:space="preserve">
+    <value>Adres zamieszkania, siedziba lub inna lokalizacja</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_POSTAL_CODE" xml:space="preserve">
+    <value>Kod pocztowy lub kod pocztowy z nazwą miejscowości</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_EMAIL" xml:space="preserve">
+    <value>Adres poczty elektronicznej</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_PHONE" xml:space="preserve">
+    <value>Numer telefonu stacjonarnego lub komórkowego</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_URL" xml:space="preserve">
+    <value>Adres strony internetowej</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_NIP" xml:space="preserve">
+    <value>Numer identyfikacji podatkowej (NIP)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_REGON" xml:space="preserve">
+    <value>Numer identyfikacyjny REGON</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_KRS" xml:space="preserve">
+    <value>Numer w Krajowym Rejestrze Sądowym</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_BANK_ACCOUNT" xml:space="preserve">
+    <value>Numer rachunku bankowego (NRB/IBAN)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_VIN" xml:space="preserve">
+    <value>Numer identyfikacyjny pojazdu (VIN)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_LAND_REGISTRY" xml:space="preserve">
+    <value>Numer księgi wieczystej prowadzonej dla nieruchomości</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_STEUER_ID" xml:space="preserve">
+    <value>Niemiecka osobista identyfikacja podatkowa (Steueridentifikationsnummer)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_UST_ID" xml:space="preserve">
+    <value>Numer identyfikacji podatkowej VAT (Umsatzsteuer-Identifikationsnummer)</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_HRB" xml:space="preserve">
+    <value>Numer w niemieckim rejestrze handlowym (HRA/HRB)</value>
   </data>
   <data name="Menu_Help_Help" xml:space="preserve">
     <value>Instrukcja</value>
@@ -594,6 +720,69 @@ końcowy i trzeci punkt łuku.</value>
   <data name="UI_Tab_Layers" xml:space="preserve">
     <value>Warstwy</value>
   </data>
+  <data name="UI_Tab_Found" xml:space="preserve">
+    <value>Znalezione</value>
+  </data>
+  <data name="Found_SelectAll" xml:space="preserve">
+    <value>Zaznacz wszystkie</value>
+  </data>
+  <data name="Found_DeselectAll" xml:space="preserve">
+    <value>Odznacz wszystkie</value>
+  </data>
+  <data name="Found_PageHeader" xml:space="preserve">
+    <value>Strona {0}  ({1})</value>
+  </data>
+  <data name="Found_GroupOutOfBounds" xml:space="preserve">
+    <value>Poza stroną  ({0})</value>
+  </data>
+  <data name="Found_GroupAltText" xml:space="preserve">
+    <value>Tekst alternatywny  ({0})</value>
+  </data>
+  <data name="Found_FilterBtn" xml:space="preserve">
+    <value>Filtr</value>
+  </data>
+  <data name="Found_Filter_All" xml:space="preserve">
+    <value>Wszystkie</value>
+  </data>
+  <data name="Found_Filter_Search" xml:space="preserve">
+    <value>Wyszukiwanie</value>
+  </data>
+  <data name="Found_Filter_OutOfBounds" xml:space="preserve">
+    <value>Poza stroną</value>
+  </data>
+  <data name="Found_Filter_AltText" xml:space="preserve">
+    <value>Tekst alternatywny</value>
+  </data>
+  <data name="Found_Filter_Invert" xml:space="preserve">
+    <value>Odwróć zaznaczenie</value>
+  </data>
+  <data name="AltEdit_Title" xml:space="preserve">
+    <value>Edytuj tekst alternatywny</value>
+  </data>
+  <data name="AltEdit_Label" xml:space="preserve">
+    <value>Tekst alternatywny:</value>
+  </data>
+  <data name="AltEdit_Clear" xml:space="preserve">
+    <value>Wyczyść</value>
+  </data>
+  <data name="AltEdit_MenuEdit" xml:space="preserve">
+    <value>Edytuj tekst alternatywny</value>
+  </data>
+  <data name="AltEdit_MenuClear" xml:space="preserve">
+    <value>Wyczyść tekst alternatywny</value>
+  </data>
+  <data name="AltDefault_Arrow" xml:space="preserve">
+    <value>Strzałka</value>
+  </data>
+  <data name="AltDefault_Image" xml:space="preserve">
+    <value>Obraz</value>
+  </data>
+  <data name="AltDefault_Comment" xml:space="preserve">
+    <value>Komentarz</value>
+  </data>
+  <data name="AltDefault_TextLabel" xml:space="preserve">
+    <value>Napis</value>
+  </data>
   <data name="Layers_Tab_Header_Name" xml:space="preserve">
     <value>Nazwa warstwy</value>
   </data>
@@ -649,7 +838,7 @@ końcowy i trzeci punkt łuku.</value>
     <value>Raport</value>
   </data>
   <data name="UI_Button_PersonalData" xml:space="preserve">
-    <value>Identyfikatory</value>
+    <value>Dane osobowe</value>
   </data>
   <data name="Merge_Title" xml:space="preserve">
     <value>Scalanie plików PDF</value>
@@ -798,7 +987,7 @@ Ponowne kliknięcie usunie zaznaczenia.</value>
     <value>Wyczyść wynik wyszukiwania.</value>
   </data>
   <data name="Tooltip_PersonalData" xml:space="preserve">
-    <value>Wyszukaj identyfikatory (PESEL, KW, itp.).</value>
+    <value>Wyszukaj identyfikatory, osoby, adresy, telefony i firmy.</value>
   </data>
   <data name="Tooltip_PreviewAfterSave" xml:space="preserve">
     <value>Pokaż zapisany plik PDF po zakończeniu.</value>
@@ -1167,7 +1356,7 @@ Skontaktuj się z autorem aplikacji.</value>
     <value>Nie znaleziono "{0}".</value>
   </data>
   <data name="Msg_NoIdentifiersFound" xml:space="preserve">
-    <value>W dokumencie nie znaleziono poprawnych numerów PESEL, KW i innych identyfikatorów.</value>
+    <value>W dokumencie nie znaleziono danych osobowych ani identyfikatorow.</value>
   </data>
   <data name="Msg_NoSearchResultsOnPage" xml:space="preserve">
     <value>Na bieżącej stronie nie znaleziono wyników wyszukiwania.</value>
@@ -1358,6 +1547,7 @@ Opis: {4}
 
 Licencje i komponenty:
 - iText 9 (AGPL-3.0)
+- OpenJPEG (BSD-2-Clause) – obsługa JPEG 2000 w iText pdfsweep
 - PDFiumSharp / PDFium
 - Newtonsoft.Json (MIT)
 - BouncyCastle (MIT)
@@ -1640,6 +1830,12 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   </data>
   <data name="CacheStatus_SearchPage" xml:space="preserve">
     <value>przeszukiwanie: {0}</value>
+  </data>
+  <data name="CacheStatus_LocalNer" xml:space="preserve">
+    <value>indeksowanie danych osobowych</value>
+  </data>
+  <data name="CacheStatus_NerPreWarm" xml:space="preserve">
+    <value>inicjalizacja wtyczki PII</value>
   </data>
   <data name="TextAnnotation_ToStringFormat" xml:space="preserve">
     <value>{0} - {1}, {2} pt, {3}, {4}, {5}, {6}</value>

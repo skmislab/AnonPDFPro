@@ -8,6 +8,7 @@ using System.Windows.Forms;
 using System.IO;
 using System.IO.Compression;
 using System.ComponentModel;
+using System.Configuration;
 using System.Reflection;
 using System.Diagnostics;
 using System.Drawing.Imaging;
@@ -146,6 +147,7 @@ namespace AnonPDF
         private bool shapeIconPrivateFontChecked;
 
         private System.Threading.CancellationTokenSource backgroundIndexingCts;
+        private System.Threading.CancellationTokenSource _personalDataCts;
         private float scaleFactor = 0;
         private readonly float percentScaleFactor = 0.5f;
         private float minScaleFactor = 1.2f;
@@ -884,6 +886,32 @@ namespace AnonPDF
         // Index of the currently selected match
         private int currentLocationIndex = -1;
 
+        // "Znalezione" tab — created entirely in code, shown/hidden dynamically
+        private TabPage foundTabPage;
+        private TreeView foundTreeView;
+        private FlowLayoutPanel foundButtonsPanel;
+        private Button foundToggleAllButton;
+        private Button foundFilterDropButton;
+        private ToolStripDropDown foundFilterDropDown;
+        private ToolStripControlHost _foundFilterDropHost;
+        private Panel _foundFilterPopupPanel;
+        private ListBox foundFilterListBox;
+        private Panel foundFilterMasterPanel;
+        private CheckState _foundFilterMasterState = CheckState.Checked;
+        private ToolStripMenuItem _foundFilterInvertItem;
+        private HashSet<string> _foundActiveCategories = new HashSet<string>(StringComparer.Ordinal);
+        private bool _suppressFilterChange;
+        private ToolStripMenuItem foundContextMenuEdit;
+        private ToolStripMenuItem foundContextMenuClear;
+        private bool _suppressFoundCheck;
+        private bool _foundTreeUserInteracting;
+
+        // Country submenu (programmatically added to Options menu)
+        private ToolStripMenuItem countryToolStripMenuItem;
+        private ToolStripMenuItem countryAutoToolStripMenuItem;
+        private ToolStripMenuItem countryPolandToolStripMenuItem;
+        private ToolStripMenuItem countryGermanyToolStripMenuItem;
+
         private bool pdfCleanUpToolError;
 
         // Fields to detect clicks on icon buttons
@@ -1148,7 +1176,7 @@ namespace AnonPDF
                         System.Drawing.Color.FromArgb(0xE6, 0xED, 0xF3),
                         System.Drawing.Color.FromArgb(0x0E, 0x5E, 0x63),
                         System.Drawing.Color.FromArgb(0xE6, 0xED, 0xF3),
-                        System.Drawing.Color.FromArgb(0xFF, 0x6B, 0x6B),
+                        System.Drawing.Color.FromArgb(0xF8, 0x71, 0x71),
                         System.Drawing.Color.FromArgb(0x12, 0x1E, 0x2A))
                 },
                 {
@@ -1170,7 +1198,7 @@ namespace AnonPDF
                         System.Drawing.Color.FromArgb(0xFF, 0xFF, 0x00),
                         System.Drawing.Color.FromArgb(0x40, 0x40, 0x00),
                         System.Drawing.Color.FromArgb(0xFF, 0xFF, 0x00),
-                        System.Drawing.Color.FromArgb(0x7A, 0x00, 0x00),
+                        System.Drawing.Color.FromArgb(0xF8, 0x71, 0x71),
                         System.Drawing.Color.Black)
                 },
                 {
@@ -1192,7 +1220,7 @@ namespace AnonPDF
                         System.Drawing.Color.White,
                         System.Drawing.Color.FromArgb(0x40, 0x40, 0x40),
                         System.Drawing.Color.White,
-                        System.Drawing.Color.FromArgb(0x7A, 0x00, 0x00),
+                        System.Drawing.Color.FromArgb(0xF8, 0x71, 0x71),
                         System.Drawing.Color.Black)
                 }
             };
@@ -1724,41 +1752,32 @@ namespace AnonPDF
 
         private void UpdateSearchCacheStatusLabel(string status)
         {
-            if (isApplicationClosing ||
-                IsDisposed ||
-                Disposing ||
-                !IsHandleCreated ||
-                searchResultLabel == null ||
-                searchResultLabel.IsDisposed)
-            {
+            if (isApplicationClosing || IsDisposed || Disposing || !IsHandleCreated)
                 return;
-            }
 
             void ApplyStatus()
             {
-                if (isApplicationClosing ||
-                    IsDisposed ||
-                    Disposing ||
-                    !IsHandleCreated ||
-                    searchResultLabel == null ||
-                    searchResultLabel.IsDisposed)
-                {
+                if (isApplicationClosing || IsDisposed || Disposing || !IsHandleCreated)
                     return;
-                }
 
-                searchResultLabel.Text = status;
-
-                // Also update the indexing overlay when cursor is disabled (background indexing in progress)
-                if (!string.IsNullOrEmpty(status) &&
-                    cursorRadioButton != null && !cursorRadioButton.Enabled &&
-                    !cursorRadioButton.IsDisposed)
+                if (!string.IsNullOrEmpty(status))
                 {
-                    string line1 = LocalizedText("Msg_CursorModeUnavailable");
-                    ShowIndexingStatus(line1 + "\n" + status);
+                    if (cursorRadioButton != null && !cursorRadioButton.Enabled && !cursorRadioButton.IsDisposed)
+                    {
+                        ShowIndexingStatus(LocalizedText("Msg_CursorModeUnavailable") + "\n" + status);
+                    }
+                    else if (personalDataButton != null && !personalDataButton.Enabled && !personalDataButton.IsDisposed)
+                    {
+                        ShowIndexingStatus(status);
+                    }
+                }
+                else
+                {
+                    HideIndexingStatus();
                 }
             }
 
-            if (searchResultLabel.InvokeRequired)
+            if (InvokeRequired)
             {
                 TryBeginInvokeOnUi(ApplyStatus);
                 return;
@@ -3216,6 +3235,20 @@ namespace AnonPDF
                 out layerName);
         }
 
+        // Returns the checkbox glyph side length in pixels for the given font.
+        // Scales proportionally from 13–18 px at 96 DPI up to ~19–26 px at 150 % / 200 %.
+        private static int GetCheckBoxSide(Font font)
+        {
+            int fontH = font?.Height ?? SystemFonts.DefaultFont.Height;
+            // 13 px = design Font.Height at 96 DPI (AutoScaleDimensions 6×13).
+            // Scales min/max linearly so checkbox fills the same fraction of the
+            // row at 150 % / 175 % / 200 % where the fixed cap of 18 px was too small.
+            float s = fontH / 13f;
+            int lo = Math.Max(13, (int)Math.Round(13 * s));
+            int hi = Math.Max(18, (int)Math.Round(18 * s));
+            return Math.Max(lo, Math.Min(hi, fontH - 1));
+        }
+
         private static void DrawThemedGridCheckBox(Graphics graphics, Rectangle bounds, DataGridViewElementStates state, object value, UiThemePalette theme, Font font)
         {
             if (graphics == null || theme == null)
@@ -3235,7 +3268,7 @@ namespace AnonPDF
                     break;
             }
 
-            int side = Math.Max(13, Math.Min(18, (font?.Height ?? SystemFonts.DefaultFont.Height) - 1));
+            int side = GetCheckBoxSide(font);
             var glyphRect = new Rectangle(
                 bounds.Left + (bounds.Width - side) / 2,
                 bounds.Top + (bounds.Height - side) / 2,
@@ -3969,6 +4002,43 @@ namespace AnonPDF
             layersPanelView.Invalidate();
         }
 
+        private void ApplyThemeToFoundTab(UiThemePalette theme)
+        {
+            if (foundTabPage == null || theme == null) return;
+            foundTabPage.BackColor = theme.SectionBackColor;
+            foundTabPage.ForeColor = theme.TextPrimaryColor;
+            if (foundButtonsPanel != null)
+                foundButtonsPanel.BackColor = theme.SectionBackColor;
+            if (foundTreeView != null)
+            {
+                foundTreeView.BackColor = theme.SectionBackColor;
+                foundTreeView.ForeColor = theme.TextPrimaryColor;
+            }
+            if (foundButtonsPanel != null)
+            {
+                foundButtonsPanel.BackColor = theme.SectionBackColor;
+                foreach (Control c in foundButtonsPanel.Controls)
+                {
+                    if (c is Button btn) ApplySecondaryButtonTheme(btn, theme);
+                }
+            }
+            if (foundFilterDropDown != null)
+                foundFilterDropDown.Renderer = new ToolStripProfessionalRenderer(new ThemedColorTable(theme));
+            if (_foundFilterPopupPanel != null)
+                _foundFilterPopupPanel.BackColor = theme.SectionBackColor;
+            if (foundFilterListBox != null)
+            {
+                foundFilterListBox.BackColor = theme.SectionBackColor;
+                foundFilterListBox.ForeColor = theme.TextPrimaryColor;
+                foundFilterListBox.Invalidate();
+            }
+            if (foundFilterMasterPanel != null)
+            {
+                foundFilterMasterPanel.BackColor = theme.SectionBackColor;
+                foundFilterMasterPanel.Invalidate();
+            }
+        }
+
         private void PruneInvisibleLayerInteractionState()
         {
             selectedTextAnnotations.RemoveWhere(annotation => annotation == null || !IsLayerVisible(annotation.LayerId));
@@ -4199,11 +4269,13 @@ namespace AnonPDF
                 return;
             }
 
+            var filteredGlobalScopes = FilterScopesByCountry(globalScopes);
+            var filteredLocalScopes = FilterScopesByCountry(localScopes);
             using (var dialog = new LegalBasesDictionaryDialog(
                 globalBases,
                 localBases,
-                globalScopes,
-                localScopes,
+                filteredGlobalScopes,
+                filteredLocalScopes,
                 canEditGlobal,
                 canEditLocal,
                 canEditGlobalScopes,
@@ -4669,11 +4741,12 @@ namespace AnonPDF
             }
 
             string nextId = GenerateNextLegalBasisIdForSource(globalBases, localBases, targetSource);
+            var filteredScopes = FilterScopesByCountry(availableScopes);
             using (var dialog = new LegalBasisEditDialog(
                 null,
                 targetSource,
                 nextId,
-                availableScopes,
+                filteredScopes,
                 Enumerable.Empty<string>(),
                 canEditTargetScopeAssignments,
                 CreateDialogTheme()))
@@ -6273,7 +6346,9 @@ namespace AnonPDF
                 case RedactionBlock redactionBlock:
                     return redactionBlock.IsMarkerSelection
                         ? LocalizedText("UI_Radio_Marker")
-                        : LocalizedText("UI_Radio_Box");
+                        : redactionBlock.IsCursorSelection
+                            ? LocalizedText("UI_Radio_Cursor")
+                            : LocalizedText("UI_Radio_Box");
 
                 case ArrowObject _:
                     switch (language)
@@ -8119,24 +8194,50 @@ namespace AnonPDF
 
                     var sourceRect = new iText.Kernel.Geom.Rectangle(pdfCoords.X, pdfCoords.Y, pdfCoords.Width, pdfCoords.Height);
 
-                    // Get precise per-glyph rects using the same strategy as the grey preview
-                    var previewRects = GetPdfCleanUpPreviewRectsForBlock(page, null, sourceRect);
-                    if (previewRects == null || previewRects.Count == 0)
+                    // Extract glyphs with text so we can filter out whitespace-only entries.
+                    // iText advance-width boxes for spaces would otherwise inflate the union.
+                    var strategy = new PdfCleanUpPreviewTextExtractionStrategy(
+                        new List<iText.Kernel.Geom.Rectangle> { sourceRect });
+                    PdfTextExtractor.GetTextFromPage(page, strategy);
+                    if (!strategy.TryGetCleanedGlyphInfos(out var glyphInfos))
                         return false;
 
-                    // Compute union of all glyph rects in PDF space
-                    float uMinX = float.MaxValue, uMinY = float.MaxValue, uMaxX = float.MinValue, uMaxY = float.MinValue;
-                    foreach (var r in previewRects)
+                    var wordGlyphs = glyphInfos
+                        .Where(g => !string.IsNullOrWhiteSpace(g.Text))
+                        .ToList();
+                    if (wordGlyphs.Count == 0)
+                        return false;
+
+                    // Use PDFium tight char bounds for X only (to trim inter-character
+                    // spacing on the left/right edges). Y is kept from the iText advance-width
+                    // bounds so the selection height stays consistent with the diagnostic
+                    // blue-box overlay, which also uses iText ascent/descent metrics.
+                    List<iText.Kernel.Geom.Rectangle> glyphRects;
+                    if (!TryRefineMarkerPreviewGlyphRectsWithPdfium(currentPage, wordGlyphs, out glyphRects))
+                        glyphRects = wordGlyphs.Select(g => g.Bounds).ToList();
+
+                    float uMinX = float.MaxValue, uMaxX = float.MinValue;
+                    foreach (var r in glyphRects)
                     {
                         if (r == null) continue;
                         uMinX = Math.Min(uMinX, (float)r.GetX());
-                        uMinY = Math.Min(uMinY, (float)r.GetY());
                         uMaxX = Math.Max(uMaxX, (float)r.GetX() + (float)r.GetWidth());
-                        uMaxY = Math.Max(uMaxY, (float)r.GetY() + (float)r.GetHeight());
                     }
-                    if (uMinX >= uMaxX || uMinY >= uMaxY) return false;
+                    if (uMinX >= uMaxX) return false;
 
-                    var unionPdf = new RectangleF(uMinX, uMinY, uMaxX - uMinX, uMaxY - uMinY);
+                    // Only apply PDFium trimming on each edge if the trim amount exceeds
+                    // 1.5 PDF points.  A larger trim signals real Tc/Tw inter-character
+                    // spacing baked into the advance width (the original bad.pdf problem).
+                    // A smaller trim is normal font-metric rounding; keeping the iText
+                    // advance-width edge keeps the selection closer to the blue search-result
+                    // boxes (which are also advance-width based).
+                    const float MinEdgeTrim = 1.5f;
+                    float finalLeft  = (uMinX - pdfCoords.X) > MinEdgeTrim        ? uMinX : pdfCoords.X;
+                    float finalRight = (pdfCoords.Right - uMaxX) > MinEdgeTrim    ? uMaxX : pdfCoords.Right;
+                    if (finalLeft >= finalRight) return false;
+
+                    // Keep Y from the original iText word bounds (already in PDF space as pdfCoords)
+                    var unionPdf = new RectangleF(finalLeft, pdfCoords.Y, finalRight - finalLeft, pdfCoords.Height);
                     refinedBounds = ConvertPdfToViewCoordinates(unionPdf, currentPage, rotation);
                     return refinedBounds.Width > 0 && refinedBounds.Height > 0;
                 }
@@ -9775,30 +9876,6 @@ namespace AnonPDF
             }
         }
 
-        private void SortLanguageMenuItems()
-        {
-            if (languageToolStripMenuItem == null || languageSystemToolStripMenuItem == null)
-            {
-                return;
-            }
-
-            var languageItems = new[]
-            {
-                languageEnglishToolStripMenuItem,
-                languageGermanToolStripMenuItem,
-                languagePolishToolStripMenuItem
-            };
-
-            var sortedLanguageItems = languageItems
-                .Where(item => item != null)
-                .OrderBy(item => item.Text, StringComparer.CurrentCultureIgnoreCase)
-                .Cast<ToolStripItem>()
-                .ToArray();
-
-            languageToolStripMenuItem.DropDownItems.Clear();
-            languageToolStripMenuItem.DropDownItems.Add(languageSystemToolStripMenuItem);
-            languageToolStripMenuItem.DropDownItems.AddRange(sortedLanguageItems);
-        }
 
         private void ApplyLocalization()
         {
@@ -9817,12 +9894,21 @@ namespace AnonPDF
             languageEnglishToolStripMenuItem.Text = Resources.Menu_Language_English;
             languagePolishToolStripMenuItem.Text = Resources.Menu_Language_Polish;
             languageGermanToolStripMenuItem.Text = LocalizedText("Menu_Language_German");
-            SortLanguageMenuItems();
             bool isSystem = string.IsNullOrWhiteSpace(Properties.Settings.Default.PreferredUICulture);
             languageSystemToolStripMenuItem.Checked = isSystem;
             languageEnglishToolStripMenuItem.Checked = !isSystem && currentCulture.TwoLetterISOLanguageName == "en";
             languagePolishToolStripMenuItem.Checked = !isSystem && currentCulture.TwoLetterISOLanguageName == "pl";
             languageGermanToolStripMenuItem.Checked = !isSystem && currentCulture.TwoLetterISOLanguageName == "de";
+
+            // Country submenu
+            if (countryToolStripMenuItem != null)
+            {
+                countryToolStripMenuItem.Text = LocalizedText("Menu_Country");
+                countryAutoToolStripMenuItem.Text = LocalizedText("Menu_Country_Auto");
+                countryPolandToolStripMenuItem.Text = LocalizedText("Menu_Country_Poland");
+                countryGermanyToolStripMenuItem.Text = LocalizedText("Menu_Country_Germany");
+                UpdateCountryMenuCheckmarks();
+            }
 
             // File menu
             openPdfToolStripMenuItem.Text = Resources.Menu_OpenPdf;
@@ -9968,6 +10054,20 @@ namespace AnonPDF
             try { pagesListTabPage.Text = LocalizedText("UI_Tab_PagesList"); } catch { }
             try { thumbnailsTabPage.Text = LocalizedText("UI_Tab_Thumbnails"); } catch { }
             try { layersTabPage.Text = LocalizedText("UI_Tab_Layers"); } catch { }
+            if (foundTabPage != null)
+                try { foundTabPage.Text = LocalizedText("UI_Tab_Found"); } catch { }
+            if (foundToggleAllButton != null)
+                try { UpdateToggleButtonText(); } catch { }
+            if (foundFilterMasterPanel != null)
+                try { foundFilterMasterPanel.Invalidate(); } catch { }
+            if (foundFilterDropButton != null)
+                try { UpdateFoundFilterButtonText(); } catch { }
+            if (_foundFilterInvertItem != null)
+                try { _foundFilterInvertItem.Text = LocalizedText("Found_Filter_Invert"); } catch { }
+            if (foundContextMenuEdit != null)
+                try { foundContextMenuEdit.Text = LocalizedText("AltEdit_MenuEdit"); } catch { }
+            if (foundContextMenuClear != null)
+                try { foundContextMenuClear.Text = LocalizedText("AltEdit_MenuClear"); } catch { }
             ApplyLayersTabLocalization();
 
             UpdateWindowTitle();
@@ -15326,6 +15426,7 @@ namespace AnonPDF
                         {
                             PageNumber = currentPage,
                             LayerId = GetResolvedActiveLayerId(),
+                            AltText = LocalizedText("AltDefault_TextLabel"),
                             AnnotationText = dlg.AnnotationText,
                             AnnotationFont = dlg.AnnotationFont,
                             AnnotationColor = dlg.AnnotationColor,
@@ -16789,26 +16890,12 @@ namespace AnonPDF
 
             this.Controls.Add(maintenanceCountdownLabel);
             maintenanceCountdownLabel.BringToFront();
-            this.ClientSizeChanged += (_, __) => PositionMaintenanceCountdownLabel();
-            mainAppSplitContainer.Panel2.SizeChanged += (_, __) => PositionMaintenanceCountdownLabel();
+            EnsureOverlayRepositionHandlers();
             ApplyThemeToMaintenanceCountdownLabel();
-            PositionMaintenanceCountdownLabel();
+            RepositionOverlayLabels();
         }
 
-        private void PositionMaintenanceCountdownLabel()
-        {
-            if (maintenanceCountdownLabel == null)
-            {
-                return;
-            }
-
-            int margin = 8;
-            Point panelOrigin = GetPanel2OriginInForm();
-            int x = panelOrigin.X + margin;
-            int y = panelOrigin.Y + margin;
-            maintenanceCountdownLabel.Location = new Point(x, y);
-            PositionObjectSelectionInfoLabel();
-        }
+        private void PositionMaintenanceCountdownLabel() => RepositionOverlayLabels();
 
         private void ApplyThemeToMaintenanceCountdownLabel()
         {
@@ -16840,10 +16927,9 @@ namespace AnonPDF
 
             this.Controls.Add(objectSelectionInfoLabel);
             objectSelectionInfoLabel.BringToFront();
-            this.ClientSizeChanged += (_, __) => PositionObjectSelectionInfoLabel();
-            mainAppSplitContainer.Panel2.SizeChanged += (_, __) => PositionObjectSelectionInfoLabel();
+            EnsureOverlayRepositionHandlers();
             ApplyThemeToObjectSelectionInfoLabel();
-            PositionObjectSelectionInfoLabel();
+            RepositionOverlayLabels();
         }
 
         private void UpdateObjectSelectionInfoLabel()
@@ -16852,43 +16938,19 @@ namespace AnonPDF
             if (string.IsNullOrWhiteSpace(selectionInfoText))
             {
                 if (objectSelectionInfoLabel != null)
-                {
                     objectSelectionInfoLabel.Visible = false;
-                }
-
+                RepositionOverlayLabels();
                 return;
             }
 
             EnsureObjectSelectionInfoOverlay();
             if (!string.Equals(objectSelectionInfoLabel.Text, selectionInfoText, StringComparison.Ordinal))
-            {
                 objectSelectionInfoLabel.Text = selectionInfoText;
-            }
-
             objectSelectionInfoLabel.Visible = true;
-            objectSelectionInfoLabel.BringToFront();
-            PositionObjectSelectionInfoLabel();
+            RepositionOverlayLabels();
         }
 
-        private void PositionObjectSelectionInfoLabel()
-        {
-            if (objectSelectionInfoLabel == null)
-            {
-                return;
-            }
-
-            int margin = 8;
-            int spacing = 6;
-            Point panelOrigin = GetPanel2OriginInForm();
-            int x = panelOrigin.X + margin;
-            int y = panelOrigin.Y + margin;
-            if (maintenanceCountdownLabel != null && maintenanceCountdownLabel.Visible)
-            {
-                y = maintenanceCountdownLabel.Bottom + spacing;
-            }
-
-            objectSelectionInfoLabel.Location = new Point(x, y);
-        }
+        private void PositionObjectSelectionInfoLabel() => RepositionOverlayLabels();
 
         private void EnsureIndexingStatusOverlay()
         {
@@ -16905,26 +16967,12 @@ namespace AnonPDF
             };
             this.Controls.Add(indexingStatusLabel);
             indexingStatusLabel.BringToFront();
-            this.ClientSizeChanged += (_, __) => PositionIndexingStatusLabel();
-            mainAppSplitContainer.Panel2.SizeChanged += (_, __) => PositionIndexingStatusLabel();
+            EnsureOverlayRepositionHandlers();
             ApplyThemeToIndexingStatusLabel();
-            PositionIndexingStatusLabel();
+            RepositionOverlayLabels();
         }
 
-        private void PositionIndexingStatusLabel()
-        {
-            if (indexingStatusLabel == null) return;
-            int margin = 8;
-            int spacing = 6;
-            Point panelOrigin = GetPanel2OriginInForm();
-            int x = panelOrigin.X + margin;
-            int y = panelOrigin.Y + margin;
-            if (maintenanceCountdownLabel != null && maintenanceCountdownLabel.Visible)
-                y = maintenanceCountdownLabel.Bottom + spacing;
-            if (objectSelectionInfoLabel != null && objectSelectionInfoLabel.Visible)
-                y = Math.Max(y, objectSelectionInfoLabel.Bottom + spacing);
-            indexingStatusLabel.Location = new Point(x, y);
-        }
+        private void PositionIndexingStatusLabel() => RepositionOverlayLabels();
 
         private void ShowIndexingStatus(string text)
         {
@@ -16932,13 +16980,52 @@ namespace AnonPDF
             ApplyThemeToIndexingStatusLabel();
             indexingStatusLabel.Text = text;
             indexingStatusLabel.Visible = true;
-            PositionIndexingStatusLabel();
+            RepositionOverlayLabels();
         }
 
         private void HideIndexingStatus()
         {
             if (indexingStatusLabel != null)
                 indexingStatusLabel.Visible = false;
+            RepositionOverlayLabels();
+        }
+
+        // Single reposition-handler registration guard — avoids duplicate SizeChanged subscriptions
+        // when multiple Ensure* methods are called over the lifetime of the form.
+        private bool _overlayRepositionHandlersRegistered;
+
+        private void EnsureOverlayRepositionHandlers()
+        {
+            if (_overlayRepositionHandlersRegistered) return;
+            _overlayRepositionHandlersRegistered = true;
+            this.ClientSizeChanged += (_, __) => RepositionOverlayLabels();
+            mainAppSplitContainer.Panel2.SizeChanged += (_, __) => RepositionOverlayLabels();
+        }
+
+        /// <summary>
+        /// Stacks all visible overlay labels in the top-left corner of Panel2,
+        /// in fixed priority order, with consistent spacing. Call whenever any
+        /// label's visibility or text changes.
+        /// </summary>
+        private void RepositionOverlayLabels()
+        {
+            const int margin = 8;
+            const int spacing = 6;
+            if (mainAppSplitContainer == null) return;
+
+            Point origin = GetPanel2OriginInForm();
+            int x = origin.X + margin;
+            int y = origin.Y + margin;
+
+            // Priority order: maintenance (danger) → selection info → indexing status
+            Label[] stack = { maintenanceCountdownLabel, objectSelectionInfoLabel, indexingStatusLabel };
+            foreach (var label in stack)
+            {
+                if (label == null || !label.Visible) continue;
+                label.Location = new Point(x, y);
+                label.BringToFront();
+                y = label.Bottom + spacing;
+            }
         }
 
         private void ApplyThemeToObjectSelectionInfoLabel()
@@ -17821,6 +17908,7 @@ namespace AnonPDF
                 Task.Run(() => CheckForNewVersion(UpdateCheckSource.Startup));
             }
             Task.Run(() => RefreshLicenseStatusFromServer());
+            PreWarmNerDaemon();
         }
 
         private void NotifyUpdatesOutOfRangeIfNeeded()
@@ -17938,6 +18026,7 @@ namespace AnonPDF
             layersTabPlaceholderPanel.BackColor = theme.SectionBackColor;
             ApplyThemeToLayersGrid(theme);
             RefreshLayersTab();
+            ApplyThemeToFoundTab(theme);
             tableLayoutPanel1.BackColor = theme.SectionBackColor;
 
             ApplyThemeToControls(mainAppSplitContainer.Panel1.Controls, theme);
@@ -18055,6 +18144,11 @@ namespace AnonPDF
                         : theme.PanelBackColor;
                     listView.ForeColor = theme.TextPrimaryColor;
                 }
+                else if (control is TreeView treeView)
+                {
+                    treeView.BackColor = theme.SectionBackColor;
+                    treeView.ForeColor = theme.TextPrimaryColor;
+                }
                 else if (control is TableLayoutPanel table)
                 {
                     table.BackColor = table == tableLayoutPanel1
@@ -18160,8 +18254,12 @@ namespace AnonPDF
             foreach (ToolStripItem item in items)
             {
                 item.ForeColor = theme.TextPrimaryColor;
+                item.BackColor = theme.SectionBackColor;
                 if (item is ToolStripDropDownItem dropDownItem && dropDownItem.DropDownItems.Count > 0)
                 {
+                    var dd = dropDownItem.DropDown;
+                    dd.BackColor = theme.SectionBackColor;
+                    dd.ForeColor = theme.TextPrimaryColor;
                     ApplyMenuItemTheme(dropDownItem.DropDownItems, theme);
                 }
             }
@@ -18614,6 +18712,9 @@ namespace AnonPDF
             diagnosticModeEnabled = false;
             diagnosticModeMenuItem.Checked = false;
             UpdateRecentFilesMenu();
+
+            InitializeFoundTab();
+            InitializeCountryMenu();
 
             if (DebugLogEnabled)
             {
@@ -20016,7 +20117,9 @@ namespace AnonPDF
             {
                 Name = "saveCurrentViewMenuItem",
                 Enabled = false,
-                Text = GetSaveCurrentViewMenuText()
+                Text = GetSaveCurrentViewMenuText(),
+                ForeColor = CurrentTheme.TextPrimaryColor,
+                BackColor = CurrentTheme.SectionBackColor
             };
             saveCurrentViewMenuItem.Click += SaveCurrentViewMenuItem_Click;
 
@@ -21554,6 +21657,10 @@ namespace AnonPDF
                     return;
                 }
 
+                // Apply pending alt text edits to the output PDF structure tree
+                // Always key by inputPdfPath (not inputFile, which may be a temp re-encoded copy)
+                ApplyPendingAltTextEdits(pdfDoc, inputPdfPath);
+
                 if (redactionVisualPdfBoundsByBlock.Count > 0)
                 {
                     foreach (var pageGroup in redactionVisualPdfBoundsByBlock
@@ -21854,6 +21961,7 @@ namespace AnonPDF
             RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
             renderTimer.Stop();
             renderTimer.Start();
+            SyncFoundTabCheckboxFromBlocks();
         }
 
         private void ClearCurrentPageRedactionBlock()
@@ -21906,6 +22014,7 @@ namespace AnonPDF
             saveProjectMenuItem.Enabled = true;
             renderTimer.Stop();
             renderTimer.Start();
+            SyncFoundTabCheckboxFromBlocks();
         }
 
         private void ClearTextAnnotations()
@@ -22188,11 +22297,23 @@ namespace AnonPDF
             ShowIndexingStatus(LocalizedText("Msg_CursorModeUnavailable"));
             backgroundIndexingCts?.Cancel();
             backgroundIndexingCts?.Dispose();
+            _personalDataCts?.Cancel();
+            _personalDataCts?.Dispose();
+            _personalDataCts = null;
+            Task.Run(() => PdfTextSearcher.StopNerDaemon());
             backgroundIndexingCts = new System.Threading.CancellationTokenSource();
             var cts = backgroundIndexingCts;
-            Task.Run(() => PdfTextSearcher.CachePdfText(inputPdfPath, userPassword, cts.Token), cts.Token)
+            var pdfPath = inputPdfPath;
+            var password = userPassword;
+            Task.Run(() => PdfTextSearcher.CachePdfText(pdfPath, password, cts.Token), cts.Token)
                 .ContinueWith(_ =>
                 {
+                    if (cts.IsCancellationRequested || isApplicationClosing)
+                        return;
+
+                    bool nerAvailable = PdfTextSearcher.IsLocalNerAvailable();
+                    bool piiAlreadyCached = PdfTextSearcher.GetPersonalDataCache(pdfPath) != null;
+
                     BeginInvoke((Action)(() =>
                     {
                         if (!cts.IsCancellationRequested &&
@@ -22200,14 +22321,58 @@ namespace AnonPDF
                         {
                             HideIndexingStatus();
                             cursorRadioButton.Enabled = true;
+                            groupBoxSearch.Enabled = true;
+
+                            if (pdfPath == inputPdfPath)
+                            {
+                                var altLocs = PdfTextSearcher.GetAltTextLocations(pdfPath);
+                                if (altLocs.Count > 0)
+                                {
+                                    searchLocations = altLocs;
+                                    PopulateFoundTab();
+                                }
+
+                                // PII already loaded from disk cache — enable button immediately
+                                if (nerAvailable && piiAlreadyCached)
+                                    personalDataButton.Enabled = true;
+                            }
                         }
                     }));
+
+                    if (cts.IsCancellationRequested || isApplicationClosing)
+                        return;
+
+                    if (nerAvailable && !piiAlreadyCached)
+                    {
+                        try
+                        {
+                            var nerResults = PdfTextSearcher.FindTextLocations(pdfPath, "", true, password, cancellationToken: cts.Token);
+                            PdfTextSearcher.SetPersonalDataCache(pdfPath, nerResults);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine("Background NER failed: " + ex.Message);
+                            // NER failed — save what we have (text/OCR/alt) so next open skips re-extraction
+                            PdfTextSearcher.SavePartialCache(pdfPath);
+                        }
+
+                        PdfTextSearcher.ClearStatusOverlay();
+
+                        BeginInvoke((Action)(() =>
+                        {
+                            if (!cts.IsCancellationRequested && pdfPath == inputPdfPath &&
+                                !isApplicationClosing && !IsDisposed && !Disposing)
+                            {
+                                personalDataButton.Enabled = true;
+                            }
+                        }));
+                    }
                 });
 
             groupBoxSelections.Enabled = true;
             groupBoxPagesToRemove.Enabled = true;
-            groupBoxSearch.Enabled = true;
-            personalDataButton.Enabled = true;
+            groupBoxSearch.Enabled = false;   // enabled after CachePdfText completes
+            personalDataButton.Enabled = false;
 
             saveProjectAsButton.Enabled = true;
             buttonRedactText.Enabled = true;
@@ -22293,6 +22458,102 @@ namespace AnonPDF
             {
                 isLoadingPdf = false;
                 EndBusyCursor();
+            }
+        }
+
+        private void ApplyPendingAltTextEdits(iText.Kernel.Pdf.PdfDocument pdfDoc, string pdfPath)
+        {
+            // edits are always keyed by inputPdfPath, not by the (possibly temp) pdfPath
+            var editsForFile = PdfTextSearcher._pendingAltTextEdits
+                .Where(kv => kv.Key.pdfPath == inputPdfPath)
+                .ToList();
+
+            Action<string> log = msg => {
+                if (!DebugLogEnabled) return;
+                try { File.AppendAllText(DebugLogPath, $"{DateTime.Now:HH:mm:ss.fff} AltEdit: {msg}{Environment.NewLine}"); } catch { }
+            };
+
+            log($"ApplyPendingAltTextEdits: {editsForFile.Count} pending edits for {System.IO.Path.GetFileName(inputPdfPath)}");
+
+            if (editsForFile.Count == 0) return;
+
+            // Alt text edits only exist for already-tagged PDFs — SetTagged() initializes
+            // iText's TagStructureContext so the struct tree is managed (not bypassed) during write.
+            pdfDoc.SetTagged();
+
+            // Walk the CURRENT document's struct tree and collect posKey → PdfDictionary directly.
+            // Using the actual dict instance from the tree (no xref re-lookup) avoids the issue
+            // where CopyPagesTo() renumbers all objects in a re-encoded temp copy.
+            var docAltMap = PdfTextSearcher.ExtractAltDictsByPosition(pdfDoc);
+            log($"docAltMap has {docAltMap.Count} entries: [{string.Join(", ", docAltMap.Keys)}]");
+            log($"edits posKeys: [{string.Join(", ", editsForFile.Select(kv => kv.Key.posKey))}]");
+
+            foreach (var kv in editsForFile)
+            {
+                string posKey = kv.Key.posKey;
+                string newText = kv.Value ?? string.Empty;
+
+                if (!docAltMap.TryGetValue(posKey, out var dict))
+                {
+                    log($"posKey={posKey} NOT FOUND in docAltMap");
+                    continue;
+                }
+
+                try
+                {
+                    string oldAlt = dict.GetAsString(PdfName.Alt)?.ToUnicodeString() ?? "(null)";
+                    dict.Put(PdfName.Alt, new PdfString(newText, PdfEncodings.UNICODE_BIG));
+                    dict.SetModified();
+                    log($"posKey={posKey} updated [{oldAlt}] -> [{newText}]");
+                }
+                catch (Exception ex)
+                {
+                    log($"posKey={posKey} EXCEPTION: {ex.Message}");
+                }
+            }
+            // Note: edits are intentionally NOT removed from _pendingAltTextEdits here.
+            // Keeping them allows the project to be saved with the edits after an export,
+            // so reloading the project and re-exporting correctly re-applies the same changes.
+            // Edits are only cleared when the user opens a different file (via ClearCache).
+        }
+
+        private iText.Kernel.Pdf.Tagutils.TagTreePointer BeginObjectTag(
+            iText.Kernel.Pdf.PdfDocument pdfDoc,
+            iText.Kernel.Pdf.PdfPage page,
+            iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
+            string altText)
+        {
+            if (string.IsNullOrWhiteSpace(altText)) return null;
+            try
+            {
+                if (!pdfDoc.IsTagged()) pdfDoc.SetTagged();
+                var ptr = new iText.Kernel.Pdf.Tagutils.TagTreePointer(pdfDoc);
+                ptr.SetPageForTagging(page);
+                ptr.AddTag(PdfName.Figure.GetValue());
+                ptr.GetProperties().SetAlternateDescription(altText);
+                pdfCanvas.OpenTag(ptr.GetTagReference());
+                return ptr;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("BeginObjectTag: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static void EndObjectTag(
+            iText.Kernel.Pdf.Canvas.PdfCanvas pdfCanvas,
+            iText.Kernel.Pdf.Tagutils.TagTreePointer ptr)
+        {
+            if (ptr == null) return;
+            try
+            {
+                pdfCanvas.CloseTag();
+                ptr.MoveToParent();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("EndObjectTag: " + ex.Message);
             }
         }
 
@@ -22655,6 +22916,16 @@ namespace AnonPDF
             }
 
             inputPdfPath = filePath;
+            if (DebugLogEnabled)
+            {
+                try
+                {
+                    string nerLogPath = Path.Combine(Path.GetTempPath(), "AnonPDF-ner.log");
+                    File.WriteAllText(nerLogPath,
+                        $"=== {Path.GetFileName(filePath)} — {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===\r\n");
+                }
+                catch { }
+            }
             LoadPdf();
         }
 
@@ -22683,6 +22954,7 @@ namespace AnonPDF
             zoomTimer.Stop();
             CancelPreviewRender();
             backgroundIndexingCts?.Cancel();
+            PdfTextSearcher.StopNerDaemon();
             HideIndexingStatus();
 
             pdf = null;
@@ -22878,7 +23150,8 @@ namespace AnonPDF
                 addCommentToolStripMenuItem.Enabled = canEditCurrentPage;
             }
             rotatePageMenuItem.Enabled = canEditCurrentPage;
-            searchToSelectionButton.Enabled = canEditCurrentPage && groupBoxSearch.Enabled;
+            searchToSelectionButton.Enabled = canEditCurrentPage && groupBoxSearch.Enabled
+                && searchLocations != null && searchLocations.Count > 0;
 
             bool hasSelectionsForThisPage = pdfLoaded && redactionBlocks.Any(rb => rb.PageNumber == currentPage);
             clearPageButton.Enabled = canEditCurrentPage && hasSelectionsForThisPage;
@@ -23950,6 +24223,13 @@ namespace AnonPDF
                 return false;
             }
 
+            int pendingAltEdits = PdfTextSearcher._pendingAltTextEdits.Count(kv => kv.Key.pdfPath == inputPdfPath);
+            LogDebug($"IsNoContentChangeExport: pendingAltEdits={pendingAltEdits}");
+            if (pendingAltEdits > 0)
+            {
+                return false;
+            }
+
             if (pagesToRemove.Count > 0 || (additionalPagesToRemove != null && additionalPagesToRemove.Count > 0))
             {
                 return false;
@@ -24003,6 +24283,12 @@ namespace AnonPDF
                 || rasterObjects.Count > 0
                 || arrowObjects.Count > 0
                 || vectorShapes.Count > 0)
+            {
+                return false;
+            }
+
+            int pendingAltEdits = PdfTextSearcher._pendingAltTextEdits.Count(kv => kv.Key.pdfPath == inputPdfPath);
+            if (pendingAltEdits > 0)
             {
                 return false;
             }
@@ -24556,6 +24842,37 @@ namespace AnonPDF
                 $"globalScopesWritable={canWriteGlobalExclusionScopes} globalLegalWritable={canWriteGlobalLegalBases}");
         }
 
+        /// <summary>Returns the effective country code: explicit setting, or OS region, or empty (show all).</summary>
+        private static string GetEffectiveCountry()
+        {
+            string pref = Properties.Settings.Default.PreferredCountry ?? string.Empty;
+            if (!string.IsNullOrEmpty(pref))
+                return pref;
+            // Auto: derive from OS regional settings
+            try
+            {
+                var region = new System.Globalization.RegionInfo(CultureInfo.InstalledUICulture.Name);
+                return region.TwoLetterISORegionName.ToLowerInvariant();
+            }
+            catch { }
+            return string.Empty;
+        }
+
+        private static List<ExclusionScopeDefinition> FilterScopesByCountry(IEnumerable<ExclusionScopeDefinition> scopes)
+        {
+            string country = GetEffectiveCountry();
+            return (scopes ?? Enumerable.Empty<ExclusionScopeDefinition>()).Where(s =>
+                string.IsNullOrEmpty(s.Language) ||
+                string.IsNullOrEmpty(country) ||
+                string.Equals(s.Language, country, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
+        /// <summary>Returns scopes relevant for the selected country. Universal scopes (Language==null) are always included.</summary>
+        private IEnumerable<ExclusionScopeDefinition> GetVisibleScopes()
+        {
+            return FilterScopesByCountry(exclusionScopesCatalog);
+        }
+
         private void LoadMergedExclusionScopesCatalog()
         {
             if (TryLoadCatalogFile(globalExclusionScopesPath, out ExclusionScopesCatalogFile globalFile, out string globalError))
@@ -24843,11 +25160,14 @@ namespace AnonPDF
             {
                 ScopeId = source.ScopeId,
                 FriendlyName = source.FriendlyName,
+                FriendlyNameKey = source.FriendlyNameKey,
                 Category = source.Category,
                 Description = source.Description,
+                DescriptionKey = source.DescriptionKey,
                 AutoDetectTags = new List<string>(source.AutoDetectTags ?? new List<string>()),
                 DefaultBasisIds = new List<string>(source.DefaultBasisIds ?? new List<string>()),
                 UiColor = source.UiColor,
+                Language = source.Language,
                 SourceKind = source.SourceKind
             };
         }
@@ -25596,7 +25916,10 @@ namespace AnonPDF
                 SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
                 AutoFootnotesEnabled = autoFootnotesEnabled,
                 ExclusionAuthority = exclusionAuthorityName,
-                ExportVisibleLayersOnly = exportVisibleLayersOnly
+                ExportVisibleLayersOnly = exportVisibleLayersOnly,
+                AltTextEdits = PdfTextSearcher._pendingAltTextEdits
+                    .Where(kv => kv.Key.pdfPath == inputPdfPath)
+                    .ToDictionary(kv => kv.Key.posKey, kv => kv.Value)
             };
         }
 
@@ -28517,6 +28840,7 @@ namespace AnonPDF
                 Id = Guid.NewGuid().ToString("N"),
                 PageNumber = currentPage,
                 LayerId = GetResolvedActiveLayerId(),
+                AltText = GetShapeTypeDisplayName(activeVectorShapeType),
                 ShapeType = activeVectorShapeType.ToString(),
                 IsRasterClip = activeVectorShapeDefaults.LimitsRasterView,
                 Points = vectorShapeDraftPoints.ToList(),
@@ -29153,14 +29477,11 @@ namespace AnonPDF
                 textMoveMouseOffset = PointF.Empty;
                 if (cursorRadioButton.Checked)
                 {
+                    if (TryHandleSearchLocationCursorClick(e.Location))
+                        return;
+
                     if (TryGetWordBoundsAtPoint(e.Location, out RectangleF wordBounds))
                     {
-                        // Refine bounds using precise glyph data (same mechanism as grey preview)
-                        if (TryRefineWordBoundsWithGlyphData(wordBounds, wordBounds, out RectangleF refined))
-                        {
-                            wordBounds = refined;
-                        }
-
                         BeginUndoCapture("Add cursor selection");
                         var block = new RedactionBlock(wordBounds, currentPage)
                         {
@@ -30549,6 +30870,7 @@ namespace AnonPDF
                                         Id = Guid.NewGuid().ToString("N"),
                                         PageNumber = currentPage,
                                         LayerId = GetResolvedActiveLayerId(),
+                                        AltText = LocalizedText("AltDefault_Comment"),
                                         Bounds = rect,
                                         CommentText = commentText,
                                         HighlightColorArgb = highlightColor.ToArgb(),
@@ -30680,7 +31002,11 @@ namespace AnonPDF
                 {
                     return;
                 }
-                TryShowRedactionContextMenu(startPoint);
+                if (TryShowRedactionContextMenu(startPoint))
+                {
+                    return;
+                }
+                TryShowAltTextContextMenu(startPoint);
             }
             isDrawing = false;
             isMarkerCtrlBoxMode = false;
@@ -31434,6 +31760,12 @@ namespace AnonPDF
             menu.Items.Add(BuildMoveToLayerMenuItem(comment.LayerId, targetLayerId => MoveObjectToLayerFromContext(comment, targetLayerId)));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(GetDeleteObjectContextMenuText(), null, (_, __) => DeleteObjectFromContext(comment));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(LocalizedText("AltEdit_MenuEdit"), null, (_, __) =>
+            {
+                string newAlt = PromptAltTextEdit(comment.AltText);
+                if (newAlt != null) SetObjectAltText(comment, newAlt);
+            });
             menu.Show(pdfViewer, location);
             return true;
         }
@@ -31586,8 +31918,187 @@ namespace AnonPDF
             deleteDuplicatedObjectsItem.Click += (_, __) => DeleteDuplicatedObjectsByGroupId(duplicateGroupId, currentPage);
             menu.Items.Add(deleteDuplicatedObjectsItem);
             menu.Items.Add(GetDeleteObjectContextMenuText(), null, (_, __) => DeleteObjectFromContext(hitObject));
+            menu.Items.Add(new ToolStripSeparator());
+            var capturedHit = hitObject;
+            menu.Items.Add(LocalizedText("AltEdit_MenuEdit"), null, (_, __) =>
+            {
+                string newAlt = PromptAltTextEdit(GetObjectAltText(capturedHit));
+                if (newAlt != null) SetObjectAltText(capturedHit, newAlt);
+            });
+
+            string capturedAlt = GetObjectAltText(capturedHit);
+            if (!string.IsNullOrWhiteSpace(capturedAlt))
+            {
+                menu.Items.Insert(0, new ToolStripSeparator());
+                var lines = FormatAltTextForMenu(capturedAlt);
+                for (int li = lines.Count - 1; li >= 0; li--)
+                    menu.Items.Insert(0, MakeAltPreviewMenuItem(lines[li], li > 0));
+            }
+
             menu.Show(pdfViewer, location);
             return true;
+        }
+
+        private bool TryShowAltTextContextMenu(Point location)
+        {
+            if (pdf == null) return false;
+
+            // Hit-test against ALL figures in the PDF (with or without Alt), not just those in the tree.
+            // _allFiguresCache covers Figure/Image roles; _altTextCache may contain additional roles
+            // (e.g. HR) that also carry Alt text — merge both so all Alt-bearing elements are reachable.
+            PdfTextSearcher._allFiguresCache.TryGetValue(inputPdfPath, out var allFigures);
+            PdfTextSearcher._altTextCache.TryGetValue(inputPdfPath, out var altTexts);
+            if ((allFigures == null || allFigures.Count == 0) && (altTexts == null || altTexts.Count == 0))
+            {
+                LogDebug($"TryShowAltTextContextMenu: no cache entry for {System.IO.Path.GetFileName(inputPdfPath)}");
+                return false;
+            }
+            // Merge: start with allFigures, supplement with altTextCache entries not already present
+            var mergedFigures = new List<PdfTextSearcher.AltTextEntry>(allFigures ?? Enumerable.Empty<PdfTextSearcher.AltTextEntry>());
+            if (altTexts != null)
+            {
+                var existingKeys = new HashSet<string>(mergedFigures.Select(f => f.PositionKey), StringComparer.Ordinal);
+                foreach (var at in altTexts)
+                    if (!existingKeys.Contains(at.PositionKey))
+                        mergedFigures.Add(at);
+            }
+
+            int rotation = GetEffectiveRotationDegrees(currentPage);
+            // Sort by area ascending so smaller (more specific) images take priority over full-page backgrounds
+            var pageFigs = mergedFigures
+                .Where(f => f.PageNumber == currentPage && f.BBox != null)
+                .OrderBy(f => f.BBox.GetWidth() * f.BBox.GetHeight())
+                .ToList();
+            LogDebug($"TryShowAltTextContextMenu: click={location} page={currentPage} rot={rotation} pageFigs={pageFigs.Count}/{allFigures.Count}");
+            PdfTextSearcher.AltTextEntry hitFig = null;
+            foreach (var fig in pageFigs)
+            {
+                var viewRect = ConvertPdfToViewCoordinates(
+                    new RectangleF(fig.BBox.GetX(), fig.BBox.GetY(), fig.BBox.GetWidth(), fig.BBox.GetHeight()),
+                    currentPage, rotation);
+                float sx = viewRect.X * scaleFactor;
+                float sy = viewRect.Y * scaleFactor;
+                float sw = viewRect.Width * scaleFactor;
+                float sh = viewRect.Height * scaleFactor;
+                const float pad = 4f;
+                LogDebug($"  fig posKey={fig.PositionKey} viewRect=({sx:F0},{sy:F0},{sw:F0}x{sh:F0}) pdfBBox=({fig.BBox.GetX():F0},{fig.BBox.GetY():F0})");
+                if (new RectangleF(sx - pad, sy - pad, sw + pad * 2, sh + pad * 2).Contains(location))
+                {
+                    hitFig = fig;
+                    break;
+                }
+            }
+            if (hitFig == null)
+            {
+                LogDebug("  no hit");
+                return false;
+            }
+
+            var capturedFig = hitFig;
+
+            // Resolve effective current alt text (original or pending edit)
+            string currentAltText = capturedFig.AltText ?? string.Empty;
+            if (PdfTextSearcher._pendingAltTextEdits.TryGetValue((inputPdfPath, capturedFig.PositionKey), out var pendingText))
+                currentAltText = pendingText;
+
+            var menu = CreateThemedMenu();
+
+            if (!string.IsNullOrWhiteSpace(currentAltText))
+            {
+                var lines = FormatAltTextForMenu(currentAltText);
+                for (int li = 0; li < lines.Count; li++)
+                    menu.Items.Add(MakeAltPreviewMenuItem(lines[li], li > 0));
+                menu.Items.Add(new ToolStripSeparator());
+            }
+
+            menu.Items.Add(LocalizedText("AltEdit_MenuEdit"), null, (_, __) => EditOriginalFigureAltText(capturedFig));
+
+            if (!string.IsNullOrWhiteSpace(currentAltText))
+            {
+                menu.Items.Add(LocalizedText("AltEdit_MenuClear"), null, (_, __) => EditOriginalFigureAltText(capturedFig, clear: true));
+            }
+
+            menu.Show(pdfViewer, location);
+            return true;
+        }
+
+        private void EditOriginalFigureAltText(PdfTextSearcher.AltTextEntry fig, bool clear = false)
+        {
+            string currentText = fig.AltText ?? string.Empty;
+            if (PdfTextSearcher._pendingAltTextEdits.TryGetValue((inputPdfPath, fig.PositionKey), out var pending))
+                currentText = pending;
+
+            string newText;
+            if (clear)
+            {
+                newText = string.Empty;
+            }
+            else
+            {
+                newText = PromptAltTextEdit(currentText);
+                if (newText == null) return; // cancelled
+            }
+
+            // Store the pending edit
+            PdfTextSearcher._pendingAltTextEdits[(inputPdfPath, fig.PositionKey)] = newText;
+
+            // Find the matching TextLocation in searchLocations (if already in the tree)
+            var existingLoc = searchLocations.FirstOrDefault(l =>
+                l.Source == LocationSource.AltText &&
+                l.PageNumber == fig.PageNumber &&
+                Math.Abs(l.Rect.GetX() - fig.BBox.GetX()) < 1f &&
+                Math.Abs(l.Rect.GetY() - fig.BBox.GetY()) < 1f);
+
+            if (existingLoc != null)
+            {
+                existingLoc.Text = newText;
+                var node = FindFoundTreeNode(existingLoc);
+                if (node != null) node.Text = MakeLeafNodeText(existingLoc);
+                foundTreeView?.Invalidate();
+            }
+            else if (!string.IsNullOrWhiteSpace(newText))
+            {
+                // New Alt text on a figure not yet in results — update alt-text portion while
+                // preserving any existing NER text results in searchLocations.
+                var altLocs = PdfTextSearcher.GetAltTextLocations(inputPdfPath);
+                searchLocations.RemoveAll(l => l.Source == LocationSource.AltText);
+                searchLocations.AddRange(altLocs);
+                PopulateFoundTab();
+            }
+
+            // If clearing and it was only visible due to a pending edit (not in original _altTextCache), remove from tree
+            if (string.IsNullOrWhiteSpace(newText))
+            {
+                bool inOriginalCache = PdfTextSearcher.GetAltEntries(inputPdfPath)
+                    ?.Any(e => e.PositionKey == fig.PositionKey) ?? false;
+                if (!inOriginalCache)
+                {
+                    // Remove from searchLocations and repopulate
+                    searchLocations.RemoveAll(l =>
+                        l.Source == LocationSource.AltText &&
+                        l.PageNumber == fig.PageNumber &&
+                        Math.Abs(l.Rect.GetX() - fig.BBox.GetX()) < 1f &&
+                        Math.Abs(l.Rect.GetY() - fig.BBox.GetY()) < 1f);
+                    PopulateFoundTab();
+                }
+            }
+
+            projectWasChangedAfterLastSave = true;
+            saveProjectButton.Enabled = true;
+            saveProjectMenuItem.Enabled = true;
+        }
+
+        private TreeNode FindFoundTreeNode(TextLocation loc)
+        {
+            if (foundTreeView == null) return null;
+            foreach (TreeNode pageNode in foundTreeView.Nodes)
+                foreach (TreeNode child in pageNode.Nodes)
+                {
+                    if (child.Tag == loc) return child;
+                    foreach (TreeNode leaf in child.Nodes)
+                        if (leaf.Tag == loc) return leaf;
+                }
+            return null;
         }
 
         private bool TryShowRedactionContextMenu(Point location)
@@ -31626,7 +32137,8 @@ namespace AnonPDF
             menu.Items.Add(BuildMoveToLayerMenuItem(block.LayerId, targetLayerId => MoveObjectToLayerFromContext(block, targetLayerId)));
             menu.Items.Add(new ToolStripSeparator());
 
-            bool hasDynamicScopes = exclusionScopesCatalog.Count > 0;
+            var visibleScopes = GetVisibleScopes().ToList();
+            bool hasDynamicScopes = visibleScopes.Count > 0;
             bool hasDynamicBases = legalBasesCatalog.Count > 0;
             var scopeMenu = new ToolStripMenuItem(GetScopeContextMenuText());
             if (hasDynamicScopes)
@@ -31639,13 +32151,13 @@ namespace AnonPDF
                 scopeMenu.DropDownItems.Add(noScopeItem);
                 scopeMenu.DropDownItems.Add(new ToolStripSeparator());
 
-                foreach (var scope in exclusionScopesCatalog.OrderBy(s => s.FriendlyName, StringComparer.CurrentCultureIgnoreCase))
+                foreach (var scope in visibleScopes.OrderBy(s => s.GetLocalizedName(), StringComparer.CurrentCultureIgnoreCase))
                 {
                     string scopeId = scope.ScopeId;
-                    var scopeItem = new ToolStripMenuItem(scope.FriendlyName)
+                    var scopeItem = new ToolStripMenuItem(scope.GetLocalizedName())
                     {
                         Checked = string.Equals(block.ScopeId, scopeId, StringComparison.OrdinalIgnoreCase),
-                        ToolTipText = string.IsNullOrWhiteSpace(scope.Description) ? scopeId : scope.Description
+                        ToolTipText = scope.GetLocalizedDescription()
                     };
                     scopeItem.Click += (_, __) => SetRedactionBlockScope(block, scopeId);
                     scopeMenu.DropDownItems.Add(scopeItem);
@@ -32345,6 +32857,7 @@ namespace AnonPDF
 
             PdfiumPreviewGlyphCandidate best = null;
             double bestScore = double.MaxValue;
+            float bestOverlapArea = 0f;
             foreach (var candidate in candidates)
             {
                 if (candidate.Used || !string.Equals(candidate.Text, glyph.Text, StringComparison.Ordinal))
@@ -32359,8 +32872,16 @@ namespace AnonPDF
                 {
                     best = candidate;
                     bestScore = score;
+                    bestOverlapArea = overlapArea;
                 }
             }
+
+            // Require spatial overlap: a zero-overlap match means we found a character with
+            // the same Unicode value at a completely different position on the page (e.g. a
+            // digit that also appears in page numbers or dates). Its CharBounds would corrupt
+            // the word-selection union, so discard it and fall back to the iText advance box.
+            if (best != null && bestOverlapArea <= 0f)
+                return null;
 
             if (best != null)
             {
@@ -32589,23 +33110,36 @@ namespace AnonPDF
                 return false;
             }
 
-            string extractedText;
-            try
+            // --- Primary path: query NER cache by geometry ---
+            int rotation = GetEffectiveRotationDegrees(block.PageNumber);
+            System.Drawing.RectangleF pdfCoords = ConvertToPdfCoordinates(block.Bounds, block.PageNumber, rotation);
+            var pdfRect = new KernelGeom.Rectangle(
+                (float)pdfCoords.X, (float)pdfCoords.Y,
+                (float)pdfCoords.Width, (float)pdfCoords.Height);
+
+            IReadOnlyList<string> detectedTags =
+                PdfTextSearcher.DetectTagsFromNerCache(inputPdfPath, block.PageNumber, pdfRect);
+
+            // --- Fallback: NER cache not loaded or no geometry match → extract text and run regex ---
+            if (detectedTags == null || detectedTags.Count == 0)
             {
-                extractedText = ExtractTextFromRectangle(inputPdfPath, block);
-            }
-            catch (Exception ex)
-            {
-                LogDebug("Auto footnote classification text extraction failed: " + ex.Message);
-                return false;
+                string extractedText;
+                try
+                {
+                    extractedText = ExtractTextFromRectangle(inputPdfPath, block);
+                }
+                catch (Exception ex)
+                {
+                    LogDebug("Auto footnote classification text extraction failed: " + ex.Message);
+                    return false;
+                }
+
+                if (string.IsNullOrWhiteSpace(extractedText))
+                    return false;
+
+                detectedTags = PdfTextSearcher.DetectIdentifierTags(extractedText);
             }
 
-            if (string.IsNullOrWhiteSpace(extractedText))
-            {
-                return false;
-            }
-
-            var detectedTags = PdfTextSearcher.DetectIdentifierTags(extractedText);
             if (detectedTags == null || detectedTags.Count == 0)
             {
                 return false;
@@ -32635,7 +33169,7 @@ namespace AnonPDF
             {
                 LogDebug(
                     $"AutoClassify page={block.PageNumber} scope={block.ScopeId} tag={block.MatchedTag} " +
-                    $"basis={string.Join(",", block.BasisIds ?? new List<string>())} text='{TruncateForLog(extractedText, 80)}'");
+                    $"basis={string.Join(",", block.BasisIds ?? new List<string>())} tags=[{string.Join(",", detectedTags)}]");
             }
 
             return true;
@@ -33114,6 +33648,8 @@ namespace AnonPDF
                 };
             }
 
+            var _tagPtr = BeginObjectTag(pdfDoc, page, pdfCanvas, annotation.AltText);
+
             if (annotation.HasLeaderArrow)
             {
                 PointF leaderAnchorView = GetTextLeaderAnchorPoint(viewCorners, NormalizeTextLeaderAnchorKind(annotation.LeaderAnchorKind));
@@ -33243,6 +33779,7 @@ namespace AnonPDF
                         rotSin,
                         rotationOffset))
                 {
+                    EndObjectTag(pdfCanvas, _tagPtr);
                     return;
                 }
 
@@ -33267,6 +33804,7 @@ namespace AnonPDF
                     gdiAscentPt + pdfTopInsetPt,
                     sharedRichLayout))
                 {
+                    EndObjectTag(pdfCanvas, _tagPtr);
                     return;
                 }
 
@@ -33304,6 +33842,7 @@ namespace AnonPDF
                     {
                         if (croppedRichBitmap == null)
                         {
+                            EndObjectTag(pdfCanvas, _tagPtr);
                             return;
                         }
 
@@ -33342,6 +33881,7 @@ namespace AnonPDF
                     }
                 }
 
+                EndObjectTag(pdfCanvas, _tagPtr);
                 return;
             }
 
@@ -33402,6 +33942,7 @@ namespace AnonPDF
 
             pdfCanvas.EndText();
             pdfCanvas.RestoreState();
+            EndObjectTag(pdfCanvas, _tagPtr);
         }
 
         private void RenderVectorShapesToPdf(
@@ -33458,6 +33999,7 @@ namespace AnonPDF
                     continue;
                 }
 
+                var _tagPtr = BeginObjectTag(pdfDoc, page, pdfCanvas, vectorShape.AltText);
                 pdfCanvas.SaveState();
                 if (hasStroke)
                 {
@@ -33558,6 +34100,7 @@ namespace AnonPDF
                 }
 
                 pdfCanvas.RestoreState();
+                EndObjectTag(pdfCanvas, _tagPtr);
             }
         }
 
@@ -33880,6 +34423,7 @@ namespace AnonPDF
             }
 
             float opacity = NormalizeOpacity(rasterObject.Opacity);
+            var _tagPtr = BeginObjectTag(pdfDoc, page, pdfCanvas, rasterObject.AltText);
             pdfCanvas.SaveState();
             ApplyRasterClipPathToPdf(pdfCanvas, pageNumber, rotation, includeBaseRotation: !baseRotationBaked, clipShapes);
             if (opacity >= 0.999f)
@@ -33896,6 +34440,7 @@ namespace AnonPDF
             }
 
             pdfCanvas.RestoreState();
+            EndObjectTag(pdfCanvas, _tagPtr);
         }
 
         private void RenderArrowObjectToPdf(
@@ -33932,6 +34477,7 @@ namespace AnonPDF
             var deviceColor = new DeviceRgb(lineColor.R, lineColor.G, lineColor.B);
             var borderDeviceColor = new DeviceRgb(borderColor.R, borderColor.G, borderColor.B);
 
+            var _tagPtr = BeginObjectTag(pdfDoc, page, pdfCanvas, arrowObject.AltText);
             pdfCanvas.SaveState();
             pdfCanvas.SetLineWidth(thickness);
             pdfCanvas.SetLineCapStyle(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.LineCapStyle.ROUND);
@@ -33996,6 +34542,7 @@ namespace AnonPDF
             }
 
             pdfCanvas.RestoreState();
+            EndObjectTag(pdfCanvas, _tagPtr);
         }
 
         private Dictionary<string, int> BuildLegalBasisFootnoteNumberMap(IEnumerable<RedactionBlock> blocks = null)
@@ -34799,6 +35346,7 @@ namespace AnonPDF
             renderTimer.Start();
             pdfViewer.Invalidate();
             removeRedactionStopwatch?.Stop();
+            SyncFoundTabCheckboxFromBlocks();
         }
 
         private void DrawVectorShapeOnPreview(Graphics graphics, VectorShapeObject vectorShape, bool multiSelectionActive)
@@ -36784,6 +37332,48 @@ namespace AnonPDF
             DrawOcrDebugBoxSet(graphics, ocrBoxes, rotation, System.Drawing.Color.FromArgb(190, 0, 170, 255), Math.Max(1f, scaleFactor * 0.8f));
         }
 
+        private void DrawAltFigureBBoxes(Graphics graphics)
+        {
+            if (!DebugLogEnabled || graphics == null || string.IsNullOrWhiteSpace(inputPdfPath)) return;
+
+            bool hasCacheEntry = PdfTextSearcher._allFiguresCache.TryGetValue(inputPdfPath, out var figs);
+            int rotation = GetEffectiveRotationDegrees(currentPage);
+
+            using (var font = new Font("Consolas", 7f))
+            using (var labelBg = new SolidBrush(System.Drawing.Color.FromArgb(180, 0, 30, 120)))
+            using (var labelFg = new SolidBrush(System.Drawing.Color.White))
+            using (var pen = new Pen(System.Drawing.Color.FromArgb(230, 0, 100, 255), 2f))
+            {
+                string summary = hasCacheEntry
+                    ? $"[AltFig] cache: {figs.Count} total, {(figs?.Count(f => f.PageNumber == currentPage) ?? 0)} on page {currentPage}"
+                    : "[AltFig] cache: NO ENTRY for this file";
+                var sumSize = graphics.MeasureString(summary, font);
+                graphics.FillRectangle(labelBg, 4, 4, sumSize.Width + 4, sumSize.Height + 2);
+                graphics.DrawString(summary, font, labelFg, 6, 5);
+
+                if (!hasCacheEntry || figs == null) return;
+
+                foreach (var fig in figs.Where(f => f.PageNumber == currentPage))
+                {
+                    var pdfRect = new RectangleF(fig.BBox.GetX(), fig.BBox.GetY(), fig.BBox.GetWidth(), fig.BBox.GetHeight());
+                    var viewRect = ConvertPdfToViewCoordinates(pdfRect, currentPage, rotation);
+                    var sr = new RectangleF(viewRect.X * scaleFactor, viewRect.Y * scaleFactor,
+                        viewRect.Width * scaleFactor, viewRect.Height * scaleFactor);
+                    if (sr.Width <= 0f || sr.Height <= 0f) continue;
+
+                    graphics.DrawRectangle(pen, sr.X, sr.Y, sr.Width, sr.Height);
+
+                    string lbl = $"{fig.PositionKey} mcid={fig.Mcid}";
+                    if (!string.IsNullOrWhiteSpace(fig.AltText))
+                        lbl += $" \"{fig.AltText.Substring(0, Math.Min(15, fig.AltText.Length))}\"";
+                    var lblSize = graphics.MeasureString(lbl, font);
+                    float lx = sr.X + 2, ly = sr.Y + 2;
+                    graphics.FillRectangle(labelBg, lx - 1, ly - 1, lblSize.Width + 2, lblSize.Height + 1);
+                    graphics.DrawString(lbl, font, labelFg, lx, ly);
+                }
+            }
+        }
+
         private void DrawOcrDebugBoxSet(Graphics graphics, List<TextLocation> boxes, int rotation, System.Drawing.Color color, float penWidth)
         {
             if (graphics == null || boxes == null || boxes.Count == 0)
@@ -36827,6 +37417,7 @@ namespace AnonPDF
 
             DrawRedactionPreviewTextOverlay(e.Graphics);
             DrawOcrDebugBoxes(e.Graphics);
+            DrawAltFigureBBoxes(e.Graphics);
 
             // Drawing saved redaction blocks for current page
             foreach (var block in redactionBlocks.Where(b => b.PageNumber == currentPage && IsLayerVisible(b.LayerId)))
@@ -37097,13 +37688,15 @@ namespace AnonPDF
 
                     float draw_y = sc_y;
                     float draw_h = sc_h;
-                    if (draw_h < 4f)
+                    if (draw_h < 4f && location.Source != LocationSource.AltText)
                     {
                         draw_h = Math.Max(12f, sc_w * 0.2f);
                         draw_y -= draw_h * 0.8f;
                     }
 
-                    float highlightPad = Math.Max(2f, Math.Min(sc_w, draw_h) * 0.35f);
+                    float highlightPad = location.Source == LocationSource.AltText
+                        ? 2f
+                        : Math.Max(2f, Math.Min(sc_w, draw_h) * 0.1f);
                     RectangleF primaryHighlightRect = new RectangleF(
                         sc_x - highlightPad,
                         draw_y - highlightPad,
@@ -37120,7 +37713,9 @@ namespace AnonPDF
                     {
                         // If this is currently selected location, change color to gray
                         highlightColor = System.Drawing.Color.FromArgb(255, 128, 128, 128);
-                        float selectedPad = highlightPad + Math.Max(4f, Math.Min(sc_w, draw_h) * 0.1f);
+                        float selectedPad = location.Source == LocationSource.AltText
+                            ? 4f
+                            : highlightPad + 3f;
                         RectangleF selectedHighlightRect = new RectangleF(
                             sc_x - selectedPad,
                             draw_y - selectedPad,
@@ -39105,6 +39700,21 @@ namespace AnonPDF
             pagingTimer.Stop();
             pagingTimer.Start();
             SelectThumbnailItemForCurrentPage(ensureVisible: IsThumbnailsTabSelected());
+            SyncFoundTabToCurrentPage();
+        }
+
+        private void SyncFoundTabToCurrentPage()
+        {
+            if (_foundTreeUserInteracting) return;
+            if (foundTreeView == null || foundTreeView.Nodes.Count == 0) return;
+            foreach (TreeNode node in foundTreeView.Nodes)
+            {
+                if (node.Tag is int pg && pg == currentPage)
+                {
+                    foundTreeView.TopNode = node;
+                    return;
+                }
+            }
         }
 
 
@@ -39508,6 +40118,32 @@ namespace AnonPDF
                     UpdateSignatureSelectionMenuState();
 
                     ApplySignatureModeFromProject(signaturesMode);
+
+                    // Restore pending alt text edits
+                    {
+                        var oldKeys = PdfTextSearcher._pendingAltTextEdits.Keys
+                            .Where(k => k.pdfPath == inputPdfPath).ToList();
+                        foreach (var k in oldKeys)
+                            PdfTextSearcher._pendingAltTextEdits.Remove(k);
+
+                        if (projectData.AltTextEdits != null)
+                        {
+                            foreach (var kv in projectData.AltTextEdits)
+                                PdfTextSearcher._pendingAltTextEdits[(inputPdfPath, kv.Key)] = kv.Value; // kv.Key = posKey
+                        }
+                        LogDebug($"AltEdit restore: {projectData.AltTextEdits?.Count ?? 0} edits from project for {System.IO.Path.GetFileName(inputPdfPath)}");
+
+                        // If same file (cache already populated), refresh Found tab so edits are visible
+                        if (PdfTextSearcher.GetAltEntries(inputPdfPath) != null)
+                        {
+                            var altLocs = PdfTextSearcher.GetAltTextLocations(inputPdfPath);
+                            if (altLocs.Count > 0)
+                            {
+                                searchLocations = altLocs;
+                                PopulateFoundTab();
+                            }
+                        }
+                    }
 
                     if (projectData.CurrentPage > 0)
                     {
@@ -40598,8 +41234,12 @@ namespace AnonPDF
                 searchPrevButton.Enabled = false;
                 searchNextButton.Enabled = false;
                 searchLastButton.Enabled = false;
+                searchToSelectionButton.Enabled = false;
                 return;
             }
+
+            bool snPdfLoaded = pdf != null && numPages > 0 && currentPage >= 1 && currentPage <= numPages;
+            searchToSelectionButton.Enabled = snPdfLoaded && !IsCurrentPageMarkedForDeletion() && groupBoxSearch.Enabled;
 
             // Check if there is a search result on the current page preceding the current result.
             bool hasPrevSamePage = currentLocationIndex > 0 && searchLocations[currentLocationIndex - 1].PageNumber == currentPage;
@@ -40854,6 +41494,16 @@ namespace AnonPDF
                 searchCacheStatusHandler = null;
             }
 
+            // Signal background NER not to start (or fall back to) a new process.
+            PdfTextSearcher.IsShuttingDown = true;
+
+            // Cancel any running background indexing/NER task.
+            backgroundIndexingCts?.Cancel();
+
+            // Kill the NER daemon on a background thread — the daemon lock may be held by a
+            // worker thread; calling StopNerDaemon() directly here would block the UI thread.
+            Task.Run(() => PdfTextSearcher.StopNerDaemon());
+
             try { maintenanceCheckTimer?.Stop(); } catch { }
             try { maintenanceCheckTimer?.Dispose(); } catch { }
             maintenanceCheckTimer = null;
@@ -40882,6 +41532,7 @@ namespace AnonPDF
             try { thumbnailViewportTimer?.Stop(); } catch { }
             CancelThumbnailGeneration();
             CancelAsyncPreviewWorkForShutdown();
+            // StopNerDaemon already dispatched asynchronously in StopBackgroundUiWorkForShutdown.
 
             if (!launchStandaloneInstallerAfterClose || standaloneInstallerLaunchAttempted)
             {
@@ -42078,6 +42729,7 @@ namespace AnonPDF
                 Id = Guid.NewGuid().ToString("N"),
                 PageNumber = currentPage,
                 LayerId = GetResolvedActiveLayerId(),
+                AltText = LocalizedText("AltDefault_Image"),
                 Bounds = initialBounds,
                 InitialBounds = initialBounds,
                 Rotation = NormalizeRotation(activeRasterDialogDefaults.Rotation),
@@ -42154,6 +42806,7 @@ namespace AnonPDF
                 Id = Guid.NewGuid().ToString("N"),
                 PageNumber = currentPage,
                 LayerId = GetResolvedActiveLayerId(),
+                AltText = LocalizedText("AltDefault_Arrow"),
                 Start = start,
                 End = end,
                 LineColorArgb = activeArrowDialogDefaults.ArrowColor.ToArgb(),
@@ -44369,6 +45022,12 @@ namespace AnonPDF
             deleteDuplicatedObjectsItem.Click += (_, __) => DeleteDuplicatedObjectsByGroupId(target.DuplicateGroupId, target.PageNumber);
             menu.Items.Add(deleteDuplicatedObjectsItem);
             menu.Items.Add(GetDeleteObjectContextMenuText(), null, (_, __) => DeleteObjectFromContext(target));
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(LocalizedText("AltEdit_MenuEdit"), null, (_, __) =>
+            {
+                string newAlt = PromptAltTextEdit(target.AltText);
+                if (newAlt != null) SetObjectAltText(target, newAlt);
+            });
 
             menu.Show(pdfViewer, location);
             return true;
@@ -51255,7 +51914,49 @@ namespace AnonPDF
 
             float docX = location.X / scaleFactor;
             float docY = location.Y / scaleFactor;
-            return redactionBlocks.Any(block => block != null && block.PageNumber == currentPage && block.Bounds.Contains(docX, docY));
+            if (redactionBlocks.Any(block => block != null && block.PageNumber == currentPage && block.Bounds.Contains(docX, docY)))
+                return true;
+
+            // AltText highlight areas act as interactive content (right-click shows edit menu)
+            if (searchLocations != null)
+            {
+                int rotation = GetEffectiveRotationDegrees(currentPage);
+                foreach (var loc in searchLocations)
+                {
+                    if (loc.Source != LocationSource.AltText || loc.PageNumber != currentPage) continue;
+                    var vr = ConvertPdfToViewCoordinates(
+                        new RectangleF(loc.Rect.GetX(), loc.Rect.GetY(), loc.Rect.GetWidth(), loc.Rect.GetHeight()),
+                        currentPage, rotation);
+                    const float hitPad = 4f;
+                    if (new RectangleF((vr.X - hitPad) * scaleFactor, (vr.Y - hitPad) * scaleFactor,
+                            (vr.Width + hitPad * 2) * scaleFactor, (vr.Height + hitPad * 2) * scaleFactor)
+                        .Contains(location))
+                        return true;
+                }
+            }
+
+            // Figures in _allFiguresCache (embedded images/shapes with or without Alt text)
+            if (inputPdfPath != null &&
+                PdfTextSearcher._allFiguresCache.TryGetValue(inputPdfPath, out var figs) &&
+                figs != null)
+            {
+                int figRot = GetEffectiveRotationDegrees(currentPage);
+                const float figPad = 4f;
+                foreach (var fig in figs)
+                {
+                    if (fig.PageNumber != currentPage || fig.BBox == null) continue;
+                    var vr = ConvertPdfToViewCoordinates(
+                        new RectangleF(fig.BBox.GetX(), fig.BBox.GetY(), fig.BBox.GetWidth(), fig.BBox.GetHeight()),
+                        currentPage, figRot);
+                    if (new RectangleF(
+                            (vr.X - figPad) * scaleFactor, (vr.Y - figPad) * scaleFactor,
+                            (vr.Width + figPad * 2) * scaleFactor, (vr.Height + figPad * 2) * scaleFactor)
+                        .Contains(location))
+                        return true;
+                }
+            }
+
+            return false;
         }
 
 
@@ -53194,22 +53895,1266 @@ namespace AnonPDF
             // Refresh drawing to change highlighting
             pdfViewer.Invalidate();
             UpdateSearchNavigationButtons();
+            SyncFoundTabSelection();
         }
 
+        private void SyncFoundTabSelection()
+        {
+            if (_foundTreeUserInteracting) return;
+            if (foundTreeView == null || currentLocationIndex < 0 || currentLocationIndex >= searchLocations.Count) return;
+            TreeNode node = FindFoundLeafNode(searchLocations[currentLocationIndex]);
+            if (node == null) return;
+            foundTreeView.SelectedNode = node;
+            node.EnsureVisible();
+        }
+
+
+        // -----------------------------------------------------------------------
+        // Found tab — dynamic tab that appears when search / NER results are ready
+        // -----------------------------------------------------------------------
+
+        // TreeView subclass that suppresses the horizontal scrollbar entirely.
+        // When there are few results and only a horizontal scrollbar exists, Windows
+        // translates mouse-wheel messages into WM_HSCROLL, causing visual glitches.
+        private sealed class NoHScrollTreeView : TreeView
+        {
+            private const int WM_HSCROLL    = 0x0114;
+            private const int WM_VSCROLL    = 0x0115;
+            private const int WM_MOUSEWHEEL = 0x020A;
+            private const int SB_HORZ       = 0;
+            private const int SB_LINEUP     = 0;
+            private const int SB_LINEDOWN   = 1;
+            private const int SB_PAGEUP     = 2;
+            private const int SB_PAGEDOWN   = 3;
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            private static extern bool ShowScrollBar(IntPtr hWnd, int wBar, bool bShow);
+
+            [System.Runtime.InteropServices.DllImport("user32.dll")]
+            private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WM_HSCROLL)
+                    return; // suppress all horizontal scroll messages
+
+                if (m.Msg == WM_MOUSEWHEEL)
+                {
+                    // Native TreeView redirects wheel to horizontal scroll when there is no
+                    // vertical scrollbar. Intercept and force vertical-only scrolling.
+                    int delta = (short)((m.WParam.ToInt64() >> 16) & 0xFFFF);
+                    int lines = SystemInformation.MouseWheelScrollLines;
+                    if (lines < 0)
+                    {
+                        int code = delta > 0 ? SB_PAGEUP : SB_PAGEDOWN;
+                        SendMessage(Handle, WM_VSCROLL, (IntPtr)code, IntPtr.Zero);
+                    }
+                    else
+                    {
+                        int code = delta > 0 ? SB_LINEUP : SB_LINEDOWN;
+                        for (int i = 0; i < lines; i++)
+                            SendMessage(Handle, WM_VSCROLL, (IntPtr)code, IntPtr.Zero);
+                    }
+                    return;
+                }
+
+                base.WndProc(ref m);
+            }
+
+            protected override void OnHandleCreated(EventArgs e)
+            {
+                base.OnHandleCreated(e);
+                ShowScrollBar(Handle, SB_HORZ, false);
+            }
+
+            protected override void OnLayout(LayoutEventArgs levent)
+            {
+                base.OnLayout(levent);
+                if (IsHandleCreated)
+                    ShowScrollBar(Handle, SB_HORZ, false);
+            }
+        }
+
+        // Returns true when the click landed on a search-result highlight and was handled.
+        // The matching location is checked in the Found tab and GoToLocation is called.
+        private bool TryHandleSearchLocationCursorClick(Point location)
+        {
+            if (searchLocations == null || searchLocations.Count == 0) return false;
+
+            float viewX = location.X / scaleFactor;
+            float viewY = location.Y / scaleFactor;
+
+            for (int i = 0; i < searchLocations.Count; i++)
+            {
+                var loc = searchLocations[i];
+                if (loc.PageNumber != currentPage) continue;
+
+                int rotation = GetEffectiveRotationDegrees(currentPage);
+                var pdfRect = new System.Drawing.RectangleF(
+                    loc.Rect.GetX(), loc.Rect.GetY(),
+                    loc.Rect.GetWidth(), loc.Rect.GetHeight());
+                var vc = ConvertPdfToViewCoordinates(pdfRect, currentPage, rotation);
+
+                // Apply same zero-dimension fallback as the highlight drawing code
+                float vX = vc.X, vY = vc.Y, vW = vc.Width, vH = vc.Height;
+                if (vH < 1f && vW > 0f) { vH = vW * 0.2f; vY -= vH * 0.8f; }
+                else if (vW < 1f && vH > 0f) { vW = vH * 0.2f; vX -= vW * 0.8f; }
+
+                // Same padding formula as the drawing code
+                float pad = Math.Max(2f / scaleFactor, Math.Min(vW, vH) * 0.35f);
+
+                if (viewX < vX - pad || viewX > vX + vW + pad) continue;
+                if (viewY < vY - pad || viewY > vY + vH + pad) continue;
+
+                // Hit — update navigation state without re-centering the view
+                currentLocationIndex = i;
+                pdfViewer.Invalidate();
+                UpdateSearchNavigationButtons();
+                SyncFoundTabSelection();
+
+                // Check the corresponding Found-tab node (fires AfterCheck → adds RedactionBlock)
+                TreeNode node = FindFoundLeafNode(loc);
+                if (node != null && !node.Checked)
+                {
+                    node.Checked = true;
+                    foundTreeView?.Invalidate();
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        private TreeNode FindFoundLeafNode(TextLocation loc)
+        {
+            if (foundTreeView == null) return null;
+            foreach (TreeNode pageNode in foundTreeView.Nodes)
+                foreach (TreeNode leaf in pageNode.Nodes)
+                    if (ReferenceEquals(leaf.Tag, loc)) return leaf;
+            return null;
+        }
+
+        private void PreWarmNerDaemon()
+        {
+            // IsLocalNerAvailable → EnsurePluginCachedLocally may copy files from a network share.
+            // Run everything on a background thread so the UI is never blocked at startup.
+            string country = GetEffectiveCountry();
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    if (!PdfTextSearcher.IsLocalNerAvailable()) return;
+                    TryBeginInvokeOnUi(() => ShowIndexingStatus(LocalizedText("CacheStatus_NerPreWarm")));
+                    PdfTextSearcher.WarmUpNerDaemon(country);
+                }
+                catch { }
+                finally { TryBeginInvokeOnUi(HideIndexingStatus); }
+            });
+        }
+
+        private void InitializeCountryMenu()
+        {
+            countryToolStripMenuItem = new ToolStripMenuItem(LocalizedText("Menu_Country"));
+
+            countryAutoToolStripMenuItem = new ToolStripMenuItem(LocalizedText("Menu_Country_Auto"));
+            countryAutoToolStripMenuItem.Click += (_, __) => SetCountry(string.Empty);
+
+            countryPolandToolStripMenuItem = new ToolStripMenuItem(LocalizedText("Menu_Country_Poland"));
+            countryPolandToolStripMenuItem.Click += (_, __) => SetCountry("pl");
+
+            countryGermanyToolStripMenuItem = new ToolStripMenuItem(LocalizedText("Menu_Country_Germany"));
+            countryGermanyToolStripMenuItem.Click += (_, __) => SetCountry("de");
+
+            countryToolStripMenuItem.DropDownItems.AddRange(new ToolStripItem[]
+            {
+                countryAutoToolStripMenuItem,
+                new ToolStripSeparator(),
+                countryGermanyToolStripMenuItem,
+                countryPolandToolStripMenuItem,
+            });
+
+            // Insert right after languageToolStripMenuItem in the Options menu
+            int langIdx = menuOptionsItem.DropDownItems.IndexOf(languageToolStripMenuItem);
+            menuOptionsItem.DropDownItems.Insert(langIdx + 1, countryToolStripMenuItem);
+
+            // Apply current theme immediately (these items are created after the initial ApplyTheme call)
+            var theme = CurrentTheme;
+            countryToolStripMenuItem.ForeColor = theme.TextPrimaryColor;
+            countryToolStripMenuItem.BackColor = theme.SectionBackColor;
+            ApplyMenuItemTheme(countryToolStripMenuItem.DropDownItems, theme);
+
+            UpdateCountryMenuCheckmarks();
+        }
+
+        private void SetCountry(string countryCode)
+        {
+            Properties.Settings.Default.PreferredCountry = countryCode;
+            Properties.Settings.Default.Save();
+            UpdateCountryMenuCheckmarks();
+        }
+
+        private void UpdateCountryMenuCheckmarks()
+        {
+            if (countryAutoToolStripMenuItem == null) return;
+            string country = Properties.Settings.Default.PreferredCountry ?? string.Empty;
+            countryAutoToolStripMenuItem.Checked = string.IsNullOrEmpty(country);
+            countryPolandToolStripMenuItem.Checked = string.Equals(country, "pl", StringComparison.OrdinalIgnoreCase);
+            countryGermanyToolStripMenuItem.Checked = string.Equals(country, "de", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void SyncFilterRowHeightToTree()
+        {
+            if (foundTreeView == null || foundFilterListBox == null) return;
+            int treeH = foundTreeView.ItemHeight;
+            if (treeH <= 0 || treeH == foundFilterListBox.ItemHeight) return;
+            foundFilterListBox.ItemHeight = treeH;
+            if (foundFilterMasterPanel != null)
+                foundFilterMasterPanel.Height = treeH + 2;
+            ResizeFoundFilterPopup();
+        }
+
+        private void InitializeFoundTab()
+        {
+            foundTabPage = new TabPage(LocalizedText("UI_Tab_Found"));
+
+            foundButtonsPanel = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                Padding = new Padding(2),
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            };
+
+            foundToggleAllButton = new Button
+            {
+                Text = LocalizedText("Found_SelectAll"),
+                AutoSize = true,
+                FlatStyle = FlatStyle.Flat,
+            };
+            foundToggleAllButton.Click += FoundToggleAll_Click;
+            foundButtonsPanel.Controls.Add(foundToggleAllButton);
+
+            foundFilterDropButton = new Button
+            {
+                Text = LocalizedText("Found_FilterBtn") + " ▾",
+                AutoSize = true,
+                FlatStyle = FlatStyle.Flat,
+                Visible = false,
+                Margin = new Padding(4, 1, 2, 1),
+            };
+            foundFilterDropButton.Click += FoundFilterDropButton_Click;
+            foundButtonsPanel.Controls.Add(foundFilterDropButton);
+
+            // ── dropdown popup ──────────────────────────────────────────────
+            // Mirror WinForms TreeView auto-height formula: max(SmallIconSize+2, Font.Height+3).
+            // This keeps filter rows identical to tree rows at every DPI scale.
+            int itemRowH = Math.Max(SystemInformation.SmallIconSize.Height + 2, this.Font.Height + 3);
+
+            foundFilterMasterPanel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = itemRowH + 2,
+                Cursor = Cursors.Hand,
+            };
+            foundFilterMasterPanel.Paint     += FoundFilterMasterPanel_Paint;
+            foundFilterMasterPanel.MouseDown += (s, me) => { if (me.Button == MouseButtons.Left) FoundFilterMaster_Click(s, me); };
+
+            _foundFilterInvertItem = new ToolStripMenuItem(LocalizedText("Found_Filter_Invert"));
+            _foundFilterInvertItem.Click += (s, ev) => InvertFoundFilter();
+            var masterCtxMenu = new ContextMenuStrip();
+            masterCtxMenu.Items.Add(_foundFilterInvertItem);
+            foundFilterMasterPanel.ContextMenuStrip = masterCtxMenu;
+
+            foundFilterListBox = new ListBox
+            {
+                DrawMode = DrawMode.OwnerDrawFixed,
+                SelectionMode = SelectionMode.None,
+                HorizontalScrollbar = false,
+                IntegralHeight = false,
+                BorderStyle = BorderStyle.None,
+                Dock = DockStyle.Fill,
+                ItemHeight = itemRowH,
+                // ToolStripDropDown does not propagate the form font — set explicitly
+                // so text size matches the tree (which inherits via the form hierarchy).
+                Font = this.Font,
+            };
+            foundFilterListBox.DrawItem  += FoundFilterListBox_DrawItem;
+            foundFilterListBox.MouseDown += FoundFilterListBox_MouseDown;
+
+            foundFilterMasterPanel.Font = this.Font;
+
+            _foundFilterPopupPanel = new Panel { Padding = new Padding(2) };
+            // Fill first, then Top so master renders on top
+            _foundFilterPopupPanel.Controls.Add(foundFilterListBox);
+            _foundFilterPopupPanel.Controls.Add(foundFilterMasterPanel);
+
+            _foundFilterDropHost = new ToolStripControlHost(_foundFilterPopupPanel)
+            {
+                Padding = Padding.Empty,
+                Margin = Padding.Empty,
+                AutoSize = false,
+            };
+
+            foundFilterDropDown = new ToolStripDropDown { Padding = new Padding(1), DropShadowEnabled = true };
+            foundFilterDropDown.Items.Add(_foundFilterDropHost);
+
+            foundTreeView = new NoHScrollTreeView
+            {
+                Dock = DockStyle.Fill,
+                CheckBoxes = false,   // Checkboxy rysowane ręcznie przez DrawNode
+                HideSelection = false,
+                ShowLines = false,
+                ShowRootLines = false,
+                ShowPlusMinus = false,
+                DrawMode = TreeViewDrawMode.OwnerDrawAll,
+                Indent = 18,
+            };
+            foundTreeView.AfterCheck += FoundTreeView_AfterCheck;
+            foundTreeView.NodeMouseClick += FoundTreeView_NodeMouseClick;
+            foundTreeView.NodeMouseDoubleClick += FoundTreeView_NodeMouseDoubleClick;
+            foundTreeView.DrawNode += FoundTreeView_DrawNode;
+            foundTreeView.MouseClick += FoundTreeView_MouseClick;
+            foundTreeView.BeforeCollapse += (_, e2) => e2.Cancel = true;
+            // Sync filter ListBox row height to the tree's native ItemHeight once
+            // the tree handle is created (TVM_GETITEMHEIGHT gives the real value).
+            foundTreeView.HandleCreated += (s, ev) => SyncFilterRowHeightToTree();
+
+            var foundContextMenu = new ContextMenuStrip();
+            foundContextMenuEdit = new ToolStripMenuItem(LocalizedText("AltEdit_MenuEdit"));
+            foundContextMenuClear = new ToolStripMenuItem(LocalizedText("AltEdit_MenuClear"));
+            foundContextMenuEdit.Click += FoundContextMenu_Edit_Click;
+            foundContextMenuClear.Click += FoundContextMenu_Clear_Click;
+            foundContextMenu.Items.Add(foundContextMenuEdit);
+            foundContextMenu.Items.Add(foundContextMenuClear);
+            foundContextMenu.Opening += (s, ev) =>
+            {
+                var node = foundTreeView.GetNodeAt(foundTreeView.PointToClient(Cursor.Position));
+                bool isAltLeaf = node?.Tag is TextLocation tl && tl.Source == LocationSource.AltText;
+                foundContextMenuEdit.Visible = isAltLeaf;
+                foundContextMenuClear.Visible = isAltLeaf;
+                if (!isAltLeaf) { ev.Cancel = true; return; }
+
+                if (s is ContextMenuStrip m)
+                {
+                    m.Renderer = new ToolStripProfessionalRenderer(new ThemedColorTable(CurrentTheme));
+                    m.ForeColor = CurrentTheme.TextPrimaryColor;
+                    m.BackColor = CurrentTheme.WindowBackColor;
+                    foreach (ToolStripItem item in m.Items)
+                    {
+                        item.ForeColor = CurrentTheme.TextPrimaryColor;
+                        item.BackColor = CurrentTheme.WindowBackColor;
+                    }
+                }
+            };
+            foundTreeView.ContextMenuStrip = foundContextMenu;
+
+            // Add Fill first, then Top — WinForms renders Top over Fill
+            foundTabPage.Controls.Add(foundTreeView);
+            foundTabPage.Controls.Add(foundButtonsPanel);
+
+            // Apply current theme immediately (ApplyTheme runs before PDFForm_Load)
+            ApplyThemeToFoundTab(CurrentTheme);
+        }
+
+        private void ShowFoundTab()
+        {
+            if (!pagesTabControl.TabPages.Contains(foundTabPage))
+                pagesTabControl.TabPages.Insert(0, foundTabPage);
+            foundTabPage.Text = LocalizedText("UI_Tab_Found");
+            pagesTabControl.SelectedTab = foundTabPage;
+            // The tab may have been detached while UseWaitCursor=true (during LoadPdf) and
+            // missed the subsequent UseWaitCursor=false reset. Clear it explicitly now.
+            foundTabPage.UseWaitCursor = false;
+        }
+
+        private void HideFoundTab()
+        {
+            if (foundTabPage != null && pagesTabControl.TabPages.Contains(foundTabPage))
+                pagesTabControl.TabPages.Remove(foundTabPage);
+            foundTreeView?.Nodes.Clear();
+        }
+
+        private void PopulateFoundTab()
+        {
+            if (foundTreeView == null) return;
+
+            // Sort: page asc → top-to-bottom (Y desc in PDF coords) → left-to-right
+            searchLocations.Sort((a, b) =>
+            {
+                int pageCmp = a.PageNumber.CompareTo(b.PageNumber);
+                if (pageCmp != 0) return pageCmp;
+                float yDiff = b.Rect.GetY() - a.Rect.GetY();
+                if (Math.Abs(yDiff) > 4f) return yDiff > 0 ? 1 : -1;
+                return a.Rect.GetX().CompareTo(b.Rect.GetX());
+            });
+
+            UpdateFoundFilterPanel();
+            RebuildFoundTree(searchLocations);
+
+            if (searchLocations.Count > 0)
+                ShowFoundTab();
+            else
+                HideFoundTab();
+        }
+
+        private void RebuildFoundTree(List<TextLocation> locations)
+        {
+            if (foundTreeView == null) return;
+
+            foundTreeView.BeginUpdate();
+            foundTreeView.Nodes.Clear();
+
+            var byPage = locations
+                .GroupBy(loc => loc.PageNumber)
+                .OrderBy(g => g.Key);
+
+            string pageHeaderFmt = LocalizedText("Found_PageHeader");
+            string outOfBoundsFmt = LocalizedText("Found_GroupOutOfBounds");
+            string altTextFmt = LocalizedText("Found_GroupAltText");
+
+            foreach (var pageGroup in byPage)
+            {
+                int count = pageGroup.Count();
+                string pageLabel = string.Format(pageHeaderFmt, pageGroup.Key, count);
+                var pageNode = new TreeNode(pageLabel) { Tag = pageGroup.Key };
+
+                var normalLocs = pageGroup.Where(l => l.Source == LocationSource.Normal).ToList();
+                var oobLocs = pageGroup.Where(l => l.Source == LocationSource.OutOfBounds).ToList();
+                var altLocs = pageGroup.Where(l => l.Source == LocationSource.AltText).ToList();
+
+                foreach (var loc in normalLocs)
+                    pageNode.Nodes.Add(new TreeNode(MakeLeafNodeText(loc)) { Tag = loc });
+
+                if (oobLocs.Count > 0)
+                {
+                    var groupNode = new TreeNode(string.Format(outOfBoundsFmt, oobLocs.Count))
+                        { Tag = LocationSource.OutOfBounds };
+                    foreach (var loc in oobLocs)
+                        groupNode.Nodes.Add(new TreeNode(MakeLeafNodeText(loc)) { Tag = loc });
+                    groupNode.Expand();
+                    pageNode.Nodes.Add(groupNode);
+                }
+
+                if (altLocs.Count > 0)
+                {
+                    var groupNode = new TreeNode(string.Format(altTextFmt, altLocs.Count))
+                        { Tag = LocationSource.AltText };
+                    foreach (var loc in altLocs)
+                        groupNode.Nodes.Add(new TreeNode(MakeLeafNodeText(loc)) { Tag = loc });
+                    groupNode.Expand();
+                    pageNode.Nodes.Add(groupNode);
+                }
+
+                pageNode.Expand();
+                foundTreeView.Nodes.Add(pageNode);
+            }
+
+            foundTreeView.EndUpdate();
+            SyncFoundTabCheckboxFromBlocks();
+            BeginInvoke((Action)(() => foundTreeView.Refresh()));
+            UpdateToggleButtonText();
+        }
+
+        private string MakeLeafNodeText(TextLocation loc)
+        {
+            string text = loc.Label != null ? (loc.Text ?? loc.Label) : (loc.Text ?? "?");
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+            if (loc.Label != null)
+            {
+                string catName = GetFoundCategoryDisplayName(loc.Label);
+                string suffix = loc.HasMultipleLabels ? "…" : string.Empty;
+                return $"[{catName}{suffix}]  {text}";
+            }
+            return text;
+        }
+
+        private static ToolStripMenuItem MakeAltPreviewMenuItem(string line, bool continuationLine)
+        {
+            var item = new ToolStripMenuItem(line) { Enabled = false };
+            if (continuationLine)
+                item.Margin = new System.Windows.Forms.Padding(item.Margin.Left, 0, item.Margin.Right, item.Margin.Bottom);
+            return item;
+        }
+
+        private static IList<string> FormatAltTextForMenu(string altText)
+        {
+            if (string.IsNullOrEmpty(altText)) return new[] { string.Empty };
+            string s = System.Text.RegularExpressions.Regex.Replace(altText.Trim(), @"\s+", " ");
+            const int maxLine = 45;
+            if (s.Length <= maxLine) return new[] { s };
+            int cut = maxLine;
+            for (int i = maxLine; i > maxLine / 2; i--)
+                if (s[i] == ' ') { cut = i; break; }
+            string line1 = s.Substring(0, cut).TrimEnd();
+            string line2 = s.Substring(cut).TrimStart();
+            if (line2.Length > maxLine) line2 = line2.Substring(0, maxLine - 1) + "…";
+            return new[] { line1, line2 };
+        }
+
+        private void FoundTreeView_AfterCheck(object sender, TreeViewEventArgs e)
+        {
+            if (_suppressFoundCheck) return;
+            _suppressFoundCheck = true;
+            try
+            {
+                if (e.Node.Tag is int)
+                {
+                    // Page-level: propagate to all descendants
+                    foreach (TreeNode child in e.Node.Nodes)
+                    {
+                        child.Checked = e.Node.Checked;
+                        if (child.Tag is LocationSource)
+                        {
+                            foreach (TreeNode leaf in child.Nodes)
+                            {
+                                leaf.Checked = e.Node.Checked;
+                                ApplyFoundNodeCheck(leaf);
+                            }
+                        }
+                        else
+                        {
+                            ApplyFoundNodeCheck(child);
+                        }
+                    }
+                    return;
+                }
+                if (e.Node.Tag is LocationSource)
+                {
+                    // Sub-group: propagate to its leaves
+                    foreach (TreeNode leaf in e.Node.Nodes)
+                    {
+                        leaf.Checked = e.Node.Checked;
+                        ApplyFoundNodeCheck(leaf);
+                    }
+                    return;
+                }
+                ApplyFoundNodeCheck(e.Node);
+            }
+            finally
+            {
+                _suppressFoundCheck = false;
+            }
+        }
+
+        private void ApplyFoundNodeCheck(TreeNode node)
+        {
+            if (!(node.Tag is TextLocation loc)) return;
+
+            int rotation = GetEffectiveRotationDegrees(loc.PageNumber);
+            var pdfRect = new System.Drawing.RectangleF(
+                loc.Rect.GetX(), loc.Rect.GetY(),
+                loc.Rect.GetWidth(), loc.Rect.GetHeight());
+            var convertedRect = ConvertPdfToViewCoordinates(pdfRect, loc.PageNumber, rotation);
+
+            if (node.Checked)
+            {
+                bool exists = redactionBlocks.Any(rb =>
+                    rb.PageNumber == loc.PageNumber &&
+                    RectEquals(ConvertToItTextRectangle(rb.Bounds),
+                               ConvertToItTextRectangle(convertedRect), 0.5f));
+                if (!exists)
+                {
+                    var rb = CreateRedactionBlockWithAutomaticClassification(convertedRect, loc.PageNumber, false);
+                    rb.IsCursorSelection = true;
+                    redactionBlocks.Add(rb);
+                    InvalidateThumbnailRedactionOverlay(loc.PageNumber);
+                    TryComputeRedactionPreviewRects(rb);
+
+                    PageItemStatus pageStatus = allPageStatuses[loc.PageNumber - 1];
+                    pageStatus.HasSelections = true;
+                    if ((string)filterComboBox.SelectedItem == allComboItem)
+                    {
+                        ListViewItem lvItem = pagesListView.Items[loc.PageNumber - 1];
+                        UpdateItemTag(lvItem, loc.PageNumber, pageStatus.HasSelections,
+                            pageStatus.HasSearchResults, pageStatus.MarkedForDeletion, pageStatus.HasObjects);
+                        pagesListView.Invalidate(lvItem.Bounds);
+                    }
+                    else
+                    {
+                        ApplyFilter((string)filterComboBox.SelectedItem);
+                    }
+
+                    projectWasChangedAfterLastSave = true;
+                    saveProjectButton.Enabled = true;
+                    saveProjectMenuItem.Enabled = true;
+                }
+            }
+            else
+            {
+                var toRemove = redactionBlocks.FirstOrDefault(rb =>
+                    rb.PageNumber == loc.PageNumber &&
+                    RectEquals(ConvertToItTextRectangle(rb.Bounds),
+                               ConvertToItTextRectangle(convertedRect), 0.5f));
+                if (toRemove != null)
+                    RemoveRedactionBlock(toRemove);
+            }
+
+            UpdateSelectionNavigationButtons();
+            if (loc.PageNumber == currentPage)
+            {
+                RefreshRedactionPreviewForCurrentPage(keepCurrentOverlay: true);
+                pdfViewer.Invalidate();
+            }
+        }
+
+        private bool CheckLeafHasBlock(TreeNode leaf)
+        {
+            if (!(leaf.Tag is TextLocation loc)) return false;
+            int rotation = GetEffectiveRotationDegrees(loc.PageNumber);
+            var pdfRect = new System.Drawing.RectangleF(
+                loc.Rect.GetX(), loc.Rect.GetY(),
+                loc.Rect.GetWidth(), loc.Rect.GetHeight());
+            var convertedRect = ConvertPdfToViewCoordinates(pdfRect, loc.PageNumber, rotation);
+            return redactionBlocks.Any(rb =>
+                rb.PageNumber == loc.PageNumber &&
+                RectEquals(ConvertToItTextRectangle(rb.Bounds),
+                           ConvertToItTextRectangle(convertedRect), 0.5f));
+        }
+
+        private void SyncFoundTabCheckboxFromBlocks()
+        {
+            if (foundTreeView == null || _suppressFoundCheck) return;
+
+            _suppressFoundCheck = true;
+            try
+            {
+                foreach (TreeNode pageNode in foundTreeView.Nodes)
+                {
+                    bool pageAllChecked = pageNode.Nodes.Count > 0;
+                    foreach (TreeNode child in pageNode.Nodes)
+                    {
+                        if (child.Tag is LocationSource)
+                        {
+                            bool groupAllChecked = child.Nodes.Count > 0;
+                            foreach (TreeNode leaf in child.Nodes)
+                            {
+                                bool hasBlock = CheckLeafHasBlock(leaf);
+                                leaf.Checked = hasBlock;
+                                if (!hasBlock) groupAllChecked = false;
+                            }
+                            child.Checked = groupAllChecked;
+                            if (!groupAllChecked) pageAllChecked = false;
+                        }
+                        else
+                        {
+                            bool hasBlock = CheckLeafHasBlock(child);
+                            child.Checked = hasBlock;
+                            if (!hasBlock) pageAllChecked = false;
+                        }
+                    }
+                    pageNode.Checked = pageAllChecked;
+                }
+            }
+            finally
+            {
+                _suppressFoundCheck = false;
+                foundTreeView?.Invalidate();
+            }
+            UpdateToggleButtonText();
+        }
+
+        private void FoundTreeView_DrawNode(object sender, DrawTreeNodeEventArgs e)
+        {
+            UiThemePalette theme = CurrentTheme;
+            if (theme == null) { e.DrawDefault = true; return; }
+
+            TreeView tree = foundTreeView;
+            bool isSelected = (e.State & TreeNodeStates.Selected) != 0;
+            bool isPageNode = e.Node.Tag is int;
+            bool isGroupNode = e.Node.Tag is LocationSource;
+
+            int rowWidth = tree.ClientSize.Width;
+            var rowRect = new Rectangle(0, e.Bounds.Y, rowWidth, e.Bounds.Height);
+
+            System.Drawing.Color backColor = isSelected
+                ? theme.SelectionBackColor
+                : isPageNode
+                    ? BlendLayerPanelColor(theme.SectionBackColor, theme.PanelBackColor, 0.55f)
+                    : isGroupNode
+                        ? BlendLayerPanelColor(theme.SectionBackColor, theme.PanelBackColor, 0.30f)
+                        : theme.SectionBackColor;
+
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+            using (var brush = new SolidBrush(backColor))
+                e.Graphics.FillRectangle(brush, rowRect);
+
+            using (var pen = new Pen(theme.BorderColor, 1f))
+                e.Graphics.DrawLine(pen, 0, rowRect.Bottom - 1, rowWidth, rowRect.Bottom - 1);
+
+            // Manual layout — e.Bounds.Left is unreliable in OwnerDrawAll with CheckBoxes=false;
+            // calculate positions from node level and tree.Indent instead.
+            const int RowMargin = 4;
+            int cbSide = GetCheckBoxSide(tree.Font);
+            int indent = RowMargin + e.Node.Level * tree.Indent;
+
+            var cbRect = new Rectangle(indent, e.Bounds.Top, cbSide, e.Bounds.Height);
+            DrawThemedGridCheckBox(e.Graphics, cbRect, DataGridViewElementStates.None, e.Node.Checked, theme, tree.Font);
+
+            bool isOobNode = isGroupNode && e.Node.Tag is LocationSource oobTag && oobTag == LocationSource.OutOfBounds;
+            bool isOobLeaf = !isPageNode && !isGroupNode &&
+                             e.Node.Parent?.Tag is LocationSource parentSrc && parentSrc == LocationSource.OutOfBounds;
+
+            System.Drawing.Color textColor;
+            if (isSelected)
+                textColor = LayerCheckboxGetContrastColor(backColor);
+            else if (isOobNode || isOobLeaf)
+                textColor = theme.DangerBackColor;
+            else if (isPageNode || isGroupNode)
+                textColor = theme.TextSecondaryColor;
+            else
+                textColor = theme.TextPrimaryColor;
+
+            int textLeft = indent + cbSide + 4;
+            var textRect = new Rectangle(textLeft, e.Bounds.Top, Math.Max(0, rowWidth - textLeft - 4), e.Bounds.Height);
+            TextRenderer.DrawText(e.Graphics, e.Node.Text, tree.Font, textRect, textColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis);
+
+            if ((e.State & TreeNodeStates.Focused) != 0)
+            {
+                using (var focusPen = new Pen(theme.BorderColor, 1f) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dot })
+                    e.Graphics.DrawRectangle(focusPen, rowRect.X, rowRect.Y, rowRect.Width - 1, rowRect.Height - 2);
+            }
+        }
+
+        private bool IsFoundNodeCheckboxHit(TreeNode node, int x)
+        {
+            if (foundTreeView == null) return false;
+            const int RowMargin = 4;
+            int cbSide = GetCheckBoxSide(foundTreeView.Font);
+            int cbLeft = RowMargin + node.Level * foundTreeView.Indent;
+            return x >= cbLeft - 2 && x <= cbLeft + cbSide + 4;
+        }
+
+        private void FoundTreeView_MouseClick(object sender, MouseEventArgs e)
+        {
+            TreeNode node = foundTreeView.GetNodeAt(e.Location);
+            if (node == null || !IsFoundNodeCheckboxHit(node, e.X)) return;
+            node.Checked = !node.Checked;
+            foundTreeView.Invalidate();
+        }
+
+        private void FoundTreeView_NodeMouseClick(object sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (IsFoundNodeCheckboxHit(e.Node, e.X)) return; // checkbox — handled by MouseClick
+
+            _foundTreeUserInteracting = true;
+            try
+            {
+                if (e.Node.Tag is int pageNumber)
+                {
+                    int firstIdx = searchLocations.FindIndex(loc => loc.PageNumber == pageNumber);
+                    if (firstIdx >= 0) GoToLocation(firstIdx);
+                    return;
+                }
+
+                if (e.Node.Tag is LocationSource)
+                {
+                    // Sub-group: navigate to its first leaf location
+                    if (e.Node.Nodes.Count > 0 && e.Node.Nodes[0].Tag is TextLocation firstLoc)
+                    {
+                        int idx = searchLocations.IndexOf(firstLoc);
+                        if (idx >= 0) GoToLocation(idx);
+                    }
+                    return;
+                }
+
+                if (e.Node.Tag is TextLocation loc)
+                {
+                    int idx = searchLocations.IndexOf(loc);
+                    if (idx >= 0) GoToLocation(idx);
+                }
+            }
+            finally
+            {
+                _foundTreeUserInteracting = false;
+            }
+        }
+
+        private void FoundTreeView_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (e.Node?.Tag is TextLocation loc && loc.Source == LocationSource.AltText)
+                OpenAltTextEditDialog(e.Node, loc);
+        }
+
+        private void FoundContextMenu_Edit_Click(object sender, EventArgs e)
+        {
+            var node = foundTreeView.SelectedNode;
+            if (node?.Tag is TextLocation loc && loc.Source == LocationSource.AltText)
+                OpenAltTextEditDialog(node, loc);
+        }
+
+        private void FoundContextMenu_Clear_Click(object sender, EventArgs e)
+        {
+            var node = foundTreeView.SelectedNode;
+            if (node?.Tag is TextLocation loc && loc.Source == LocationSource.AltText)
+                ApplyAltTextEdit(node, loc, string.Empty);
+        }
+
+        private void OpenAltTextEditDialog(TreeNode node, TextLocation loc)
+        {
+            using (var dlg = new AltTextEditDialog(loc.Text ?? string.Empty))
+            {
+                dlg.ApplyDialogTheme(CreateDialogTheme());
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                ApplyAltTextEdit(node, loc, dlg.AltText);
+            }
+        }
+
+        private string PromptAltTextEdit(string currentText)
+        {
+            using (var dlg = new AltTextEditDialog(currentText ?? string.Empty))
+            {
+                dlg.ApplyDialogTheme(CreateDialogTheme());
+                return dlg.ShowDialog(this) == DialogResult.OK ? dlg.AltText : null;
+            }
+        }
+
+        private string GetObjectAltText(object obj)
+        {
+            if (obj is TextAnnotation ta) return ta.AltText;
+            if (obj is RasterObject ro) return ro.AltText;
+            if (obj is ArrowObject ao) return ao.AltText;
+            if (obj is VectorShapeObject vs) return vs.AltText;
+            if (obj is CommentAnnotation ca) return ca.AltText;
+            return null;
+        }
+
+        private void SetObjectAltText(object obj, string altText)
+        {
+            if (obj is TextAnnotation ta) ta.AltText = altText;
+            else if (obj is RasterObject ro) ro.AltText = altText;
+            else if (obj is ArrowObject ao) ao.AltText = altText;
+            else if (obj is VectorShapeObject vs) vs.AltText = altText;
+            else if (obj is CommentAnnotation ca) ca.AltText = altText;
+            else return;
+            projectWasChangedAfterLastSave = true;
+            saveProjectButton.Enabled = true;
+            saveProjectMenuItem.Enabled = true;
+        }
+
+        private void ApplyAltTextEdit(TreeNode node, TextLocation loc, string newText)
+        {
+            loc.Text = newText;
+            node.Text = MakeLeafNodeText(loc);
+            foundTreeView.Invalidate();
+
+            bool stored = false;
+            var entries = PdfTextSearcher.GetAltEntries(inputPdfPath);
+            if (entries != null)
+            {
+                var entry = entries.FirstOrDefault(e =>
+                    e.PageNumber == loc.PageNumber &&
+                    Math.Abs(e.BBox.GetX() - loc.Rect.GetX()) < 1f &&
+                    Math.Abs(e.BBox.GetY() - loc.Rect.GetY()) < 1f);
+                if (entry != null)
+                {
+                    entry.AltText = newText;
+                    PdfTextSearcher._pendingAltTextEdits[(inputPdfPath, entry.PositionKey)] = newText;
+                    stored = true;
+                }
+            }
+
+            // Fallback for untagged images (not in _altTextCache): find matching entry in _allFiguresCache
+            if (!stored && PdfTextSearcher._allFiguresCache.TryGetValue(inputPdfPath, out var allFigs) && allFigs != null)
+            {
+                var figEntry = allFigs.FirstOrDefault(f =>
+                    f.BBox != null &&
+                    f.PageNumber == loc.PageNumber &&
+                    Math.Abs(f.BBox.GetX() - loc.Rect.GetX()) < 2f &&
+                    Math.Abs(f.BBox.GetY() - loc.Rect.GetY()) < 2f);
+                if (figEntry != null)
+                    PdfTextSearcher._pendingAltTextEdits[(inputPdfPath, figEntry.PositionKey)] = newText;
+            }
+
+            projectWasChangedAfterLastSave = true;
+            saveProjectButton.Enabled = true;
+            saveProjectMenuItem.Enabled = true;
+        }
+
+        private void FoundToggleAll_Click(object sender, EventArgs e)
+        {
+            SetAllFoundChecked(IsAnyLeafUnchecked());
+        }
+
+        private bool IsAnyLeafUnchecked()
+        {
+            if (foundTreeView == null) return false;
+            foreach (TreeNode page in foundTreeView.Nodes)
+                foreach (TreeNode child in page.Nodes)
+                {
+                    if (child.Tag is LocationSource)
+                    {
+                        if (child.Nodes.Cast<TreeNode>().Any(l => !l.Checked)) return true;
+                    }
+                    else if (!child.Checked) return true;
+                }
+            return false;
+        }
+
+        private void UpdateToggleButtonText()
+        {
+            if (foundToggleAllButton == null) return;
+            foundToggleAllButton.Text = IsAnyLeafUnchecked()
+                ? LocalizedText("Found_SelectAll")
+                : LocalizedText("Found_DeselectAll");
+        }
+
+        private void SetAllFoundChecked(bool check)
+        {
+            if (foundTreeView == null) return;
+            _suppressFoundCheck = true;
+            try
+            {
+                foreach (TreeNode page in foundTreeView.Nodes)
+                {
+                    page.Checked = check;
+                    foreach (TreeNode child in page.Nodes)
+                    {
+                        child.Checked = check;
+                        if (child.Tag is LocationSource)
+                        {
+                            foreach (TreeNode leaf in child.Nodes)
+                                leaf.Checked = check;
+                        }
+                    }
+                }
+
+                // Apply block changes while suppress is still active so that
+                // SyncFoundTabCheckboxFromBlocks() inside RemoveRedactionBlock
+                // cannot re-check nodes whose blocks haven't been removed yet.
+                foreach (TreeNode page in foundTreeView.Nodes)
+                    foreach (TreeNode child in page.Nodes)
+                    {
+                        if (child.Tag is LocationSource)
+                        {
+                            foreach (TreeNode leaf in child.Nodes)
+                                ApplyFoundNodeCheck(leaf);
+                        }
+                        else
+                        {
+                            ApplyFoundNodeCheck(child);
+                        }
+                    }
+            }
+            finally { _suppressFoundCheck = false; }
+
+            // Single sync pass now that all blocks have been added/removed.
+            SyncFoundTabCheckboxFromBlocks();
+
+            renderTimer.Stop();
+            renderTimer.Start();
+            pdfViewer.Invalidate();
+        }
+
+        // ── Filter panel ────────────────────────────────────────────────────────
+
+        private const string FoundCategoryKey_Text = "$Text";
+        private const string FoundCategoryKey_OutOfBounds = "$OutOfBounds";
+        private const string FoundCategoryKey_AltText = "$AltText";
+
+        private static string GetFoundCategoryKey(TextLocation loc)
+        {
+            if (loc.Source == LocationSource.OutOfBounds) return FoundCategoryKey_OutOfBounds;
+            if (loc.Source == LocationSource.AltText) return FoundCategoryKey_AltText;
+            return loc.Label ?? FoundCategoryKey_Text;
+        }
+
+        private string GetFoundCategoryDisplayName(string key)
+        {
+            switch (key)
+            {
+                case FoundCategoryKey_Text:        return LocalizedText("Found_Filter_Search");
+                case FoundCategoryKey_OutOfBounds: return LocalizedText("Found_Filter_OutOfBounds");
+                case FoundCategoryKey_AltText:     return LocalizedText("Found_Filter_AltText");
+            }
+            string scopeResKey = NerLabelToScopeKey(key);
+            if (scopeResKey != null)
+            {
+                string s = LocalizedText(scopeResKey);
+                if (!string.IsNullOrEmpty(s) && s != scopeResKey) return s;
+            }
+            return key;
+        }
+
+        private static string NerLabelToScopeKey(string label)
+        {
+            switch (label)
+            {
+                case "PERSON":
+                case "PER":
+                case "persName":      return "Scope_SCOPE_PERSON";
+                case "LOCATION":
+                case "LOC":
+                case "GPE":
+                case "placeName":
+                case "geogName":      return "Scope_SCOPE_LOCATION";
+                case "ORG":
+                case "ORGANIZATION":  return "Scope_SCOPE_ORG";
+                case "PESEL":         return "Scope_SCOPE_PESEL";
+                case "NIP":           return "Scope_SCOPE_NIP";
+                case "REGON":         return "Scope_SCOPE_REGON";
+                case "KRS":           return "Scope_SCOPE_KRS";
+                case "KW":            return "Scope_SCOPE_LAND_REGISTRY";
+                case "IDENTITY_CARD": return "Scope_SCOPE_IDENTITY_CARD";
+                case "POSTAL_CODE":   return "Scope_SCOPE_POSTAL_CODE";
+                case "EMAIL":         return "Scope_SCOPE_EMAIL";
+                case "PHONE":         return "Scope_SCOPE_PHONE";
+                case "URL":           return "Scope_SCOPE_URL";
+                case "BANK_ACCOUNT":  return "Scope_SCOPE_BANK_ACCOUNT";
+                case "VIN":           return "Scope_SCOPE_VIN";
+                case "DATE":
+                case "TIME":          return "Scope_SCOPE_DATE";
+                case "MONEY":
+                case "AMOUNT":        return "Scope_SCOPE_AMOUNT";
+                case "LOAN_NUMBER":   return "Scope_SCOPE_LOAN_NUMBER";
+                default:              return null;
+            }
+        }
+
+        private void UpdateFoundFilterPanel()
+        {
+            if (foundFilterListBox == null) return;
+            _suppressFilterChange = true;
+            try
+            {
+                foundFilterListBox.Items.Clear();
+
+                var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+                foreach (var loc in searchLocations)
+                {
+                    string key = GetFoundCategoryKey(loc);
+                    counts.TryGetValue(key, out int c);
+                    counts[key] = c + 1;
+                }
+
+                _foundActiveCategories = new HashSet<string>(counts.Keys, StringComparer.Ordinal);
+
+                var orderedKeys = counts.Keys
+                    .Where(k => !k.StartsWith("$")).OrderBy(k => k)
+                    .Concat(counts.Keys.Where(k => k.StartsWith("$")).OrderBy(k => k));
+
+                foreach (string key in orderedKeys)
+                    foundFilterListBox.Items.Add(
+                        new FoundFilterItem(key, $"{GetFoundCategoryDisplayName(key)} ({counts[key]})"));
+
+                _foundFilterMasterState = CheckState.Checked;
+                foundFilterMasterPanel?.Invalidate();
+
+                if (foundFilterDropButton != null)
+                    foundFilterDropButton.Visible = counts.Count > 1;
+
+                ResizeFoundFilterPopup();
+                UpdateFoundFilterButtonText();
+            }
+            finally
+            {
+                _suppressFilterChange = false;
+            }
+        }
+
+        private void ResizeFoundFilterPopup()
+        {
+            if (foundFilterListBox == null || _foundFilterPopupPanel == null) return;
+
+            int itemH   = foundFilterListBox.ItemHeight;
+            int visible = Math.Max(1, Math.Min(foundFilterListBox.Items.Count, 10));
+            int listH   = visible * itemH;
+            int masterH = foundFilterMasterPanel?.Height ?? (itemH + 2);
+
+            int textW = ScaleForDpiStatic(140);
+            if (foundFilterListBox.Items.Count > 0)
+            {
+                using (var g = foundFilterListBox.CreateGraphics())
+                {
+                    foreach (FoundFilterItem fi in foundFilterListBox.Items)
+                    {
+                        int w = TextRenderer.MeasureText(g, fi.ToString(),
+                            foundFilterListBox.Font, Size.Empty,
+                            TextFormatFlags.SingleLine).Width;
+                        if (w > textW) textW = w;
+                    }
+                }
+            }
+            int popupW = textW + ScaleForDpiStatic(36);  // checkbox glyph + left margin
+            int popupH = masterH + listH + _foundFilterPopupPanel.Padding.Vertical;
+
+            _foundFilterPopupPanel.Size = new Size(popupW, popupH);
+            _foundFilterDropHost.Size   = _foundFilterPopupPanel.Size;
+        }
+
+        private int FoundFilterActiveCount() =>
+            foundFilterListBox == null ? 0 :
+            foundFilterListBox.Items.Cast<FoundFilterItem>()
+                .Count(fi => _foundActiveCategories.Contains(fi.Key));
+
+        private void UpdateFoundFilterButtonText()
+        {
+            if (foundFilterDropButton == null || foundFilterListBox == null) return;
+            int total  = foundFilterListBox.Items.Count;
+            int active = FoundFilterActiveCount();
+            string label = LocalizedText("Found_FilterBtn");
+            foundFilterDropButton.Text = (total == 0 || active == total)
+                ? label + " ▾"
+                : $"{label} ({active}/{total}) ▾";
+        }
+
+        private void ApplyFoundFilter()
+        {
+            if (_suppressFilterChange) return;
+            UpdateFoundFilterMasterState();
+            var filtered = searchLocations
+                .Where(loc => _foundActiveCategories.Contains(GetFoundCategoryKey(loc)))
+                .ToList();
+            RebuildFoundTree(filtered);
+            UpdateFoundFilterButtonText();
+        }
+
+        private void UpdateFoundFilterMasterState()
+        {
+            if (foundFilterListBox == null) return;
+            int total  = foundFilterListBox.Items.Count;
+            int active = FoundFilterActiveCount();
+            if (total == 0) return;
+            _foundFilterMasterState =
+                active == total ? CheckState.Checked :
+                active == 0    ? CheckState.Unchecked :
+                                 CheckState.Indeterminate;
+            foundFilterMasterPanel?.Invalidate();
+        }
+
+        private void FoundFilterDropButton_Click(object sender, EventArgs e)
+        {
+            if (foundFilterDropDown == null || foundFilterDropButton == null) return;
+            ApplyThemeToFoundTab(CurrentTheme);
+            var pt = foundFilterDropButton.PointToScreen(new Point(0, foundFilterDropButton.Height));
+            foundFilterDropDown.Show(pt);
+            foundFilterListBox?.Focus();
+        }
+
+        private void FoundFilterListBox_MouseDown(object sender, MouseEventArgs e)
+        {
+            if (_suppressFilterChange || foundFilterListBox == null) return;
+            int idx = foundFilterListBox.IndexFromPoint(e.Location);
+            if (idx < 0 || idx >= foundFilterListBox.Items.Count) return;
+            if (!(foundFilterListBox.Items[idx] is FoundFilterItem fi)) return;
+
+            if (_foundActiveCategories.Contains(fi.Key)) _foundActiveCategories.Remove(fi.Key);
+            else _foundActiveCategories.Add(fi.Key);
+
+            foundFilterListBox.Invalidate(foundFilterListBox.GetItemRectangle(idx));
+            UpdateFoundFilterMasterState();
+            ApplyFoundFilter();
+        }
+
+        private void FoundFilterMasterPanel_Paint(object sender, PaintEventArgs e)
+        {
+            var theme = CurrentTheme;
+            if (theme == null || foundFilterMasterPanel == null) return;
+            var bounds = foundFilterMasterPanel.ClientRectangle;
+            using (var brush = new SolidBrush(theme.SectionBackColor))
+                e.Graphics.FillRectangle(brush, bounds);
+            using (var pen = new Pen(theme.BorderColor, 1f))
+                e.Graphics.DrawLine(pen, 0, bounds.Bottom - 1, bounds.Width, bounds.Bottom - 1);
+            int cbSide = GetCheckBoxSide(foundFilterMasterPanel.Font);
+            var cbRect = new Rectangle(4, (bounds.Height - cbSide) / 2, cbSide, cbSide);
+            DrawThemedGridCheckBox(e.Graphics, cbRect, DataGridViewElementStates.None,
+                _foundFilterMasterState, theme, foundFilterMasterPanel.Font);
+            var textRect = new Rectangle(cbRect.Right + 4, 0,
+                bounds.Width - cbRect.Right - 6, bounds.Height);
+            TextRenderer.DrawText(e.Graphics, LocalizedText("Found_Filter_All"),
+                foundFilterMasterPanel.Font, textRect, theme.TextPrimaryColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+        }
+
+        private void FoundFilterListBox_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0 || foundFilterListBox == null) return;
+            var theme = CurrentTheme;
+            if (theme == null) { e.DrawBackground(); return; }
+
+            if (!(foundFilterListBox.Items[e.Index] is FoundFilterItem fi)) return;
+            bool isChecked = _foundActiveCategories.Contains(fi.Key);
+
+            // Row background
+            using (var brush = new SolidBrush(theme.SectionBackColor))
+                e.Graphics.FillRectangle(brush, e.Bounds);
+
+            // Separator line
+            using (var pen = new Pen(theme.BorderColor, 1f))
+                e.Graphics.DrawLine(pen, e.Bounds.Left, e.Bounds.Bottom - 1,
+                    e.Bounds.Right, e.Bounds.Bottom - 1);
+
+            // Checkbox glyph — same method as tree/layers
+            int cbSide  = GetCheckBoxSide(e.Font);
+            int cbLeft  = e.Bounds.Left + 4;
+            var cbRect  = new Rectangle(cbLeft, e.Bounds.Top, cbSide + 4, e.Bounds.Height);
+            DrawThemedGridCheckBox(e.Graphics, cbRect, DataGridViewElementStates.None,
+                isChecked, theme, e.Font);
+
+            // Label text
+            var textRect = new Rectangle(cbRect.Right + 2, e.Bounds.Top,
+                e.Bounds.Right - cbRect.Right - 4, e.Bounds.Height);
+            TextRenderer.DrawText(e.Graphics, fi.ToString(), e.Font, textRect,
+                theme.TextPrimaryColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
+        }
+
+        private void FoundFilterMaster_Click(object sender, EventArgs e)
+        {
+            if (_suppressFilterChange || foundFilterListBox == null) return;
+            bool check = FoundFilterActiveCount() < foundFilterListBox.Items.Count;
+            if (check)
+                foreach (FoundFilterItem fi in foundFilterListBox.Items)
+                    _foundActiveCategories.Add(fi.Key);
+            else
+                _foundActiveCategories.Clear();
+
+            _foundFilterMasterState = check ? CheckState.Checked : CheckState.Unchecked;
+            foundFilterMasterPanel?.Invalidate();
+            foundFilterListBox.Invalidate();
+            ApplyFoundFilter();
+        }
+
+        private void InvertFoundFilter()
+        {
+            if (foundFilterListBox == null) return;
+            foreach (FoundFilterItem fi in foundFilterListBox.Items)
+            {
+                if (_foundActiveCategories.Contains(fi.Key)) _foundActiveCategories.Remove(fi.Key);
+                else _foundActiveCategories.Add(fi.Key);
+            }
+            foundFilterListBox.Invalidate();
+            UpdateFoundFilterMasterState();
+            ApplyFoundFilter();
+        }
+
+        private sealed class FoundFilterItem
+        {
+            public string Key { get; }
+            private readonly string _display;
+            public FoundFilterItem(string key, string display) { Key = key; _display = display; }
+            public override string ToString() => _display;
+        }
+
+        // -----------------------------------------------------------------------
 
         private async void SearchText()
         {
             string search = searchTextBox.Text.Trim();
             if (!string.IsNullOrEmpty(search))
             {
+                CancelDeferredBusyCursorForPdfViewerPaint();
                 ClearSearchResult();
-                //this.Cursor = Cursors.WaitCursor;
                 groupBoxSearch.Enabled = false;
                 searchLocations = await Task.Run(() => PdfTextSearcher.FindTextLocations(inputPdfPath, search, false, userPassword, this));
                 groupBoxSearch.Enabled = true;
                 searchTextBox.SelectAll();
                 searchTextBox.Focus();
                 searchResultLabel.Text = LocalizedFormat("Search_ResultCount", searchLocations.Count);
+                foreach (var loc in searchLocations)
+                    if (loc.Text == null) loc.Text = search;
 
                 // Collect unique pages to avoid thousands of per-result ListView updates
                 // which would freeze the UI thread on large documents.
@@ -53247,6 +55192,7 @@ namespace AnonPDF
                 }
 
                 pdfViewer.Invalidate();
+                PopulateFoundTab();
                 if (searchLocations.Count == 0)
                 {
                     MessageBox.Show(this, string.Format(Resources.Msg_SearchNotFound, search), Resources.Title_Info, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -53366,12 +55312,41 @@ namespace AnonPDF
 
         private async void PersonalDataButton_Click(object sender, EventArgs e)
         {
+            // Release any pending render-busy cursor from LoadPdf so GoToLocation
+            // below doesn't inherit UseWaitCursor=true and bleed it into foundTreeView.
+            CancelDeferredBusyCursorForPdfViewerPaint();
+            BeginBusyCursor();
             personalDataButton.Enabled = false;
             ClearSearchResult();
 
+            // Cancel any previous personal-data search still in progress
+            _personalDataCts?.Cancel();
+            _personalDataCts?.Dispose();
+            _personalDataCts = new System.Threading.CancellationTokenSource();
+            var pdToken = _personalDataCts.Token;
+
+            try
+            {
+            var cached = PdfTextSearcher.GetPersonalDataCache(inputPdfPath);
+            if (cached != null)
+            {
+                searchLocations = new List<TextLocation>(cached);
+            }
+            else
+            {
+                groupBoxSearch.Enabled = false;
+                searchLocations = await Task.Run(() => PdfTextSearcher.FindTextLocations(inputPdfPath, "", true, userPassword, cancellationToken: pdToken), pdToken);
+                groupBoxSearch.Enabled = true;
+            }
+
+            // Run PII detection on ALT texts (may use NER daemon → must stay off UI thread)
+            pdToken.ThrowIfCancellationRequested();
             groupBoxSearch.Enabled = false;
-            searchLocations = await Task.Run(() => PdfTextSearcher.FindTextLocations(inputPdfPath, "", true, userPassword, this));
+            var altLocsWithPii = await Task.Run(() => PdfTextSearcher.GetAltTextLocationsForPersonalData(inputPdfPath, pdToken), pdToken);
             groupBoxSearch.Enabled = true;
+            if (altLocsWithPii.Count > 0)
+                searchLocations.AddRange(altLocsWithPii);
+
             searchResultLabel.Text = LocalizedFormat("Search_ResultCount", searchLocations.Count);
 
             // Batch update: collect unique pages first to avoid per-result ListView calls
@@ -53410,6 +55385,7 @@ namespace AnonPDF
 
             personalDataButton.Enabled = true;
             pdfViewer.Invalidate();
+            PopulateFoundTab();
             if (searchLocations.Count == 0)
             {
                 MessageBox.Show(this, Resources.Msg_NoIdentifiersFound, Resources.Title_Info, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -53417,10 +55393,19 @@ namespace AnonPDF
             }
             else
             {
-
                 GoToLocation(0);
             }
-
+            } // end try
+            catch (OperationCanceledException)
+            {
+                // Cancelled because a new file was opened — quietly restore UI state
+                groupBoxSearch.Enabled = true;
+                personalDataButton.Enabled = true;
+            }
+            finally
+            {
+                EndBusyCursor();
+            }
         }
 
         private void ClearSearchResult()
@@ -53450,7 +55435,7 @@ namespace AnonPDF
             {
                 ApplyFilter((string)filterComboBox.SelectedItem);
             }
-
+            HideFoundTab();
         }
 
 
@@ -53918,6 +55903,7 @@ namespace AnonPDF
             renderTimer.Stop();
             renderTimer.Start();
             pdfViewer.Invalidate();
+            SyncFoundTabCheckboxFromBlocks();
         }
 
         private static bool RectEquals(iText.Kernel.Geom.Rectangle rect1, iText.Kernel.Geom.Rectangle rect2, float tolerance = 0.01f)
@@ -54062,6 +56048,58 @@ namespace AnonPDF
 
 
 
+        // Returns text from already-indexed OCR lines that overlap the given PDF-space rect.
+        // Used as a fast, rotation-safe alternative to re-running OCR on a cropped bitmap.
+        private string GetCachedTextInRect(string pdfPath, int pageNumber, RectangleF pdfRect)
+        {
+            var lines = PdfTextSearcher.GetCachedLines(pdfPath);
+            if (lines == null || lines.Count == 0) return null;
+
+            float rx1 = pdfRect.Left, ry1 = pdfRect.Top;
+            float rx2 = pdfRect.Right, ry2 = pdfRect.Bottom;
+
+            var sb = new System.Text.StringBuilder();
+            foreach (var line in lines
+                .Where(l => l.PageNumber == pageNumber)
+                .OrderBy(l => l.YPosition))
+            {
+                if (line.OcrWordBounds != null && line.OcrWordBounds.Count > 0)
+                {
+                    // OCR line — collect individual words inside the rect
+                    var wordTexts = new List<string>();
+                    var words = line.OcrWords ?? new List<PdfTextSearcher.OcrWordInfo>();
+                    for (int wi = 0; wi < line.OcrWordBounds.Count; wi++)
+                    {
+                        var wb = line.OcrWordBounds[wi];
+                        float wx1 = (float)wb.GetX(), wy1 = (float)wb.GetY();
+                        float wx2 = wx1 + (float)wb.GetWidth();
+                        float wy2 = wy1 + (float)wb.GetHeight();
+                        if (wx2 < rx1 || wx1 > rx2 || wy2 < ry1 || wy1 > ry2) continue;
+                        if (wi < words.Count && words[wi] != null)
+                            wordTexts.Add(words[wi].Text ?? string.Empty);
+                    }
+                    if (wordTexts.Count > 0)
+                    {
+                        if (sb.Length > 0) sb.Append(' ');
+                        sb.Append(string.Join(" ", wordTexts));
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(line.Text))
+                {
+                    // Native-text line — check line bounding box
+                    if (line.Characters == null || line.Characters.Count == 0) continue;
+                    float lx1 = line.Characters.Min(c => c.BoundingBox != null ? (float)c.BoundingBox.GetX() : float.MaxValue);
+                    float ly1 = line.Characters.Min(c => c.BoundingBox != null ? (float)c.BoundingBox.GetY() : float.MaxValue);
+                    float lx2 = line.Characters.Max(c => c.BoundingBox != null ? (float)(c.BoundingBox.GetX() + c.BoundingBox.GetWidth()) : float.MinValue);
+                    float ly2 = line.Characters.Max(c => c.BoundingBox != null ? (float)(c.BoundingBox.GetY() + c.BoundingBox.GetHeight()) : float.MinValue);
+                    if (lx2 < rx1 || lx1 > rx2 || ly2 < ry1 || ly1 > ry2) continue;
+                    if (sb.Length > 0) sb.Append(' ');
+                    sb.Append(line.Text.Trim());
+                }
+            }
+            return sb.Length > 0 ? sb.ToString() : null;
+        }
+
         public string ExtractTextFromRectangle(string pdfPath, RedactionBlock block)
         {
             var props = new ReaderProperties();
@@ -54140,6 +56178,22 @@ namespace AnonPDF
                         string text = ExtractTextFromRectangle(inputPdfPath, block);
                         LogOcrDiagnostic(
                             $"Copy selection extracted text index={blockIndex} page={block.PageNumber} textLength={(text ?? string.Empty).Length}");
+
+                        if (string.IsNullOrWhiteSpace(text))
+                        {
+                            // Try cached OCR lines first — avoids re-running OCR on a
+                            // cropped bitmap which may be rotated (e.g. auto-rotated scan).
+                            // block.Bounds is in view/screen space; cached lines use PDF space (bottom-left origin),
+                            // so convert first.
+                            var blockRot = GetEffectiveRotationDegrees(block.PageNumber);
+                            var blockPdfBounds = ConvertToPdfCoordinates(block.Bounds, block.PageNumber, blockRot);
+                            text = GetCachedTextInRect(inputPdfPath, block.PageNumber, blockPdfBounds);
+                            if (!string.IsNullOrWhiteSpace(text))
+                            {
+                                LogOcrDiagnostic(
+                                    $"Copy selection cached-lines hit index={blockIndex} page={block.PageNumber} textLength={text.Length}");
+                            }
+                        }
 
                         if (string.IsNullOrWhiteSpace(text))
                         {
@@ -54361,7268 +56415,6 @@ namespace AnonPDF
         private void ExportGraphicsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             ExportAllImagesToSourceFolder(inputPdfPath);
-        }
-    }
-
-    public enum TextLeaderAnchorKind
-    {
-        TopLeft,
-        TopCenter,
-        TopRight,
-        RightCenter,
-        BottomRight,
-        BottomCenter,
-        BottomLeft,
-        LeftCenter
-    }
-
-    public class TextAnnotation
-    {
-        public string Id { get; set; }
-
-        public int PageNumber { get; set; }
-
-        public string LayerId { get; set; }
-
-        public string AnnotationText { get; set; }
-
-        public Font AnnotationFont { get; set; }
-
-        public System.Drawing.Color AnnotationColor { get; set; }
-
-        public int AnnotationBackgroundColorArgb { get; set; }
-
-        public int AnnotationBorderColorArgb { get; set; }
-
-        public float AnnotationBorderWidth { get; set; }
-
-        public float AnnotationFrameMargin { get; set; }
-
-        public bool HasLeaderArrow { get; set; }
-
-        public float LeaderLineWidth { get; set; }
-
-        public TextLeaderAnchorKind LeaderAnchorKind { get; set; }
-
-        public PointF LeaderEndPoint { get; set; }
-
-        public float LeaderHeadLength { get; set; }
-
-        public float LeaderHeadWidth { get; set; }
-
-        public string AnnotationContentMode { get; set; }
-
-        public string AnnotationRichText { get; set; }
-
-        public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
-
-        public int AnnotationRotation { get; set; }
-
-        public RectangleF AnnotationBounds { get; set; }
-
-        public bool AnnotationIsLocked { get; set; }
-
-        public string DuplicateGroupId { get; set; }
-
-        public DateTime CreatedAtUtc { get; set; }
-
-        public DateTime UpdatedAtUtc { get; set; }
-
-        [JsonIgnore]
-        public string RichContentSizeCacheKey { get; set; }
-
-        [JsonIgnore]
-        public SizeF RichContentSizeCacheValue { get; set; }
-
-        [JsonIgnore]
-        public string CachedRichContentSizeKey { get; set; }
-
-        [JsonIgnore]
-        public SizeF CachedRichContentSize { get; set; }
-
-        [JsonIgnore]
-        public bool HasCachedRichContentSize { get; set; }
-
-        [JsonIgnore]
-        public string CachedRichPreviewBitmapKey { get; set; }
-
-        [JsonIgnore]
-        public Bitmap CachedRichPreviewBitmap { get; set; }
-
-        [JsonIgnore]
-        public Rectangle CachedRichPreviewSourceRect { get; set; }
-
-        [JsonIgnore]
-        public bool HasCachedRichPreviewSourceRect { get; set; }
-
-        [JsonIgnore]
-        public bool CachedRichPreviewIncludesFrame { get; set; }
-
-        [JsonIgnore]
-        public string CachedRichPreviewFrameKey { get; set; }
-
-        [JsonIgnore]
-        public RectangleF CachedRichPreviewFrameLocalPx { get; set; }
-
-        [JsonIgnore]
-        public bool HasCachedRichPreviewFrameLocalPx { get; set; }
-
-        [JsonIgnore]
-        public string CachedRichHtmlRenderKey { get; set; }
-
-        [JsonIgnore]
-        public byte[] CachedRichHtmlRenderPdfBytes { get; set; }
-
-        [JsonIgnore]
-        public RectangleF CachedRichHtmlRenderFrameRectTopDownPt { get; set; }
-
-        [JsonIgnore]
-        public float CachedRichHtmlRenderSourceWidthPt { get; set; }
-
-        [JsonIgnore]
-        public float CachedRichHtmlRenderSourceHeightPt { get; set; }
-
-        [JsonIgnore]
-        public float CachedRichHtmlRenderTargetWidthPt { get; set; }
-
-        [JsonIgnore]
-        public float CachedRichHtmlRenderTargetHeightPt { get; set; }
-
-        [JsonIgnore]
-        public float MeasuredAtDpi { get; set; }
-
-        public TextAnnotation()
-        {
-            Id = Guid.NewGuid().ToString("N");
-            PageNumber = 1;
-            LayerId = PDFForm.DefaultLayerId;
-            AnnotationText = "";
-            AnnotationFont = new Font("Arial", 12);
-            AnnotationColor = System.Drawing.Color.Black;
-            AnnotationBackgroundColorArgb = System.Drawing.Color.Transparent.ToArgb();
-            AnnotationBorderColorArgb = System.Drawing.Color.Black.ToArgb();
-            AnnotationBorderWidth = 0f;
-            AnnotationFrameMargin = 0f;
-            HasLeaderArrow = false;
-            LeaderLineWidth = 1.5f;
-            LeaderAnchorKind = TextLeaderAnchorKind.RightCenter;
-            LeaderEndPoint = PointF.Empty;
-            LeaderHeadLength = PDFForm.DefaultArrowHeadLength;
-            LeaderHeadWidth = PDFForm.DefaultArrowHeadWidth;
-            AnnotationContentMode = "plain";
-            AnnotationRichText = null;
-            AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Left; // Default left alignment
-            AnnotationRotation = 0;
-            AnnotationBounds = new RectangleF(0, 0, 100, 30); // Example rectangular area
-            AnnotationIsLocked = false;
-            DuplicateGroupId = null;
-            CreatedAtUtc = DateTime.MinValue;
-            UpdatedAtUtc = DateTime.MinValue;
-        }
-
-
-        public TextAnnotation(int pageNumber, string text, Font font, System.Drawing.Color color, System.Windows.Forms.HorizontalAlignment alignment, RectangleF bounds, bool isLocked = false)
-        {
-            Id = Guid.NewGuid().ToString("N");
-            PageNumber = pageNumber;
-            LayerId = PDFForm.DefaultLayerId;
-            AnnotationText = text;
-            AnnotationFont = font;
-            AnnotationColor = color;
-            AnnotationBackgroundColorArgb = System.Drawing.Color.Transparent.ToArgb();
-            AnnotationBorderColorArgb = System.Drawing.Color.Black.ToArgb();
-            AnnotationBorderWidth = 0f;
-            AnnotationFrameMargin = 0f;
-            HasLeaderArrow = false;
-            LeaderLineWidth = 1.5f;
-            LeaderAnchorKind = TextLeaderAnchorKind.RightCenter;
-            LeaderEndPoint = PointF.Empty;
-            LeaderHeadLength = PDFForm.DefaultArrowHeadLength;
-            LeaderHeadWidth = PDFForm.DefaultArrowHeadWidth;
-            AnnotationContentMode = "plain";
-            AnnotationRichText = null;
-            AnnotationAlignment = alignment;
-            AnnotationRotation = 0;
-            AnnotationBounds = bounds;
-            AnnotationIsLocked = isLocked;
-            DuplicateGroupId = null;
-            CreatedAtUtc = DateTime.MinValue;
-            UpdatedAtUtc = DateTime.MinValue;
-        }
-
-        public override string ToString()
-        {
-            // Optional, facilitates debugging and displaying annotation information.
-            return FormatResource(
-                "TextAnnotation_ToStringFormat",
-                AnnotationText,
-                AnnotationFont.FontFamily.Name,
-                AnnotationFont.Size,
-                AnnotationColor.Name,
-                AnnotationAlignment,
-                AnnotationRotation,
-                AnnotationIsLocked);
-        }
-
-        private static string FormatResource(string key, params object[] args)
-        {
-            string format = GetResourceText(key);
-            return string.Format(format, args);
-        }
-
-        private static string GetResourceText(string key)
-        {
-            var culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
-            string value = Resources.ResourceManager.GetString(key, culture);
-            return string.IsNullOrWhiteSpace(value) ? key : value;
-        }
-    }
-
-    public class EditTextDialog : Form
-    {
-        private Label lblText;
-        private RichTextBox txtText;
-        private CheckBox chkRichTextMode;
-        private FlowLayoutPanel richTextToolbarPanel;
-        private Button btnBold;
-        private Button btnItalic;
-        private Button btnUnderline;
-        private Label lblRichTextColor;
-        private Button btnRichTextColor;
-        private Button btnFont;
-        private Label lblTextColor;
-        private Button btnColor;
-        private Label lblBackgroundColor;
-        private Button btnBackgroundColor;
-        private CheckBox chkNoBackgroundColor;
-        private Label lblBorderColor;
-        private Button btnBorderColor;
-        private Label lblBorderWidth;
-        private NumericUpDown nudBorderWidth;
-        private Label lblFrameMargin;
-        private NumericUpDown nudFrameMargin;
-        private CheckBox chkLeaderArrow;
-        private Label lblLeaderLineWidth;
-        private NumericUpDown nudLeaderLineWidth;
-        private Label lblLeaderHeadLength;
-        private NumericUpDown nudLeaderHeadLength;
-        private Label lblLeaderHeadWidth;
-        private NumericUpDown nudLeaderHeadWidth;
-        private Label lblFontDisplay;
-        private GroupBox groupBoxAlignment;
-        private RadioButton rbLeft;
-        private RadioButton rbCenter;
-        private RadioButton rbRight;
-        private GroupBox groupBoxRotation;
-        private Label lblRotation;
-        private NumericUpDown nudRotation;
-        private FlowLayoutPanel rotationPresetPanel;
-        private GroupBox groupBoxSymbols;
-        private FlowLayoutPanel symbolsPanel;
-        private Button btnRestoreDefaults;
-        private Button btnOK;
-        private Button btnCancel;
-        private System.Drawing.Color lastBackgroundColorBeforeTransparent = System.Drawing.Color.White;
-        private DialogTheme dialogTheme;
-
-        // Properties that allow reading values set by the user
-        public string AnnotationText { get; set; }
-        public Font AnnotationFont { get; set; }
-        public System.Drawing.Color AnnotationColor { get; set; }
-        public System.Drawing.Color AnnotationBackgroundColor { get; set; }
-        public System.Drawing.Color AnnotationBorderColor { get; set; }
-        public float AnnotationBorderWidth { get; set; }
-        public float AnnotationFrameMargin { get; set; }
-        public bool HasLeaderArrow { get; set; }
-        public float LeaderLineWidth { get; set; }
-        public float LeaderHeadLength { get; set; }
-        public float LeaderHeadWidth { get; set; }
-        public bool IsRichTextMode { get; set; }
-        public string AnnotationRichText { get; set; }
-        public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
-        public int AnnotationRotation { get; set; }
-        public Action ApplyChanges { get; set; }
-        public Action<EditTextDialog> RestoreDefaultsAction { get; set; }
-        private bool suppressAutoApply;
-        private bool suppressEditorPresentationRefresh;
-        private Font editorDisplayFont;
-        private readonly Timer liveApplyTimer;
-        private const int LiveApplyDelayMs = 180;
-        private const float EditorDisplayFontSize = 12f;
-
-        public EditTextDialog()
-        {
-            AutoScaleDimensions = new SizeF(6F, 13F);
-            AutoScaleMode = AutoScaleMode.Font;
-
-            // Set default values if nothing was set previously
-            if (AnnotationText == null) AnnotationText = "";
-            if (AnnotationFont == null) AnnotationFont = new Font("Arial", 12);
-            if (AnnotationColor == System.Drawing.Color.Empty) AnnotationColor = System.Drawing.Color.Black;
-            if (AnnotationBackgroundColor == System.Drawing.Color.Empty) AnnotationBackgroundColor = System.Drawing.Color.Transparent;
-            if (AnnotationBorderColor == System.Drawing.Color.Empty) AnnotationBorderColor = System.Drawing.Color.Black;
-            if (AnnotationRichText == null) AnnotationRichText = string.Empty;
-            if (AnnotationBackgroundColor.A > 0)
-            {
-                lastBackgroundColorBeforeTransparent = AnnotationBackgroundColor;
-            }
-            LeaderLineWidth = PDFForm.NormalizeLeaderLineWidth(LeaderLineWidth <= 0f ? 1.5f : LeaderLineWidth);
-            LeaderHeadLength = PDFForm.NormalizeLeaderHeadLength(LeaderHeadLength <= 0f ? PDFForm.DefaultArrowHeadLength : LeaderHeadLength);
-            LeaderHeadWidth = PDFForm.NormalizeLeaderHeadWidth(LeaderHeadWidth <= 0f ? PDFForm.DefaultArrowHeadWidth : LeaderHeadWidth);
-            AnnotationRotation = NormalizeAngle(AnnotationRotation);
-            liveApplyTimer = new Timer { Interval = LiveApplyDelayMs };
-            liveApplyTimer.Tick += (_, __) =>
-            {
-                liveApplyTimer.Stop();
-                TryApplyChanges();
-            };
-            this.FormClosing += (_, __) => liveApplyTimer.Stop();
-            this.FormClosed += (_, __) =>
-            {
-                editorDisplayFont?.Dispose();
-                editorDisplayFont = null;
-            };
-
-            InitializeComponents();
-        }
-
-        private void InitializeComponents()
-        {
-            this.Text = Resources.EditText_Title;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.ClientSize = PDFForm.ScaleSizeForDpiStatic(430, 730);
-            this.MaximizeBox = false;
-                        this.MinimizeBox = false;
-            this.AutoScroll = true;
-            this.AutoScrollMargin = new Size(0, PDFForm.ScaleForDpiStatic(16));
-            int maxH = Screen.GetWorkingArea(this).Height - 80;
-            if (this.Height > maxH) this.Height = maxH;
-
-            // Label: "Enter text:"
-            lblText = new Label
-            {
-                Text = Resources.EditText_LabelText,
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(10))
-            };
-
-            // TextBox - multiline for entering content
-            txtText = new RichTextBox
-            {
-                Multiline = true,
-                ScrollBars = RichTextBoxScrollBars.Both,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(30)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(100)),
-                WordWrap = false,
-                Font = new Font("Segoe UI", 12f, FontStyle.Regular, GraphicsUnit.Point)
-            };
-            txtText.ZoomFactor = 1f;
-            txtText.TextChanged += TxtText_TextChanged;
-
-            chkRichTextMode = new CheckBox
-            {
-                Text = GetRichModeLabelText(),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(138))
-            };
-            chkRichTextMode.CheckedChanged += RichModeCheckedChanged;
-
-            richTextToolbarPanel = new FlowLayoutPanel
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(160)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(32)),
-                FlowDirection = FlowDirection.LeftToRight,
-                WrapContents = false,
-                Visible = false
-            };
-
-            btnBold = new Button
-            {
-                Text = "B",
-                Size = new Size(PDFForm.ScaleForDpiStatic(32), PDFForm.ScaleForDpiStatic(28)),
-                Font = new Font(Font, FontStyle.Bold),
-                TabStop = false
-            };
-            btnBold.Click += (_, __) => ToggleRichSelectionFontStyle(FontStyle.Bold);
-
-            btnItalic = new Button
-            {
-                Text = "I",
-                Size = new Size(PDFForm.ScaleForDpiStatic(32), PDFForm.ScaleForDpiStatic(28)),
-                Font = new Font(Font, FontStyle.Italic),
-                TabStop = false
-            };
-            btnItalic.Click += (_, __) => ToggleRichSelectionFontStyle(FontStyle.Italic);
-
-            btnUnderline = new Button
-            {
-                Text = "U",
-                Size = new Size(PDFForm.ScaleForDpiStatic(32), PDFForm.ScaleForDpiStatic(28)),
-                Font = new Font(Font, FontStyle.Underline),
-                TabStop = false
-            };
-            btnUnderline.Click += (_, __) => ToggleRichSelectionFontStyle(FontStyle.Underline);
-
-            btnRichTextColor = new Button
-            {
-                Text = GetChooseColorButtonText(),
-                Size = new Size(PDFForm.ScaleForDpiStatic(90), PDFForm.ScaleForDpiStatic(28)),
-                TabStop = false
-            };
-            btnRichTextColor.Click += BtnRichTextColor_Click;
-
-            richTextToolbarPanel.Controls.Add(btnBold);
-            richTextToolbarPanel.Controls.Add(btnItalic);
-            richTextToolbarPanel.Controls.Add(btnUnderline);
-            lblRichTextColor = new Label
-            {
-                Text = GetRichSelectionColorLabelText(),
-                AutoSize = true,
-                Margin = new Padding(8, 7, 0, 0)
-            };
-            richTextToolbarPanel.Controls.Add(lblRichTextColor);
-            richTextToolbarPanel.Controls.Add(btnRichTextColor);
-
-            // Font picker button
-            btnFont = new Button
-            {
-                Text = Resources.EditText_ButtonFont,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(198)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(100), PDFForm.ScaleForDpiStatic(30))
-            };
-            btnFont.Click += BtnFont_Click;
-
-            // Label showing the current font selection
-            lblFontDisplay = new Label
-            {
-                Text = FormatResource("EditText_FontDisplay", AnnotationFont.FontFamily.Name, AnnotationFont.Size),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(205))
-            };
-
-            // Button to choose color
-            lblTextColor = new Label
-            {
-                Text = GetTextColorLabelText(),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(237))
-            };
-
-            btnColor = new Button
-            {
-                Text = Resources.EditText_ButtonColor,
-                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(230)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(30))
-            };
-            btnColor.Click += BtnColor_Click;
-
-            lblBackgroundColor = new Label
-            {
-                Text = GetBackgroundColorLabelText(),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(271))
-            };
-
-            btnBackgroundColor = new Button
-            {
-                Text = GetChooseColorButtonText(),
-                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(264)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(30))
-            };
-            btnBackgroundColor.Click += BtnBackgroundColor_Click;
-
-            chkNoBackgroundColor = new CheckBox
-            {
-                Text = GetNoBackgroundLabelText(),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(276), PDFForm.ScaleForDpiStatic(271))
-            };
-            chkNoBackgroundColor.CheckedChanged += NoBackgroundColorCheckedChanged;
-
-            lblBorderColor = new Label
-            {
-                Text = GetResourceText("EditText_LabelBorderColor"),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(305))
-            };
-
-            btnBorderColor = new Button
-            {
-                Text = GetChooseColorButtonText(),
-                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(298)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(30))
-            };
-            btnBorderColor.Click += BtnBorderColor_Click;
-
-            lblBorderWidth = new Label
-            {
-                Text = GetResourceText("EditText_LabelBorderWidth"),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(339))
-            };
-            nudBorderWidth = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(336)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
-                DecimalPlaces = 3,
-                Minimum = 0,
-                Maximum = 24,
-                Increment = 0.001m
-            };
-            nudBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
-
-            lblFrameMargin = new Label
-            {
-                Text = GetResourceText("EditText_LabelFrameMargin"),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(235), PDFForm.ScaleForDpiStatic(339))
-            };
-            nudFrameMargin = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(336)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
-                DecimalPlaces = 1,
-                Minimum = 0,
-                Maximum = 120,
-                Increment = 1m
-            };
-            nudFrameMargin.ValueChanged += (_, __) => TryApplyChanges();
-
-            chkLeaderArrow = new CheckBox
-            {
-                Text = GetResourceText("EditText_CheckLeaderArrow"),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(370))
-            };
-            chkLeaderArrow.CheckedChanged += (_, __) =>
-            {
-                UpdateLeaderControlsState();
-                TryApplyChanges();
-            };
-
-            lblLeaderLineWidth = new Label
-            {
-                Text = GetResourceText("EditText_LabelLeaderLineWidth"),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(402))
-            };
-            nudLeaderLineWidth = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(399)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
-                DecimalPlaces = 1,
-                Minimum = 0.5m,
-                Maximum = 24,
-                Increment = 0.5m
-            };
-            nudLeaderLineWidth.ValueChanged += (_, __) => TryApplyChanges();
-
-            lblLeaderHeadLength = new Label
-            {
-                Text = GetResourceText("EditText_LabelLeaderHeadLength"),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(235), PDFForm.ScaleForDpiStatic(402))
-            };
-            nudLeaderHeadLength = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(399)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
-                DecimalPlaces = 1,
-                Minimum = 4,
-                Maximum = 120,
-                Increment = 1m
-            };
-            nudLeaderHeadLength.ValueChanged += (_, __) => TryApplyChanges();
-
-            lblLeaderHeadWidth = new Label
-            {
-                Text = GetResourceText("EditText_LabelLeaderHeadWidth"),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(430))
-            };
-            nudLeaderHeadWidth = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(427)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
-                DecimalPlaces = 1,
-                Minimum = 4,
-                Maximum = 120,
-                Increment = 1m
-            };
-            nudLeaderHeadWidth.ValueChanged += (_, __) => TryApplyChanges();
-
-            // GroupBox for alignment selection
-            groupBoxAlignment = new GroupBox
-            {
-                Text = Resources.EditText_GroupAlignment,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(462)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(50))
-            };
-
-            // RadioButton for left alignment
-            rbLeft = new RadioButton
-            {
-                Text = Resources.EditText_AlignLeft,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(20)),
-                AutoSize = true,
-                Checked = true
-            };
-
-            // RadioButton for center alignment
-            rbCenter = new RadioButton
-            {
-                Text = Resources.EditText_AlignCenter,
-                Location = new Point(PDFForm.ScaleForDpiStatic(150), PDFForm.ScaleForDpiStatic(20)),
-                AutoSize = true
-            };
-
-            // RadioButton for right alignment
-            rbRight = new RadioButton
-            {
-                Text = Resources.EditText_AlignRight,
-                Location = new Point(PDFForm.ScaleForDpiStatic(290), PDFForm.ScaleForDpiStatic(20)),
-                AutoSize = true
-            };
-
-            groupBoxAlignment.Controls.Add(rbLeft);
-            groupBoxAlignment.Controls.Add(rbCenter);
-            groupBoxAlignment.Controls.Add(rbRight);
-
-            rbLeft.CheckedChanged += RadioButton_CheckedChanged;
-            rbCenter.CheckedChanged += RadioButton_CheckedChanged;
-            rbRight.CheckedChanged += RadioButton_CheckedChanged;
-
-            // GroupBox for rotation selection
-            groupBoxRotation = new GroupBox
-            {
-                Text = Resources.EditText_GroupRotation,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(522)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(55))
-            };
-
-            lblRotation = new Label
-            {
-                Text = Resources.EditText_RotationLabel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(22)),
-                AutoSize = true
-            };
-
-            nudRotation = new NumericUpDown
-            {
-                Minimum = 0,
-                Maximum = 359,
-                Increment = 1,
-                Value = NormalizeAngle(AnnotationRotation),
-                Location = new Point(PDFForm.ScaleForDpiStatic(90), PDFForm.ScaleForDpiStatic(18)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(70), PDFForm.ScaleForDpiStatic(22))
-            };
-            nudRotation.ValueChanged += RotationValueChanged;
-
-            rotationPresetPanel = new FlowLayoutPanel
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(18)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(220), PDFForm.ScaleForDpiStatic(28)),
-                AutoSize = false,
-                WrapContents = false,
-                FlowDirection = FlowDirection.LeftToRight,
-                Margin = new Padding(0)
-            };
-
-            int[] presets = { 0, 30, 45, 90, 180, 270 };
-            foreach (int preset in presets)
-            {
-                Button presetButton = new Button
-                {
-                    Text = preset.ToString(CultureInfo.InvariantCulture),
-                    Tag = preset,
-                    Size = new Size(PDFForm.ScaleForDpiStatic(34), PDFForm.ScaleForDpiStatic(24)),
-                    Margin = new Padding(2, 0, 0, 0),
-                    TabStop = false
-                };
-                presetButton.Click += RotationPresetButton_Click;
-                rotationPresetPanel.Controls.Add(presetButton);
-            }
-
-            groupBoxRotation.Controls.Add(lblRotation);
-            groupBoxRotation.Controls.Add(nudRotation);
-            groupBoxRotation.Controls.Add(rotationPresetPanel);
-
-            // GroupBox for symbol gallery
-            groupBoxSymbols = new GroupBox
-            {
-                Text = Resources.EditText_GroupSymbols,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(592)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(65))
-            };
-
-            symbolsPanel = new FlowLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                AutoSize = false,
-                WrapContents = false,
-                FlowDirection = FlowDirection.LeftToRight,
-                Padding = new Padding(6, 5, 6, 5)
-            };
-
-            string[] symbols =
-            {
-                "\u2500", // ─
-                "\u00B0", // °
-                "\u00B2", // ²
-                "\u0142", // ł
-                "\u00A7", // §
-                "\u2022", // •
-                "\u2713", // ✓
-                "\u2717", // ✗
-                "\u2192", // →
-                "\u00B1"  // ±
-            };
-            foreach (string symbol in symbols)
-            {
-                Button btnSymbol = new Button
-                {
-                    Text = symbol,
-                    Size = new Size(PDFForm.ScaleForDpiStatic(32), PDFForm.ScaleForDpiStatic(28)),
-                    Margin = new Padding(4, 0, 0, 0),
-                    TabStop = false
-                };
-                btnSymbol.Click += SymbolButton_Click;
-                symbolsPanel.Controls.Add(btnSymbol);
-            }
-            groupBoxSymbols.Controls.Add(symbolsPanel);
-
-            // OK and Cancel buttons
-            btnOK = new Button
-            {
-                Text = Resources.Merge_OK,
-                Location = new Point(PDFForm.ScaleForDpiStatic(240), PDFForm.ScaleForDpiStatic(678)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
-                DialogResult = DialogResult.OK
-            };
-            btnOK.Click += BtnOK_Click;
-
-            btnRestoreDefaults = new Button
-            {
-                Text = GetResourceText("UI_Button_RestoreSettings"),
-                Location = new Point(PDFForm.ScaleForDpiStatic(90), PDFForm.ScaleForDpiStatic(678)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(140), PDFForm.ScaleForDpiStatic(30))
-            };
-            btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
-
-            btnCancel = new Button
-            {
-                Text = Resources.Merge_Cancel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(678)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
-                DialogResult = DialogResult.Cancel
-            };
-
-            // Add controls to the form
-            this.Controls.Add(lblText);
-            this.Controls.Add(txtText);
-            this.Controls.Add(chkRichTextMode);
-            this.Controls.Add(richTextToolbarPanel);
-            this.Controls.Add(btnFont);
-            this.Controls.Add(lblFontDisplay);
-            this.Controls.Add(lblTextColor);
-            this.Controls.Add(btnColor);
-            this.Controls.Add(lblBackgroundColor);
-            this.Controls.Add(btnBackgroundColor);
-            this.Controls.Add(chkNoBackgroundColor);
-            this.Controls.Add(lblBorderColor);
-            this.Controls.Add(btnBorderColor);
-            this.Controls.Add(lblBorderWidth);
-            this.Controls.Add(nudBorderWidth);
-            this.Controls.Add(lblFrameMargin);
-            this.Controls.Add(nudFrameMargin);
-            this.Controls.Add(chkLeaderArrow);
-            this.Controls.Add(lblLeaderLineWidth);
-            this.Controls.Add(nudLeaderLineWidth);
-            this.Controls.Add(lblLeaderHeadLength);
-            this.Controls.Add(nudLeaderHeadLength);
-            this.Controls.Add(lblLeaderHeadWidth);
-            this.Controls.Add(nudLeaderHeadWidth);
-            this.Controls.Add(groupBoxAlignment);
-            this.Controls.Add(groupBoxRotation);
-            this.Controls.Add(groupBoxSymbols);
-            this.Controls.Add(btnRestoreDefaults);
-            this.Controls.Add(btnOK);
-            this.Controls.Add(btnCancel);
-
-
-            this.CancelButton = btnCancel;
-            this.AcceptButton = null;
-        }
-
-        protected override void OnLoad(EventArgs e)
-        {
-            base.OnLoad(e);
-            bool previousSuppressAutoApply = suppressAutoApply;
-            bool previousSuppressPresentationRefresh = suppressEditorPresentationRefresh;
-            try
-            {
-                suppressAutoApply = true;
-                suppressEditorPresentationRefresh = true;
-                ApplyPropertiesToControls();
-            }
-            finally
-            {
-                suppressAutoApply = previousSuppressAutoApply;
-                suppressEditorPresentationRefresh = previousSuppressPresentationRefresh;
-            }
-
-            ApplyEditorDisplayFormatting(normalizeRichContent: IsRichTextMode);
-            if (dialogTheme != null)
-            {
-                ApplyDialogTheme(dialogTheme);
-            }
-        }
-
-        internal void ApplyDialogTheme(DialogTheme theme)
-        {
-            dialogTheme = theme;
-            DialogThemeApplier.ApplyTo(this, theme, txtText, btnRichTextColor, btnColor, btnBackgroundColor, btnBorderColor);
-            UpdateColorControls();
-        }
-
-        private void BtnRestoreDefaults_Click(object sender, EventArgs e)
-        {
-            if (RestoreDefaultsAction == null)
-            {
-                return;
-            }
-
-            string preservedText = txtText.Text ?? string.Empty;
-            RestoreDefaultsAction(this);
-            AnnotationText = preservedText;
-            AnnotationRichText = null;
-            bool previousSuppressAutoApply = suppressAutoApply;
-            bool previousSuppressPresentationRefresh = suppressEditorPresentationRefresh;
-            try
-            {
-                suppressAutoApply = true;
-                suppressEditorPresentationRefresh = true;
-                ApplyPropertiesToControls();
-            }
-            finally
-            {
-                suppressAutoApply = previousSuppressAutoApply;
-                suppressEditorPresentationRefresh = previousSuppressPresentationRefresh;
-            }
-            ApplyEditorDisplayFormatting(normalizeRichContent: IsRichTextMode);
-            TryApplyChanges();
-        }
-
-        private void ApplyPropertiesToControls()
-        {
-            UpdateFontDisplay();
-            bool richLoaded = false;
-            if (IsRichTextMode && !string.IsNullOrWhiteSpace(AnnotationRichText))
-            {
-                try
-                {
-                    txtText.Rtf = AnnotationRichText;
-                    richLoaded = true;
-                }
-                catch
-                {
-                    richLoaded = false;
-                }
-            }
-
-            if (!richLoaded)
-            {
-                txtText.Text = AnnotationText ?? string.Empty;
-            }
-
-            switch (AnnotationAlignment)
-            {
-                case System.Windows.Forms.HorizontalAlignment.Center:
-                    rbCenter.Checked = true;
-                    break;
-                case System.Windows.Forms.HorizontalAlignment.Right:
-                    rbRight.Checked = true;
-                    break;
-                default:
-                    rbLeft.Checked = true;
-                    break;
-            }
-
-            nudRotation.Value = NormalizeAngle(AnnotationRotation);
-            nudBorderWidth.Value = (decimal)NormalizeAnnotationBorderWidth(AnnotationBorderWidth);
-            nudFrameMargin.Value = (decimal)NormalizeAnnotationFrameMargin(AnnotationFrameMargin);
-            if (chkLeaderArrow != null)
-            {
-                chkLeaderArrow.Checked = HasLeaderArrow;
-            }
-            if (nudLeaderLineWidth != null)
-            {
-                nudLeaderLineWidth.Value = (decimal)PDFForm.NormalizeLeaderLineWidth(LeaderLineWidth);
-            }
-            if (nudLeaderHeadLength != null)
-            {
-                nudLeaderHeadLength.Value = (decimal)PDFForm.NormalizeLeaderHeadLength(LeaderHeadLength);
-            }
-            if (nudLeaderHeadWidth != null)
-            {
-                nudLeaderHeadWidth.Value = (decimal)PDFForm.NormalizeLeaderHeadWidth(LeaderHeadWidth);
-            }
-            if (chkNoBackgroundColor != null)
-            {
-                chkNoBackgroundColor.Checked = AnnotationBackgroundColor.A <= 0;
-            }
-            chkRichTextMode.Checked = IsRichTextMode;
-            if (IsRichTextMode && !string.IsNullOrWhiteSpace(AnnotationRichText))
-            {
-                try
-                {
-                    txtText.Rtf = AnnotationRichText;
-                }
-                catch
-                {
-                    txtText.Text = AnnotationText ?? string.Empty;
-                }
-            }
-            SetRichMode(IsRichTextMode, updateState: false, reloadEditorContent: false, applyFormatting: false);
-            ApplyAlignmentToEditor();
-            UpdateLeaderControlsState();
-        }
-
-        private void UpdateLeaderControlsState()
-        {
-            bool enabled = chkLeaderArrow != null && chkLeaderArrow.Checked;
-            if (lblLeaderLineWidth != null)
-            {
-                lblLeaderLineWidth.Enabled = enabled;
-            }
-            if (nudLeaderLineWidth != null)
-            {
-                nudLeaderLineWidth.Enabled = enabled;
-            }
-            if (lblLeaderHeadLength != null)
-            {
-                lblLeaderHeadLength.Enabled = enabled;
-            }
-            if (nudLeaderHeadLength != null)
-            {
-                nudLeaderHeadLength.Enabled = enabled;
-            }
-            if (lblLeaderHeadWidth != null)
-            {
-                lblLeaderHeadWidth.Enabled = enabled;
-            }
-            if (nudLeaderHeadWidth != null)
-            {
-                nudLeaderHeadWidth.Enabled = enabled;
-            }
-        }
-
-        private static System.Drawing.Color GetContrastingTextColor(System.Drawing.Color color)
-        {
-            int luminance = (int)((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B));
-            return luminance >= 140 ? System.Drawing.Color.Black : System.Drawing.Color.White;
-        }
-
-        private string GetTextColorLabelText()
-        {
-            return GetResourceText("EditText_LabelTextColor");
-        }
-
-        private string GetBackgroundColorLabelText()
-        {
-            return GetResourceText("EditText_LabelBackgroundColor");
-        }
-
-        private string GetChooseColorButtonText()
-        {
-            return GetResourceText("EditText_ButtonChooseColor");
-        }
-
-        private string GetRichModeLabelText()
-        {
-            return GetResourceText("EditText_RichModeLabel");
-        }
-
-        private string GetNoBackgroundLabelText()
-        {
-            return GetResourceText("EditText_NoBackground");
-        }
-
-        private string GetRichSelectionColorLabelText()
-        {
-            return GetResourceText("EditText_RichSelectionColorLabel");
-        }
-
-        private void UpdateColorControls()
-        {
-            System.Drawing.Color labelColor = dialogTheme?.TextSecondaryColor ?? SystemColors.ControlText;
-            if (lblTextColor != null) lblTextColor.ForeColor = labelColor;
-
-            if (btnColor != null)
-            {
-                btnColor.BackColor = AnnotationColor;
-                btnColor.ForeColor = GetContrastingTextColor(AnnotationColor);
-                btnColor.Text = GetChooseColorButtonText();
-                btnColor.UseVisualStyleBackColor = false;
-            }
-
-            if (lblBackgroundColor != null) lblBackgroundColor.ForeColor = labelColor;
-
-            if (btnBackgroundColor != null)
-            {
-                System.Drawing.Color previewColor = AnnotationBackgroundColor.A > 0
-                    ? AnnotationBackgroundColor
-                    : System.Drawing.Color.White;
-                btnBackgroundColor.BackColor = previewColor;
-                btnBackgroundColor.ForeColor = GetContrastingTextColor(previewColor);
-                btnBackgroundColor.Text = GetChooseColorButtonText();
-                btnBackgroundColor.UseVisualStyleBackColor = false;
-                btnBackgroundColor.Enabled = chkNoBackgroundColor == null || !chkNoBackgroundColor.Checked;
-            }
-
-            if (lblBorderColor != null) lblBorderColor.ForeColor = labelColor;
-            if (btnBorderColor != null)
-            {
-                System.Drawing.Color previewColor = AnnotationBorderColor.A > 0
-                    ? AnnotationBorderColor
-                    : System.Drawing.Color.White;
-                btnBorderColor.BackColor = previewColor;
-                btnBorderColor.ForeColor = GetContrastingTextColor(previewColor);
-                btnBorderColor.Text = GetChooseColorButtonText();
-                btnBorderColor.UseVisualStyleBackColor = false;
-            }
-        }
-
-        private void SetRichMode(bool richMode, bool updateState, bool reloadEditorContent = true, bool applyFormatting = true)
-        {
-            IsRichTextMode = richMode;
-            richTextToolbarPanel.Visible = richMode;
-
-            // Global font must remain available in both modes.
-            btnFont.Enabled = true;
-            lblFontDisplay.Enabled = true;
-            lblTextColor.Enabled = !richMode;
-            btnColor.Enabled = !richMode;
-            lblBackgroundColor.Enabled = true;
-            btnBackgroundColor.Enabled = chkNoBackgroundColor == null || !chkNoBackgroundColor.Checked;
-            if (chkNoBackgroundColor != null)
-            {
-                chkNoBackgroundColor.Enabled = true;
-            }
-
-            if (reloadEditorContent && richMode)
-            {
-                if (!string.IsNullOrWhiteSpace(AnnotationRichText))
-                {
-                    try
-                    {
-                        txtText.Rtf = AnnotationRichText;
-                    }
-                    catch
-                    {
-                        txtText.Text = AnnotationText ?? string.Empty;
-                    }
-                }
-            }
-            else if (reloadEditorContent)
-            {
-                AnnotationRichText = null;
-                AnnotationText = txtText.Text;
-            }
-
-            ApplyAlignmentToEditor();
-            if (applyFormatting)
-            {
-                ApplyEditorDisplayFormatting(normalizeRichContent: richMode);
-            }
-
-            if (updateState)
-            {
-                ScheduleApplyChanges();
-            }
-            UpdateColorControls();
-        }
-
-        private void UpdateFontDisplay()
-        {
-
-            string fontStyles = "";
-            if (AnnotationFont.Bold)
-                fontStyles += "B";
-            if (AnnotationFont.Italic)
-                fontStyles += "I";
-            if (AnnotationFont.Strikeout)
-                fontStyles += "S";
-            if (AnnotationFont.Underline)
-                fontStyles += "U";
-            if (!string.IsNullOrEmpty(fontStyles))
-                fontStyles = " (" + fontStyles + ")";
-
-            if (string.IsNullOrEmpty(fontStyles))
-            {
-                lblFontDisplay.Text = FormatResource("EditText_FontDisplay", AnnotationFont.FontFamily.Name, AnnotationFont.Size);
-            }
-            else
-            {
-                lblFontDisplay.Text = FormatResource("EditText_FontDisplayWithStyle", AnnotationFont.FontFamily.Name, AnnotationFont.Size, fontStyles);
-            }
-
-            if (!suppressEditorPresentationRefresh)
-            {
-                ApplyEditorDisplayFormatting(normalizeRichContent: IsRichTextMode);
-            }
-            UpdateColorControls();
-        }
-
-        private void ApplyEditorDisplayFormatting(bool normalizeRichContent)
-        {
-            if (txtText == null)
-            {
-                return;
-            }
-
-            Font sourceFont = AnnotationFont ?? this.Font ?? SystemFonts.DefaultFont;
-            Font newEditorFont = new Font(sourceFont.FontFamily, EditorDisplayFontSize, sourceFont.Style, GraphicsUnit.Point);
-            Font previousEditorFont = editorDisplayFont;
-            editorDisplayFont = newEditorFont;
-            txtText.ZoomFactor = 1f;
-            previousEditorFont?.Dispose();
-
-            if (!IsRichTextMode)
-            {
-                txtText.Font = editorDisplayFont;
-                return;
-            }
-
-            if (!normalizeRichContent || txtText.TextLength <= 0)
-            {
-                txtText.Font = editorDisplayFont;
-                return;
-            }
-
-            RefreshRichEditorPresentation();
-        }
-
-        private void RefreshRichEditorPresentation()
-        {
-            if (txtText == null || editorDisplayFont == null || txtText.TextLength <= 0)
-            {
-                return;
-            }
-
-            int selectionStart = txtText.SelectionStart;
-            int selectionLength = txtText.SelectionLength;
-            bool previousSuppressAutoApply = suppressAutoApply;
-            bool previousSuppressPresentationRefresh = suppressEditorPresentationRefresh;
-
-            try
-            {
-                suppressAutoApply = true;
-                suppressEditorPresentationRefresh = true;
-                string editorDisplayRtf = PDFForm.BuildEditorDisplayRichTextRtf(txtText.Text, txtText.Rtf, AnnotationFont);
-                if (!string.IsNullOrWhiteSpace(editorDisplayRtf))
-                {
-                    txtText.Rtf = editorDisplayRtf;
-                }
-
-                ApplyAlignmentToEditor();
-            }
-            finally
-            {
-                int safeSelectionStart = Math.Max(0, Math.Min(selectionStart, txtText.TextLength));
-                int safeSelectionLength = Math.Max(0, Math.Min(selectionLength, txtText.TextLength - safeSelectionStart));
-                txtText.Select(safeSelectionStart, safeSelectionLength);
-                suppressAutoApply = previousSuppressAutoApply;
-                suppressEditorPresentationRefresh = previousSuppressPresentationRefresh;
-            }
-        }
-
-        private void TxtText_TextChanged(object sender, EventArgs e)
-        {
-            if (IsRichTextMode && !suppressEditorPresentationRefresh)
-            {
-                RefreshRichEditorPresentation();
-            }
-
-            ScheduleApplyChanges();
-        }
-
-
-        private void RadioButton_CheckedChanged(object sender, EventArgs e)
-        {
-            if (rbLeft.Checked)
-            {
-                AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Left; ;
-            }
-            else if (rbCenter.Checked)
-            {
-                AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Center;
-            }
-            else if (rbRight.Checked)
-            {
-                AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Right;
-            }
-            ApplyAlignmentToEditor();
-            ScheduleApplyChanges();
-
-        }
-
-        private void ApplyAlignmentToEditor()
-        {
-            if (txtText == null)
-            {
-                return;
-            }
-
-            int selectionStart = txtText.SelectionStart;
-            int selectionLength = txtText.SelectionLength;
-            try
-            {
-                txtText.SelectAll();
-                txtText.SelectionAlignment = AnnotationAlignment;
-            }
-            finally
-            {
-                txtText.Select(selectionStart, selectionLength);
-            }
-        }
-
-        private void RotationValueChanged(object sender, EventArgs e)
-        {
-            AnnotationRotation = NormalizeAngle((int)nudRotation.Value);
-            ScheduleApplyChanges();
-        }
-
-        private void RotationPresetButton_Click(object sender, EventArgs e)
-        {
-            if (sender is Button btn)
-            {
-                int value = 0;
-                if (btn.Tag is int tagValue)
-                {
-                    value = tagValue;
-                }
-                else
-                {
-                    int.TryParse(btn.Text, out value);
-                }
-
-                if (value < nudRotation.Minimum)
-                {
-                    value = (int)nudRotation.Minimum;
-                }
-                else if (value > nudRotation.Maximum)
-                {
-                    value = (int)nudRotation.Maximum;
-                }
-
-                nudRotation.Value = value;
-                nudRotation.Focus();
-            }
-        }
-
-        private void BtnFont_Click(object sender, EventArgs e)
-        {
-            using (FontDialog fontDialog = new FontDialog())
-            {
-                fontDialog.Font = AnnotationFont;
-                if (fontDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    AnnotationFont = fontDialog.Font;
-                    UpdateFontDisplay();
-                    ScheduleApplyChanges();
-                }
-            }
-        }
-
-        private void BtnColor_Click(object sender, EventArgs e)
-        {
-            using (ColorDialog colorDialog = new ColorDialog())
-            {
-                colorDialog.Color = AnnotationColor;
-                if (colorDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    AnnotationColor = colorDialog.Color;
-                    UpdateColorControls();
-                    TryApplyChanges();
-                }
-            }
-        }
-
-        private void BtnBackgroundColor_Click(object sender, EventArgs e)
-        {
-            using (ColorDialog colorDialog = new ColorDialog())
-            {
-                colorDialog.Color = AnnotationBackgroundColor.A > 0
-                    ? AnnotationBackgroundColor
-                    : System.Drawing.Color.White;
-                if (colorDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    AnnotationBackgroundColor = colorDialog.Color;
-                    lastBackgroundColorBeforeTransparent = colorDialog.Color;
-                    if (chkNoBackgroundColor != null)
-                    {
-                        chkNoBackgroundColor.Checked = false;
-                    }
-                    UpdateColorControls();
-                    TryApplyChanges();
-                }
-            }
-        }
-
-        private void NoBackgroundColorCheckedChanged(object sender, EventArgs e)
-        {
-            if (chkNoBackgroundColor == null)
-            {
-                return;
-            }
-
-            if (chkNoBackgroundColor.Checked)
-            {
-                if (AnnotationBackgroundColor.A > 0)
-                {
-                    lastBackgroundColorBeforeTransparent = AnnotationBackgroundColor;
-                }
-                AnnotationBackgroundColor = System.Drawing.Color.Transparent;
-            }
-            else if (AnnotationBackgroundColor.A <= 0)
-            {
-                AnnotationBackgroundColor = lastBackgroundColorBeforeTransparent.A > 0
-                    ? lastBackgroundColorBeforeTransparent
-                    : System.Drawing.Color.White;
-            }
-
-            UpdateColorControls();
-            TryApplyChanges();
-        }
-
-        private void BtnBorderColor_Click(object sender, EventArgs e)
-        {
-            using (ColorDialog colorDialog = new ColorDialog())
-            {
-                colorDialog.Color = AnnotationBorderColor.A > 0
-                    ? AnnotationBorderColor
-                    : System.Drawing.Color.Black;
-                if (colorDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    AnnotationBorderColor = colorDialog.Color;
-                    UpdateColorControls();
-                    TryApplyChanges();
-                }
-            }
-        }
-
-        private void RichModeCheckedChanged(object sender, EventArgs e)
-        {
-            if (suppressAutoApply && suppressEditorPresentationRefresh)
-            {
-                IsRichTextMode = chkRichTextMode.Checked;
-                richTextToolbarPanel.Visible = IsRichTextMode;
-                UpdateColorControls();
-                return;
-            }
-
-            SetRichMode(chkRichTextMode.Checked, updateState: true);
-        }
-
-        private void ToggleRichSelectionFontStyle(FontStyle style)
-        {
-            if (!IsRichTextMode)
-            {
-                return;
-            }
-
-            Font selectionFont = txtText.SelectionFont ?? txtText.Font ?? AnnotationFont ?? this.Font;
-            FontStyle newStyle = selectionFont.Style.HasFlag(style)
-                ? (selectionFont.Style & ~style)
-                : (selectionFont.Style | style);
-            txtText.SelectionFont = new Font(selectionFont, newStyle);
-            txtText.Focus();
-            ScheduleApplyChanges();
-        }
-
-        private void BtnRichTextColor_Click(object sender, EventArgs e)
-        {
-            if (!IsRichTextMode)
-            {
-                return;
-            }
-
-            using (ColorDialog colorDialog = new ColorDialog())
-            {
-                colorDialog.Color = txtText.SelectionColor.IsEmpty ? AnnotationColor : txtText.SelectionColor;
-                if (colorDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    txtText.SelectionColor = colorDialog.Color;
-                    txtText.Focus();
-                    ScheduleApplyChanges();
-                }
-            }
-        }
-
-        private void BtnOK_Click(object sender, EventArgs e)
-        {
-            if (string.IsNullOrEmpty(txtText.Text.Trim()))
-            {
-                MessageBox.Show(this, Resources.EditText_EmptyError, Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                this.DialogResult = DialogResult.None;
-                return;
-            }
-            AnnotationText = txtText.Text.Trim();
-            AnnotationRichText = IsRichTextMode
-                ? BuildRichTextForApply()
-                : null;
-            AnnotationBorderWidth = NormalizeAnnotationBorderWidth((float)nudBorderWidth.Value);
-            AnnotationFrameMargin = NormalizeAnnotationFrameMargin((float)nudFrameMargin.Value);
-            HasLeaderArrow = chkLeaderArrow != null && chkLeaderArrow.Checked;
-            LeaderLineWidth = PDFForm.NormalizeLeaderLineWidth((float)nudLeaderLineWidth.Value);
-            LeaderHeadLength = PDFForm.NormalizeLeaderHeadLength((float)nudLeaderHeadLength.Value);
-            LeaderHeadWidth = PDFForm.NormalizeLeaderHeadWidth((float)nudLeaderHeadWidth.Value);
-        }
-
-        private static int NormalizeAngle(int rotation)
-        {
-            rotation %= 360;
-            if (rotation < 0)
-                rotation += 360;
-            return rotation;
-        }
-
-        private static float NormalizeAnnotationBorderWidth(float value)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value))
-            {
-                return 0f;
-            }
-
-            return Math.Max(0f, Math.Min(24f, value));
-        }
-
-        private static float NormalizeAnnotationFrameMargin(float value)
-        {
-            if (float.IsNaN(value) || float.IsInfinity(value))
-            {
-                return 0f;
-            }
-
-            return Math.Max(0f, Math.Min(120f, value));
-        }
-
-        private void SymbolButton_Click(object sender, EventArgs e)
-        {
-            if (sender is Button btn)
-            {
-                txtText.SelectedText = btn.Text;
-                txtText.Focus();
-            }
-        }
-
-        private void ScheduleApplyChanges()
-        {
-            if (suppressAutoApply)
-            {
-                liveApplyTimer?.Stop();
-                return;
-            }
-
-            if (liveApplyTimer == null)
-            {
-                TryApplyChanges();
-                return;
-            }
-
-            liveApplyTimer.Stop();
-            liveApplyTimer.Start();
-        }
-
-        private void TryApplyChanges()
-        {
-            if (ApplyChanges == null || suppressAutoApply)
-                return;
-            if (string.IsNullOrWhiteSpace(txtText.Text))
-                return;
-            AnnotationText = txtText.Text;
-            AnnotationRichText = IsRichTextMode
-                ? BuildRichTextForApply()
-                : null;
-            AnnotationBorderWidth = NormalizeAnnotationBorderWidth((float)nudBorderWidth.Value);
-            AnnotationFrameMargin = NormalizeAnnotationFrameMargin((float)nudFrameMargin.Value);
-            HasLeaderArrow = chkLeaderArrow != null && chkLeaderArrow.Checked;
-            LeaderLineWidth = PDFForm.NormalizeLeaderLineWidth((float)nudLeaderLineWidth.Value);
-            LeaderHeadLength = PDFForm.NormalizeLeaderHeadLength((float)nudLeaderHeadLength.Value);
-            LeaderHeadWidth = PDFForm.NormalizeLeaderHeadWidth((float)nudLeaderHeadWidth.Value);
-            ApplyChanges?.Invoke();
-        }
-
-        private string BuildRichTextForApply()
-        {
-            if (!IsRichTextMode)
-            {
-                return null;
-            }
-
-            string editorText = txtText?.Text ?? string.Empty;
-            string editorRtf = txtText?.Rtf ?? string.Empty;
-            string renderableRtf = PDFForm.BuildRenderableRichTextRtf(editorText, editorRtf, AnnotationFont);
-            int expectedLineCount = CountNormalizedLines(editorText);
-            int renderableLineCount = GetLineCountFromRtf(renderableRtf);
-            if (renderableLineCount >= expectedLineCount || string.IsNullOrWhiteSpace(editorRtf))
-            {
-                return renderableRtf;
-            }
-
-            int editorRtfLineCount = GetLineCountFromRtf(editorRtf);
-            if (editorRtfLineCount >= expectedLineCount)
-            {
-                return editorRtf;
-            }
-
-            return renderableRtf;
-        }
-
-        private static int CountNormalizedLines(string text)
-        {
-            string normalized = (text ?? string.Empty).Replace("\r\n", "\n").Replace("\r", "\n");
-            return Math.Max(1, normalized.Split(new[] { '\n' }, StringSplitOptions.None).Length);
-        }
-
-        private static int GetLineCountFromRtf(string rtf)
-        {
-            if (string.IsNullOrWhiteSpace(rtf))
-            {
-                return 1;
-            }
-
-            try
-            {
-                using (var richTextBox = new RichTextBox())
-                {
-                    richTextBox.Rtf = rtf;
-                    return CountNormalizedLines(richTextBox.Text);
-                }
-            }
-            catch
-            {
-                return 1;
-            }
-        }
-
-        private static string FormatResource(string key, params object[] args)
-        {
-            string format = GetResourceText(key);
-            return string.Format(format, args);
-        }
-
-        private static string GetResourceText(string key)
-        {
-            var culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
-            string value = Resources.ResourceManager.GetString(key, culture);
-            return string.IsNullOrWhiteSpace(value) ? key : value;
-        }
-    }
-
-
-
-    public class EditRasterDialog : Form
-    {
-        private GroupBox groupGeometry;
-        private Label lblX;
-        private Label lblY;
-        private Label lblWidth;
-        private Label lblHeight;
-        private NumericUpDown nudX;
-        private NumericUpDown nudY;
-        private NumericUpDown nudWidth;
-        private NumericUpDown nudHeight;
-
-        private GroupBox groupRotation;
-        private Label lblRotation;
-        private NumericUpDown nudRotation;
-        private FlowLayoutPanel rotationPresetPanel;
-
-        private GroupBox groupOptions;
-        private CheckBox chkLockAspect;
-        private CheckBox chkLocked;
-        private CheckBox chkTransparentBackground;
-        private Label lblOpacity;
-        private NumericUpDown nudOpacity;
-
-        private GroupBox groupSource;
-        private Label lblSourceValue;
-        private Button btnReplaceImage;
-        private Button btnResetAspect;
-        private Button btnResetOneToOne;
-
-        private Button btnRestoreDefaults;
-        private Button btnOK;
-        private Button btnCancel;
-
-        private bool suppressDimensionSync;
-        private bool suppressAutoApply;
-        private decimal aspectRatio = 1m;
-        private decimal lockedAspectRatio = 1m;
-
-        public float PositionX { get; set; }
-        public float PositionY { get; set; }
-        public float WidthValue { get; set; }
-        public float HeightValue { get; set; }
-        public int Rotation { get; set; }
-        public float RasterOpacity { get; set; }
-        public bool TransparentBackground { get; set; }
-        public bool LockAspect { get; set; }
-        public bool IsLocked { get; set; }
-        public string SourceType { get; set; }
-        public string FilePath { get; set; }
-        public string ReplacementImagePath { get; private set; }
-        public decimal SourceAspectRatio { get; set; }
-        public int SourcePixelWidth { get; set; }
-        public int SourcePixelHeight { get; set; }
-        public float ViewScaleFactor { get; set; } = 1f;
-        public float PageWidth { get; set; }
-        public float PageHeight { get; set; }
-        public Func<string> SelectReplacementImage { get; set; }
-        public Action ApplyChanges { get; set; }
-        public Action<EditRasterDialog> RestoreDefaultsAction { get; set; }
-        private DialogTheme dialogTheme;
-
-        public EditRasterDialog()
-        {
-            AutoScaleDimensions = new SizeF(6F, 13F);
-            AutoScaleMode = AutoScaleMode.Font;
-            InitializeComponents();
-        }
-
-        private void InitializeComponents()
-        {
-            Text = Resources.EditRaster_Title;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            StartPosition = FormStartPosition.CenterParent;
-            Width = PDFForm.ScaleForDpiStatic(430);
-            Height = PDFForm.ScaleForDpiStatic(470);
-            MaximizeBox = false;
-            MinimizeBox = false;
-
-            groupGeometry = new GroupBox
-            {
-                Text = Resources.EditRaster_GroupGeometry,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(10)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(110))
-            };
-
-            lblX = new Label { Text = Resources.EditRaster_LabelX, Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(27)), AutoSize = true };
-            nudX = BuildNumberInput(PDFForm.ScaleForDpiStatic(60), PDFForm.ScaleForDpiStatic(24), -100000m, 100000m, 2);
-            lblY = new Label { Text = Resources.EditRaster_LabelY, Location = new Point(PDFForm.ScaleForDpiStatic(205), PDFForm.ScaleForDpiStatic(27)), AutoSize = true };
-            nudY = BuildNumberInput(PDFForm.ScaleForDpiStatic(250), PDFForm.ScaleForDpiStatic(24), -100000m, 100000m, 2);
-            lblWidth = new Label { Text = Resources.EditRaster_LabelWidth, Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(67)), AutoSize = true };
-            nudWidth = BuildNumberInput(PDFForm.ScaleForDpiStatic(60), PDFForm.ScaleForDpiStatic(64), 1m, 100000m, 2);
-            lblHeight = new Label { Text = Resources.EditRaster_LabelHeight, Location = new Point(PDFForm.ScaleForDpiStatic(205), PDFForm.ScaleForDpiStatic(67)), AutoSize = true };
-            nudHeight = BuildNumberInput(PDFForm.ScaleForDpiStatic(250), PDFForm.ScaleForDpiStatic(64), 1m, 100000m, 2);
-            nudX.ValueChanged += AnyControlValueChanged;
-            nudY.ValueChanged += AnyControlValueChanged;
-            nudWidth.ValueChanged += NudWidth_ValueChanged;
-            nudHeight.ValueChanged += NudHeight_ValueChanged;
-
-            groupGeometry.Controls.Add(lblX);
-            groupGeometry.Controls.Add(nudX);
-            groupGeometry.Controls.Add(lblY);
-            groupGeometry.Controls.Add(nudY);
-            groupGeometry.Controls.Add(lblWidth);
-            groupGeometry.Controls.Add(nudWidth);
-            groupGeometry.Controls.Add(lblHeight);
-            groupGeometry.Controls.Add(nudHeight);
-
-            groupRotation = new GroupBox
-            {
-                Text = Resources.EditRaster_GroupRotation,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(128)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(58))
-            };
-
-            lblRotation = new Label
-            {
-                Text = Resources.EditRaster_RotationLabel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(25)),
-                AutoSize = true
-            };
-            nudRotation = new NumericUpDown
-            {
-                Minimum = 0,
-                Maximum = 359,
-                Increment = 1,
-                Location = new Point(PDFForm.ScaleForDpiStatic(70), PDFForm.ScaleForDpiStatic(21)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(64), PDFForm.ScaleForDpiStatic(22))
-            };
-            nudRotation.ValueChanged += AnyControlValueChanged;
-            rotationPresetPanel = new FlowLayoutPanel
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(20)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(240), PDFForm.ScaleForDpiStatic(26)),
-                AutoSize = false,
-                WrapContents = false,
-                FlowDirection = FlowDirection.LeftToRight,
-                Margin = new Padding(0)
-            };
-
-            int[] presets = { 0, 30, 45, 90, 180, 270 };
-            foreach (int preset in presets)
-            {
-                Button presetButton = new Button
-                {
-                    Text = preset.ToString(CultureInfo.InvariantCulture),
-                    Tag = preset,
-                    Size = new Size(PDFForm.ScaleForDpiStatic(34), PDFForm.ScaleForDpiStatic(24)),
-                    Margin = new Padding(2, 0, 0, 0),
-                    TabStop = false
-                };
-                presetButton.Click += RotationPresetButton_Click;
-                rotationPresetPanel.Controls.Add(presetButton);
-            }
-
-            groupRotation.Controls.Add(lblRotation);
-            groupRotation.Controls.Add(nudRotation);
-            groupRotation.Controls.Add(rotationPresetPanel);
-
-            groupOptions = new GroupBox
-            {
-                Text = Resources.EditRaster_GroupOptions,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(194)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(86))
-            };
-            chkLockAspect = new CheckBox
-            {
-                Text = Resources.EditRaster_CheckLockAspect,
-                Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(24)),
-                AutoSize = true
-            };
-            chkLockAspect.CheckedChanged += ChkLockAspect_CheckedChanged;
-            chkLocked = new CheckBox
-            {
-                Text = Resources.EditRaster_CheckLocked,
-                Location = new Point(PDFForm.ScaleForDpiStatic(190), PDFForm.ScaleForDpiStatic(24)),
-                AutoSize = true
-            };
-            chkTransparentBackground = new CheckBox
-            {
-                Text = Resources.EditRaster_CheckTransparentBackground,
-                Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(56)),
-                AutoSize = true
-            };
-            chkTransparentBackground.CheckedChanged += AnyControlValueChanged;
-            lblOpacity = new Label
-            {
-                Text = Resources.EditRaster_LabelOpacity,
-                Location = new Point(PDFForm.ScaleForDpiStatic(190), PDFForm.ScaleForDpiStatic(56)),
-                AutoSize = true
-            };
-            nudOpacity = new NumericUpDown
-            {
-                Minimum = 0,
-                Maximum = 100,
-                DecimalPlaces = 0,
-                Increment = 1,
-                Location = new Point(PDFForm.ScaleForDpiStatic(300), PDFForm.ScaleForDpiStatic(52)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(70), PDFForm.ScaleForDpiStatic(22)),
-                ThousandsSeparator = false
-            };
-            nudOpacity.ValueChanged += AnyControlValueChanged;
-            chkLocked.CheckedChanged += AnyControlValueChanged;
-            groupOptions.Controls.Add(chkLockAspect);
-            groupOptions.Controls.Add(chkLocked);
-            groupOptions.Controls.Add(chkTransparentBackground);
-            groupOptions.Controls.Add(lblOpacity);
-            groupOptions.Controls.Add(nudOpacity);
-
-            groupSource = new GroupBox
-            {
-                Text = Resources.EditRaster_GroupSource,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(288)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(86))
-            };
-            lblSourceValue = new Label
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(25)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(250), PDFForm.ScaleForDpiStatic(18)),
-                AutoEllipsis = true
-            };
-            btnReplaceImage = new Button
-            {
-                Text = Resources.EditRaster_ButtonReplaceImage,
-                Location = new Point(PDFForm.ScaleForDpiStatic(268), PDFForm.ScaleForDpiStatic(18)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(116), PDFForm.ScaleForDpiStatic(28))
-            };
-            btnReplaceImage.Click += BtnReplaceImage_Click;
-            btnResetAspect = new Button
-            {
-                Text = Resources.EditRaster_ButtonResetAspect,
-                Location = new Point(PDFForm.ScaleForDpiStatic(268), PDFForm.ScaleForDpiStatic(50)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(116), PDFForm.ScaleForDpiStatic(28))
-            };
-            btnResetAspect.Click += BtnResetAspect_Click;
-            btnResetOneToOne = new Button
-            {
-                Text = Resources.EditRaster_ButtonResetOneToOne,
-                Location = new Point(PDFForm.ScaleForDpiStatic(212), PDFForm.ScaleForDpiStatic(50)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(50), PDFForm.ScaleForDpiStatic(28))
-            };
-            btnResetOneToOne.Click += BtnResetOneToOne_Click;
-            groupSource.Controls.Add(lblSourceValue);
-            groupSource.Controls.Add(btnReplaceImage);
-            groupSource.Controls.Add(btnResetAspect);
-            groupSource.Controls.Add(btnResetOneToOne);
-
-            btnOK = new Button
-            {
-                Text = Resources.Merge_OK,
-                Location = new Point(PDFForm.ScaleForDpiStatic(238), PDFForm.ScaleForDpiStatic(386)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
-                DialogResult = DialogResult.OK
-            };
-            btnOK.Click += BtnOK_Click;
-
-            btnRestoreDefaults = new Button
-            {
-                Text = Resources.ResourceManager.GetString("UI_Button_RestoreSettings", Resources.Culture ?? CultureInfo.CurrentUICulture) ?? "UI_Button_RestoreSettings",
-                Location = new Point(PDFForm.ScaleForDpiStatic(92), PDFForm.ScaleForDpiStatic(386)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(136), PDFForm.ScaleForDpiStatic(30))
-            };
-            btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
-
-            btnCancel = new Button
-            {
-                Text = Resources.Merge_Cancel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(324), PDFForm.ScaleForDpiStatic(386)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
-                DialogResult = DialogResult.Cancel
-            };
-
-            Controls.Add(groupGeometry);
-            Controls.Add(groupRotation);
-            Controls.Add(groupOptions);
-            Controls.Add(groupSource);
-            Controls.Add(btnRestoreDefaults);
-            Controls.Add(btnOK);
-            Controls.Add(btnCancel);
-
-            CancelButton = btnCancel;
-            AcceptButton = btnOK;
-        }
-
-        private static NumericUpDown BuildNumberInput(int x, int y, decimal min, decimal max, int decimals)
-        {
-            return new NumericUpDown
-            {
-                Location = new Point(x, y),
-                Size = new Size(PDFForm.ScaleForDpiStatic(120), PDFForm.ScaleForDpiStatic(22)),
-                Minimum = min,
-                Maximum = max,
-                DecimalPlaces = decimals,
-                ThousandsSeparator = true,
-                Increment = decimals > 0 ? 0.1m : 1m
-            };
-        }
-
-        protected override void OnLoad(EventArgs e)
-        {
-            base.OnLoad(e);
-            suppressDimensionSync = true;
-            suppressAutoApply = true;
-
-            nudX.Value = ClampDecimal((decimal)PositionX, nudX.Minimum, nudX.Maximum);
-            nudY.Value = ClampDecimal((decimal)PositionY, nudY.Minimum, nudY.Maximum);
-            nudWidth.Value = ClampDecimal((decimal)Math.Max(1f, WidthValue), nudWidth.Minimum, nudWidth.Maximum);
-            nudHeight.Value = ClampDecimal((decimal)Math.Max(1f, HeightValue), nudHeight.Minimum, nudHeight.Maximum);
-            nudRotation.Value = NormalizeAngle(Rotation);
-            nudOpacity.Value = ClampDecimal((decimal)(Math.Max(0f, Math.Min(1f, RasterOpacity)) * 100f), nudOpacity.Minimum, nudOpacity.Maximum);
-            chkTransparentBackground.Checked = TransparentBackground;
-            chkLockAspect.Checked = LockAspect;
-            chkLocked.Checked = IsLocked;
-            ReplacementImagePath = string.Empty;
-            btnResetAspect.Enabled = SourceAspectRatio > 0m;
-            btnResetOneToOne.Enabled = SourcePixelWidth > 0 && SourcePixelHeight > 0;
-
-            RecalculateAspectRatio();
-            lockedAspectRatio = aspectRatio > 0m ? aspectRatio : 1m;
-            UpdateSourceLabel();
-
-            SyncPropertiesFromControls();
-            ApplyDialogTheme(dialogTheme);
-            suppressAutoApply = false;
-            suppressDimensionSync = false;
-        }
-
-        internal void ApplyDialogTheme(DialogTheme theme)
-        {
-            dialogTheme = theme;
-            DialogThemeApplier.ApplyTo(this, theme);
-        }
-
-        private static decimal ClampDecimal(decimal value, decimal min, decimal max)
-        {
-            if (value < min) return min;
-            if (value > max) return max;
-            return value;
-        }
-
-        private static int NormalizeAngle(int rotation)
-        {
-            rotation %= 360;
-            if (rotation < 0)
-            {
-                rotation += 360;
-            }
-            return rotation;
-        }
-
-        private void RecalculateAspectRatio()
-        {
-            decimal height = nudHeight.Value;
-            aspectRatio = height <= 0m ? 1m : nudWidth.Value / height;
-            if (aspectRatio <= 0m)
-            {
-                aspectRatio = 1m;
-            }
-        }
-
-        private void ChkLockAspect_CheckedChanged(object sender, EventArgs e)
-        {
-            if (chkLockAspect.Checked)
-            {
-                RecalculateAspectRatio();
-                lockedAspectRatio = aspectRatio > 0m ? aspectRatio : 1m;
-            }
-            TryApplyChanges();
-        }
-
-        private void NudWidth_ValueChanged(object sender, EventArgs e)
-        {
-            if (suppressDimensionSync)
-            {
-                return;
-            }
-
-            if (chkLockAspect.Checked && aspectRatio > 0m)
-            {
-                decimal ratioToUse = lockedAspectRatio > 0m ? lockedAspectRatio : aspectRatio;
-                suppressDimensionSync = true;
-                decimal height = nudWidth.Value / ratioToUse;
-                nudHeight.Value = ClampDecimal(height, nudHeight.Minimum, nudHeight.Maximum);
-                suppressDimensionSync = false;
-            }
-            TryApplyChanges();
-        }
-
-        private void NudHeight_ValueChanged(object sender, EventArgs e)
-        {
-            if (suppressDimensionSync)
-            {
-                return;
-            }
-
-            if (chkLockAspect.Checked && aspectRatio > 0m)
-            {
-                decimal ratioToUse = lockedAspectRatio > 0m ? lockedAspectRatio : aspectRatio;
-                suppressDimensionSync = true;
-                decimal width = nudHeight.Value * ratioToUse;
-                nudWidth.Value = ClampDecimal(width, nudWidth.Minimum, nudWidth.Maximum);
-                suppressDimensionSync = false;
-            }
-            TryApplyChanges();
-        }
-
-        private void AnyControlValueChanged(object sender, EventArgs e)
-        {
-            TryApplyChanges();
-        }
-
-        private void RotationPresetButton_Click(object sender, EventArgs e)
-        {
-            if (sender is Button btn)
-            {
-                int value = 0;
-                if (btn.Tag is int preset)
-                {
-                    value = preset;
-                }
-                else
-                {
-                    int.TryParse(btn.Text, out value);
-                }
-
-                if (value < nudRotation.Minimum)
-                {
-                    value = (int)nudRotation.Minimum;
-                }
-                else if (value > nudRotation.Maximum)
-                {
-                    value = (int)nudRotation.Maximum;
-                }
-
-                nudRotation.Value = value;
-                nudRotation.Focus();
-            }
-        }
-
-        private void UpdateSourceLabel()
-        {
-            if (!string.IsNullOrWhiteSpace(ReplacementImagePath))
-            {
-                lblSourceValue.Text = Path.GetFileName(ReplacementImagePath);
-                return;
-            }
-
-            string sourceValue;
-            if (string.Equals(SourceType, "Clipboard", StringComparison.OrdinalIgnoreCase))
-            {
-                sourceValue = Resources.EditRaster_LabelSourceClipboard;
-            }
-            else if (string.Equals(SourceType, "File", StringComparison.OrdinalIgnoreCase))
-            {
-                sourceValue = string.IsNullOrWhiteSpace(FilePath)
-                    ? Resources.EditRaster_LabelSourceFile
-                    : Path.GetFileName(FilePath);
-            }
-            else
-            {
-                sourceValue = Resources.EditRaster_LabelSourceUnknown;
-            }
-
-            lblSourceValue.Text = sourceValue;
-        }
-
-        private void BtnReplaceImage_Click(object sender, EventArgs e)
-        {
-            if (SelectReplacementImage == null)
-            {
-                return;
-            }
-
-            string selectedPath = SelectReplacementImage();
-            if (string.IsNullOrWhiteSpace(selectedPath))
-            {
-                return;
-            }
-
-            ReplacementImagePath = selectedPath;
-            if (TryGetImageInfoFromPath(selectedPath, out int sourceWidth, out int sourceHeight, out decimal aspectFromFile))
-            {
-                SourcePixelWidth = sourceWidth;
-                SourcePixelHeight = sourceHeight;
-                SourceAspectRatio = aspectFromFile;
-            }
-            btnResetAspect.Enabled = SourceAspectRatio > 0m;
-            btnResetOneToOne.Enabled = SourcePixelWidth > 0 && SourcePixelHeight > 0;
-            UpdateSourceLabel();
-            TryApplyChanges();
-        }
-
-        private static bool TryGetImageInfoFromPath(string filePath, out int width, out int height, out decimal aspectRatio)
-        {
-            width = 0;
-            height = 0;
-            aspectRatio = 0m;
-            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-            {
-                return false;
-            }
-
-            try
-            {
-                using (var image = DrawingImage.FromFile(filePath))
-                {
-                    if (image.Width <= 0 || image.Height <= 0)
-                    {
-                        return false;
-                    }
-
-                    width = image.Width;
-                    height = image.Height;
-                    aspectRatio = (decimal)width / height;
-                    return aspectRatio > 0m;
-                }
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private void BtnResetAspect_Click(object sender, EventArgs e)
-        {
-            if (SourceAspectRatio <= 0m)
-            {
-                return;
-            }
-
-            decimal currentArea = nudWidth.Value * nudHeight.Value;
-            if (currentArea <= 0m)
-            {
-                currentArea = 1m;
-            }
-
-            decimal targetWidth = (decimal)Math.Sqrt((double)(currentArea * SourceAspectRatio));
-            decimal targetHeight = targetWidth / SourceAspectRatio;
-
-            suppressDimensionSync = true;
-            nudWidth.Value = ClampDecimal(targetWidth, nudWidth.Minimum, nudWidth.Maximum);
-            nudHeight.Value = ClampDecimal(targetHeight, nudHeight.Minimum, nudHeight.Maximum);
-            suppressDimensionSync = false;
-
-            aspectRatio = SourceAspectRatio;
-            if (chkLockAspect.Checked)
-            {
-                lockedAspectRatio = aspectRatio > 0m ? aspectRatio : lockedAspectRatio;
-            }
-            TryApplyChanges();
-        }
-
-        private void BtnResetOneToOne_Click(object sender, EventArgs e)
-        {
-            if (SourcePixelWidth <= 0 || SourcePixelHeight <= 0)
-            {
-                return;
-            }
-
-            decimal scale = (decimal)Math.Max(0.01f, ViewScaleFactor);
-            decimal centerX = nudX.Value + (nudWidth.Value / 2m);
-            decimal centerY = nudY.Value + (nudHeight.Value / 2m);
-            decimal targetWidth = SourcePixelWidth / scale;
-            decimal targetHeight = SourcePixelHeight / scale;
-
-            // If 1:1 is larger than page area, scale down with a safe margin
-            // so resize handles are still easy to grab.
-            if (PageWidth > 0f && PageHeight > 0f)
-            {
-                decimal viewScale = (decimal)Math.Max(0.01f, ViewScaleFactor);
-                decimal marginInViewPixels = 28m;
-                decimal marginDoc = marginInViewPixels / viewScale;
-                decimal availableWidth = Math.Max(1m, (decimal)PageWidth - (2m * marginDoc));
-                decimal availableHeight = Math.Max(1m, (decimal)PageHeight - (2m * marginDoc));
-
-                double radians = (Math.PI / 180d) * NormalizeAngle((int)nudRotation.Value);
-                decimal absCos = (decimal)Math.Abs(Math.Cos(radians));
-                decimal absSin = (decimal)Math.Abs(Math.Sin(radians));
-                decimal extentWidth = (targetWidth * absCos) + (targetHeight * absSin);
-                decimal extentHeight = (targetWidth * absSin) + (targetHeight * absCos);
-
-                if (extentWidth > availableWidth || extentHeight > availableHeight)
-                {
-                    decimal scaleX = availableWidth / Math.Max(1m, extentWidth);
-                    decimal scaleY = availableHeight / Math.Max(1m, extentHeight);
-                    decimal fitScale = Math.Min(scaleX, scaleY);
-                    if (fitScale > 0m && fitScale < 1m)
-                    {
-                        targetWidth *= fitScale;
-                        targetHeight *= fitScale;
-                    }
-                }
-            }
-
-            targetWidth = ClampDecimal(targetWidth, nudWidth.Minimum, nudWidth.Maximum);
-            targetHeight = ClampDecimal(targetHeight, nudHeight.Minimum, nudHeight.Maximum);
-
-            suppressDimensionSync = true;
-            nudWidth.Value = targetWidth;
-            nudHeight.Value = targetHeight;
-            nudX.Value = ClampDecimal(centerX - (targetWidth / 2m), nudX.Minimum, nudX.Maximum);
-            nudY.Value = ClampDecimal(centerY - (targetHeight / 2m), nudY.Minimum, nudY.Maximum);
-            suppressDimensionSync = false;
-
-            aspectRatio = SourceAspectRatio > 0m ? SourceAspectRatio : aspectRatio;
-            if (chkLockAspect.Checked)
-            {
-                lockedAspectRatio = aspectRatio > 0m ? aspectRatio : lockedAspectRatio;
-            }
-            TryApplyChanges();
-        }
-
-        private void BtnOK_Click(object sender, EventArgs e)
-        {
-            SyncPropertiesFromControls();
-        }
-
-        private void BtnRestoreDefaults_Click(object sender, EventArgs e)
-        {
-            if (RestoreDefaultsAction == null)
-            {
-                return;
-            }
-
-            RestoreDefaultsAction(this);
-            suppressAutoApply = true;
-            suppressDimensionSync = true;
-            try
-            {
-                nudRotation.Value = NormalizeAngle(Rotation);
-                nudOpacity.Value = ClampDecimal((decimal)(Math.Max(0f, Math.Min(1f, RasterOpacity)) * 100f), nudOpacity.Minimum, nudOpacity.Maximum);
-                chkTransparentBackground.Checked = TransparentBackground;
-                chkLockAspect.Checked = LockAspect;
-                chkLocked.Checked = IsLocked;
-                RecalculateAspectRatio();
-                lockedAspectRatio = aspectRatio > 0m ? aspectRatio : 1m;
-            }
-            finally
-            {
-                suppressDimensionSync = false;
-                suppressAutoApply = false;
-            }
-            TryApplyChanges();
-        }
-
-        private void SyncPropertiesFromControls()
-        {
-            PositionX = (float)nudX.Value;
-            PositionY = (float)nudY.Value;
-            WidthValue = Math.Max(1f, (float)nudWidth.Value);
-            HeightValue = Math.Max(1f, (float)nudHeight.Value);
-            Rotation = NormalizeAngle((int)nudRotation.Value);
-            RasterOpacity = (float)(nudOpacity.Value / 100m);
-            TransparentBackground = chkTransparentBackground.Checked;
-            LockAspect = chkLockAspect.Checked;
-            IsLocked = chkLocked.Checked;
-        }
-
-        public void SyncControlsFromObject(RasterObject rasterObject)
-        {
-            if (rasterObject == null)
-            {
-                return;
-            }
-
-            suppressAutoApply = true;
-            suppressDimensionSync = true;
-            try
-            {
-                nudX.Value = ClampDecimal((decimal)rasterObject.Bounds.X, nudX.Minimum, nudX.Maximum);
-                nudY.Value = ClampDecimal((decimal)rasterObject.Bounds.Y, nudY.Minimum, nudY.Maximum);
-                nudWidth.Value = ClampDecimal((decimal)Math.Max(1f, rasterObject.Bounds.Width), nudWidth.Minimum, nudWidth.Maximum);
-                nudHeight.Value = ClampDecimal((decimal)Math.Max(1f, rasterObject.Bounds.Height), nudHeight.Minimum, nudHeight.Maximum);
-                nudRotation.Value = NormalizeAngle(rasterObject.Rotation);
-                nudOpacity.Value = ClampDecimal((decimal)(Math.Max(0f, Math.Min(1f, rasterObject.Opacity)) * 100f), nudOpacity.Minimum, nudOpacity.Maximum);
-                chkTransparentBackground.Checked = rasterObject.TransparentBackground;
-                chkLockAspect.Checked = rasterObject.LockAspect;
-                chkLocked.Checked = rasterObject.IsLocked;
-                SourceType = rasterObject.SourceType;
-                FilePath = rasterObject.FilePath;
-                ReplacementImagePath = string.Empty;
-                if (TryGetImageInfoFromPath(FilePath, out int sourceWidth, out int sourceHeight, out decimal aspectFromPath))
-                {
-                    SourcePixelWidth = sourceWidth;
-                    SourcePixelHeight = sourceHeight;
-                    SourceAspectRatio = aspectFromPath;
-                }
-                btnResetAspect.Enabled = SourceAspectRatio > 0m;
-                btnResetOneToOne.Enabled = SourcePixelWidth > 0 && SourcePixelHeight > 0;
-                RecalculateAspectRatio();
-                lockedAspectRatio = aspectRatio > 0m ? aspectRatio : lockedAspectRatio;
-                UpdateSourceLabel();
-                SyncPropertiesFromControls();
-            }
-            finally
-            {
-                suppressDimensionSync = false;
-                suppressAutoApply = false;
-            }
-        }
-
-        private void TryApplyChanges()
-        {
-            if (ApplyChanges == null || suppressAutoApply)
-            {
-                return;
-            }
-
-            SyncPropertiesFromControls();
-            ApplyChanges?.Invoke();
-        }
-    }
-
-    public class EditArrowDialog : Form
-    {
-        private Button btnColor;
-        private Button btnBorderColor;
-        private NumericUpDown nudThickness;
-        private NumericUpDown nudBorderWidth;
-        private NumericUpDown nudHeadLength;
-        private NumericUpDown nudHeadWidth;
-        private CheckBox chkLocked;
-        private Button btnRestoreDefaults;
-        private Button btnOK;
-        private Button btnCancel;
-        private bool suppressAutoApply;
-        private DialogTheme dialogTheme;
-
-        public System.Drawing.Color ArrowColor { get; set; } = System.Drawing.Color.Red;
-        public float ThicknessValue { get; set; } = 3f;
-        public System.Drawing.Color BorderColor { get; set; } = System.Drawing.Color.Black;
-        public float BorderWidthValue { get; set; } = 0f;
-        public float HeadLengthValue { get; set; } = 18f;
-        public float HeadWidthValue { get; set; } = 12f;
-        public bool IsLocked { get; set; }
-        public Action ApplyChanges { get; set; }
-        public Action<EditArrowDialog> RestoreDefaultsAction { get; set; }
-
-        public EditArrowDialog()
-        {
-            InitializeComponents();
-        }
-
-        private void InitializeComponents()
-        {
-            Text = Resources.EditArrow_Title;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            StartPosition = FormStartPosition.CenterParent;
-            Width = PDFForm.ScaleForDpiStatic(360);
-            Height = PDFForm.ScaleForDpiStatic(350);
-            MaximizeBox = false;
-            MinimizeBox = false;
-
-            Label lblColor = new Label { Text = Resources.EditArrow_Color, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(22)), AutoSize = true };
-            btnColor = new Button { Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(16)), Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(28)), Text = Resources.EditArrow_ChooseColor };
-            btnColor.Click += BtnColor_Click;
-
-            Label lblThickness = new Label { Text = Resources.EditArrow_LineThickness, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(64)), AutoSize = true };
-            nudThickness = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(60)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
-                Minimum = 1,
-                Maximum = 24,
-                DecimalPlaces = 1,
-                Increment = 0.5m
-            };
-            nudThickness.ValueChanged += (_, __) => TryApplyChanges();
-
-            Label lblBorderColor = new Label { Text = Resources.EditArrow_BorderColor, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(100)), AutoSize = true };
-            btnBorderColor = new Button { Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(94)), Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(28)), Text = Resources.EditArrow_ChooseColor };
-            btnBorderColor.Click += BtnBorderColor_Click;
-
-            Label lblBorderWidth = new Label { Text = Resources.EditArrow_BorderThickness, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(136)), AutoSize = true };
-            nudBorderWidth = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(132)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
-                Minimum = 0,
-                Maximum = 24,
-                DecimalPlaces = 3,
-                Increment = 0.001m
-            };
-            nudBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
-
-            Label lblHeadLength = new Label { Text = Resources.EditArrow_HeadLength, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(172)), AutoSize = true };
-            nudHeadLength = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(168)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
-                Minimum = 4,
-                Maximum = 120,
-                DecimalPlaces = 1,
-                Increment = 1m
-            };
-            nudHeadLength.ValueChanged += (_, __) => TryApplyChanges();
-
-            Label lblHeadWidth = new Label { Text = Resources.EditArrow_HeadWidth, Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(208)), AutoSize = true };
-            nudHeadWidth = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(204)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
-                Minimum = 4,
-                Maximum = 120,
-                DecimalPlaces = 1,
-                Increment = 1m
-            };
-            nudHeadWidth.ValueChanged += (_, __) => TryApplyChanges();
-
-            chkLocked = new CheckBox
-            {
-                Text = Resources.EditRaster_CheckLocked,
-                Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(240)),
-                AutoSize = true
-            };
-            chkLocked.CheckedChanged += (_, __) => TryApplyChanges();
-
-            btnOK = new Button
-            {
-                Text = Resources.Merge_OK,
-                Location = new Point(PDFForm.ScaleForDpiStatic(166), PDFForm.ScaleForDpiStatic(262)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
-                DialogResult = DialogResult.OK
-            };
-            btnOK.Click += BtnOK_Click;
-
-            btnRestoreDefaults = new Button
-            {
-                Text = Resources.ResourceManager.GetString("UI_Button_RestoreSettings", Resources.Culture ?? CultureInfo.CurrentUICulture) ?? "UI_Button_RestoreSettings",
-                Location = new Point(PDFForm.ScaleForDpiStatic(16), PDFForm.ScaleForDpiStatic(262)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(140), PDFForm.ScaleForDpiStatic(30))
-            };
-            btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
-
-            btnCancel = new Button
-            {
-                Text = Resources.Merge_Cancel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(252), PDFForm.ScaleForDpiStatic(262)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
-                DialogResult = DialogResult.Cancel
-            };
-
-            Controls.Add(lblColor);
-            Controls.Add(btnColor);
-            Controls.Add(lblThickness);
-            Controls.Add(nudThickness);
-            Controls.Add(lblBorderColor);
-            Controls.Add(btnBorderColor);
-            Controls.Add(lblBorderWidth);
-            Controls.Add(nudBorderWidth);
-            Controls.Add(lblHeadLength);
-            Controls.Add(nudHeadLength);
-            Controls.Add(lblHeadWidth);
-            Controls.Add(nudHeadWidth);
-            Controls.Add(chkLocked);
-            Controls.Add(btnRestoreDefaults);
-            Controls.Add(btnOK);
-            Controls.Add(btnCancel);
-
-            AcceptButton = btnOK;
-            CancelButton = btnCancel;
-        }
-
-        protected override void OnLoad(EventArgs e)
-        {
-            base.OnLoad(e);
-            suppressAutoApply = true;
-            try
-            {
-                btnColor.BackColor = ArrowColor;
-                btnBorderColor.BackColor = BorderColor;
-                nudThickness.Value = ClampValue((decimal)ThicknessValue, nudThickness.Minimum, nudThickness.Maximum);
-                nudBorderWidth.Value = ClampValue((decimal)BorderWidthValue, nudBorderWidth.Minimum, nudBorderWidth.Maximum);
-                nudHeadLength.Value = ClampValue((decimal)HeadLengthValue, nudHeadLength.Minimum, nudHeadLength.Maximum);
-                nudHeadWidth.Value = ClampValue((decimal)HeadWidthValue, nudHeadWidth.Minimum, nudHeadWidth.Maximum);
-                chkLocked.Checked = IsLocked;
-                SyncPropertiesFromControls();
-                ApplyDialogTheme(dialogTheme);
-            }
-            finally
-            {
-                suppressAutoApply = false;
-            }
-        }
-
-        internal void ApplyDialogTheme(DialogTheme theme)
-        {
-            dialogTheme = theme;
-            DialogThemeApplier.ApplyTo(this, theme, btnColor, btnBorderColor);
-            if (btnColor != null)
-            {
-                btnColor.ForeColor = GetContrastingTextColor(btnColor.BackColor);
-            }
-            if (btnBorderColor != null)
-            {
-                btnBorderColor.ForeColor = GetContrastingTextColor(btnBorderColor.BackColor);
-            }
-        }
-
-        private static System.Drawing.Color GetContrastingTextColor(System.Drawing.Color color)
-        {
-            int luminance = (int)((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B));
-            return luminance >= 140 ? System.Drawing.Color.Black : System.Drawing.Color.White;
-        }
-
-        private static decimal ClampValue(decimal value, decimal min, decimal max)
-        {
-            if (value < min)
-            {
-                return min;
-            }
-            if (value > max)
-            {
-                return max;
-            }
-            return value;
-        }
-
-        private void BtnColor_Click(object sender, EventArgs e)
-        {
-            using (var colorDialog = new ColorDialog())
-            {
-                colorDialog.Color = ArrowColor;
-                if (colorDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    ArrowColor = colorDialog.Color;
-                    btnColor.BackColor = ArrowColor;
-                    btnColor.ForeColor = GetContrastingTextColor(ArrowColor);
-                    TryApplyChanges();
-                }
-            }
-        }
-
-        private void BtnBorderColor_Click(object sender, EventArgs e)
-        {
-            using (var colorDialog = new ColorDialog())
-            {
-                colorDialog.Color = BorderColor;
-                if (colorDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    BorderColor = colorDialog.Color;
-                    btnBorderColor.BackColor = BorderColor;
-                    btnBorderColor.ForeColor = GetContrastingTextColor(BorderColor);
-                    TryApplyChanges();
-                }
-            }
-        }
-
-        private void BtnOK_Click(object sender, EventArgs e)
-        {
-            SyncPropertiesFromControls();
-        }
-
-        private void BtnRestoreDefaults_Click(object sender, EventArgs e)
-        {
-            if (RestoreDefaultsAction == null)
-            {
-                return;
-            }
-
-            RestoreDefaultsAction(this);
-            suppressAutoApply = true;
-            try
-            {
-                btnColor.BackColor = ArrowColor;
-                btnBorderColor.BackColor = BorderColor;
-                btnColor.ForeColor = GetContrastingTextColor(ArrowColor);
-                btnBorderColor.ForeColor = GetContrastingTextColor(BorderColor);
-                nudThickness.Value = ClampValue((decimal)ThicknessValue, nudThickness.Minimum, nudThickness.Maximum);
-                nudBorderWidth.Value = ClampValue((decimal)BorderWidthValue, nudBorderWidth.Minimum, nudBorderWidth.Maximum);
-                nudHeadLength.Value = ClampValue((decimal)HeadLengthValue, nudHeadLength.Minimum, nudHeadLength.Maximum);
-                nudHeadWidth.Value = ClampValue((decimal)HeadWidthValue, nudHeadWidth.Minimum, nudHeadWidth.Maximum);
-                chkLocked.Checked = IsLocked;
-            }
-            finally
-            {
-                suppressAutoApply = false;
-            }
-            TryApplyChanges();
-        }
-
-        private void SyncPropertiesFromControls()
-        {
-            ThicknessValue = (float)nudThickness.Value;
-            BorderWidthValue = (float)nudBorderWidth.Value;
-            HeadLengthValue = (float)nudHeadLength.Value;
-            HeadWidthValue = (float)nudHeadWidth.Value;
-            IsLocked = chkLocked.Checked;
-        }
-
-        private void TryApplyChanges()
-        {
-            if (ApplyChanges == null || suppressAutoApply)
-            {
-                return;
-            }
-
-            SyncPropertiesFromControls();
-            ApplyChanges?.Invoke();
-        }
-    }
-    public class SplitDocumentDialog : Form
-    {
-        private Label lblFile;
-        private TextBox txtFilePath;
-        private Button btnBrowse;
-        private Label lblPageCount;
-        private Label lblPages;
-        private TextBox txtPageNumbers;
-        private Label lblStep;
-        private NumericUpDown nudStep;
-        private Button btnOK;
-        private Button btnCancel;
-
-        // Properties returning selected data
-        public string SelectedFile { get; private set; }
-        public List<int> PageNumbers { get; private set; } = new List<int>();
-        public int DocumentPageCount { get; private set; }  // Number of pages in the PDF
-        public int Step { get; private set; }  // Split step
-
-        public SplitDocumentDialog(int numPages = 0, string defaultFile = "")
-        {
-            DocumentPageCount = numPages;
-            SelectedFile = defaultFile;
-            InitializeComponents();
-        }
-
-        private void InitializeComponents()
-        {
-            this.Text = Resources.Split_Title;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.MaximizeBox = false;
-                        this.MinimizeBox = false;
-            this.AutoScroll = true;
-            int maxH = Screen.GetWorkingArea(this).Height - 80;
-            if (this.Height > maxH) this.Height = maxH;
-            this.Width = PDFForm.ScaleForDpiStatic(400);
-            this.Height = PDFForm.ScaleForDpiStatic(280);
-
-            // Label for file
-            lblFile = new Label
-            {
-                Text = Resources.Split_FileLabel,
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(20))
-            };
-
-            // Text field with selected path (read-only)
-            txtFilePath = new TextBox
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(45)),
-                Width = PDFForm.ScaleForDpiStatic(240),
-                Text = SelectedFile,
-                ReadOnly = true
-            };
-
-            // Label to display page count
-            lblPageCount = new Label
-            {
-                Text = string.Format(Resources.Split_PageCountLabel, DocumentPageCount),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(75))
-            };
-
-            txtPageNumbers = new TextBox
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(125)),
-                Width = PDFForm.ScaleForDpiStatic(360)
-            };
-
-            // Label for the step value
-            lblStep = new Label
-            {
-                Text = Resources.Split_StepLabel,
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(160))
-            };
-
-            nudStep = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(140), PDFForm.ScaleForDpiStatic(160)),
-                Minimum = 0,
-                Width = PDFForm.ScaleForDpiStatic(50),
-                Value = 0
-            };
-
-            // "Browse" button to open OpenFileDialog
-            btnBrowse = new Button
-            {
-                Text = Resources.Split_Browse,
-                Location = new Point(PDFForm.ScaleForDpiStatic(260), PDFForm.ScaleForDpiStatic(43)),
-                Width = PDFForm.ScaleForDpiStatic(110),
-                Height = PDFForm.ScaleForDpiStatic(28)
-            };
-            btnBrowse.Click += BtnBrowse_Click;
-
-            // Text field for entering page numbers
-            txtPageNumbers = new TextBox
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(125)),
-                Width = PDFForm.ScaleForDpiStatic(360)
-            };
-
-            nudStep = new NumericUpDown
-            {
-                Location = new Point(PDFForm.ScaleForDpiStatic(130), PDFForm.ScaleForDpiStatic(160)),
-                Minimum = 0,
-                Width = PDFForm.ScaleForDpiStatic(70),
-                Value = 0
-            };
-
-            // OK button
-            btnOK = new Button
-            {
-                Text = Resources.Merge_OK,
-                Location = new Point(PDFForm.ScaleForDpiStatic(190), PDFForm.ScaleForDpiStatic(200)),
-                Width = PDFForm.ScaleForDpiStatic(80),
-                Height = PDFForm.ScaleForDpiStatic(28),
-                DialogResult = DialogResult.OK
-            };
-
-            // Label to display page count
-            lblPageCount = new Label
-            {
-                Text = string.Format(Resources.Split_PageCountLabel, DocumentPageCount),
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(75))
-            };
-
-            // Label for page numbers to split
-            lblPages = new Label
-            {
-                Text = Resources.Split_PagesLabel,
-                AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(100))
-            };
-
-            // OK button
-            btnOK = new Button
-            {
-                Text = Resources.Merge_OK,
-                Location = new Point(PDFForm.ScaleForDpiStatic(190), PDFForm.ScaleForDpiStatic(200)),
-                Width = PDFForm.ScaleForDpiStatic(80),
-                Height = PDFForm.ScaleForDpiStatic(28),
-                DialogResult = DialogResult.OK
-            };
-            btnOK.Click += BtnOK_Click;
-
-            // Cancel button
-            btnCancel = new Button
-            {
-                Text = Resources.Merge_Cancel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(280), PDFForm.ScaleForDpiStatic(200)),
-                Width = PDFForm.ScaleForDpiStatic(80),
-                Height = PDFForm.ScaleForDpiStatic(28),
-                DialogResult = DialogResult.Cancel
-            };
-
-            // Add controls to the form
-            this.Controls.Add(lblFile);
-            this.Controls.Add(txtFilePath);
-            this.Controls.Add(btnBrowse);
-            this.Controls.Add(lblPageCount);
-            this.Controls.Add(lblPages);
-            this.Controls.Add(txtPageNumbers);
-            this.Controls.Add(lblStep);
-            this.Controls.Add(nudStep);
-            this.Controls.Add(btnOK);
-            this.Controls.Add(btnCancel);
-
-            this.AcceptButton = btnOK;
-            this.CancelButton = btnCancel;
-        }
-
-        private void BtnBrowse_Click(object sender, EventArgs e)
-        {
-            using (OpenFileDialog openFileDialog = new OpenFileDialog())
-            {
-                openFileDialog.Filter = Resources.Dialog_Filter_PDF;
-                openFileDialog.Title = Resources.Split_Dlg_Title;
-
-                if (openFileDialog.ShowDialog(this) == DialogResult.OK)
-                {
-                    txtFilePath.Text = openFileDialog.FileName;
-                    SelectedFile = openFileDialog.FileName;
-
-                    // After selecting PDF file, display number of pages
-                    try
-                    {
-                        var props = new ReaderProperties();
-                        //if (!string.IsNullOrEmpty(userPassword))
-                        //{
-
-                        //}
-                        using (PdfReader reader = new PdfReader(SelectedFile, props).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
-                        using (iText.Kernel.Pdf.PdfDocument pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
-                        {
-                            DocumentPageCount = pdfDoc.GetNumberOfPages();
-                        }
-                        lblPageCount.Text = string.Format(Resources.Split_PageCountLabel, DocumentPageCount);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show(this, string.Format(Resources.Split_Err_ReadFile, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        lblPageCount.Text = Resources.Split_PageCountUnknown;
-                        DocumentPageCount = 0;
-                    }
-                }
-            }
-        }
-
-        private void BtnOK_Click(object sender, EventArgs e)
-        {
-            // Validation - whether file was selected and exists
-            if (string.IsNullOrEmpty(SelectedFile) || !File.Exists(SelectedFile))
-            {
-                MessageBox.Show(this, Resources.Split_Err_SelectFile, Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                this.DialogResult = DialogResult.None;
-                return;
-            }
-
-            // Validation - whether page numbers for splitting were entered
-            string input = txtPageNumbers.Text;
-            var numbers = input.Split(new char[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            List<int> parsedNumbers = new List<int>();
-            foreach (var numStr in numbers)
-            {
-                if (int.TryParse(numStr.Trim(), out int num) && num > 0)
-                {
-                    parsedNumbers.Add(num);
-                }
-                else
-                {
-                    MessageBox.Show(this, string.Format(Resources.Err_InvalidPageNumberValue, numStr), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    this.DialogResult = DialogResult.None;
-                    return;
-                }
-            }
-
-            // Ensure page numbers are unique and sorted
-            PageNumbers = parsedNumbers.Distinct().OrderBy(n => n).ToList();
-            Step = (int)nudStep.Value;
-            if (PageNumbers.Count == 0 && Step == 0)
-            {
-                MessageBox.Show(this, Resources.Delete_Err_NoData, Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
-                this.DialogResult = DialogResult.None;
-                return;
-            } else
-            {
-                this.Close();
-            }
-        }
-    }
-
-
-
-    public partial class MergeFilesForm : Form
-    {
-        private BindingList<string> pdfFiles = new BindingList<string>();
-        private ListBox listBoxFiles;
-        private Button buttonAddFiles;
-        private Button buttonAddDirectory;
-        private Button buttonRemove;
-        private Button buttonUp;
-        private Button buttonDown;
-        private Button buttonClearAll;
-        private Button buttonMerge;
-        private Button buttonCancel;
-
-        public MergeFilesForm()
-        {
-            this.FormClosing += MergeFilesForm_FormClosing;
-            InitializeComponent();
-            listBoxFiles.DataSource = pdfFiles;
-        }
-
-        private void InitializeComponent()
-        {
-            this.Text = Resources.Merge_Title;
-            this.Size = PDFForm.ScaleSizeForDpiStatic(580, 400);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-
-
-            listBoxFiles = new ListBox
-            {
-                Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(20), PDFForm.ScaleForDpiStatic(20)),
-                Size = PDFForm.ScaleSizeForDpiStatic(400, 280),
-                HorizontalScrollbar = true,
-                SelectionMode = SelectionMode.MultiExtended
-            };
-
-            buttonAddFiles = new Button { Text = Resources.Merge_AddFiles, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(20)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
-            buttonAddDirectory = new Button { Text = Resources.Merge_AddDirectory, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(60)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
-            buttonRemove = new Button { Text = Resources.Merge_RemoveSelected, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(100)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
-            buttonClearAll = new Button { Text = Resources.Merge_ClearList, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(140)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
-            buttonUp = new Button { Text = Resources.Merge_Up, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(180)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
-            buttonDown = new Button { Text = Resources.Merge_Down, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(220)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
-            buttonMerge = new Button { Text = Resources.Merge_OK, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(300), PDFForm.ScaleForDpiStatic(320)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
-            buttonCancel = new Button { Text = Resources.Merge_Cancel, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(320)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28), DialogResult = DialogResult.Cancel };
-
-            this.Controls.Add(listBoxFiles);
-            this.Controls.Add(buttonAddFiles);
-            this.Controls.Add(buttonAddDirectory);
-            this.Controls.Add(buttonRemove);
-            this.Controls.Add(buttonClearAll);
-            this.Controls.Add(buttonUp);
-            this.Controls.Add(buttonDown);
-            this.Controls.Add(buttonMerge);
-            this.Controls.Add(buttonCancel);
-
-            buttonAddFiles.Click += ButtonAddFiles_Click;
-            buttonAddDirectory.Click += ButtonAddDirectory_Click;
-            buttonRemove.Click += ButtonRemove_Click;
-            buttonClearAll.Click += ButtonClearAll_Click;
-            buttonUp.Click += ButtonUp_Click;
-            buttonDown.Click += ButtonDown_Click;
-            buttonMerge.Click += ButtonMerge_Click;
-            buttonCancel.Click += ButtonCancel_Click;
-
-            this.CancelButton = buttonCancel;
-            this.AcceptButton = null;
-        }
-
-        private void MergeFilesForm_FormClosing(object sender, FormClosingEventArgs e)
-        {
-            if (e.CloseReason == CloseReason.UserClosing)
-            {
-                e.Cancel = true;
-                this.Hide();
-                this.Owner?.Activate();
-            }
-        }
-
-        private void ButtonAddFiles_Click(object sender, EventArgs e)
-        {
-            OpenFileDialog ofd = new OpenFileDialog()
-            {
-                Filter = Resources.Dialog_Filter_PDF,
-                Multiselect = true
-            };
-            if (ofd.ShowDialog(this) == DialogResult.OK)
-            {
-                foreach (var file in ofd.FileNames)
-                {
-                    if (!pdfFiles.Contains(file))
-                        pdfFiles.Add(file);
-                }
-            }
-        }
-
-        private void ButtonAddDirectory_Click(object sender, EventArgs e)
-        {
-            using (var dlg = new FolderBrowserDialog())
-            {
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    var files = Directory.GetFiles(dlg.SelectedPath, "*.pdf");
-                    foreach (var file in files)
-                    {
-                        if (!pdfFiles.Contains(file))
-                            pdfFiles.Add(file);
-                    }
-                }
-            }
-        }
-
-        private void ButtonRemove_Click(object sender, EventArgs e)
-        {
-            var selectedItems = listBoxFiles.SelectedItems.Cast<string>().ToList();
-            foreach (var item in selectedItems)
-            {
-                pdfFiles.Remove(item);
-            }
-        }
-
-        private void ButtonClearAll_Click(object sender, EventArgs e)
-        {
-            pdfFiles.Clear();
-        }
-
-        private void ButtonUp_Click(object sender, EventArgs e)
-        {
-            if (listBoxFiles.SelectedItems.Count == 0) return;
-
-            var selected = listBoxFiles.SelectedItems.Cast<string>().ToList();
-            var indices = selected.Select(item => pdfFiles.IndexOf(item)).Where(i => i > 0).OrderBy(i => i).ToList();
-
-            var moved = new HashSet<string>(selected);
-            for (int i = 1; i < pdfFiles.Count; i++)
-            {
-                if (moved.Contains(pdfFiles[i]) && !moved.Contains(pdfFiles[i - 1]))
-                {
-                    string temp = pdfFiles[i - 1];
-                    pdfFiles[i - 1] = pdfFiles[i];
-                    pdfFiles[i] = temp;
-                }
-            }
-
-            ReselectItems(selected);
-        }
-
-        private void ButtonDown_Click(object sender, EventArgs e)
-        {
-            if (listBoxFiles.SelectedItems.Count == 0) return;
-            var selected = listBoxFiles.SelectedItems.Cast<string>().ToList();
-            var indices = selected.Select(item => pdfFiles.IndexOf(item)).Where(i => i < pdfFiles.Count - 1).OrderByDescending(i => i).ToList();
-
-            foreach (var i in indices)
-            {
-                var temp = pdfFiles[i + 1];
-                pdfFiles[i + 1] = pdfFiles[i];
-                pdfFiles[i] = temp;
-            }
-
-            ReselectItems(selected);
-        }
-
-        private void ReselectItems(List<string> selected)
-        {
-            listBoxFiles.ClearSelected(); // pierwszy
-            this.BeginInvoke(new System.Action(() =>
-            {
-                listBoxFiles.ClearSelected(); // second inside UI queue
-                foreach (var item in selected)
-                {
-                    int idx = pdfFiles.IndexOf(item);
-                    if (idx >= 0)
-                        listBoxFiles.SetSelected(idx, true);
-                }
-            }));
-        }
-
-        private void ButtonCancel_Click(object sender, EventArgs e)
-        {
-            this.Hide();
-            this.Owner?.Activate();
-        }
-
-        private async void ButtonMerge_Click(object sender, EventArgs e)
-        {
-            if (pdfFiles.Count == 0)
-            {
-                MessageBox.Show(this, Resources.Msg_FileListEmpty, Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
-                return;
-            }
-
-            // First, validate all files
-            List<string> lockedFiles = new List<string>();
-            foreach (var file in pdfFiles)
-            {
-                try
-                {
-                    using (var reader = new PdfReader(file))
-                    using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
-                    {
-                        // try to get number of pages - this can already throw an exception
-                        int pages = pdfDoc.GetNumberOfPages();
-
-                        // try to copy one page to empty document in memory
-                        using (var ms = new MemoryStream())
-                        using (var tempWriter = new iText.Kernel.Pdf.PdfWriter(ms))
-                        using (var tempDoc = new iText.Kernel.Pdf.PdfDocument(tempWriter))
-                        {
-                            // this line will throw an exception if the file has restrictions
-                            pdfDoc.CopyPagesTo(1, Math.Min(1, pages), tempDoc);
-                        }
-                    }
-                }
-                catch (iText.Kernel.Exceptions.BadPasswordException)
-                {
-                    lockedFiles.Add(file);
-                }
-                catch (Exception ex)
-                {
-                    // if it's another error, also treat it as problem with this PDF
-                    lockedFiles.Add(file + string.Format(GetLocalizedResourceText("Msg_ErrorSuffix"), ex.Message));
-                }
-            }
-
-            if (lockedFiles.Count > 0)
-            {
-                // if any file is locked, don't merge
-                string msg = GetLocalizedResourceText("Err_Merge_FilesHaveSecurity");
-                foreach (var f in lockedFiles)
-                {
-                    msg += "- " + Path.GetFileName(f) + "\n";
-                }
-                MessageBox.Show(this, msg, Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            // if all files are OK, only then ask for destination
-            SaveFileDialog sfd = new SaveFileDialog { Filter = Resources.Dialog_Filter_PDF };
-            if (sfd.ShowDialog(this) != DialogResult.OK)
-            {
-                return;
-            }
-
-            buttonMerge.Enabled = false;
-            this.Cursor = Cursors.WaitCursor;
-            string destination = sfd.FileName;
-            var filesToMerge = pdfFiles.ToList(); // snapshot for background task
-
-            try
-            {
-                await Task.Run(() =>
-                {
-                    using (var writer = new iText.Kernel.Pdf.PdfWriter(destination))
-                    using (var mergedDoc = new iText.Kernel.Pdf.PdfDocument(writer))
-                    {
-                        foreach (var file in filesToMerge)
-                        {
-                            using (var reader = new PdfReader(file))
-                            using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
-                            {
-                                pdfDoc.CopyPagesTo(1, pdfDoc.GetNumberOfPages(), mergedDoc);
-                            }
-                        }
-
-                        PDFForm.ApplyDemoWatermarkIfNeeded(mergedDoc);
-                    }
-                });
-
-                MessageBox.Show(this, Resources.Merge_Success, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
-                this.Hide();
-                this.Owner?.Activate();
-
-                try
-                {
-                    if (this.Owner is PDFForm parentForm)
-                    {
-                        parentForm.ExitFullScreenIfNeeded();
-                    }
-
-                    var psi = new ProcessStartInfo
-                    {
-                        FileName = destination,
-                        UseShellExecute = true
-                    };
-                    Process.Start(psi);
-                }
-                catch (System.ComponentModel.Win32Exception wex)
-                {
-                    MessageBox.Show(this, string.Format(Resources.Err_NoAssociatedPdfApp, wex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, string.Format(Resources.Merge_Err_Merge, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            finally
-            {
-                this.Cursor = Cursors.Default;
-                buttonMerge.Enabled = true;
-            }
-        }
-
-        private static string GetLocalizedResourceText(string key)
-        {
-            var culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
-            string text = Resources.ResourceManager.GetString(key, culture);
-            return string.IsNullOrWhiteSpace(text) ? key : text;
-        }
-
-    }
-
-    public class ZoomPanel : Panel
-    {
-        public ZoomPanel()
-        {
-            DoubleBuffered = true;
-            TabStop = true;
-            ResizeRedraw = true;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.Selectable, true);
-            UpdateStyles();
-        }
-
-        protected override bool IsInputKey(Keys keyData)
-        {
-            Keys keyCode = keyData & Keys.KeyCode;
-            if (keyCode == Keys.Left || keyCode == Keys.Right || keyCode == Keys.Up || keyCode == Keys.Down)
-            {
-                return true;
-            }
-
-            return base.IsInputKey(keyData);
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            const int WM_MOUSEWHEEL = 0x020A;
-            if (m.Msg == WM_MOUSEWHEEL)
-            {
-                // Get delta value and cursor position within control
-                int delta = (short)((long)m.WParam >> 16);
-                Point mousePos = this.PointToClient(Cursor.Position);
-                MouseEventArgs args = new MouseEventArgs(MouseButtons.None, 0, mousePos.X, mousePos.Y, delta);
-
-                // Find parent form and call method handling event
-                PDFForm pdfForm = FindForm() as PDFForm;
-                if (pdfForm is PDFForm)
-                {
-                    pdfForm.Panel2_MouseWheel(args);
-                }
-
-                // If CTRL is pressed, "eat" message â€“ don't pass to base.WndProc
-                if ((Control.ModifierKeys & Keys.Control) == Keys.Control)
-                    return;
-            }
-            base.WndProc(ref m);
-        }
-
-    }
-
-    // Class representing text occurrence location
-    public class TextLocation
-    {
-        public int PageNumber { get; set; }
-        public int PageRotation { get; set; }
-        public iText.Kernel.Geom.Rectangle Rect { get; set; }
-        public bool IsOcr { get; set; }
-        public bool IsExactOcrWord { get; set; }
-
-        public TextLocation(int pageNumber, int pageRotation, iText.Kernel.Geom.Rectangle rect, bool isOcr = false, bool isExactOcrWord = false)
-        {
-            PageNumber = pageNumber;
-            PageRotation = pageRotation;
-            Rect = rect;
-            IsOcr = isOcr;
-            IsExactOcrWord = isExactOcrWord;
-        }
-
-        public override string ToString()
-        {
-            var culture = Properties.Resources.Culture ?? CultureInfo.CurrentUICulture;
-            var format = Properties.Resources.ResourceManager.GetString("TextLocation_ToStringFormat", culture);
-            if (string.IsNullOrWhiteSpace(format))
-            {
-                format = "TextLocation_ToStringFormat";
-            }
-            return string.Format(format, PageNumber, Rect);
-        }
-    }
-
-    public class ThemedDataGridView : DataGridView
-    {
-        public ThemedDataGridView()
-        {
-            DoubleBuffered = true;
-            ResizeRedraw = true;
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-            UpdateStyles();
-        }
-    }
-
-
-
-    public class RedactionBlock
-    {
-        public System.Drawing.RectangleF Bounds { get; set; }
-        public int PageNumber { get; set; }
-        public string LayerId { get; set; }
-        public int? FootnoteNumber { get; set; }
-        public string ScopeId { get; set; }
-        public List<string> BasisIds { get; set; }
-        public string ClassificationSource { get; set; }
-        public string MatchedTag { get; set; }
-        public string InterestSubject { get; set; }
-        public bool IsMarkerSelection { get; set; }
-        public string DuplicateGroupId { get; set; }
-        public DateTime CreatedAtUtc { get; set; }
-        public DateTime UpdatedAtUtc { get; set; }
-        [JsonIgnore]
-        public List<System.Drawing.RectangleF> PreviewTextRectsPdf { get; set; }
-
-        public bool IsCursorSelection { get; set; }
-
-        public RedactionBlock()
-        {
-            LayerId = PDFForm.DefaultLayerId;
-            FootnoteNumber = null;
-            ScopeId = null;
-            BasisIds = new List<string>();
-            ClassificationSource = "none";
-            MatchedTag = null;
-            InterestSubject = null;
-            IsMarkerSelection = false;
-            IsCursorSelection = false;
-            DuplicateGroupId = null;
-            CreatedAtUtc = DateTime.MinValue;
-            UpdatedAtUtc = DateTime.MinValue;
-            PreviewTextRectsPdf = null;
-        }
-
-        public RedactionBlock(System.Drawing.RectangleF bounds, int pageNumber)
-            : this()
-        {
-            Bounds = bounds;
-            PageNumber = pageNumber;
-            CreatedAtUtc = DateTime.UtcNow;
-            UpdatedAtUtc = DateTime.UtcNow;
-        }
-    }
-
-    public class CommentAnnotation
-    {
-        public string Id { get; set; }
-        public int PageNumber { get; set; }
-        public string LayerId { get; set; }
-        public RectangleF Bounds { get; set; }
-        public string CommentText { get; set; }
-        public int HighlightColorArgb { get; set; } = System.Drawing.Color.FromArgb(255, 235, 59).ToArgb();
-        public int TextColorArgb { get; set; } = System.Drawing.Color.Black.ToArgb();
-        public bool IsMarkerSelection { get; set; }
-        public float? NoteX { get; set; }
-        public float? NoteY { get; set; }
-        public float? NoteWidth { get; set; }
-        public float? NoteHeight { get; set; }
-        public string DuplicateGroupId { get; set; }
-        public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
-        public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
-
-        public CommentAnnotation()
-        {
-            Id = Guid.NewGuid().ToString("N");
-            LayerId = PDFForm.DefaultLayerId;
-            CommentText = string.Empty;
-            DuplicateGroupId = null;
-        }
-    }
-
-    public class SignatureInfo
-    {
-        public string FieldName { get; set; }
-        public string SignerName { get; set; }
-        public string SignerTitle { get; set; }
-        public string SignerOrganization { get; set; }
-        public DateTime SignDate { get; set; }
-    }
-
-    public class SelectSignaturesDialog : Form
-    {
-        private readonly ListView listView;
-        private readonly Button btnOK;
-        private readonly Button btnCancel;
-
-        public List<string> SelectedFieldNames { get; private set; } = new List<string>();
-
-        public SelectSignaturesDialog(List<SignatureInfo> signatures, IEnumerable<string> preselectedFields)
-        {
-            this.Text = Resources.Signatures_Select_Title;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-            this.Width = PDFForm.ScaleForDpiStatic(520);
-            this.Height = PDFForm.ScaleForDpiStatic(360);
-
-            listView = new ListView
-            {
-                View = View.Details,
-                CheckBoxes = true,
-                FullRowSelect = true,
-                GridLines = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(10)),
-                Size = PDFForm.ScaleSizeForDpiStatic(480, 260)
-            };
-
-            listView.Columns.Add(Resources.Signatures_Select_Column_Name, PDFForm.ScaleForDpiStatic(180));
-            listView.Columns.Add(Resources.Signatures_Select_Column_Title, PDFForm.ScaleForDpiStatic(140));
-            listView.Columns.Add(Resources.Signatures_Select_Column_Date, PDFForm.ScaleForDpiStatic(140));
-
-            HashSet<string> preselected = null;
-            if (preselectedFields != null)
-            {
-                preselected = new HashSet<string>(preselectedFields, StringComparer.OrdinalIgnoreCase);
-            }
-
-            foreach (SignatureInfo sig in signatures)
-            {
-                string signer = string.IsNullOrWhiteSpace(sig.SignerName) ? "-" : sig.SignerName;
-                string title = string.IsNullOrWhiteSpace(sig.SignerTitle) ? "-" : sig.SignerTitle;
-                string date = sig.SignDate == DateTime.MinValue ? "-" : sig.SignDate.ToString("g", CultureInfo.CurrentCulture);
-
-                ListViewItem item = new ListViewItem(signer);
-                item.SubItems.Add(title);
-                item.SubItems.Add(date);
-                item.Tag = sig.FieldName ?? string.Empty;
-                item.Checked = preselected == null || preselected.Contains(sig.FieldName ?? string.Empty);
-                listView.Items.Add(item);
-            }
-
-            btnOK = new Button
-            {
-                Text = Resources.Merge_OK,
-                Location = new Point(PDFForm.ScaleForDpiStatic(320), PDFForm.ScaleForDpiStatic(280)),
-                Size = PDFForm.ScaleSizeForDpiStatic(80, 30),
-                DialogResult = DialogResult.OK
-            };
-
-            btnCancel = new Button
-            {
-                Text = Resources.Merge_Cancel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(410), PDFForm.ScaleForDpiStatic(280)),
-                Size = PDFForm.ScaleSizeForDpiStatic(80, 30),
-                DialogResult = DialogResult.Cancel
-            };
-
-            this.Controls.Add(listView);
-            this.Controls.Add(btnOK);
-            this.Controls.Add(btnCancel);
-
-            this.AcceptButton = btnOK;
-            this.CancelButton = btnCancel;
-        }
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            if (this.DialogResult == DialogResult.OK)
-            {
-                SelectedFieldNames = listView.Items
-                    .Cast<ListViewItem>()
-                    .Where(item => item.Checked && item.Tag is string)
-                    .Select(item => (string)item.Tag)
-                    .Where(name => !string.IsNullOrWhiteSpace(name))
-                    .ToList();
-            }
-
-            base.OnFormClosing(e);
-        }
-    }
-
-    public enum LegalBasisSource
-    {
-        Global = 0,
-        Local = 1
-    }
-
-    public enum ExclusionScopeSource
-    {
-        Global = 0,
-        Local = 1
-    }
-
-    public class ExclusionScopesCatalogFile
-    {
-        [JsonProperty("version")]
-        public string Version { get; set; }
-
-        [JsonProperty("exclusion_scopes")]
-        public List<ExclusionScopeDefinition> ExclusionScopes { get; set; }
-    }
-
-    public class ExclusionScopeDefinition
-    {
-        [JsonProperty("scope_id")]
-        public string ScopeId { get; set; }
-
-        [JsonProperty("friendly_name")]
-        public string FriendlyName { get; set; }
-
-        [JsonProperty("category")]
-        public string Category { get; set; }
-
-        [JsonProperty("description")]
-        public string Description { get; set; }
-
-        [JsonProperty("auto_detect_tags")]
-        public List<string> AutoDetectTags { get; set; }
-
-        [JsonProperty("default_basis_ids")]
-        public List<string> DefaultBasisIds { get; set; }
-
-        [JsonProperty("ui_color")]
-        public string UiColor { get; set; }
-
-        [JsonIgnore]
-        public ExclusionScopeSource SourceKind { get; set; }
-    }
-
-    public class LegalBasesCatalogFile
-    {
-        [JsonProperty("source")]
-        public string Source { get; set; }
-
-        [JsonProperty("legal_bases")]
-        public List<LegalBasisDefinition> LegalBases { get; set; }
-    }
-
-    public class LegalBasisDefinition
-    {
-        [JsonProperty("id")]
-        public string Id { get; set; }
-
-        [JsonProperty("title")]
-        public string Title { get; set; }
-
-        [JsonProperty("full_citation")]
-        public string FullCitation { get; set; }
-
-        [JsonProperty("requires_interest_subject")]
-        public bool RequiresInterestSubject { get; set; }
-
-        [JsonProperty("description_hint")]
-        public string DescriptionHint { get; set; }
-
-        [JsonIgnore]
-        public LegalBasisSource SourceKind { get; set; }
-    }
-
-    public class ProjectData
-    {
-        public List<RedactionBlock> RedactionBlocks { get; set; }
-        public List<CommentAnnotation> CommentAnnotations { get; set; }
-        public HashSet<int> PagesToRemove { get; set; }
-        public List<TextAnnotation> TextAnnotations { get; set; }
-        public List<RasterObject> RasterObjects { get; set; }
-        public List<ArrowObject> ArrowObjects { get; set; }
-        public List<VectorShapeObject> VectorShapes { get; set; }
-        public List<LayerDefinition> Layers { get; set; }
-        public string ActiveLayerId { get; set; }
-        public List<ProjectObjectLayer> ObjectLayers { get; set; }
-        public Dictionary<int, int> PageRotationOffsets { get; set; }
-        public int CurrentPage { get; set; }
-        public float? ZoomFactor { get; set; }
-        public int? ScrollX { get; set; }
-        public int? ScrollY { get; set; }
-        public int? PagesListTopPage { get; set; }
-        public int? ThumbnailsTopPage { get; set; }
-        public List<string> SignaturesToRemove { get; set; }
-        public string SignaturesMode { get; set; }
-        public bool? AutoFootnotesEnabled { get; set; }
-        public string ExclusionAuthority { get; set; }
-        public bool ExportVisibleLayersOnly { get; set; }
-        public String FilePath { get; set; }
-    }
-
-    public class RasterObject
-    {
-        public string Id { get; set; }
-        public int PageNumber { get; set; }
-        public string LayerId { get; set; } = PDFForm.DefaultLayerId;
-        public RectangleF Bounds { get; set; }
-        public RectangleF InitialBounds { get; set; }
-        public int Rotation { get; set; }
-        public float Opacity { get; set; } = 1f;
-        public bool TransparentBackground { get; set; } = false;
-        public bool LockAspect { get; set; }
-        public bool IsLocked { get; set; }
-        public string SourceType { get; set; }
-        public string FilePath { get; set; }
-        public byte[] EmbeddedBytes { get; set; }
-        public string MimeType { get; set; }
-        public string DuplicateGroupId { get; set; }
-        public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
-        public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
-    }
-
-    public class ArrowObject
-    {
-        public string Id { get; set; }
-        public int PageNumber { get; set; }
-        public string LayerId { get; set; } = PDFForm.DefaultLayerId;
-        public PointF Start { get; set; }
-        public PointF End { get; set; }
-        public int LineColorArgb { get; set; } = System.Drawing.Color.Red.ToArgb();
-        public float Thickness { get; set; } = 3f;
-        public int BorderColorArgb { get; set; } = System.Drawing.Color.Black.ToArgb();
-        public float BorderWidth { get; set; } = 0f;
-        public float HeadLength { get; set; } = 18f;
-        public float HeadWidth { get; set; } = 12f;
-        public bool IsLocked { get; set; }
-        public string DuplicateGroupId { get; set; }
-        public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
-        public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
-    }
-
-    public class VectorShapeObject
-    {
-        public string Id { get; set; }
-        public int PageNumber { get; set; }
-        public string LayerId { get; set; } = PDFForm.DefaultLayerId;
-        public string ShapeType { get; set; }
-        public bool IsRasterClip { get; set; }
-        public List<PointF> Points { get; set; } = new List<PointF>();
-        public int StrokeColorArgb { get; set; } = System.Drawing.Color.Blue.ToArgb();
-        public float StrokeWidth { get; set; } = 2f;
-        public int FillColorArgb { get; set; } = System.Drawing.Color.Gold.ToArgb();
-        public int FillPatternColorArgb { get; set; } = System.Drawing.Color.FromArgb(0, 0, 0, 0).ToArgb();
-        public float FillOpacity { get; set; } = 0.18f;
-        public string StrokeStyle { get; set; } = "solid";
-        public string FillPattern { get; set; } = "solid";
-        public string StartLineEnding { get; set; } = "None";
-        public string EndLineEnding { get; set; } = "None";
-        public float StartLineEndingPrimarySize { get; set; }
-        public float StartLineEndingSecondarySize { get; set; }
-        public float EndLineEndingPrimarySize { get; set; }
-        public float EndLineEndingSecondarySize { get; set; }
-        public bool IsLocked { get; set; }
-        public string DuplicateGroupId { get; set; }
-        public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
-        public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
-    }
-
-    public class ProjectObjectLayer
-    {
-        public string Type { get; set; }
-        public string Id { get; set; }
-    }
-
-    public class LayerDefinition
-    {
-        public string Id { get; set; }
-        public string Name { get; set; }
-        public string GroupName { get; set; }
-        public int Order { get; set; }
-        public bool IsVisible { get; set; } = true;
-        public bool IsLocked { get; set; }
-        public bool ExcludeFromExport { get; set; }
-        public bool IsSystem { get; set; }
-
-        public LayerDefinition Clone()
-        {
-            return new LayerDefinition
-            {
-                Id = Id,
-                Name = Name,
-                GroupName = GroupName,
-                Order = Order,
-                IsVisible = IsVisible,
-                IsLocked = IsLocked,
-                ExcludeFromExport = ExcludeFromExport,
-                IsSystem = IsSystem
-            };
-        }
-    }
-
-    public class ResumeState
-    {
-        public string PdfPath { get; set; }
-        public string ProjectPath { get; set; }
-        public int CurrentPage { get; set; }
-        public float? ZoomFactor { get; set; }
-        public int ScrollX { get; set; }
-        public int ScrollY { get; set; }
-    }
-
-    public class PageItemStatus
-    {
-        public int PageNumber { get; set; }
-        public bool MarkedForDeletion { get; set; }
-        public bool HasSearchResults { get; set; }
-        public bool HasSelections { get; set; }
-        public bool HasObjects { get; set; }
-        public bool HasRotation { get; set; }
-    }
-
-    public class DeletePagesDialog : Form
-    {
-        public int StartPage { get; private set; }
-        public int EndPage { get; private set; }
-        public int Step { get; private set; }
-        public bool ApplyDeletion { get; private set; } // true: apply range, false: cancel selection
-
-        private readonly NumericUpDown nudStart;
-        private readonly NumericUpDown nudEnd;
-        private readonly NumericUpDown nudStep;
-        private readonly RadioButton rbApply;
-        private readonly RadioButton rbCancel;
-        private readonly Button btnOK;
-        private readonly Button btnCancel;
-
-        private readonly ErrorProvider errorProvider;
-
-        public DeletePagesDialog(int numPages)
-        {
-            this.Text = Resources.Delete_Title;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-            this.Width = PDFForm.ScaleForDpiStatic(300);
-            this.Height = PDFForm.ScaleForDpiStatic(300);
-
-            errorProvider = new ErrorProvider
-            {
-                BlinkStyle = ErrorBlinkStyle.NeverBlink
-            };
-
-            // Labels and NumericUpDown controls to select page range
-            Label lblStart = new Label() { Text = Resources.Delete_Label_Start, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(20), Width = PDFForm.ScaleForDpiStatic(120) };
-            nudStart = new NumericUpDown() { Left = PDFForm.ScaleForDpiStatic(150), Top = PDFForm.ScaleForDpiStatic(20), Width = PDFForm.ScaleForDpiStatic(50), Height = PDFForm.ScaleForDpiStatic(22), Minimum = 1, Maximum = numPages, Value = 1 };
-
-            Label lblEnd = new Label() { Text = Resources.Delete_Label_End, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(60), Width = PDFForm.ScaleForDpiStatic(120) };
-            nudEnd = new NumericUpDown() { Left = PDFForm.ScaleForDpiStatic(150), Top = PDFForm.ScaleForDpiStatic(60), Width = PDFForm.ScaleForDpiStatic(50), Height = PDFForm.ScaleForDpiStatic(22), Minimum = 1, Maximum = numPages, Value = numPages };
-
-            Label lblStep = new Label() { Text = Resources.Delete_Label_Step, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(100), Width = PDFForm.ScaleForDpiStatic(120) };
-            nudStep = new NumericUpDown() { Left = PDFForm.ScaleForDpiStatic(150), Top = PDFForm.ScaleForDpiStatic(100), Width = PDFForm.ScaleForDpiStatic(50), Height = PDFForm.ScaleForDpiStatic(22), Minimum = 0, Maximum = numPages, Value = 1 };
-
-            // Two RadioButtons — one to apply, one to cancel the selection
-            rbApply = new RadioButton() { Text = Resources.Delete_Radio_Apply, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(140), Width = PDFForm.ScaleForDpiStatic(200) };
-            rbCancel = new RadioButton() { Text = Resources.Delete_Radio_Cancel, Left = PDFForm.ScaleForDpiStatic(20), Top = PDFForm.ScaleForDpiStatic(170), Width = PDFForm.ScaleForDpiStatic(200) };
-
-            // By default set that we want to apply selection
-            rbApply.Checked = true;
-
-            // OK and Cancel buttons
-            btnOK = new Button() { Text = Resources.Merge_OK, Left = PDFForm.ScaleForDpiStatic(50), Width = PDFForm.ScaleForDpiStatic(80), Height = PDFForm.ScaleForDpiStatic(28), Top = PDFForm.ScaleForDpiStatic(210), DialogResult = DialogResult.OK };
-            btnCancel = new Button() { Text = Resources.Merge_Cancel, Left = PDFForm.ScaleForDpiStatic(150), Width = PDFForm.ScaleForDpiStatic(80), Height = PDFForm.ScaleForDpiStatic(28), Top = PDFForm.ScaleForDpiStatic(210), DialogResult = DialogResult.Cancel };
-
-            // Add controls to the form
-            this.Controls.Add(lblStart);
-            this.Controls.Add(nudStart);
-            this.Controls.Add(lblEnd);
-            this.Controls.Add(nudEnd);
-            this.Controls.Add(lblStep);
-            this.Controls.Add(nudStep);
-            this.Controls.Add(rbApply);
-            this.Controls.Add(rbCancel);
-            this.Controls.Add(btnOK);
-            this.Controls.Add(btnCancel);
-
-            this.AcceptButton = btnOK;
-            this.CancelButton = btnCancel;
-
-            // "Live" validation
-            nudStart.ValueChanged += Nud_ValueChanged;
-            nudEnd.ValueChanged += Nud_ValueChanged;
-            nudStep.ValueChanged += Nud_ValueChanged;
-
-            nudStart.MouseClick += Nud_MouseClick;
-            nudEnd.MouseClick += Nud_MouseClick;
-            nudStep.MouseClick += Nud_MouseClick;
-        }
-
-        private void Nud_MouseClick(object sender, MouseEventArgs e)
-        {
-            if (sender is NumericUpDown nud)
-                nud.Select(0, nud.Text.Length);
-        }
-
-        private void Nud_KeyPress(object sender, KeyPressEventArgs e)
-        {
-            if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
-            {
-                e.Handled = true;
-            }
-        }
-
-
-        private void Nud_ValueChanged(object sender, EventArgs e)
-        {
-            if (nudStart.Value > nudEnd.Value)
-            {
-                errorProvider.SetError(nudStart, Resources.Delete_Err_StartGreater);
-                btnOK.Enabled = false;
-            }
-            else
-            {
-                errorProvider.SetError(nudStart, "");
-                btnOK.Enabled = true;
-            }
-        }
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
-        {
-            if (this.DialogResult == DialogResult.OK)
-            {
-            // Final validation
-                if (nudStart.Value > nudEnd.Value)
-                {
-                    MessageBox.Show(this, Resources.Delete_Err_StartGreater,
-                                    Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    e.Cancel = true;
-                    return;
-                }
-
-                StartPage = (int)nudStart.Value;
-                EndPage = (int)nudEnd.Value;
-                Step = (int)nudStep.Value;
-
-                // Set ApplyDeletion depending on selected RadioButton
-                // If rbApply is checked, we want to apply selection, otherwise cancel.
-                ApplyDeletion = rbApply.Checked;
-            }
-            base.OnFormClosing(e);
-        }
-    }
-
-    public class PdfTextSearcher
-    {
-        private static readonly string PDDServerUrl = "";
-        private const int MinimumNativeTextCharactersToSkipOcr = 40;
-        private const float OcrSearchHorizontalPaddingRatio = 0.03f;
-        private const float OcrSearchRightPaddingRatio = 0.16f;
-        private const float OcrSearchVerticalPaddingRatio = 0.08f;
-        private const float OcrSearchMinimumHorizontalPadding = 0.5f;
-        private const float OcrSearchMinimumRightPadding = 1.5f;
-        private const float OcrSearchMinimumVerticalPadding = 1.0f;
-        // Cache for processed lines by file path
-        private static readonly Dictionary<string, List<CachedLine>> _lineCache = new Dictionary<string, List<CachedLine>>();
-
-
-
-        // Structure storing line data
-        internal class CachedLine
-        {
-            public int PageNumber { get; set; }
-            public int PageRotation { get; set; }
-            public string Text { get; set; } = "";
-            public float YPosition { get; set; }
-            public List<CharacterInfo> Characters { get; set; } = new List<CharacterInfo>();
-            public bool IsOcr { get; set; }
-            public float PageWidth { get; set; }
-            public float PageHeight { get; set; }
-            public List<KernelGeom.Rectangle> OcrWordBounds { get; set; } = new List<KernelGeom.Rectangle>();
-            public List<KernelGeom.Rectangle> RawOcrWordBounds { get; set; } = new List<KernelGeom.Rectangle>();
-            public List<OcrWordInfo> OcrWords { get; set; } = new List<OcrWordInfo>();
-        }
-
-        internal class CharacterInfo
-        {
-            public char Char { get; set; }
-            public KernelGeom.Rectangle BoundingBox { get; set; }
-        }
-
-        internal class OcrWordInfo
-        {
-            public string Text { get; set; } = "";
-            public int StartIndex { get; set; }
-            public int Length { get; set; }
-            public KernelGeom.Rectangle BoundingBox { get; set; }
-        }
-
-        private sealed class OcrCandidateImageInfo
-        {
-            public KernelGeom.Rectangle BoundsPdf { get; set; }
-            public int PixelWidth { get; set; }
-            public int PixelHeight { get; set; }
-        }
-
-        private sealed class OcrCandidateImageExtractionListener : IEventListener
-        {
-            private readonly List<OcrCandidateImageInfo> images = new List<OcrCandidateImageInfo>();
-            private readonly double pageArea;
-
-            public OcrCandidateImageExtractionListener(KernelGeom.Rectangle pageSize)
-            {
-                pageArea = pageSize == null
-                    ? 1d
-                    : Math.Max(1d, pageSize.GetWidth() * pageSize.GetHeight());
-            }
-
-            public IReadOnlyList<OcrCandidateImageInfo> Images => images;
-
-            public void EventOccurred(IEventData data, EventType type)
-            {
-                if (type != EventType.RENDER_IMAGE || !(data is ImageRenderInfo imageInfo))
-                {
-                    return;
-                }
-
-                try
-                {
-                    PdfImageXObject pdfImage = imageInfo.GetImage();
-                    if (pdfImage == null)
-                    {
-                        return;
-                    }
-
-                    iText.Kernel.Geom.Matrix ctm = imageInfo.GetImageCtm();
-                    iText.Kernel.Geom.Vector p0 = new iText.Kernel.Geom.Vector(0, 0, 1).Cross(ctm);
-                    iText.Kernel.Geom.Vector p1 = new iText.Kernel.Geom.Vector(1, 0, 1).Cross(ctm);
-                    iText.Kernel.Geom.Vector p2 = new iText.Kernel.Geom.Vector(0, 1, 1).Cross(ctm);
-                    iText.Kernel.Geom.Vector p3 = new iText.Kernel.Geom.Vector(1, 1, 1).Cross(ctm);
-
-                    float minX = Math.Min(Math.Min(p0.Get(iText.Kernel.Geom.Vector.I1), p1.Get(iText.Kernel.Geom.Vector.I1)), Math.Min(p2.Get(iText.Kernel.Geom.Vector.I1), p3.Get(iText.Kernel.Geom.Vector.I1)));
-                    float maxX = Math.Max(Math.Max(p0.Get(iText.Kernel.Geom.Vector.I1), p1.Get(iText.Kernel.Geom.Vector.I1)), Math.Max(p2.Get(iText.Kernel.Geom.Vector.I1), p3.Get(iText.Kernel.Geom.Vector.I1)));
-                    float minY = Math.Min(Math.Min(p0.Get(iText.Kernel.Geom.Vector.I2), p1.Get(iText.Kernel.Geom.Vector.I2)), Math.Min(p2.Get(iText.Kernel.Geom.Vector.I2), p3.Get(iText.Kernel.Geom.Vector.I2)));
-                    float maxY = Math.Max(Math.Max(p0.Get(iText.Kernel.Geom.Vector.I2), p1.Get(iText.Kernel.Geom.Vector.I2)), Math.Max(p2.Get(iText.Kernel.Geom.Vector.I2), p3.Get(iText.Kernel.Geom.Vector.I2)));
-
-                    float width = maxX - minX;
-                    float height = maxY - minY;
-                    if (width <= 0f || height <= 0f)
-                    {
-                        return;
-                    }
-
-                    int pixelWidth = (int)Math.Round(pdfImage.GetWidth());
-                    int pixelHeight = (int)Math.Round(pdfImage.GetHeight());
-                    double coverage = (width * height) / pageArea;
-                    if (pixelWidth < 20 || pixelHeight < 10 || width < 12f || height < 8f || coverage < 0.0005d)
-                    {
-                        return;
-                    }
-
-                    images.Add(new OcrCandidateImageInfo
-                    {
-                        BoundsPdf = new KernelGeom.Rectangle(minX, minY, width, height),
-                        PixelWidth = pixelWidth,
-                        PixelHeight = pixelHeight
-                    });
-                }
-                catch
-                {
-                    // Ignore malformed image events and keep extracting the rest.
-                }
-            }
-
-            public ICollection<EventType> GetSupportedEvents()
-            {
-                return new List<EventType> { EventType.RENDER_IMAGE };
-            }
-        }
-
-        public static event Action<string> OnCacheStatusChanged;
-
-        private static string LocalizedText(string key)
-        {
-            var culture = Resources.Culture ?? CultureInfo.CurrentUICulture;
-            var text = Resources.ResourceManager.GetString(key, culture);
-            return string.IsNullOrWhiteSpace(text) ? key : text;
-        }
-
-        private static string LocalizedFormat(string key, params object[] args)
-        {
-            return string.Format(LocalizedText(key), args);
-        }
-
-        public static List<TextLocation> FindTextLocations(string pdfPath, string searchText, bool searchPersonalData, string userPassword, IWin32Window owner = null)
-        {
-            // Check whether lines for this file are already cached
-            if (!_lineCache.ContainsKey(pdfPath))
-            {
-                CacheLines(pdfPath, userPassword);
-            }
-
-            // Perform search based on cache
-            return SearchInCachedLines(pdfPath, searchText, searchPersonalData, owner);
-        }
-
-        public static List<TextLocation> GetOcrDebugLocations(string pdfPath, int pageNumber)
-        {
-            return GetOcrDebugLocations(pdfPath, pageNumber, rawOcrBounds: false);
-        }
-
-        public static List<TextLocation> GetRawOcrDebugLocations(string pdfPath, int pageNumber)
-        {
-            return GetOcrDebugLocations(pdfPath, pageNumber, rawOcrBounds: true);
-        }
-
-        private static List<TextLocation> GetOcrDebugLocations(string pdfPath, int pageNumber, bool rawOcrBounds)
-        {
-            var locations = new List<TextLocation>();
-            if (string.IsNullOrWhiteSpace(pdfPath) || pageNumber < 1)
-            {
-                return locations;
-            }
-
-            if (!_lineCache.TryGetValue(pdfPath, out List<CachedLine> cachedLines) || cachedLines == null)
-            {
-                return locations;
-            }
-
-            foreach (CachedLine line in cachedLines.Where(line => line != null && line.IsOcr && line.PageNumber == pageNumber))
-            {
-                List<KernelGeom.Rectangle> sourceBoxes = rawOcrBounds ? line.RawOcrWordBounds : line.OcrWordBounds;
-                List<KernelGeom.Rectangle> boxes = sourceBoxes != null && sourceBoxes.Count > 0
-                    ? sourceBoxes
-                    : new List<KernelGeom.Rectangle> { GetTextFragmentRectangle(line, 0, line.Text?.Length ?? 0) };
-
-                foreach (KernelGeom.Rectangle rect in boxes)
-                {
-                    if (rect == null || rect.GetWidth() <= 0f || rect.GetHeight() <= 0f)
-                    {
-                        continue;
-                    }
-
-                    locations.Add(new TextLocation(line.PageNumber, line.PageRotation, rect, isOcr: true));
-                }
-            }
-
-            return locations;
-        }
-
-        private static void CacheLines(string pdfPath, string userPassword, System.Threading.CancellationToken cancellationToken = default)
-        {
-            var lines = new List<CachedLine>();
-
-
-            var props = new ReaderProperties();
-            if (!string.IsNullOrEmpty(userPassword))
-            {
-                props.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
-            }
-
-            using (iText.Kernel.Pdf.PdfDocument pdfDoc = new iText.Kernel.Pdf.PdfDocument(new PdfReader(pdfPath, props).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions)))
-            {
-                for (int page = 1; page <= pdfDoc.GetNumberOfPages(); page++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var pageObj = pdfDoc.GetPage(page);
-                    int rotation = pageObj.GetRotation();
-                    var strategy = new LineExtractionStrategy(page, rotation);
-
-                    PdfCanvasProcessor processor = new PdfCanvasProcessor(strategy);
-                    processor.ProcessPageContent(pageObj);
-
-                    lines.AddRange(strategy.ExtractedLines);
-                    OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_IndexPage", page));
-                }
-
-                AppendOcrLinesForPagesWithoutNativeText(pdfPath, userPassword, pdfDoc, lines, cancellationToken);
-            }
-            OnCacheStatusChanged?.Invoke(string.Empty);
-            // Save in cache
-            OnCacheStatusChanged?.Invoke(string.Empty);
-            // Save in cache
-            _lineCache[pdfPath] = lines;
-        }
-
-        private static void AppendOcrLinesForPagesWithoutNativeText(
-            string pdfPath,
-            string userPassword,
-            iText.Kernel.Pdf.PdfDocument pdfDoc,
-            List<CachedLine> lines,
-            System.Threading.CancellationToken cancellationToken = default)
-        {
-            if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath) || pdfDoc == null || lines == null)
-            {
-                return;
-            }
-
-            HashSet<int> pagesWithNativeText = new HashSet<int>(
-                lines
-                    .Where(line => !string.IsNullOrWhiteSpace(line.Text))
-                    .GroupBy(line => line.PageNumber)
-                    .Where(group => group.Sum(line => (line.Text ?? string.Empty).Trim().Length) >= MinimumNativeTextCharactersToSkipOcr)
-                    .Select(group => group.Key));
-
-            try
-            {
-                JObject debugRoot = CreateOcrDebugRoot(pdfPath);
-                JArray debugPages = (JArray)debugRoot["pages"];
-                JArray skippedPages = (JArray)debugRoot["skippedPagesWithNativeText"];
-
-                using (var pdfiumDoc = new PDFiumSharp.PdfDocument(pdfPath, userPassword))
-                {
-                    OcrEngine engine = CreateWindowsOcrEngine();
-                    if (engine == null)
-                    {
-                        Debug.WriteLine("OCR skipped: Windows OCR engine is not available.");
-                        return;
-                    }
-
-                    for (int pageNumber = 1; pageNumber <= pdfDoc.GetNumberOfPages(); pageNumber++)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        var pageObj = pdfDoc.GetPage(pageNumber);
-                        bool pageHasNativeText = pagesWithNativeText.Contains(pageNumber);
-                        List<KernelGeom.Rectangle> ocrImageBounds = GetOcrCandidateImageBounds(pageObj);
-                        if (pageHasNativeText && ocrImageBounds.Count == 0)
-                        {
-                            skippedPages.Add(pageNumber);
-                            continue;
-                        }
-
-                        OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_OcrPage", pageNumber));
-
-                        using (Bitmap pageBitmap = RenderPdfPageForOcr(pdfiumDoc.Pages[pageNumber - 1]))
-                        {
-                            if (pageBitmap == null)
-                            {
-                                continue;
-                            }
-
-                            int rotation = pageObj.GetRotation();
-                            KernelGeom.Rectangle pageSize = pageObj.GetPageSize();
-                            List<CachedLine> ocrLines = RecognizeOcrLinesWithWindowsOcr(engine, pageBitmap, pageNumber, rotation, pageSize, out JObject debugPage).ToList();
-                            if (pageHasNativeText)
-                            {
-                                ocrLines = ocrLines
-                                    .Where(line => IntersectsAnyOcrImageBounds(line, ocrImageBounds))
-                                    .ToList();
-                            }
-
-                            lines.AddRange(ocrLines);
-                            if (debugPage != null)
-                            {
-                                debugPage["pageHasNativeText"] = pageHasNativeText;
-                                debugPage["ocrImageBounds"] = new JArray(ocrImageBounds.Select(CreatePdfBoundsJson));
-                                debugPage["indexedLineCount"] = ocrLines.Count;
-                                debugPages.Add(debugPage);
-                            }
-                        }
-                    }
-                }
-
-                WriteOcrDebugJson(pdfPath, debugRoot);
-            }
-            catch (Exception ex)
-            {
-                // OCR is an auxiliary search index. Native PDF text search must continue even if OCR fails.
-                Debug.WriteLine("OCR cache failed: " + ex);
-            }
-        }
-
-
-        private static JObject CreateOcrDebugRoot(string pdfPath)
-        {
-            return new JObject
-            {
-                ["sourcePdf"] = pdfPath ?? string.Empty,
-                ["generatedAtUtc"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture),
-                ["engine"] = "Windows.Media.Ocr",
-                ["language"] = "PolishPreferred",
-                ["notes"] = "Diagnostic OCR dump. Contains recognized text and geometry; do not store with production projects.",
-                ["skippedPagesWithNativeText"] = new JArray(),
-                ["pages"] = new JArray()
-            };
-        }
-
-        private static void WriteOcrDebugJson(string pdfPath, JObject debugRoot)
-        {
-            if (!PDFForm.IsDiagnosticModeEnabled || string.IsNullOrWhiteSpace(pdfPath) || debugRoot == null)
-            {
-                return;
-            }
-
-            try
-            {
-                string directory = Path.GetDirectoryName(pdfPath);
-                if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
-                {
-                    return;
-                }
-
-                string fileName = Path.GetFileNameWithoutExtension(pdfPath) + ".ocr-debug.json";
-                string outputPath = Path.Combine(directory, fileName);
-                File.WriteAllText(outputPath, debugRoot.ToString(Formatting.Indented), new System.Text.UTF8Encoding(false));
-                Debug.WriteLine("OCR debug JSON saved: " + outputPath);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("OCR debug JSON save failed: " + ex);
-            }
-        }
-
-        private static List<KernelGeom.Rectangle> GetOcrCandidateImageBounds(iText.Kernel.Pdf.PdfPage page)
-        {
-            var result = new List<KernelGeom.Rectangle>();
-            if (page == null)
-            {
-                return result;
-            }
-
-            try
-            {
-                var listener = new OcrCandidateImageExtractionListener(page.GetPageSize());
-                var processor = new PdfCanvasProcessor(listener);
-                processor.ProcessPageContent(page);
-
-                result.AddRange(listener.Images
-                    .Where(image => image?.BoundsPdf != null)
-                    .Select(image => image.BoundsPdf));
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("OCR image bounds extraction failed: " + ex);
-            }
-
-            return result;
-        }
-
-        private static string GetTessDataPath()
-        {
-            string exePath = Assembly.GetExecutingAssembly().Location;
-            string exeDir = Path.GetDirectoryName(exePath);
-            return string.IsNullOrWhiteSpace(exeDir)
-                ? null
-                : Path.Combine(exeDir, "tessdata");
-        }
-
-        private static Bitmap RenderPdfPageForOcr(PDFiumSharp.PdfPage page)
-        {
-            if (page == null || page.Width <= 0 || page.Height <= 0)
-            {
-                return null;
-            }
-
-            const float dpi = 300f;
-            int bitmapWidth = Math.Max(1, (int)Math.Ceiling(page.Width * dpi / 72f));
-            int bitmapHeight = Math.Max(1, (int)Math.Ceiling(page.Height * dpi / 72f));
-
-            using (var pdfBitmap = new PDFiumSharp.PDFiumBitmap(bitmapWidth, bitmapHeight, true))
-            {
-                pdfBitmap.FillRectangle(0, 0, bitmapWidth, bitmapHeight, 0xFFFFFFFF);
-                page.Render(renderTarget: pdfBitmap, flags: PDFiumSharp.Enums.RenderingFlags.Annotations);
-
-                using (var ms = new MemoryStream())
-                {
-                    pdfBitmap.Save(ms);
-                    ms.Position = 0;
-                    using (var image = DrawingImage.FromStream(ms))
-                    {
-                        return new Bitmap(image);
-                    }
-                }
-            }
-        }
-
-        private static Bitmap RenderPdfRegionForOcr(PDFiumSharp.PdfPage page, KernelGeom.Rectangle region)
-        {
-            if (page == null || page.Width <= 0 || page.Height <= 0 || region == null)
-            {
-                return null;
-            }
-
-            const float dpi = 300f;
-            float scale = dpi / 72f;
-            int fullWidth = Math.Max(1, (int)Math.Ceiling(page.Width * scale));
-            int fullHeight = Math.Max(1, (int)Math.Ceiling(page.Height * scale));
-
-            // Clamp region to page bounds
-            float rx = Math.Max(0, region.GetX());
-            float ry = Math.Max(0, region.GetY());
-            float rw = Math.Min(region.GetWidth(), (float)page.Width - rx);
-            float rh = Math.Min(region.GetHeight(), (float)page.Height - ry);
-            if (rw <= 0 || rh <= 0)
-                return null;
-
-            int cropX = (int)Math.Floor(rx * scale);
-            int cropY = (int)Math.Floor(ry * scale);
-            int cropW = Math.Max(1, (int)Math.Ceiling(rw * scale));
-            int cropH = Math.Max(1, (int)Math.Ceiling(rh * scale));
-            cropW = Math.Min(cropW, fullWidth - cropX);
-            cropH = Math.Min(cropH, fullHeight - cropY);
-
-            using (var pdfBitmap = new PDFiumSharp.PDFiumBitmap(fullWidth, fullHeight, true))
-            {
-                pdfBitmap.FillRectangle(0, 0, fullWidth, fullHeight, 0xFFFFFFFF);
-                page.Render(renderTarget: pdfBitmap, flags: PDFiumSharp.Enums.RenderingFlags.Annotations);
-
-                using (var ms = new MemoryStream())
-                {
-                    pdfBitmap.Save(ms);
-                    ms.Position = 0;
-                    using (var fullImage = DrawingImage.FromStream(ms))
-                    using (var fullBitmap = new Bitmap(fullImage))
-                    {
-                        if (cropX + cropW > fullBitmap.Width || cropY + cropH > fullBitmap.Height)
-                            return null;
-                        var cropped = fullBitmap.Clone(
-                            new System.Drawing.Rectangle(cropX, cropY, cropW, cropH),
-                            fullBitmap.PixelFormat);
-                        return cropped;
-                    }
-                }
-            }
-        }
-
-        private static OcrEngine CreateWindowsOcrEngine()
-        {
-            try
-            {
-                var polishLanguage = OcrEngine.AvailableRecognizerLanguages
-                    .FirstOrDefault(language =>
-                        string.Equals(language.LanguageTag, "pl", StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(language.LanguageTag, "pl-PL", StringComparison.OrdinalIgnoreCase));
-
-                if (polishLanguage != null)
-                {
-                    OcrEngine polishEngine = OcrEngine.TryCreateFromLanguage(polishLanguage);
-                    if (polishEngine != null)
-                    {
-                        return polishEngine;
-                    }
-                }
-
-                return OcrEngine.TryCreateFromUserProfileLanguages();
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("Windows OCR engine initialization failed: " + ex);
-                return null;
-            }
-        }
-
-        public static async Task<(string Text, string LanguageTag)> RecognizeBitmapTextWithWindowsOcrAsync(Bitmap bitmap)
-        {
-            if (bitmap == null)
-            {
-                return (string.Empty, string.Empty);
-            }
-
-            OcrEngine engine = CreateWindowsOcrEngine();
-            if (engine == null)
-            {
-                Debug.WriteLine("Windows OCR skipped: engine is not available.");
-                return (string.Empty, string.Empty);
-            }
-
-            string languageTag = engine.RecognizerLanguage?.LanguageTag ?? string.Empty;
-            string tempImagePath = null;
-            try
-            {
-                tempImagePath = Path.Combine(Path.GetTempPath(), "AnonPDFPro-ocr-crop-" + Guid.NewGuid().ToString("N") + ".png");
-                bitmap.Save(tempImagePath, ImageFormat.Png);
-
-                OcrResult result = await RecognizeWindowsOcrAsync(engine, tempImagePath);
-
-                return (result?.Text ?? string.Empty, languageTag);
-            }
-            finally
-            {
-                if (!string.IsNullOrWhiteSpace(tempImagePath))
-                {
-                    try
-                    {
-                        File.Delete(tempImagePath);
-                    }
-                    catch
-                    {
-                        // OCR temp file cleanup must not break copy/search.
-                    }
-                }
-            }
-        }
-
-        private static IEnumerable<CachedLine> RecognizeOcrLinesWithWindowsOcr(
-            OcrEngine engine,
-            Bitmap bitmap,
-            int pageNumber,
-            int pageRotation,
-            KernelGeom.Rectangle pageSize,
-            out JObject debugPage)
-        {
-            var result = new List<CachedLine>();
-            debugPage = CreateOcrDebugPage(pageNumber, pageRotation, pageSize, bitmap);
-            if (engine == null || bitmap == null || pageSize == null || bitmap.Width <= 0 || bitmap.Height <= 0)
-            {
-                return result;
-            }
-
-            string tempImagePath = null;
-            try
-            {
-                tempImagePath = Path.Combine(Path.GetTempPath(), "AnonPDFPro-ocr-" + Guid.NewGuid().ToString("N") + ".png");
-                bitmap.Save(tempImagePath, ImageFormat.Png);
-
-                OcrResult page = RecognizeWindowsOcrAsync(engine, tempImagePath)
-                    .GetAwaiter()
-                    .GetResult();
-
-                debugPage["engine"] = "Windows.Media.Ocr";
-                debugPage["language"] = engine.RecognizerLanguage?.LanguageTag ?? string.Empty;
-                debugPage["text"] = page?.Text ?? string.Empty;
-                debugPage["textAngle"] = page?.TextAngle == null ? null : JToken.FromObject(page.TextAngle.Value);
-                JArray debugBlocks = (JArray)debugPage["blocks"];
-
-                if (page == null)
-                {
-                    return result;
-                }
-
-                int rank = 0;
-                int lineIndex = 0;
-                foreach (OcrLine textLine in page.Lines)
-                {
-                    Windows.Foundation.Rect? lineBounds = GetWindowsOcrLineBounds(textLine);
-                    JObject debugLine = CreateWindowsOcrElementJson(
-                        "line",
-                        ++rank,
-                        lineIndex,
-                        textLine.Text,
-                        null,
-                        lineBounds,
-                        pageSize,
-                        bitmap.Width,
-                        bitmap.Height,
-                        pageRotation);
-                    JArray debugWords = new JArray();
-                    debugLine["words"] = debugWords;
-                    debugBlocks.Add(debugLine);
-
-                    int wordIndex = 0;
-                    foreach (OcrWord word in textLine.Words)
-                    {
-                        JObject debugWord = CreateWindowsOcrElementJson(
-                            "word",
-                            ++rank,
-                            wordIndex,
-                            word.Text,
-                            null,
-                            word.BoundingRect,
-                            pageSize,
-                            bitmap.Width,
-                            bitmap.Height,
-                            pageRotation);
-                        debugWords.Add(debugWord);
-                        wordIndex++;
-                    }
-
-                    CachedLine cachedLine = CreateCachedLineFromWindowsOcrLine(
-                        textLine,
-                        pageNumber,
-                        pageRotation,
-                        pageSize,
-                        bitmap.Width,
-                        bitmap.Height,
-                        page.TextAngle);
-
-                    if (cachedLine != null && !string.IsNullOrWhiteSpace(cachedLine.Text))
-                    {
-                        result.Add(cachedLine);
-                    }
-
-                    lineIndex++;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("Windows OCR page recognition failed: " + ex);
-                debugPage["error"] = ex.ToString();
-            }
-            finally
-            {
-                if (!string.IsNullOrWhiteSpace(tempImagePath))
-                {
-                    try
-                    {
-                        File.Delete(tempImagePath);
-                    }
-                    catch
-                    {
-                        // Diagnostic OCR temp file cleanup must not break search.
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        private static async Task<OcrResult> RecognizeWindowsOcrAsync(OcrEngine engine, string imagePath)
-        {
-            StorageFile file = await StorageFile.GetFileFromPathAsync(imagePath);
-            using (IRandomAccessStream stream = await file.OpenAsync(FileAccessMode.Read))
-            {
-                BitmapDecoder decoder = await BitmapDecoder.CreateAsync(stream);
-                SoftwareBitmap softwareBitmap = await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
-                return await engine.RecognizeAsync(softwareBitmap);
-            }
-        }
-
-        private static Windows.Foundation.Rect? GetWindowsOcrLineBounds(OcrLine line)
-        {
-            if (line == null || line.Words == null || line.Words.Count == 0)
-            {
-                return null;
-            }
-
-            double left = double.MaxValue;
-            double top = double.MaxValue;
-            double right = double.MinValue;
-            double bottom = double.MinValue;
-
-            foreach (OcrWord word in line.Words)
-            {
-                Windows.Foundation.Rect rect = word.BoundingRect;
-                left = Math.Min(left, rect.X);
-                top = Math.Min(top, rect.Y);
-                right = Math.Max(right, rect.X + rect.Width);
-                bottom = Math.Max(bottom, rect.Y + rect.Height);
-            }
-
-            if (left == double.MaxValue || top == double.MaxValue || right <= left || bottom <= top)
-            {
-                return null;
-            }
-
-            return new Windows.Foundation.Rect(left, top, right - left, bottom - top);
-        }
-
-        private static JObject CreateWindowsOcrElementJson(
-            string level,
-            int rank,
-            int index,
-            string text,
-            float? confidence,
-            Windows.Foundation.Rect? bounds,
-            KernelGeom.Rectangle pageSize,
-            int bitmapWidth,
-            int bitmapHeight,
-            int rotation)
-        {
-            var item = new JObject
-            {
-                ["level"] = level ?? string.Empty,
-                ["rank"] = rank,
-                ["index"] = index,
-                ["text"] = text ?? string.Empty,
-                ["confidence"] = confidence == null ? null : JToken.FromObject(confidence.Value)
-            };
-
-            item["bounds"] = bounds.HasValue
-                ? CreateWindowsOcrBoundsJson(bounds.Value, pageSize, bitmapWidth, bitmapHeight, rotation)
-                : null;
-
-            return item;
-        }
-
-        private static JObject CreateWindowsOcrBoundsJson(
-            Windows.Foundation.Rect ocrRect,
-            KernelGeom.Rectangle pageSize,
-            int bitmapWidth,
-            int bitmapHeight,
-            int rotation)
-        {
-            var item = new JObject
-            {
-                ["ocrPixels"] = new JObject
-                {
-                    ["x"] = ocrRect.X,
-                    ["y"] = ocrRect.Y,
-                    ["width"] = ocrRect.Width,
-                    ["height"] = ocrRect.Height
-                }
-            };
-
-            if (pageSize != null && bitmapWidth > 0 && bitmapHeight > 0)
-            {
-                KernelGeom.Rectangle pdfRect = ConvertWindowsOcrRectToPdfRect(ocrRect, pageSize, bitmapWidth, bitmapHeight, rotation);
-                item["pdf"] = CreatePdfBoundsJson(pdfRect);
-            }
-            else
-            {
-                item["pdf"] = null;
-            }
-
-            return item;
-        }
-
-        private static CachedLine CreateCachedLineFromWindowsOcrLine(
-            OcrLine textLine,
-            int pageNumber,
-            int pageRotation,
-            KernelGeom.Rectangle pageSize,
-            int bitmapWidth,
-            int bitmapHeight,
-            double? textAngleDegrees)
-        {
-            if (textLine == null || textLine.Words == null || textLine.Words.Count == 0 || pageSize == null)
-            {
-                return null;
-            }
-
-            Windows.Foundation.Rect? lineBounds = GetWindowsOcrLineBounds(textLine);
-            if (!lineBounds.HasValue)
-            {
-                return null;
-            }
-            KernelGeom.Rectangle lineRect = ConvertWindowsOcrRectToPdfRect(lineBounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
-            var cachedLine = new CachedLine
-            {
-                PageNumber = pageNumber,
-                PageRotation = pageRotation,
-                YPosition = lineRect.GetY(),
-                IsOcr = true,
-                PageWidth = pageSize.GetWidth(),
-                PageHeight = pageSize.GetHeight()
-            };
-
-            bool hasWords = false;
-            float previousRight = lineRect.GetX();
-
-            foreach (OcrWord word in textLine.Words)
-            {
-                string wordText = (word.Text ?? string.Empty).Trim();
-                if (string.IsNullOrWhiteSpace(wordText))
-                {
-                    continue;
-                }
-
-                Windows.Foundation.Rect correctedOcrRect = MapWindowsOcrRectToOriginalImageRect(
-                    word.BoundingRect,
-                    bitmapWidth,
-                    bitmapHeight,
-                    textAngleDegrees);
-                KernelGeom.Rectangle rawWordRect = ConvertWindowsOcrRectToPdfRect(correctedOcrRect, pageSize, bitmapWidth, bitmapHeight, pageRotation);
-                cachedLine.RawOcrWordBounds.Add(rawWordRect);
-
-                KernelGeom.Rectangle wordRect = rawWordRect;
-                cachedLine.OcrWordBounds.Add(wordRect);
-                if (hasWords)
-                {
-                    AppendOcrSpace(cachedLine, previousRight, wordRect.GetX(), wordRect.GetY(), wordRect.GetHeight());
-                }
-
-                int wordStartIndex = cachedLine.Text.Length;
-                AppendOcrWord(cachedLine, wordText, wordRect);
-                int wordLength = cachedLine.Text.Length - wordStartIndex;
-                if (wordLength > 0)
-                {
-                    cachedLine.OcrWords.Add(new OcrWordInfo
-                    {
-                        Text = wordText,
-                        StartIndex = wordStartIndex,
-                        Length = wordLength,
-                        BoundingBox = wordRect
-                    });
-                }
-
-                previousRight = wordRect.GetX() + wordRect.GetWidth();
-                hasWords = true;
-            }
-
-            return cachedLine;
-        }
-
-        private static IEnumerable<CachedLine> RecognizeOcrLines(
-            Engine engine,
-            Bitmap bitmap,
-            int pageNumber,
-            int pageRotation,
-            KernelGeom.Rectangle pageSize,
-            out JObject debugPage)
-        {
-            var result = new List<CachedLine>();
-            debugPage = CreateOcrDebugPage(pageNumber, pageRotation, pageSize, bitmap);
-            if (engine == null || bitmap == null || pageSize == null || bitmap.Width <= 0 || bitmap.Height <= 0)
-            {
-                return result;
-            }
-
-            using (var ms = new MemoryStream())
-            {
-                bitmap.Save(ms, ImageFormat.Png);
-                ms.Position = 0;
-
-                using (var pixImage = TesseractOCR.Pix.Image.LoadFromMemory(ms))
-                using (var page = engine.Process(pixImage, TesseractOCR.Enums.PageSegMode.Auto))
-                {
-                    debugPage["text"] = page.Text ?? string.Empty;
-                    debugPage["meanConfidence"] = page.MeanConfidence;
-                    JArray debugBlocks = (JArray)debugPage["blocks"];
-                    int rank = 0;
-                    int blockIndex = 0;
-                    foreach (var block in page.Layout)
-                    {
-                        JObject debugBlock = CreateOcrElementJson(
-                            "block",
-                            ++rank,
-                            blockIndex,
-                            block.Text,
-                            block.Confidence,
-                            block.BoundingBox,
-                            pageSize,
-                            bitmap.Width,
-                            bitmap.Height,
-                            pageRotation);
-                        debugBlock["blockType"] = block.BlockType.ToString();
-                        JArray debugParagraphs = new JArray();
-                        debugBlock["paragraphs"] = debugParagraphs;
-                        debugBlocks.Add(debugBlock);
-
-                        int paragraphIndex = 0;
-                        foreach (var paragraph in block.Paragraphs)
-                        {
-                            JObject debugParagraph = CreateOcrElementJson(
-                                "paragraph",
-                                ++rank,
-                                paragraphIndex,
-                                paragraph.Text,
-                                paragraph.Confidence,
-                                paragraph.BoundingBox,
-                                pageSize,
-                                bitmap.Width,
-                                bitmap.Height,
-                                pageRotation);
-                            JArray debugLines = new JArray();
-                            debugParagraph["lines"] = debugLines;
-                            debugParagraphs.Add(debugParagraph);
-
-                            int lineIndex = 0;
-                            foreach (var textLine in paragraph.TextLines)
-                            {
-                                JObject debugLine = CreateOcrElementJson(
-                                    "line",
-                                    ++rank,
-                                    lineIndex,
-                                    textLine.Text,
-                                    textLine.Confidence,
-                                    textLine.BoundingBox,
-                                    pageSize,
-                                    bitmap.Width,
-                                    bitmap.Height,
-                                    pageRotation);
-                                JArray debugWords = new JArray();
-                                debugLine["words"] = debugWords;
-                                debugLines.Add(debugLine);
-
-                                int wordIndex = 0;
-                                foreach (var word in textLine.Words)
-                                {
-                                    JObject debugWord = CreateOcrElementJson(
-                                        "word",
-                                        ++rank,
-                                        wordIndex,
-                                        word.Text,
-                                        word.Confidence,
-                                        word.BoundingBox,
-                                        pageSize,
-                                        bitmap.Width,
-                                        bitmap.Height,
-                                        pageRotation);
-                                    JArray debugSymbols = new JArray();
-                                    debugWord["symbols"] = debugSymbols;
-                                    debugWords.Add(debugWord);
-
-                                    int symbolIndex = 0;
-                                    foreach (var symbol in word.Symbols)
-                                    {
-                                        JObject debugSymbol = CreateOcrElementJson(
-                                            "symbol",
-                                            ++rank,
-                                            symbolIndex,
-                                            symbol.Text,
-                                            symbol.Confidence,
-                                            symbol.BoundingBox,
-                                            pageSize,
-                                            bitmap.Width,
-                                            bitmap.Height,
-                                            pageRotation);
-                                        debugSymbols.Add(debugSymbol);
-                                        symbolIndex++;
-                                    }
-
-                                    wordIndex++;
-                                }
-
-                                CachedLine cachedLine = CreateCachedLineFromOcrTextLine(
-                                    textLine,
-                                    pageNumber,
-                                    pageRotation,
-                                    pageSize,
-                                    bitmap.Width,
-                                    bitmap.Height);
-
-                                if (cachedLine != null && !string.IsNullOrWhiteSpace(cachedLine.Text))
-                                {
-                                    result.Add(cachedLine);
-                                }
-
-                                lineIndex++;
-                            }
-
-                            paragraphIndex++;
-                        }
-
-                        blockIndex++;
-                    }
-                }
-            }
-
-            return result;
-        }
-
-        private static JObject CreateOcrDebugPage(int pageNumber, int pageRotation, KernelGeom.Rectangle pageSize, Bitmap bitmap)
-        {
-            return new JObject
-            {
-                ["pageNumber"] = pageNumber,
-                ["pageRotation"] = pageRotation,
-                ["bitmap"] = bitmap == null
-                    ? null
-                    : new JObject
-                    {
-                        ["width"] = bitmap.Width,
-                        ["height"] = bitmap.Height,
-                        ["horizontalDpi"] = bitmap.HorizontalResolution,
-                        ["verticalDpi"] = bitmap.VerticalResolution
-                    },
-                ["pdfPageBounds"] = pageSize == null
-                    ? null
-                    : CreatePdfBoundsJson(pageSize),
-                ["blocks"] = new JArray()
-            };
-        }
-
-        private static JObject CreateOcrElementJson(
-            string level,
-            int rank,
-            int index,
-            string text,
-            float confidence,
-            TesseractOCR.Rect? bounds,
-            KernelGeom.Rectangle pageSize,
-            int bitmapWidth,
-            int bitmapHeight,
-            int pageRotation)
-        {
-            var item = new JObject
-            {
-                ["level"] = level ?? string.Empty,
-                ["rank"] = rank,
-                ["index"] = index,
-                ["text"] = text ?? string.Empty,
-                ["confidence"] = confidence
-            };
-
-            if (bounds.HasValue)
-            {
-                item["bounds"] = CreateOcrBoundsJson(bounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
-            }
-            else
-            {
-                item["bounds"] = null;
-            }
-
-            return item;
-        }
-
-        private static JObject CreateOcrBoundsJson(
-            TesseractOCR.Rect ocrRect,
-            KernelGeom.Rectangle pageSize,
-            int bitmapWidth,
-            int bitmapHeight,
-            int pageRotation)
-        {
-            var item = new JObject
-            {
-                ["ocrPixels"] = new JObject
-                {
-                    ["x1"] = ocrRect.X1,
-                    ["y1"] = ocrRect.Y1,
-                    ["x2"] = ocrRect.X2,
-                    ["y2"] = ocrRect.Y2,
-                    ["width"] = ocrRect.Width,
-                    ["height"] = ocrRect.Height
-                }
-            };
-
-            if (pageSize != null && bitmapWidth > 0 && bitmapHeight > 0)
-            {
-                KernelGeom.Rectangle pdfRect = ConvertOcrRectToPdfRect(ocrRect, pageSize, bitmapWidth, bitmapHeight, pageRotation);
-                item["pdf"] = CreatePdfBoundsJson(pdfRect);
-            }
-            else
-            {
-                item["pdf"] = null;
-            }
-
-            return item;
-        }
-
-        private static JObject CreatePdfBoundsJson(KernelGeom.Rectangle rect)
-        {
-            if (rect == null)
-            {
-                return null;
-            }
-
-            return new JObject
-            {
-                ["x"] = rect.GetX(),
-                ["y"] = rect.GetY(),
-                ["width"] = rect.GetWidth(),
-                ["height"] = rect.GetHeight(),
-                ["left"] = rect.GetLeft(),
-                ["right"] = rect.GetRight(),
-                ["bottom"] = rect.GetBottom(),
-                ["top"] = rect.GetTop()
-            };
-        }
-
-        private static CachedLine CreateCachedLineFromOcrTextLine(
-            TesseractOCR.Layout.TextLine textLine,
-            int pageNumber,
-            int pageRotation,
-            KernelGeom.Rectangle pageSize,
-            int bitmapWidth,
-            int bitmapHeight)
-        {
-            if (textLine == null)
-            {
-                return null;
-            }
-
-            var lineBounds = textLine.BoundingBox;
-            if (!lineBounds.HasValue)
-            {
-                return null;
-            }
-
-            KernelGeom.Rectangle lineRect = ConvertOcrRectToPdfRect(lineBounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
-            var cachedLine = new CachedLine
-            {
-                PageNumber = pageNumber,
-                PageRotation = pageRotation,
-                YPosition = lineRect.GetY(),
-                IsOcr = true,
-                PageWidth = pageSize.GetWidth(),
-                PageHeight = pageSize.GetHeight()
-            };
-
-            bool hasWords = false;
-            float previousRight = lineRect.GetX();
-
-            foreach (var word in textLine.Words)
-            {
-                string wordText = word.Text ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(wordText))
-                {
-                    continue;
-                }
-
-                var wordBounds = word.BoundingBox;
-                if (!wordBounds.HasValue)
-                {
-                    continue;
-                }
-
-                KernelGeom.Rectangle wordRect = ConvertOcrRectToPdfRect(wordBounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
-                cachedLine.OcrWordBounds.Add(wordRect);
-                if (hasWords)
-                {
-                    AppendOcrSpace(cachedLine, previousRight, wordRect.GetX(), wordRect.GetY(), wordRect.GetHeight());
-                }
-
-                int wordStartIndex = cachedLine.Text.Length;
-                if (!AppendOcrWordFromSymbols(cachedLine, word, pageSize, bitmapWidth, bitmapHeight, pageRotation))
-                {
-                    AppendOcrWord(cachedLine, wordText.Trim(), wordRect);
-                }
-                int wordLength = cachedLine.Text.Length - wordStartIndex;
-                if (wordLength > 0)
-                {
-                    cachedLine.OcrWords.Add(new OcrWordInfo
-                    {
-                        Text = wordText.Trim(),
-                        StartIndex = wordStartIndex,
-                        Length = wordLength,
-                        BoundingBox = wordRect
-                    });
-                }
-                previousRight = wordRect.GetX() + wordRect.GetWidth();
-                hasWords = true;
-            }
-
-            if (!hasWords)
-            {
-                string fallbackText = (textLine.Text ?? string.Empty).Trim();
-                cachedLine.OcrWordBounds.Add(lineRect);
-                int wordStartIndex = cachedLine.Text.Length;
-                AppendOcrWord(cachedLine, fallbackText, lineRect);
-                int wordLength = cachedLine.Text.Length - wordStartIndex;
-                if (wordLength > 0)
-                {
-                    cachedLine.OcrWords.Add(new OcrWordInfo
-                    {
-                        Text = cachedLine.Text.Substring(wordStartIndex, wordLength),
-                        StartIndex = wordStartIndex,
-                        Length = wordLength,
-                        BoundingBox = lineRect
-                    });
-                }
-            }
-
-            return cachedLine;
-        }
-
-        private static KernelGeom.Rectangle ConvertOcrRectToPdfRect(
-            TesseractOCR.Rect ocrRect,
-            KernelGeom.Rectangle pageSize,
-            int bitmapWidth,
-            int bitmapHeight,
-            int pageRotation)
-        {
-            float pageWidth = pageSize.GetWidth();
-            float pageHeight = pageSize.GetHeight();
-
-            int rotation = (pageRotation % 360 + 360) % 360;
-            float visWidth = (rotation == 90 || rotation == 270) ? pageHeight : pageWidth;
-            float visHeight = (rotation == 90 || rotation == 270) ? pageWidth : pageHeight;
-
-            double x_v = ocrRect.X1 * (double)visWidth / bitmapWidth;
-            double y_v = ocrRect.Y1 * (double)visHeight / bitmapHeight;
-            double w_v = ocrRect.Width * (double)visWidth / bitmapWidth;
-            double h_v = ocrRect.Height * (double)visHeight / bitmapHeight;
-
-            double x_n, y_n, w_n, h_n;
-            switch (rotation)
-            {
-                case 90:
-                    x_n = y_v;
-                    y_n = x_v;
-                    w_n = h_v;
-                    h_n = w_v;
-                    break;
-                case 180:
-                    x_n = visWidth - x_v - w_v;
-                    y_n = y_v;
-                    w_n = w_v;
-                    h_n = h_v;
-                    break;
-                case 270:
-                    x_n = visHeight - y_v - h_v;
-                    y_n = visWidth - x_v - w_v;
-                    w_n = h_v;
-                    h_n = w_v;
-                    break;
-                default:
-                    x_n = x_v;
-                    y_n = visHeight - y_v - h_v;
-                    w_n = w_v;
-                    h_n = h_v;
-                    break;
-            }
-
-            return new KernelGeom.Rectangle((float)x_n, (float)y_n, (float)Math.Max(0.1, w_n), (float)Math.Max(0.1, h_n));
-        }
-
-        private static KernelGeom.Rectangle ConvertWindowsOcrRectToPdfRect(
-            Windows.Foundation.Rect ocrRect,
-            KernelGeom.Rectangle pageSize,
-            int bitmapWidth,
-            int bitmapHeight,
-            int pageRotation)
-        {
-            float pageWidth = pageSize.GetWidth();
-            float pageHeight = pageSize.GetHeight();
-
-            int rotation = (pageRotation % 360 + 360) % 360;
-            float visWidth = (rotation == 90 || rotation == 270) ? pageHeight : pageWidth;
-            float visHeight = (rotation == 90 || rotation == 270) ? pageWidth : pageHeight;
-
-            double x_v = ocrRect.X * (double)visWidth / bitmapWidth;
-            double y_v = ocrRect.Y * (double)visHeight / bitmapHeight;
-            double w_v = ocrRect.Width * (double)visWidth / bitmapWidth;
-            double h_v = ocrRect.Height * (double)visHeight / bitmapHeight;
-
-            double x_n, y_n, w_n, h_n;
-            switch (rotation)
-            {
-                case 90:
-                    x_n = y_v;
-                    y_n = x_v;
-                    w_n = h_v;
-                    h_n = w_v;
-                    break;
-                case 180:
-                    x_n = visWidth - x_v - w_v;
-                    y_n = y_v;
-                    w_n = w_v;
-                    h_n = h_v;
-                    break;
-                case 270:
-                    x_n = visHeight - y_v - h_v;
-                    y_n = visWidth - x_v - w_v;
-                    w_n = h_v;
-                    h_n = w_v;
-                    break;
-                default:
-                    x_n = x_v;
-                    y_n = visHeight - y_v - h_v;
-                    w_n = w_v;
-                    h_n = h_v;
-                    break;
-            }
-
-            return new KernelGeom.Rectangle((float)x_n, (float)y_n, (float)Math.Max(0.1, w_n), (float)Math.Max(0.1, h_n));
-        }
-
-        private static Windows.Foundation.Rect MapWindowsOcrRectToOriginalImageRect(
-            Windows.Foundation.Rect ocrRect,
-            int imageWidth,
-            int imageHeight,
-            double? textAngleDegrees)
-        {
-            if (imageWidth <= 0 || imageHeight <= 0 || ocrRect.Width <= 0d || ocrRect.Height <= 0d)
-            {
-                return ocrRect;
-            }
-
-            double angle = textAngleDegrees.HasValue
-                ? -textAngleDegrees.Value * Math.PI / 180d
-                : 0d;
-
-            if (Math.Abs(angle) < 0.000001d)
-            {
-                return ocrRect;
-            }
-
-            double cosA = Math.Cos(angle);
-            double sinA = Math.Sin(angle);
-            double centerX = imageWidth / 2d;
-            double centerY = imageHeight / 2d;
-
-            System.Drawing.PointF p0 = MapWindowsOcrPointToOriginalImage(ocrRect.X, ocrRect.Y, centerX, centerY, cosA, sinA);
-            System.Drawing.PointF p1 = MapWindowsOcrPointToOriginalImage(ocrRect.X + ocrRect.Width, ocrRect.Y, centerX, centerY, cosA, sinA);
-            System.Drawing.PointF p2 = MapWindowsOcrPointToOriginalImage(ocrRect.X + ocrRect.Width, ocrRect.Y + ocrRect.Height, centerX, centerY, cosA, sinA);
-            System.Drawing.PointF p3 = MapWindowsOcrPointToOriginalImage(ocrRect.X, ocrRect.Y + ocrRect.Height, centerX, centerY, cosA, sinA);
-
-            double left = Math.Min(Math.Min(p0.X, p1.X), Math.Min(p2.X, p3.X));
-            double top = Math.Min(Math.Min(p0.Y, p1.Y), Math.Min(p2.Y, p3.Y));
-            double right = Math.Max(Math.Max(p0.X, p1.X), Math.Max(p2.X, p3.X));
-            double bottom = Math.Max(Math.Max(p0.Y, p1.Y), Math.Max(p2.Y, p3.Y));
-
-            left = Math.Max(0d, left);
-            top = Math.Max(0d, top);
-            right = Math.Min(imageWidth, right);
-            bottom = Math.Min(imageHeight, bottom);
-
-            if (right <= left || bottom <= top)
-            {
-                return ocrRect;
-            }
-
-            return new Windows.Foundation.Rect(left, top, right - left, bottom - top);
-        }
-
-        private static System.Drawing.PointF MapWindowsOcrPointToOriginalImage(
-            double x,
-            double y,
-            double centerX,
-            double centerY,
-            double cosA,
-            double sinA)
-        {
-            double dx = x - centerX;
-            double dy = y - centerY;
-            return new System.Drawing.PointF(
-                (float)(centerX + (dx * cosA) + (dy * sinA)),
-                (float)(centerY - (dx * sinA) + (dy * cosA)));
-        }
-
-        private static bool IntersectsAnyOcrImageBounds(CachedLine line, List<KernelGeom.Rectangle> imageBounds)
-        {
-            if (line == null || imageBounds == null || imageBounds.Count == 0)
-            {
-                return false;
-            }
-
-            KernelGeom.Rectangle lineBounds = GetCachedLineBounds(line);
-            if (lineBounds == null)
-            {
-                return false;
-            }
-
-            return imageBounds.Any(imageRect => RectanglesIntersectWithTolerance(lineBounds, imageRect, 1.5f));
-        }
-
-        internal static KernelGeom.Rectangle GetCachedLineBounds(CachedLine line)
-        {
-            if (line == null)
-            {
-                return null;
-            }
-
-            IEnumerable<KernelGeom.Rectangle> rects = line.OcrWordBounds != null && line.OcrWordBounds.Count > 0
-                ? line.OcrWordBounds
-                : line.Characters?.Select(ch => ch.BoundingBox);
-
-            if (rects == null)
-            {
-                return null;
-            }
-
-            bool hasRect = false;
-            float left = float.MaxValue;
-            float right = float.MinValue;
-            float bottom = float.MaxValue;
-            float top = float.MinValue;
-
-            foreach (KernelGeom.Rectangle rect in rects)
-            {
-                if (rect == null || rect.GetWidth() <= 0f || rect.GetHeight() <= 0f)
-                {
-                    continue;
-                }
-
-                hasRect = true;
-                left = Math.Min(left, rect.GetLeft());
-                right = Math.Max(right, rect.GetRight());
-                bottom = Math.Min(bottom, rect.GetBottom());
-                top = Math.Max(top, rect.GetTop());
-            }
-
-            if (!hasRect || right <= left || top <= bottom)
-            {
-                return null;
-            }
-
-            return new KernelGeom.Rectangle(left, bottom, right - left, top - bottom);
-        }
-
-        private static bool RectanglesIntersectWithTolerance(KernelGeom.Rectangle a, KernelGeom.Rectangle b, float tolerance)
-        {
-            if (a == null || b == null)
-            {
-                return false;
-            }
-
-            float aLeft = a.GetLeft() - tolerance;
-            float aRight = a.GetRight() + tolerance;
-            float aBottom = a.GetBottom() - tolerance;
-            float aTop = a.GetTop() + tolerance;
-            float bLeft = b.GetLeft();
-            float bRight = b.GetRight();
-            float bBottom = b.GetBottom();
-            float bTop = b.GetTop();
-
-            return aLeft < bRight && aRight > bLeft && aBottom < bTop && aTop > bBottom;
-        }
-
-        private static void AppendOcrSpace(CachedLine line, float previousRight, float nextLeft, float y, float height)
-        {
-            if (line == null)
-            {
-                return;
-            }
-
-            float gap = Math.Max(0.1f, nextLeft - previousRight);
-            line.Text += " ";
-            line.Characters.Add(new CharacterInfo
-            {
-                Char = ' ',
-                BoundingBox = new KernelGeom.Rectangle(previousRight, y, gap, Math.Max(0.1f, height))
-            });
-        }
-
-        private static bool AppendOcrWordFromSymbols(
-            CachedLine line,
-            TesseractOCR.Layout.Word word,
-            KernelGeom.Rectangle pageSize,
-            int bitmapWidth,
-            int bitmapHeight,
-            int pageRotation)
-        {
-            if (line == null || word == null || pageSize == null || bitmapWidth <= 0 || bitmapHeight <= 0)
-            {
-                return false;
-            }
-
-            string wordText = (word.Text ?? string.Empty).Trim();
-            if (string.IsNullOrEmpty(wordText))
-            {
-                return false;
-            }
-
-            var symbolCharacters = new List<CharacterInfo>();
-            int beforeCount = line.Characters.Count;
-            foreach (var symbol in word.Symbols)
-            {
-                string symbolText = symbol.Text ?? string.Empty;
-                if (string.IsNullOrEmpty(symbolText))
-                {
-                    continue;
-                }
-
-                var symbolBounds = symbol.BoundingBox;
-                if (!symbolBounds.HasValue)
-                {
-                    continue;
-                }
-
-                KernelGeom.Rectangle symbolRect = ConvertOcrRectToPdfRect(symbolBounds.Value, pageSize, bitmapWidth, bitmapHeight, pageRotation);
-                if (symbolRect == null || symbolRect.GetWidth() <= 0f || symbolRect.GetHeight() <= 0f)
-                {
-                    continue;
-                }
-
-                AppendOcrWordToCharacters(symbolCharacters, symbolText, symbolRect);
-            }
-
-            if (symbolCharacters.Count != wordText.Length)
-            {
-                return false;
-            }
-
-            for (int i = 0; i < wordText.Length; i++)
-            {
-                symbolCharacters[i].Char = wordText[i];
-            }
-
-            line.Text += wordText;
-            line.Characters.AddRange(symbolCharacters);
-            return line.Characters.Count > beforeCount;
-        }
-
-        private static void AppendOcrWord(CachedLine line, string text, KernelGeom.Rectangle rect)
-        {
-            if (line == null || string.IsNullOrEmpty(text) || rect == null)
-            {
-                return;
-            }
-
-            float charWidth = Math.Max(0.1f, rect.GetWidth() / Math.Max(1, text.Length));
-            for (int i = 0; i < text.Length; i++)
-            {
-                line.Text += text[i];
-                line.Characters.Add(new CharacterInfo
-                {
-                    Char = text[i],
-                    BoundingBox = new KernelGeom.Rectangle(
-                        rect.GetX() + (charWidth * i),
-                        rect.GetY(),
-                        charWidth,
-                        Math.Max(0.1f, rect.GetHeight()))
-                });
-            }
-        }
-
-        private static void AppendOcrWordToCharacters(List<CharacterInfo> characters, string text, KernelGeom.Rectangle rect)
-        {
-            if (characters == null || string.IsNullOrEmpty(text) || rect == null)
-            {
-                return;
-            }
-
-            float charWidth = Math.Max(0.1f, rect.GetWidth() / Math.Max(1, text.Length));
-            for (int i = 0; i < text.Length; i++)
-            {
-                characters.Add(new CharacterInfo
-                {
-                    Char = text[i],
-                    BoundingBox = new KernelGeom.Rectangle(
-                        rect.GetX() + (charWidth * i),
-                        rect.GetY(),
-                        charWidth,
-                        Math.Max(0.1f, rect.GetHeight()))
-                });
-            }
-        }
-
-        // Funkcja do odczytu text na podstawie line_number
-        private static List<TextLocation> SearchInCachedLines(string pdfPath, string searchText, bool searchPersonalData, IWin32Window owner)
-        {
-
-            var locations = new List<TextLocation> { };
-            var cachedLines = _lineCache[pdfPath];
-            string searchTextLower = searchText.ToLowerInvariant();
-
-            int cnt = 0;
-            int lastReportedPage = -1;
-            foreach (var line in cachedLines)
-            {
-
-                string textLower = line.Text.ToLowerInvariant();
-                if (line.PageNumber != lastReportedPage)
-                {
-                    lastReportedPage = line.PageNumber;
-                    OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_SearchPage", line.PageNumber));
-                }
-                if (searchPersonalData)
-                {
-                    SearchPersonalData(line, locations);
-                }
-                else if (textLower.Contains(searchTextLower))
-                {
-                    HashSet<int> exactOcrWordMatchStarts = AddExactOcrWordMatches(line, searchText, locations);
-                    // TODO: add per-line search progress notification
-                    int startIndex = textLower.IndexOf(searchTextLower, StringComparison.CurrentCultureIgnoreCase);
-                    while (startIndex >= 0)
-                    {
-                        if (exactOcrWordMatchStarts != null && exactOcrWordMatchStarts.Contains(startIndex))
-                        {
-                            startIndex = textLower.IndexOf(searchTextLower, startIndex + 1, StringComparison.CurrentCultureIgnoreCase);
-                            continue;
-                        }
-
-                        KernelGeom.Rectangle textRect = GetSearchResultRectangle(line, startIndex, searchText.Length);
-                        if (textRect != null)
-                        {
-                            locations.Add(new TextLocation(line.PageNumber, line.PageRotation, textRect, line.IsOcr));
-                        }
-                        startIndex = textLower.IndexOf(searchTextLower, startIndex + 1, StringComparison.CurrentCultureIgnoreCase);
-                    }
-                }
-                cnt++;
-            }
-
-            if (searchPersonalData && PDDServerUrl!="")
-            {
-                DialogResult result = ShowMessageBox(
-                    owner,
-                    Resources.Msg_Confirm_NameSearchSlow,
-                    Resources.Title_Warning,
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Exclamation,
-                    MessageBoxDefaultButton.Button2);
-
-                if (result == DialogResult.No)
-                {
-                    return locations;
-                }
-
-                using (var client = new HttpClient())
-                {
-                    var groupedByPage = cachedLines
-                        .Select((line, index) => new { Line = line, Index = index })
-                        .GroupBy(x => x.Line.PageNumber);
-
-                    foreach (var pageGroup in groupedByPage)
-                    {
-                        var pageLines = pageGroup.ToList();
-
-                        OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_SearchPage", pageGroup.Key));
-
-                        var reqlines = pageLines.Select(x => new
-                        {
-                            linenumber = x.Index,
-                            text = x.Line.Text
-                        }).ToList();
-
-                        var requestData = new { reqlines };
-                        string jsonRequest = JsonConvert.SerializeObject(requestData);
-                        var content = new StringContent(jsonRequest, System.Text.Encoding.UTF8, "application/json");
-                        string jsonOut = "{}";
-
-                        try
-                        {
-                            var response = client.PostAsync(PDDServerUrl, content)
-                                .GetAwaiter()
-                                .GetResult();
-                            response.EnsureSuccessStatusCode();
-                            jsonOut = response.Content.ReadAsStringAsync()
-                                .GetAwaiter()
-                                .GetResult();
-                        }
-                        catch {
-
-                            ShowMessageBox(owner, Resources.Msg_NameSearchServiceUnavailable, Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                            return locations;
-                        }
-
-                        JObject obj = JObject.Parse(jsonOut);
-                        JArray respLines = obj["resplines"] as JArray;
-
-                        if (respLines == null) continue;
-
-                        foreach (var respLine in respLines)
-                        {
-                            int lineNumber = int.Parse(respLine["linenumber"]?.ToString() ?? "-1");
-                            if (lineNumber < 0 || lineNumber >= cachedLines.Count) continue;
-
-                            var cachedLine = cachedLines[lineNumber];
-                            var entities = respLine["entities"] as JArray;
-                            if (entities == null || entities.Count == 0) continue;
-
-                            string textLower = cachedLine.Text.ToLowerInvariant();
-
-                            foreach (var entity in entities)
-                            {
-                                string entityText = entity["text"]?.ToString();
-                                if (string.IsNullOrWhiteSpace(entityText)) continue;
-
-                                string entityLower = entityText.ToLowerInvariant();
-                                int startIndex = textLower.IndexOf(entityLower, StringComparison.CurrentCultureIgnoreCase);
-
-                                while (startIndex >= 0)
-                                {
-                                    var textRect = GetSearchResultRectangle(cachedLine, startIndex, entityText.Length);
-                                    if (textRect != null)
-                                    {
-                                        locations.Add(new TextLocation(cachedLine.PageNumber, cachedLine.PageRotation, textRect, cachedLine.IsOcr));
-                                    }
-                                    startIndex = textLower.IndexOf(entityLower, startIndex + 1, StringComparison.CurrentCultureIgnoreCase);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                locations = locations
-                    .OrderBy(loc => loc.PageNumber)
-                    .ThenByDescending(loc => loc.Rect.GetY())
-                    .ToList();
-
-                var deduplicatedLocations = new List<TextLocation>();
-                foreach (var loc in locations)
-                {
-                    bool isDuplicate = false;
-                    for (int i = 0; i < deduplicatedLocations.Count; i++)
-                    {
-                        var existing = deduplicatedLocations[i];
-
-                        float x1 = loc.Rect.GetX();
-                        float y1 = loc.Rect.GetY();
-                        float w1 = loc.Rect.GetWidth();
-                        float h1 = loc.Rect.GetHeight();
-
-                        float x2 = existing.Rect.GetX();
-                        float y2 = existing.Rect.GetY();
-                        float w2 = existing.Rect.GetWidth();
-                        float h2 = existing.Rect.GetHeight();
-
-                        float cx1 = x1 + w1 / 2f;
-                        float cy1 = y1 + h1 / 2f;
-                        float cx2 = x2 + w2 / 2f;
-                        float cy2 = y2 + h2 / 2f;
-
-                        float toleranceX = Math.Max(15f, w2 * 0.5f);
-                        float toleranceY = Math.Max(15f, h2 * 0.8f);
-
-                        if (loc.PageNumber == existing.PageNumber &&
-                            Math.Abs(cx1 - cx2) < toleranceX &&
-                            Math.Abs(cy1 - cy2) < toleranceY)
-                        {
-                            if (h1 > h2)
-                            {
-                                deduplicatedLocations[i] = loc;
-                            }
-                            else if (h1 == h2 && w1 > w2)
-                            {
-                                deduplicatedLocations[i] = loc;
-                            }
-                            isDuplicate = true;
-                            break;
-                        }
-                    }
-                    if (!isDuplicate)
-                    {
-                        deduplicatedLocations.Add(loc);
-                    }
-                }
-                locations = deduplicatedLocations;
-            }
-            OnCacheStatusChanged?.Invoke(string.Empty);
-
-            // Sort results by page then by position (top-to-bottom) so
-            // navigation follows the visual reading order regardless of
-            // whether results come from native text or OCR lines.
-            locations = locations
-                .OrderBy(loc => loc.PageNumber)
-                .ThenByDescending(loc => loc.Rect.GetY())
-                .ToList();
-
-            return locations;
-        }
-
-        private static HashSet<int> AddExactOcrWordMatches(CachedLine line, string searchText, List<TextLocation> locations)
-        {
-            if (line?.IsOcr != true ||
-                line.OcrWords == null ||
-                line.OcrWords.Count == 0 ||
-                string.IsNullOrWhiteSpace(searchText) ||
-                locations == null)
-            {
-                return null;
-            }
-
-            var matchedStarts = new HashSet<int>();
-            string normalizedSearchText = searchText.Trim();
-            foreach (OcrWordInfo word in line.OcrWords)
-            {
-                if (word == null ||
-                    word.BoundingBox == null ||
-                    word.BoundingBox.GetWidth() <= 0f ||
-                    word.BoundingBox.GetHeight() <= 0f ||
-                    string.IsNullOrWhiteSpace(word.Text))
-                {
-                    continue;
-                }
-
-                if (!string.Equals(word.Text.Trim(), normalizedSearchText, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                locations.Add(new TextLocation(line.PageNumber, line.PageRotation, word.BoundingBox, isOcr: true, isExactOcrWord: true));
-                matchedStarts.Add(word.StartIndex);
-            }
-
-            return matchedStarts.Count > 0 ? matchedStarts : null;
-        }
-
-        private static void AddOcrManualSearchMatches(CachedLine line, string searchText, List<TextLocation> locations)
-        {
-            if (line == null || !line.IsOcr || string.IsNullOrWhiteSpace(line.Text) || string.IsNullOrWhiteSpace(searchText) || locations == null)
-            {
-                return;
-            }
-
-            string normalizedLine = BuildOcrManualSearchText(line.Text, removeAtSign: false, out List<int> lineIndexes);
-            string normalizedSearch = BuildOcrManualSearchText(searchText, removeAtSign: false, out _);
-            int added = AddOcrManualSearchMatchesFromNormalizedText(
-                line,
-                normalizedLine,
-                lineIndexes,
-                normalizedSearch,
-                locations,
-                expandMissingAtSign: false);
-
-            if (added > 0 || normalizedSearch.IndexOf('@') < 0)
-            {
-                return;
-            }
-
-            string normalizedLineWithoutAt = BuildOcrManualSearchText(line.Text, removeAtSign: true, out List<int> lineIndexesWithoutAt);
-            string normalizedSearchWithoutAt = BuildOcrManualSearchText(searchText, removeAtSign: true, out _);
-            if (normalizedSearchWithoutAt.Length < 2)
-            {
-                return;
-            }
-
-            AddOcrManualSearchMatchesFromNormalizedText(
-                line,
-                normalizedLineWithoutAt,
-                lineIndexesWithoutAt,
-                normalizedSearchWithoutAt,
-                locations,
-                expandMissingAtSign: true);
-        }
-
-        private static int AddOcrManualSearchMatchesFromNormalizedText(
-            CachedLine line,
-            string normalizedLine,
-            List<int> originalIndexes,
-            string normalizedSearch,
-            List<TextLocation> locations,
-            bool expandMissingAtSign)
-        {
-            if (line == null ||
-                string.IsNullOrEmpty(normalizedLine) ||
-                string.IsNullOrEmpty(normalizedSearch) ||
-                originalIndexes == null ||
-                originalIndexes.Count != normalizedLine.Length ||
-                locations == null)
-            {
-                return 0;
-            }
-
-            int added = 0;
-            int startIndex = normalizedLine.IndexOf(normalizedSearch, StringComparison.OrdinalIgnoreCase);
-            while (startIndex >= 0)
-            {
-                if (startIndex + normalizedSearch.Length <= originalIndexes.Count)
-                {
-                    int originalStart = originalIndexes[startIndex];
-                    int originalEnd = originalIndexes[startIndex + normalizedSearch.Length - 1] + 1;
-                    int originalLength = originalEnd - originalStart;
-                    if (originalStart >= 0 && originalLength > 0)
-                    {
-                        KernelGeom.Rectangle textRect = GetSearchResultRectangle(line, originalStart, originalLength);
-                        if (expandMissingAtSign)
-                        {
-                            textRect = ExpandOcrRectangleForMissingAtSign(textRect, line);
-                        }
-
-                        if (textRect != null)
-                        {
-                            locations.Add(new TextLocation(line.PageNumber, line.PageRotation, textRect, isOcr: true));
-                            added++;
-                        }
-                    }
-                }
-
-                startIndex = normalizedLine.IndexOf(normalizedSearch, startIndex + 1, StringComparison.OrdinalIgnoreCase);
-            }
-
-            return added;
-        }
-
-        private static string BuildOcrManualSearchText(string text, bool removeAtSign, out List<int> originalIndexes)
-        {
-            originalIndexes = new List<int>();
-            if (string.IsNullOrEmpty(text))
-            {
-                return string.Empty;
-            }
-
-            var builder = new System.Text.StringBuilder(text.Length);
-            for (int i = 0; i < text.Length; i++)
-            {
-                char ch = NormalizeOcrManualSearchChar(text[i]);
-                if (char.IsWhiteSpace(ch) || (removeAtSign && ch == '@'))
-                {
-                    continue;
-                }
-
-                builder.Append(char.ToLowerInvariant(ch));
-                originalIndexes.Add(i);
-            }
-
-            return builder.ToString();
-        }
-
-        private static char NormalizeOcrManualSearchChar(char ch)
-        {
-            switch (ch)
-            {
-                case '＠':
-                case '©':
-                case '®':
-                case '§':
-                    return '@';
-                case '．':
-                case '·':
-                case '•':
-                case '‚':
-                    return '.';
-                default:
-                    return ch;
-            }
-        }
-
-        private static KernelGeom.Rectangle ExpandOcrRectangleForMissingAtSign(KernelGeom.Rectangle rect, CachedLine line)
-        {
-            if (rect == null)
-            {
-                return null;
-            }
-
-            float extraRight = Math.Max(2f, rect.GetHeight() * 0.75f);
-            float right = rect.GetX() + rect.GetWidth() + extraRight;
-            if (line != null && line.PageWidth > 0f)
-            {
-                right = Math.Min(line.PageWidth, right);
-            }
-
-            return new KernelGeom.Rectangle(rect.GetX(), rect.GetY(), Math.Max(rect.GetWidth(), right - rect.GetX()), rect.GetHeight());
-        }
-
-        private static DialogResult ShowMessageBox(
-            IWin32Window owner,
-            string text,
-            string caption,
-            MessageBoxButtons buttons,
-            MessageBoxIcon icon,
-            MessageBoxDefaultButton defaultButton = MessageBoxDefaultButton.Button1)
-        {
-            if (owner is Control control && control.InvokeRequired)
-            {
-                return (DialogResult)control.Invoke(new Func<DialogResult>(() =>
-                    MessageBox.Show(owner, text, caption, buttons, icon, defaultButton)));
-            }
-
-            return owner == null
-                ? MessageBox.Show(text, caption, buttons, icon, defaultButton)
-                : MessageBox.Show(owner, text, caption, buttons, icon, defaultButton);
-        }
-
-
-        // Function to clear cache
-        public static void ClearCache(string pdfPath = null)
-        {
-            if (pdfPath == null)
-            {
-                _lineCache.Clear();
-            }
-            else
-            {
-                _lineCache.Remove(pdfPath);
-            }
-        }
-
-        public static void CachePdfText(string pdfPath, string userPassword)
-        {
-            CachePdfText(pdfPath, userPassword, System.Threading.CancellationToken.None);
-        }
-
-        public static void CachePdfText(string pdfPath, string userPassword, System.Threading.CancellationToken cancellationToken)
-        {
-            if (!_lineCache.ContainsKey(pdfPath))
-            {
-                CacheLines(pdfPath, userPassword, cancellationToken);
-            }
-        }
-
-        internal static List<CachedLine> GetCachedLines(string pdfPath)
-        {
-            if (_lineCache.TryGetValue(pdfPath, out var lines))
-                return lines;
-            return new List<CachedLine>();
-        }
-
-        private class LineExtractionStrategy : LocationTextExtractionStrategy
-        {
-            private readonly int _pageNum;
-            private readonly int _pageRotation;
-            public List<CachedLine> ExtractedLines { get; } = new List<CachedLine>();
-            private const float Y_TOLERANCE = 2.0f;
-
-            public LineExtractionStrategy(int pageNum, int pageRotation)
-            {
-                _pageNum = pageNum;
-                _pageRotation = pageRotation;
-            }
-
-            public override void EventOccurred(IEventData data, EventType type)
-            {
-                if (type == EventType.RENDER_TEXT && data is TextRenderInfo renderInfo)
-                {
-                    var baseline = renderInfo.GetBaseline();
-                    float yPos = baseline.GetStartPoint().Get(KernelGeom.Vector.I2);
-
-                    CachedLine line = ExtractedLines.Find(l => Math.Abs(l.YPosition - yPos) < Y_TOLERANCE);
-                    if (line == null)
-                    {
-                        line = new CachedLine { PageNumber = _pageNum, PageRotation = _pageRotation, YPosition = yPos };
-                        ExtractedLines.Add(line);
-                    }
-
-                    string text = renderInfo.GetText();
-                    line.Text += text;
-
-                    var charInfos = renderInfo.GetCharacterRenderInfos();
-                    if (charInfos != null)
-                    {
-                        foreach (var charInfo in charInfos)
-                        {
-                            KernelGeom.LineSegment charBaseline = charInfo.GetBaseline();
-                            KernelGeom.LineSegment charAscentLine = charInfo.GetAscentLine();
-                            KernelGeom.LineSegment charDescentLine = charInfo.GetDescentLine();
-
-                            KernelGeom.Vector baselineStart = charBaseline.GetStartPoint();
-                            KernelGeom.Vector baselineEnd = charBaseline.GetEndPoint();
-
-                            KernelGeom.Vector ascentEnd = charAscentLine.GetEndPoint();
-                            KernelGeom.Vector descentStart = charDescentLine.GetStartPoint();
-
-                            float minX = baselineStart.Get(KernelGeom.Vector.I1);
-                            float maxX = baselineEnd.Get(KernelGeom.Vector.I1);
-                            float minY = baselineStart.Get(KernelGeom.Vector.I2);
-                            float maxY = ascentEnd.Get(KernelGeom.Vector.I2) - (minY - descentStart.Get(KernelGeom.Vector.I2)) * 1.5f;
-
-                            line.Characters.Add(new CharacterInfo
-                            {
-                                Char = charInfo.GetText()[0], // Assume GetText() for single character returns 1 char
-                                BoundingBox = new KernelGeom.Rectangle(minX, minY, maxX - minX, maxY - minY)
-                            });
-                        }
-                    }
-                }
-
-                base.EventOccurred(data, type);
-            }
-        }
-
-        private static void SearchPersonalData(CachedLine line, List<TextLocation> locations)
-        {
-            string text = line.Text;
-            int len = text.Length;
-            bool[] matched = len > 0 ? new bool[len] : null;
-
-            // Debug: dump every line that contains digits to help diagnose regex misses
-            if (text.Any(char.IsDigit) && (text.Contains("1020") || text.Contains("4795") || text.Contains("8496") || text.Contains("3420")))
-            {
-                Debug.WriteLine($"SEARCH_LINE page={line.PageNumber} text='{text}' hex={BitConverter.ToString(System.Text.Encoding.UTF8.GetBytes(text)).Replace("-", " ")} len={text.Length} ocr={line.IsOcr}");
-            }
-
-            foreach (Match match in PeselPattern.Matches(text))
-            {
-                if (!Overlaps(matched, match) && ValidatePesel(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-            foreach (Match match in PropertyRegisterPattern.Matches(text))
-            {
-                if (!Overlaps(matched, match) && ValidatePropertyRegister(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-            foreach (Match match in IdCardPattern.Matches(text))
-            {
-                if (!Overlaps(matched, match) && ValidateIdCard(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-            foreach (Match match in EmailPattern.Matches(text))
-            {
-                if (!Overlaps(matched, match))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-            foreach (Match match in NipPattern.Matches(text))
-            {
-                if (!Overlaps(matched, match) && ValidateNip(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-            foreach (Match match in RegonPattern.Matches(text))
-            {
-                if (!Overlaps(matched, match) && ValidateRegon(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-            foreach (Match match in KrsPattern.Matches(text))
-            {
-                if (!Overlaps(matched, match) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-            foreach (Match match in PostalCodePattern.Matches(text))
-            {
-                if (!Overlaps(matched, match) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-            foreach (Match match in BankAccountPattern.Matches(text))
-            {
-                Debug.WriteLine($"BankAccountPattern found: '{match.Value}' (len={match.Value.Length})");
-                if (!Overlaps(matched, match) && ValidateBankAccount(match.Value) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                {
-                    Debug.WriteLine($"BankAccount validated: '{match.Value}'");
-                    MarkMatched(matched, match); AddLocationForMatch(line, match, locations);
-                }
-            }
-            foreach (Match match in VinPattern.Matches(text))
-            {
-                if (!Overlaps(matched, match) && IsIdentifierMatchGeometryCompact(line, match.Index, match.Length))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-            foreach (Match match in UrlPattern.Matches(text))
-            {
-                if (!Overlaps(matched, match))
-                { MarkMatched(matched, match); AddLocationForMatch(line, match, locations); }
-            }
-
-        }
-
-        private static bool Overlaps(bool[] matched, Match m)
-        {
-            if (matched == null) return false;
-            for (int i = m.Index; i < m.Index + m.Length && i < matched.Length; i++)
-                if (matched[i]) return true;
-            return false;
-        }
-
-        private static void MarkMatched(bool[] matched, Match m)
-        {
-            if (matched == null) return;
-            for (int i = m.Index; i < m.Index + m.Length && i < matched.Length; i++)
-                matched[i] = true;
-        }
-
-        private static bool IsIdentifierMatchGeometryCompact(CachedLine line, int startIndex, int length)
-        {
-            if (line?.Characters == null || length <= 1 || startIndex < 0)
-            {
-                return true;
-            }
-
-            int endExclusive = startIndex + length;
-            if (endExclusive > line.Characters.Count)
-            {
-                // For identifier detection prefer precision over recall:
-                // when mapping text index -> glyphs is uncertain, skip the match.
-                return false;
-            }
-
-            var widths = new List<float>(length);
-            for (int i = startIndex; i < endExclusive; i++)
-            {
-                var rect = line.Characters[i].BoundingBox;
-                float width = Math.Max(0f, rect.GetWidth());
-                if (width > 0.1f)
-                {
-                    widths.Add(width);
-                }
-            }
-
-            float medianWidth = widths.Count > 0
-                ? widths.OrderBy(w => w).ElementAt(widths.Count / 2)
-                : 0f;
-            float maxAllowedGap = Math.Max(2f, medianWidth * 1.6f);
-
-            for (int i = startIndex; i < endExclusive - 1; i++)
-            {
-                var current = line.Characters[i].BoundingBox;
-                var next = line.Characters[i + 1].BoundingBox;
-                float currentRight = current.GetX() + current.GetWidth();
-                float gap = next.GetX() - currentRight;
-                if (gap > maxAllowedGap)
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private static void AddLocationForMatch(CachedLine line, Match match, List<TextLocation> locations)
-        {
-            KernelGeom.Rectangle textRect = GetSearchResultRectangle(line, match.Index, match.Length);
-            if (textRect != null)
-            {
-                locations.Add(new TextLocation(line.PageNumber, line.PageRotation, textRect, line.IsOcr));
-            }
-        }
-
-        private static KernelGeom.Rectangle GetSearchResultRectangle(CachedLine line, int startIndex, int length)
-        {
-            if (line?.IsOcr == true && TryGetExactOcrWordRectangle(line, startIndex, length, out KernelGeom.Rectangle exactWordRect))
-            {
-                return exactWordRect;
-            }
-
-            KernelGeom.Rectangle textRect = GetTextFragmentRectangle(line, startIndex, length);
-            if (textRect == null || line?.IsOcr != true)
-            {
-                return textRect;
-            }
-
-            return ExpandOcrTextFragmentRectangle(line, startIndex, length, textRect);
-        }
-
-        private static bool TryGetExactOcrWordRectangle(
-            CachedLine line,
-            int startIndex,
-            int length,
-            out KernelGeom.Rectangle rectangle)
-        {
-            rectangle = null;
-            if (line?.OcrWords == null || line.OcrWords.Count == 0 || startIndex < 0 || length <= 0)
-            {
-                return false;
-            }
-
-            foreach (OcrWordInfo word in line.OcrWords)
-            {
-                if (word == null ||
-                    word.BoundingBox == null ||
-                    word.BoundingBox.GetWidth() <= 0f ||
-                    word.BoundingBox.GetHeight() <= 0f)
-                {
-                    continue;
-                }
-
-                if (word.StartIndex == startIndex && word.Length == length)
-                {
-                    rectangle = word.BoundingBox;
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private static KernelGeom.Rectangle ExpandOcrTextFragmentRectangle(
-            CachedLine line,
-            int startIndex,
-            int length,
-            KernelGeom.Rectangle fallbackRect)
-        {
-            if (line == null || fallbackRect == null)
-            {
-                return fallbackRect;
-            }
-
-            float padX = Math.Max(OcrSearchMinimumHorizontalPadding, fallbackRect.GetHeight() * OcrSearchHorizontalPaddingRatio);
-            float padRight = Math.Max(OcrSearchMinimumRightPadding, fallbackRect.GetHeight() * OcrSearchRightPaddingRatio);
-            float padY = Math.Max(OcrSearchMinimumVerticalPadding, fallbackRect.GetHeight() * OcrSearchVerticalPaddingRatio);
-            float left = fallbackRect.GetX() - padX;
-            float bottom = fallbackRect.GetY() - padY;
-            float right = fallbackRect.GetX() + fallbackRect.GetWidth() + padRight;
-            float top = fallbackRect.GetY() + fallbackRect.GetHeight() + padY;
-
-            if (line.PageWidth > 0f)
-            {
-                left = Math.Max(0f, left);
-                right = Math.Min(line.PageWidth, right);
-            }
-
-            if (line.PageHeight > 0f)
-            {
-                bottom = Math.Max(0f, bottom);
-                top = Math.Min(line.PageHeight, top);
-            }
-
-            float width = right - left;
-            float height = top - bottom;
-            if (width <= 0f || height <= 0f)
-            {
-                return fallbackRect;
-            }
-
-            return new KernelGeom.Rectangle(left, bottom, width, height);
-        }
-
-        private static KernelGeom.Rectangle GetTextFragmentRectangle(CachedLine line, int startIndex, int length)
-        {
-            if (string.IsNullOrEmpty(line.Text) || startIndex < 0 || startIndex + length > line.Text.Length)
-                return null;
-
-            float minX = float.MaxValue;
-            float maxX = float.MinValue;
-            float minY = float.MaxValue;
-            float maxY = float.MinValue;
-
-            for (int i = startIndex; i < startIndex + length && i < line.Characters.Count; i++)
-            {
-                var charInfo = line.Characters[i];
-                minX = Math.Min(minX, charInfo.BoundingBox.GetX());
-                maxX = Math.Max(maxX, charInfo.BoundingBox.GetX() + charInfo.BoundingBox.GetWidth());
-                minY = Math.Min(minY, charInfo.BoundingBox.GetY());
-                maxY = Math.Max(maxY, charInfo.BoundingBox.GetY() + charInfo.BoundingBox.GetHeight());
-            }
-
-            if (minX == float.MaxValue || maxX == float.MinValue || minY == float.MaxValue || maxY == float.MinValue)
-                return null;
-
-            return new KernelGeom.Rectangle(minX, minY, maxX - minX, maxY - minY);
-        }
-
-        // Patterns for personal data
-        private static readonly Regex PeselPattern = new Regex(@"\b\d{11}\b");
-        private static readonly Regex PropertyRegisterPattern = new Regex(@"\b([A-Z]{2}\d{1}[A-Z0-9]{1})/\d{8}/\d{1}\b");
-        private static readonly Regex IdCardPattern = new Regex(@"\b[A-Z]{3}\s?\d{6}\b");
-        private static readonly Regex EmailPattern = new Regex(@"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}");
-        private static readonly Regex NipPattern = new Regex(@"\b\d{3}[- ]?\d{2,3}[- ]?\d{2,3}[- ]?\d{2,3}\b");
-        private static readonly Regex RegonPattern = new Regex(@"\b\d{9}(?:\d{5})?\b");
-        private static readonly Regex PostalCodePattern = new Regex(@"(?<!\d)[0-9]{2}-[0-9]{3}(?!\d)");
-        private static readonly Regex BankAccountPattern = new Regex(@"[0-9]{2}(?:\s?[0-9]{4}){6}");
-        private static readonly Regex VinPattern = new Regex(@"\b[A-HJ-NPR-Z0-9]{17}\b");
-        private static readonly Regex UrlPattern = new Regex(@"https?://[^\s]{4,}");
-        private static readonly Regex KrsPattern = new Regex(@"\b\d{10}\b");
-
-        internal static IReadOnlyList<string> DetectIdentifierTags(string text)
-        {
-            var detectedTags = new List<string>();
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                return detectedTags;
-            }
-
-            if (PeselPattern.Matches(text).Cast<Match>().Any(match => ValidatePesel(match.Value)))
-            {
-                detectedTags.Add("PESEL");
-            }
-
-            if (PropertyRegisterPattern.Matches(text).Cast<Match>().Any(match => ValidatePropertyRegister(match.Value)))
-            {
-                detectedTags.Add("KW");
-            }
-
-            if (IdCardPattern.Matches(text).Cast<Match>().Any(match => ValidateIdCard(match.Value)))
-            {
-                detectedTags.Add("IDENTITY_CARD");
-            }
-
-            if (EmailPattern.IsMatch(text))
-            {
-                detectedTags.Add("EMAIL");
-            }
-
-            if (NipPattern.Matches(text).Cast<Match>().Any(match => ValidateNip(match.Value)))
-            {
-                detectedTags.Add("NIP");
-            }
-
-            if (RegonPattern.Matches(text).Cast<Match>().Any(match => ValidateRegon(match.Value)))
-            {
-                detectedTags.Add("REGON");
-            }
-
-            if (KrsPattern.IsMatch(text))
-            {
-                detectedTags.Add("KRS");
-            }
-
-            if (PostalCodePattern.IsMatch(text))
-            {
-                detectedTags.Add("POSTAL_CODE");
-            }
-
-            if (BankAccountPattern.Matches(text).Cast<Match>().Any(match => ValidateBankAccount(match.Value)))
-            {
-                detectedTags.Add("BANK_ACCOUNT");
-            }
-
-            if (VinPattern.IsMatch(text))
-            {
-                detectedTags.Add("VIN");
-            }
-
-            if (UrlPattern.IsMatch(text))
-            {
-                detectedTags.Add("URL");
-            }
-
-            return detectedTags;
-        }
-
-        private static bool ValidatePesel(string pesel)
-        {
-            // Check basic conditions
-            if (pesel == null || pesel.Length != 11 || !pesel.All(char.IsDigit))
-                return false;
-
-            // Check control digit
-            int[] weights = { 1, 3, 7, 9, 1, 3, 7, 9, 1, 3 };
-            int sum = 0;
-            for (int i = 0; i < 10; i++)
-            {
-                sum += (pesel[i] - '0') * weights[i];
-            }
-            int checkDigit = (10 - (sum % 10)) % 10;
-            if (checkDigit != (pesel[10] - '0'))
-                return false;
-
-            // Extract birth date (only after checking control digit)
-            if (!int.TryParse(pesel.Substring(0, 2), out int yearDigits) ||
-                !int.TryParse(pesel.Substring(2, 2), out int monthDigits) ||
-                !int.TryParse(pesel.Substring(4, 2), out int day))
-                return false;
-
-            // Determine full year and actual month
-            int fullYear;
-            int month;
-            if (monthDigits >= 1 && monthDigits <= 12) // 1900-1999
-            {
-                fullYear = 1900 + yearDigits;
-                month = monthDigits;
-            }
-            else if (monthDigits >= 21 && monthDigits <= 32) // 2000-2099
-            {
-                fullYear = 2000 + yearDigits;
-                month = monthDigits - 20;
-            }
-            else if (monthDigits >= 81 && monthDigits <= 92) // 1800-1899
-            {
-                fullYear = 1800 + yearDigits;
-                month = monthDigits - 80;
-            }
-            else if (monthDigits >= 41 && monthDigits <= 52) // 2100-2199
-            {
-                fullYear = 2100 + yearDigits;
-                month = monthDigits - 40;
-            }
-            else if (monthDigits >= 61 && monthDigits <= 72) // 2200-2299
-            {
-                fullYear = 2200 + yearDigits;
-                month = monthDigits - 60;
-            }
-            else
-            {
-                return false; // Invalid month range
-            }
-
-            // Birth date validation
-            try
-            {
-                DateTime date = new DateTime(fullYear, month, day);
-                return true;
-            }
-            catch (ArgumentOutOfRangeException)
-            {
-                return false; // Invalid date (e.g. February 31)
-            }
-        }
-
-        private static bool ValidatePropertyRegister(string number)
-        {
-            if (string.IsNullOrEmpty(number))
-                return false;
-
-            string pattern = @"^([A-Z]{2}\d{1}[A-Z0-9]{1})/\d{8}/\d{1}$";
-            var match = Regex.Match(number, pattern, RegexOptions.IgnoreCase);
-            if (!match.Success)
-                return false;
-
-            string prefix = match.Groups[1].Value.ToUpperInvariant();
-
-            HashSet<string> allowedPrefixes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "BB1B", "BB1C", "BB1Z", "BI1B", "BI1P", "BI1S", "BI2P", "BI3P", "BY1B", "BY1I",
-            "BY1M", "BY1N", "BY1S", "BY1T", "BY1U", "BY1Z", "BY2T", "CIKW", "CZ1C", "CZ1L",
-            "CZ1M", "CZ1Z", "CZ2C", "DIRS", "EL1B", "EL1D", "EL1E", "EL1I", "EL1N", "EL1O",
-            "EL2O", "GD1A", "GD1E", "GD1G", "GD1I", "GD1M", "GD1R", "GD1S", "GD1T", "GD1W",
-            "GD1Y", "GD2I", "GD2M", "GD2W", "GL1G", "GL1J", "GL1R", "GL1S", "GL1T", "GL1W",
-            "GL1X", "GL1Y", "GL1Z", "GW1G", "GW1K", "GW1M", "GW1S", "GW1U", "JG1B", "JG1J",
-            "JG1K", "JG1L", "JG1S", "JG1Z", "KA1B", "KA1C", "KA1D", "KA1I", "KA1J", "KA1K",
-            "KA1L", "KA1M", "KA1P", "KA1S", "KA1T", "KA1Y", "KI1A", "KI1B", "KI1H", "KI1I",
-            "KI1J", "KI1K", "KI1L", "KI1O", "KI1P", "KI1R", "KI1S", "KI1T", "KI1W", "KN1K",
-            "KN1N", "KN1S", "KN1T", "KO1B", "KO1D", "KO1E", "KO1I", "KO1K", "KO1L", "KO1W",
-            "KO2B", "KR1B", "KR1C", "KR1E", "KR1H", "KR1I", "KR1K", "KR1M", "KR1O", "KR1P",
-            "KR1S", "KR1W", "KR1Y", "KR2E", "KR2I", "KR2K", "KR2P", "KR2Y", "KR3I", "KS1B",
-            "KS1E", "KS1J", "KS1K", "KS1S", "KS2E", "KZ1A", "KZ1E", "KZ1J", "KZ1O", "KZ1P",
-            "KZ1R", "KZ1W", "LD1B", "LD1G", "LD1H", "LD1K", "LD1M", "LD1O", "LD1P", "LD1R",
-            "LD1Y", "LE1G", "LE1J", "LE1L", "LE1U", "LE1Z", "LM1G", "LM1L", "LM1W", "LM1Z",
-            "LU1A", "LU1B", "LU1C", "LU1I", "LU1K", "LU1O", "LU1P", "LU1R", "LU1S", "LU1U",
-            "LU1W", "LU1Y", "NS1G", "NS1L", "NS1M", "NS1S", "NS1T", "NS1Z", "NS2L", "OL1B",
-            "OL1C", "OL1E", "OL1G", "OL1K", "OL1L", "OL1M", "OL1N", "OL1O", "OL1P", "OL1S",
-            "OL1Y", "OL2G", "OP1B", "OP1G", "OP1K", "OP1L", "OP1N", "OP1O", "OP1P", "OP1S",
-            "OP1U", "OS1M", "OS1O", "OS1P", "OS1U", "OS1W", "PL1C", "PL1E", "PL1G", "PL1L",
-            "PL1M", "PL1O", "PL1P", "PL1Z", "PL2M", "PO1A", "PO1B", "PO1D", "PO1E", "PO1F",
-            "PO1G", "PO1H", "PO1I", "PO1K", "PO1L", "PO1M", "PO1N", "PO1O", "PO1P", "PO1R",
-            "PO1S", "PO1T", "PO1Y", "PO1Z", "PO2A", "PO2H", "PO2P", "PO2T", "PR1J", "PR1L",
-            "PR1P", "PR1R", "PR2R", "PT1B", "PT1O", "PT1P", "PT1R", "PT1T", "RA1G", "RA1K",
-            "RA1L", "RA1P", "RA1R", "RA1S", "RA1Z", "RA2G", "RA2Z", "RZ1A", "RZ1D", "RZ1E",
-            "RZ1R", "RZ1S", "RZ1Z", "RZ2Z", "SI1G", "SI1M", "SI1P", "SI1S", "SI1W", "SI2S",
-            "SL1B", "SL1C", "SL1L", "SL1M", "SL1S", "SL1Z", "SO1C", "SR1L", "SR1S", "SR1W",
-            "SR1Z", "SR2L", "SR2W", "SU1A", "SU1N", "SU1S", "SW1D", "SW1K", "SW1S", "SW1W",
-            "SW1Z", "SW2K", "SZ1C", "SZ1G", "SZ1K", "SZ1L", "SZ1M", "SZ1O", "SZ1S", "SZ1T",
-            "SZ1W", "SZ1Y", "SZ2S", "SZ2T", "TB1K", "TB1M", "TB1N", "TB1S", "TB1T", "TO1B",
-            "TO1C", "TO1G", "TO1T", "TO1U", "TO1W", "TR1B", "TR1D", "TR1O", "TR1T", "TR2T",
-            "WA1G", "WA1I", "WA1L", "WA1M", "WA1N", "WA1O", "WA1P", "WA1W", "WA2M", "WA3M",
-            "WA4M", "WA5M", "WA6M", "WL1A", "WL1L", "WL1R", "WL1W", "WL1Y", "WR1E", "WR1K",
-            "WR1L", "WR1M", "WR1O", "WR1S", "WR1T", "WR1W", "ZA1B", "ZA1H", "ZA1J", "ZA1K",
-            "ZA1T", "ZA1Z", "ZG1E", "ZG1G", "ZG1K", "ZG1N", "ZG1R", "ZG1S", "ZG1W", "ZG2K",
-            "ZG2S"
-        };
-            return allowedPrefixes.Contains(prefix);
-        }
-
-        private static bool ValidateIdCard(string idCard)
-        {
-            // Remove space if exists
-            idCard = idCard.Replace(" ", "");
-            if (idCard.Length != 9) return false;
-
-            int[] weights = { 7, 3, 1, 7, 3, 1, 7, 3 }; // Weights for 3 letters and 5 digits (without the control digit)
-            int sum = 0;
-
-            // Letter check (positions 0-2)
-            for (int i = 0; i < 3; i++)
-            {
-                if (!char.IsUpper(idCard[i])) return false;
-                sum += (idCard[i] - 'A' + 10) * weights[i];
-            }
-
-            // Pierwsza cyfra (pozycja 3) to cyfra kontrolna
-            if (!char.IsDigit(idCard[3])) return false;
-            int checkDigit = idCard[3] - '0';
-
-            // Calculate weighted sum for digits (positions 4-8, i.e. 2nd-6th digit)
-            for (int i = 4; i < 9; i++)
-            {
-                if (!char.IsDigit(idCard[i])) return false;
-                sum += (idCard[i] - '0') * weights[i - 1]; // i-1, because we skip control digit
-            }
-
-            int calculatedCheckDigit = sum % 10;
-            return calculatedCheckDigit == checkDigit;
-        }
-
-        private static bool ValidateNip(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return false;
-            string digits = new string(value.Where(c => char.IsDigit(c)).ToArray());
-            if (digits.Length != 10 || !digits.All(char.IsDigit))
-            {
-                return false;
-            }
-
-            int[] weights = { 6, 5, 7, 2, 3, 4, 5, 6, 7 };
-            int sum = 0;
-            for (int i = 0; i < 9; i++)
-            {
-                sum += (digits[i] - '0') * weights[i];
-            }
-
-            int checksum = sum % 11;
-            if (checksum == 10)
-            {
-                return false;
-            }
-
-            return checksum == (digits[9] - '0');
-        }
-
-        private static bool ValidateRegon(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value) || !value.All(char.IsDigit))
-            {
-                return false;
-            }
-
-            if (value.Length == 9)
-            {
-                int[] weights = { 8, 9, 2, 3, 4, 5, 6, 7 };
-                int sum = 0;
-                for (int i = 0; i < 8; i++)
-                {
-                    sum += (value[i] - '0') * weights[i];
-                }
-
-                int checksum = sum % 11;
-                if (checksum == 10)
-                {
-                    checksum = 0;
-                }
-
-                return checksum == (value[8] - '0');
-            }
-
-            if (value.Length == 14)
-            {
-                int[] weights = { 2, 4, 8, 5, 0, 9, 7, 3, 6, 1, 2, 4, 8 };
-                int sum = 0;
-                for (int i = 0; i < 13; i++)
-                {
-                    sum += (value[i] - '0') * weights[i];
-                }
-
-                int checksum = sum % 11;
-                if (checksum == 10)
-                {
-                    checksum = 0;
-                }
-
-                return checksum == (value[13] - '0');
-            }
-
-            return false;
-        }
-
-        private static bool ValidateBankAccount(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return false;
-            string digits = value.Replace(" ", "");
-            Debug.WriteLine($"ValidateBankAccount: input='{value}' digits='{digits}' len={digits.Length}");
-            if (digits.Length < 26 || !digits.All(char.IsDigit))
-            {
-                Debug.WriteLine($"ValidateBankAccount: rejected (len={digits.Length} allDigits={digits.All(char.IsDigit)})");
-                return false;
-            }
-
-            // Try as Polish NRB (26 digits): prepend "PL" implicitly for IBAN check
-            if (digits.Length == 26)
-            {
-                // IBAN: "PL" + digits → replace P=25, L=21 → "2521" + digits
-                // Move first 6 chars (2521 + first 2 digits of NRB) to end
-                string ibanDigits = "2521" + digits;
-                string reordered = ibanDigits.Substring(6) + ibanDigits.Substring(0, 6);
-                long rem97 = Mod97(reordered);
-                Debug.WriteLine($"ValidateBankAccount: NRB reordered='{reordered}' mod97={rem97}");
-                if (rem97 == 1) return true;
-            }
-
-            // Try as raw IBAN (may start with letters)
-            string clean = new string(value.Where(c => char.IsLetterOrDigit(c)).ToArray()).ToUpperInvariant();
-            if (clean.Length >= 5 && clean.Take(2).All(char.IsLetter))
-            {
-                string reorderedIban = clean.Substring(4) + clean.Substring(0, 4);
-                // Convert letters to numbers
-                var sb = new System.Text.StringBuilder();
-                foreach (char c in reorderedIban)
-                {
-                    if (char.IsLetter(c))
-                        sb.Append((c - 'A' + 10).ToString());
-                    else
-                        sb.Append(c);
-                }
-                if (Mod97(sb.ToString()) == 1) return true;
-            }
-
-            return false;
-        }
-
-        private static long Mod97(string number)
-        {
-            long rem = 0;
-            for (int i = 0; i < number.Length; i++)
-            {
-                rem = (rem * 10 + (number[i] - '0')) % 97;
-            }
-            return rem;
-        }
-
-
-    }
-
-
-
-    class PdfCleanUpPreviewTextExtractionStrategy : ITextExtractionStrategy
-    {
-        private const float PreviewIntersectionEpsilon = 1e-4f;
-
-        public sealed class CleanedGlyphInfo
-        {
-            public CleanedGlyphInfo(iText.Kernel.Geom.Rectangle bounds, string text)
-            {
-                Bounds = bounds;
-                Text = text ?? string.Empty;
-            }
-
-            public iText.Kernel.Geom.Rectangle Bounds { get; }
-            public string Text { get; }
-        }
-
-        private readonly IList<iText.Kernel.Geom.Rectangle> regions;
-        private readonly CleanUpProperties properties;
-        private readonly List<iText.Kernel.Geom.Rectangle> cleanedGlyphRectangles;
-        private readonly List<CleanedGlyphInfo> cleanedGlyphInfos;
-
-        public PdfCleanUpPreviewTextExtractionStrategy(
-            IList<iText.Kernel.Geom.Rectangle> regions,
-            CleanUpProperties properties = null)
-        {
-            this.regions = regions ?? new List<iText.Kernel.Geom.Rectangle>();
-            this.properties = properties ?? new CleanUpProperties();
-            cleanedGlyphRectangles = new List<iText.Kernel.Geom.Rectangle>();
-            cleanedGlyphInfos = new List<CleanedGlyphInfo>();
-        }
-
-        public void EventOccurred(IEventData data, EventType type)
-        {
-            if (!type.Equals(EventType.RENDER_TEXT) || !(data is TextRenderInfo renderInfo))
-            {
-                return;
-            }
-
-            if (properties.GetOverlapRatio() == null && IsTextNotToBeCleaned(renderInfo))
-            {
-                return;
-            }
-
-            foreach (TextRenderInfo glyphRenderInfo in renderInfo.GetCharacterRenderInfos())
-            {
-                if (!IsTextNotToBeCleaned(glyphRenderInfo))
-                {
-                    iText.Kernel.Geom.Rectangle glyphBounds = GetGlyphBoundingRectangle(glyphRenderInfo);
-                    if (glyphBounds != null && glyphBounds.GetWidth() > 0f && glyphBounds.GetHeight() > 0f)
-                    {
-                        cleanedGlyphRectangles.Add(glyphBounds);
-                        cleanedGlyphInfos.Add(new CleanedGlyphInfo(glyphBounds, glyphRenderInfo.GetText()));
-                    }
-                }
-            }
-        }
-
-        public string GetResultantText()
-        {
-            return string.Empty;
-        }
-
-        public string GetResultantText(ITextChunkLocation location)
-        {
-            return string.Empty;
-        }
-
-        public ICollection<EventType> GetSupportedEvents()
-        {
-            return new List<EventType> { EventType.RENDER_TEXT };
-        }
-
-        public bool TryGetCleanedGlyphRectangles(out List<iText.Kernel.Geom.Rectangle> glyphRects)
-        {
-            glyphRects = cleanedGlyphRectangles
-                .Where(rect => rect != null && rect.GetWidth() > 0f && rect.GetHeight() > 0f)
-                .ToList();
-            return glyphRects.Count > 0;
-        }
-
-        public bool TryGetCleanedGlyphInfos(out List<CleanedGlyphInfo> glyphInfos)
-        {
-            glyphInfos = cleanedGlyphInfos
-                .Where(info => info?.Bounds != null && info.Bounds.GetWidth() > 0f && info.Bounds.GetHeight() > 0f)
-                .ToList();
-            return glyphInfos.Count > 0;
-        }
-
-        private bool IsTextNotToBeCleaned(TextRenderInfo renderInfo)
-        {
-            iText.Kernel.Geom.Point[] textRect = GetTextRectangle(renderInfo);
-            foreach (iText.Kernel.Geom.Rectangle region in regions)
-            {
-                iText.Kernel.Geom.Point[] redactRect = GetRectangleVertices(region);
-                if (CheckIfRectanglesIntersect(textRect, redactRect))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
-
-        private bool CheckIfRectanglesIntersect(iText.Kernel.Geom.Point[] rect1, iText.Kernel.Geom.Point[] rect2)
-        {
-            var clipper = new iText.Kernel.Pdf.Canvas.Parser.ClipperLib.Clipper();
-            var clipperBridge = properties.GetOffsetProperties().CalculateOffsetMultiplierDynamically()
-                ? new iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipperBridge(rect1, rect2)
-                : new iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipperBridge();
-
-            if (!clipperBridge.AddPolygonToClipper(clipper, rect2, iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyType.CLIP))
-            {
-                if (!clipperBridge.AddPolygonToClipper(clipper, rect1, iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyType.SUBJECT))
-                {
-                    if (!clipperBridge.AddPolylineSubjectToClipper(clipper, rect2))
-                    {
-                        return false;
-                    }
-
-                    if (rect1.Length != rect2.Length)
-                    {
-                        return false;
-                    }
-
-                    iText.Kernel.Geom.Point startPoint = rect2[0];
-                    iText.Kernel.Geom.Point endPoint = rect2[0];
-                    for (int i = 1; i < rect2.Length; i++)
-                    {
-                        if (rect2[i].Distance(startPoint) > PreviewIntersectionEpsilon)
-                        {
-                            endPoint = rect2[i];
-                            break;
-                        }
-                    }
-
-                    foreach (iText.Kernel.Geom.Point point in rect1)
-                    {
-                        if (IsPointOnLineSegment(point, startPoint, endPoint, true))
-                        {
-                            return true;
-                        }
-                    }
-                }
-
-                return false;
-            }
-
-            bool intersectionSubjectAdded = clipperBridge.AddPolygonToClipper(
-                clipper,
-                rect1,
-                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyType.SUBJECT);
-            if (intersectionSubjectAdded)
-            {
-                var paths = new List<List<iText.Kernel.Pdf.Canvas.Parser.ClipperLib.IntPoint>>();
-                clipper.Execute(
-                    iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipType.INTERSECTION,
-                    paths,
-                    iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyFillType.NON_ZERO,
-                    iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyFillType.NON_ZERO);
-                return CheckIfIntersectionOccurs(paths, rect1, false, clipperBridge);
-            }
-
-            intersectionSubjectAdded = clipperBridge.AddPolylineSubjectToClipper(clipper, rect1);
-            if (!intersectionSubjectAdded)
-            {
-                const double smallDiff = 0.01d;
-                var expandedRect1 = new iText.Kernel.Geom.Point[rect1.Length + 1];
-                Array.Copy(rect1, 0, expandedRect1, 0, rect1.Length);
-                expandedRect1[rect1.Length] = new iText.Kernel.Geom.Point(rect1[0].GetX() + smallDiff, rect1[0].GetY());
-                rect1 = expandedRect1;
-                intersectionSubjectAdded = clipperBridge.AddPolylineSubjectToClipper(clipper, rect1);
-                if (!intersectionSubjectAdded)
-                {
-                    return false;
-                }
-            }
-
-            var polyTree = new iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyTree();
-            clipper.Execute(
-                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipType.INTERSECTION,
-                polyTree,
-                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyFillType.NON_ZERO,
-                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.PolyFillType.NON_ZERO);
-            return CheckIfIntersectionOccurs(
-                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.Clipper.PolyTreeToPaths(polyTree),
-                rect1,
-                true,
-                clipperBridge);
-        }
-
-        private bool CheckIfIntersectionOccurs(
-            List<List<iText.Kernel.Pdf.Canvas.Parser.ClipperLib.IntPoint>> paths,
-            iText.Kernel.Geom.Point[] rect1,
-            bool isDegenerate,
-            iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipperBridge clipperBridge)
-        {
-            if (paths == null || paths.Count == 0)
-            {
-                return false;
-            }
-
-            iText.Kernel.Pdf.Canvas.Parser.ClipperLib.IntRect intersectionRectangle =
-                iText.Kernel.Pdf.Canvas.Parser.ClipperLib.Clipper.GetBounds(paths);
-            if (properties.GetOverlapRatio() == null)
-            {
-                return !CheckIfIntersectionRectangleDegenerate(intersectionRectangle, isDegenerate, clipperBridge);
-            }
-
-            double overlappedArea = CalculatePolygonArea(rect1);
-            double intersectionArea =
-                clipperBridge.LongRectCalculateHeight(intersectionRectangle) *
-                clipperBridge.LongRectCalculateWidth(intersectionRectangle);
-            double percentageOfOverlapping = intersectionArea / overlappedArea;
-            const float smallValueForRoundingErrors = 1e-5f;
-            return percentageOfOverlapping + smallValueForRoundingErrors > properties.GetOverlapRatio();
-        }
-
-        private static bool CheckIfIntersectionRectangleDegenerate(
-            iText.Kernel.Pdf.Canvas.Parser.ClipperLib.IntRect rect,
-            bool isIntersectSubjectDegenerate,
-            iText.Kernel.Pdf.Canvas.Parser.ClipperLib.ClipperBridge clipperBridge)
-        {
-            float width = clipperBridge.LongRectCalculateWidth(rect);
-            float height = clipperBridge.LongRectCalculateHeight(rect);
-            return isIntersectSubjectDegenerate
-                ? (width < PreviewIntersectionEpsilon && height < PreviewIntersectionEpsilon)
-                : (width < PreviewIntersectionEpsilon || height < PreviewIntersectionEpsilon);
-        }
-
-        private static bool IsPointOnLineSegment(
-            iText.Kernel.Geom.Point currentPoint,
-            iText.Kernel.Geom.Point linePoint1,
-            iText.Kernel.Geom.Point linePoint2,
-            bool isBetweenLinePoints)
-        {
-            double dxc = currentPoint.GetX() - linePoint1.GetX();
-            double dyc = currentPoint.GetY() - linePoint1.GetY();
-            double dxl = linePoint2.GetX() - linePoint1.GetX();
-            double dyl = linePoint2.GetY() - linePoint1.GetY();
-            double cross = dxc * dyl - dyc * dxl;
-            if (Math.Abs(cross) <= PreviewIntersectionEpsilon)
-            {
-                if (!isBetweenLinePoints)
-                {
-                    return true;
-                }
-
-                if (Math.Abs(dxl) >= Math.Abs(dyl))
-                {
-                    return dxl > 0
-                        ? linePoint1.GetX() - PreviewIntersectionEpsilon <= currentPoint.GetX() &&
-                            currentPoint.GetX() <= linePoint2.GetX() + PreviewIntersectionEpsilon
-                        : linePoint2.GetX() - PreviewIntersectionEpsilon <= currentPoint.GetX() &&
-                            currentPoint.GetX() <= linePoint1.GetX() + PreviewIntersectionEpsilon;
-                }
-
-                return dyl > 0
-                    ? linePoint1.GetY() - PreviewIntersectionEpsilon <= currentPoint.GetY() &&
-                        currentPoint.GetY() <= linePoint2.GetY() + PreviewIntersectionEpsilon
-                    : linePoint2.GetY() - PreviewIntersectionEpsilon <= currentPoint.GetY() &&
-                        currentPoint.GetY() <= linePoint1.GetY() + PreviewIntersectionEpsilon;
-            }
-
-            return false;
-        }
-
-        private static iText.Kernel.Geom.Rectangle GetGlyphBoundingRectangle(TextRenderInfo renderInfo)
-        {
-            iText.Kernel.Geom.Point[] points = GetTextRectangle(renderInfo);
-            float minX = points.Min(point => (float)point.GetX());
-            float minY = points.Min(point => (float)point.GetY());
-            float maxX = points.Max(point => (float)point.GetX());
-            float maxY = points.Max(point => (float)point.GetY());
-
-            float width = maxX - minX;
-            float height = maxY - minY;
-            if (width <= 0f || height <= 0f)
-            {
-                return null;
-            }
-
-            return new iText.Kernel.Geom.Rectangle(minX, minY, width, height);
-        }
-
-        private static iText.Kernel.Geom.Point[] GetTextRectangle(TextRenderInfo renderInfo)
-        {
-            iText.Kernel.Geom.LineSegment ascent = renderInfo.GetAscentLine();
-            iText.Kernel.Geom.LineSegment descent = renderInfo.GetDescentLine();
-            return new[]
-            {
-                new iText.Kernel.Geom.Point(ascent.GetStartPoint().Get(0), ascent.GetStartPoint().Get(1)),
-                new iText.Kernel.Geom.Point(ascent.GetEndPoint().Get(0), ascent.GetEndPoint().Get(1)),
-                new iText.Kernel.Geom.Point(descent.GetEndPoint().Get(0), descent.GetEndPoint().Get(1)),
-                new iText.Kernel.Geom.Point(descent.GetStartPoint().Get(0), descent.GetStartPoint().Get(1))
-            };
-        }
-
-        private static iText.Kernel.Geom.Point[] GetRectangleVertices(iText.Kernel.Geom.Rectangle rect)
-        {
-            return new[]
-            {
-                new iText.Kernel.Geom.Point(rect.GetLeft(), rect.GetBottom()),
-                new iText.Kernel.Geom.Point(rect.GetRight(), rect.GetBottom()),
-                new iText.Kernel.Geom.Point(rect.GetRight(), rect.GetTop()),
-                new iText.Kernel.Geom.Point(rect.GetLeft(), rect.GetTop())
-            };
-        }
-
-        private static double CalculatePolygonArea(iText.Kernel.Geom.Point[] polygon)
-        {
-            if (polygon == null || polygon.Length < 3)
-            {
-                return 0d;
-            }
-
-            double area = 0d;
-            for (int i = 0; i < polygon.Length; i++)
-            {
-                iText.Kernel.Geom.Point current = polygon[i];
-                iText.Kernel.Geom.Point next = polygon[(i + 1) % polygon.Length];
-                area += (current.GetX() * next.GetY()) - (next.GetX() * current.GetY());
-            }
-
-            return Math.Abs(area) * 0.5d;
-        }
-    }
-
-    class CustomTextExtractionStrategy : ITextExtractionStrategy
-    {
-        public struct CoveredLineInfo
-        {
-            public iText.Kernel.Geom.Rectangle Bounds { get; }
-            public int GlyphCount { get; }
-
-            public CoveredLineInfo(iText.Kernel.Geom.Rectangle bounds, int glyphCount)
-            {
-                Bounds = bounds;
-                GlyphCount = glyphCount;
-            }
-        }
-
-        private readonly iText.Kernel.Geom.Rectangle _targetRect;
-        private readonly List<TextChunk> _textChunks;
-        private readonly List<GlyphBounds> _coveredGlyphs;
-        private readonly bool _expandDiacriticsForVisualBounds;
-        private readonly bool _bodyBoundsOnly;
-        private readonly float _yTolerance = 1.0f; // Tolerance for Y coordinate (in points)
-        private readonly bool _sortByX = false; // Set to true if you want to sort by X
-        private readonly bool _reverseOrder = false; // Ustaw na true dla tekstu od prawej do lewej
-        private bool _hasCoveredBounds;
-        private float _coveredMinX;
-        private float _coveredMinY;
-        private float _coveredMaxX;
-        private float _coveredMaxY;
-
-        public CustomTextExtractionStrategy(
-            iText.Kernel.Geom.Rectangle targetRect,
-            bool expandDiacriticsForVisualBounds = true,
-            bool bodyBoundsOnly = false)
-        {
-            _targetRect = targetRect;
-            _textChunks = new List<TextChunk>();
-            _coveredGlyphs = new List<GlyphBounds>();
-            _expandDiacriticsForVisualBounds = expandDiacriticsForVisualBounds;
-            _bodyBoundsOnly = bodyBoundsOnly;
-            _hasCoveredBounds = false;
-            _coveredMinX = float.MaxValue;
-            _coveredMinY = float.MaxValue;
-            _coveredMaxX = float.MinValue;
-            _coveredMaxY = float.MinValue;
-        }
-
-        public void EventOccurred(IEventData data, EventType type)
-        {
-            if (type.Equals(EventType.RENDER_TEXT))
-            {
-                TextRenderInfo renderInfo = (TextRenderInfo)data;
-                foreach (TextRenderInfo chunk in renderInfo.GetCharacterRenderInfos())
-                {
-                    // Get ascent and descent lines for each character
-                    var ascentLine = chunk.GetAscentLine();
-                    var descentLine = chunk.GetDescentLine();
-
-                    // Get character bounding box coordinates
-                    float x1 = Math.Min(ascentLine.GetStartPoint().Get(0), descentLine.GetStartPoint().Get(0));
-                    float x2 = Math.Max(ascentLine.GetEndPoint().Get(0), descentLine.GetEndPoint().Get(0));
-                    float y1Detect = descentLine.GetStartPoint().Get(1); // Bottom edge (descent) — used for intersection
-                    float y2 = ascentLine.GetStartPoint().Get(1); // Top edge (ascent)
-
-                    string glyphText = chunk.GetText();
-                    if (_expandDiacriticsForVisualBounds && glyphText.Length == 1 && y2 > y1Detect)
-                    {
-                        string nfd = glyphText[0].ToString().Normalize(System.Text.NormalizationForm.FormD);
-                        for (int ni = 1; ni < nfd.Length; ni++)
-                        {
-                            int cp = (int)nfd[ni];
-                            if (cp >= 0x0300 && cp <= 0x0315)
-                            {
-                                y2 += (y2 - y1Detect) * 0.20f;
-                                break;
-                            }
-                        }
-                    }
-
-                    bool intersects = IsBoundingBoxInRectangle(x1, y1Detect, x2, y2, _targetRect);
-
-                    if (intersects)
-                    {
-                        float y1Store = _bodyBoundsOnly
-                            ? chunk.GetBaseline().GetStartPoint().Get(1)
-                            : y1Detect;
-
-                        _textChunks.Add(new TextChunk(chunk.GetText(), y1Store, x1));
-                        _coveredGlyphs.Add(new GlyphBounds(
-                            Math.Min(x1, x2),
-                            Math.Min(y1Store, y2),
-                            Math.Max(x1, x2),
-                            Math.Max(y1Store, y2),
-                            y1Store,
-                            glyphText));
-                        if (!_hasCoveredBounds)
-                        {
-                            _coveredMinX = x1;
-                            _coveredMinY = y1Store;
-                            _coveredMaxX = x2;
-                            _coveredMaxY = y2;
-                            _hasCoveredBounds = true;
-                        }
-                        else
-                        {
-                            _coveredMinX = Math.Min(_coveredMinX, x1);
-                            _coveredMinY = Math.Min(_coveredMinY, y1Store);
-                            _coveredMaxX = Math.Max(_coveredMaxX, x2);
-                            _coveredMaxY = Math.Max(_coveredMaxY, y2);
-                        }
-                    }
-                }
-            }
-        }
-
-        private bool IsBoundingBoxInRectangle(float x1, float y1, float x2, float y2, iText.Kernel.Geom.Rectangle rect)
-        {
-            float rectLeft = rect.GetLeft();
-            float rectRight = rect.GetRight();
-            float rectBottom = rect.GetBottom();
-            float rectTop = rect.GetTop();
-
-            bool xOverlap = (x1 <= rectRight && x2 >= rectLeft); // At least partial horizontal coverage
-            bool yOverlap = (y1 <= rectTop && y2 >= rectBottom); // At least partial vertical coverage
-
-            return xOverlap && yOverlap;
-        }
-
-        public string GetResultantText()
-        {
-            // Group characters by line (based on Y coordinate)
-            Dictionary<float, List<TextChunk>> lines = new Dictionary<float, List<TextChunk>>();
-            foreach (var chunk in _textChunks)
-            {
-                float roundedY = (float)Math.Round(chunk.Y / _yTolerance) * _yTolerance;
-                if (!lines.ContainsKey(roundedY))
-                    lines[roundedY] = new List<TextChunk>();
-                lines[roundedY].Add(chunk);
-            }
-
-            // Buduj tekst
-            System.Text.StringBuilder result = new System.Text.StringBuilder();
-            foreach (var line in lines)
-            {
-                // Sort characters in line by X if sorting is enabled
-                if (_sortByX)
-                {
-                    line.Value.Sort((a, b) => _reverseOrder ? b.X.CompareTo(a.X) : a.X.CompareTo(b.X));
-                }
-                foreach (var chunk in line.Value)
-                {
-                    result.Append(chunk.Text);
-                }
-                result.AppendLine();
-            }
-
-            return result.ToString();
-        }
-
-        public string GetResultantText(ITextChunkLocation location) => GetResultantText();
-
-        public ICollection<EventType> GetSupportedEvents()
-        {
-            return new List<EventType> { EventType.RENDER_TEXT };
-        }
-
-        public bool TryGetCoveredBounds(out iText.Kernel.Geom.Rectangle bounds)
-        {
-            bounds = null;
-            if (!_hasCoveredBounds)
-            {
-                return false;
-            }
-
-            float width = _coveredMaxX - _coveredMinX;
-            float height = _coveredMaxY - _coveredMinY;
-            if (width <= 0f || height <= 0f)
-            {
-                return false;
-            }
-
-            bounds = new iText.Kernel.Geom.Rectangle(_coveredMinX, _coveredMinY, width, height);
-            return true;
-        }
-
-        public bool TryGetPerLineBounds(out List<iText.Kernel.Geom.Rectangle> lineBounds)
-        {
-            lineBounds = null;
-            if (!TryGetPerLineCoverage(out List<CoveredLineInfo> coveredLines))
-            {
-                return false;
-            }
-
-            lineBounds = coveredLines
-                .Select(line => line.Bounds)
-                .ToList();
-            return lineBounds.Count > 0;
-        }
-
-        public bool TryGetPerLineCoverage(out List<CoveredLineInfo> coveredLines)
-        {
-            coveredLines = null;
-            if (_coveredGlyphs.Count == 0)
-            {
-                return false;
-            }
-
-            const float baselineStep = 1.5f;
-            var lines = new Dictionary<float, List<GlyphBounds>>();
-            foreach (var glyph in _coveredGlyphs)
-            {
-                float key = (float)Math.Round(glyph.Baseline / baselineStep) * baselineStep;
-                if (!lines.TryGetValue(key, out List<GlyphBounds> list))
-                {
-                    list = new List<GlyphBounds>();
-                    lines[key] = list;
-                }
-
-                list.Add(glyph);
-            }
-
-            coveredLines = new List<CoveredLineInfo>(lines.Count);
-            foreach (var entry in lines)
-            {
-                float minX = float.MaxValue;
-                float minY = float.MaxValue;
-                float maxX = float.MinValue;
-                float maxY = float.MinValue;
-                foreach (var glyph in entry.Value)
-                {
-                    minX = Math.Min(minX, glyph.Left);
-                    minY = Math.Min(minY, glyph.Bottom);
-                    maxX = Math.Max(maxX, glyph.Right);
-                    maxY = Math.Max(maxY, glyph.Top);
-                }
-
-                float width = maxX - minX;
-                float height = maxY - minY;
-                if (width > 0f && height > 0f)
-                {
-                    coveredLines.Add(new CoveredLineInfo(
-                        new iText.Kernel.Geom.Rectangle(minX, minY, width, height),
-                        entry.Value.Count));
-                }
-            }
-
-            return coveredLines.Count > 0;
-        }
-
-        public bool TryGetCoveredBoundsForMarkerLine(out iText.Kernel.Geom.Rectangle bounds)
-        {
-            bounds = null;
-            if (_coveredGlyphs.Count == 0)
-            {
-                return false;
-            }
-
-            if (!TryGetSelectedMarkerLine(out List<GlyphBounds> selectedLine, out _, out _, out _))
-            {
-                return false;
-            }
-
-            return TryBuildBoundsFromGlyphs(selectedLine, out bounds);
-        }
-
-        public bool TryGetCoveredBoundsForMarkerLineVisual(out iText.Kernel.Geom.Rectangle bounds)
-        {
-            bounds = null;
-            if (!TryGetSelectedMarkerLine(out List<GlyphBounds> selectedLine, out _, out _, out _))
-            {
-                return false;
-            }
-
-            if (selectedLine.Count == 0)
-            {
-                return false;
-            }
-
-            float minX = selectedLine.Min(g => g.Left);
-            float maxX = selectedLine.Max(g => g.Right);
-            List<float> bottoms = selectedLine.Select(g => g.Bottom).OrderBy(v => v).ToList();
-            List<float> tops = selectedLine.Select(g => g.Top).OrderBy(v => v).ToList();
-
-            float normalizedBottom = SelectMarkerVisualEdge(bottoms, preferUpperValues: true);
-            float normalizedTop = SelectMarkerVisualEdge(tops, preferUpperValues: false);
-
-            // Keep the visual rect valid even when normalization becomes too aggressive.
-            if (normalizedTop <= normalizedBottom)
-            {
-                return TryBuildBoundsFromGlyphs(selectedLine, out bounds);
-            }
-
-            float width = maxX - minX;
-            float height = normalizedTop - normalizedBottom;
-            if (width <= 0f || height <= 0f)
-            {
-                return false;
-            }
-
-            bounds = new iText.Kernel.Geom.Rectangle(minX, normalizedBottom, width, height);
-            return true;
-        }
-
-        private bool TryGetSelectedMarkerLine(
-            out List<GlyphBounds> selectedLine,
-            out float selectedKey,
-            out int selectedCount,
-            out float selectedDistance)
-        {
-            selectedLine = null;
-            selectedKey = 0f;
-            selectedCount = -1;
-            selectedDistance = float.MaxValue;
-
-            if (_coveredGlyphs.Count == 0)
-            {
-                return false;
-            }
-
-            const float baselineStep = 1.5f;
-            float targetCenterY = _targetRect.GetBottom() + (_targetRect.GetHeight() / 2f);
-            var lines = new Dictionary<float, List<GlyphBounds>>();
-            foreach (var glyph in _coveredGlyphs)
-            {
-                float key = (float)Math.Round(glyph.Baseline / baselineStep) * baselineStep;
-                if (!lines.TryGetValue(key, out List<GlyphBounds> list))
-                {
-                    list = new List<GlyphBounds>();
-                    lines[key] = list;
-                }
-
-                list.Add(glyph);
-            }
-
-            foreach (var entry in lines)
-            {
-                int count = entry.Value.Count;
-                float distance = Math.Abs(entry.Key - targetCenterY);
-                if (count > selectedCount || (count == selectedCount && distance < selectedDistance))
-                {
-                    selectedCount = count;
-                    selectedDistance = distance;
-                    selectedKey = entry.Key;
-                }
-            }
-
-            return lines.TryGetValue(selectedKey, out selectedLine) && selectedLine != null && selectedLine.Count > 0;
-        }
-
-        private static bool TryBuildBoundsFromGlyphs(List<GlyphBounds> glyphs, out iText.Kernel.Geom.Rectangle bounds)
-        {
-            bounds = null;
-            if (glyphs == null || glyphs.Count == 0)
-            {
-                return false;
-            }
-
-            float minX = float.MaxValue;
-            float minY = float.MaxValue;
-            float maxX = float.MinValue;
-            float maxY = float.MinValue;
-            foreach (var glyph in glyphs)
-            {
-                minX = Math.Min(minX, glyph.Left);
-                minY = Math.Min(minY, glyph.Bottom);
-                maxX = Math.Max(maxX, glyph.Right);
-                maxY = Math.Max(maxY, glyph.Top);
-            }
-
-            float width = maxX - minX;
-            float height = maxY - minY;
-            if (width <= 0f || height <= 0f)
-            {
-                return false;
-            }
-
-            bounds = new iText.Kernel.Geom.Rectangle(minX, minY, width, height);
-            return true;
-        }
-
-        private static float SelectMarkerVisualEdge(List<float> sortedValues, bool preferUpperValues)
-        {
-            if (sortedValues == null || sortedValues.Count == 0)
-            {
-                return 0f;
-            }
-
-            if (sortedValues.Count <= 2)
-            {
-                return preferUpperValues ? sortedValues[sortedValues.Count - 1] : sortedValues[0];
-            }
-
-            int trimCount = Math.Max(1, sortedValues.Count / 6);
-            trimCount = Math.Min(trimCount, sortedValues.Count - 1);
-            int index = preferUpperValues
-                ? sortedValues.Count - 1 - trimCount
-                : trimCount;
-            index = Math.Max(0, Math.Min(sortedValues.Count - 1, index));
-            return sortedValues[index];
-        }
-
-        private struct GlyphBounds
-        {
-            public float Left { get; }
-            public float Bottom { get; }
-            public float Right { get; }
-            public float Top { get; }
-            public float Baseline { get; }
-            public string Text { get; }
-
-            public GlyphBounds(float left, float bottom, float right, float top, float baseline, string text)
-            {
-                Left = left;
-                Bottom = bottom;
-                Right = right;
-                Top = top;
-                Baseline = baseline;
-                Text = text;
-            }
-        }
-
-        private class TextChunk
-        {
-            public string Text { get; }
-            public float Y { get; }
-            public float X { get; }
-
-            public TextChunk(string text, float y, float x)
-            {
-                Text = text;
-                Y = y;
-                X = x;
-            }
-        }
-
-    }
-
-    public static class AuditLogger
-    {
-        /// <summary>
-        /// Saves to [dbo].[AnonPDF] login and ip of current user/station.
-        /// Columns [id] (IDENTITY) and [datetime] (DEFAULT GETDATE()) are skipped.
-        /// </summary>
-        public static void LogUsage(string connectionString)
-        {
-            string login = GetCurrentLogin();
-            string ip = GetPreferredIPv4() ?? "0.0.0.0";
-
-            const string sql = @"INSERT INTO dbo.AnonPDF ([login], [ip]) VALUES (@login, @ip);";
-
-            using (var conn = new SqlConnection(connectionString))
-            using (var cmd = new SqlCommand(sql, conn))
-            {
-                cmd.Parameters.AddWithValue("@login", login);
-                cmd.Parameters.AddWithValue("@ip", ip);
-
-                conn.Open();
-                cmd.ExecuteNonQuery();
-            }
-        }
-
-        private static string GetCurrentLogin()
-        {
-            // Full domain login if available (DOMAIN\User); fallback: Environment.UserName
-            try
-            {
-                var id = WindowsIdentity.GetCurrent();
-                if (id != null && !string.IsNullOrWhiteSpace(id.Name))
-                    return id.Name;
-            }
-            catch { /* ignore; use fallback */ }
-
-            return Environment.UserName ?? "unknown";
-        }
-
-        private static string GetPreferredIPv4()
-        {
-            try
-            {
-                // 1) Active interfaces (OperationalStatus.Up), exclude loopback/tunnel, IPv4 unicast
-                var candidates =
-                    NetworkInterface.GetAllNetworkInterfaces()
-                        .Where(nic =>
-                            nic.OperationalStatus == OperationalStatus.Up &&
-                            nic.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
-                            nic.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
-                        .SelectMany(nic => nic.GetIPProperties().UnicastAddresses)
-                        .Where(ua => ua?.Address != null && ua.Address.AddressFamily == AddressFamily.InterNetwork)
-                        .Select(ua => ua.Address)
-                        .Where(addr =>
-                            !IPAddress.IsLoopback(addr) &&
-                            addr.ToString() != "0.0.0.0" &&
-                            !addr.ToString().StartsWith("169.254.")) // unikaj APIPA
-                        .Select(addr => addr.ToString())
-                        .Distinct()
-                        .ToList();
-
-                if (candidates.Count > 0)
-                    return candidates.First();
-
-                // 2) Fallback: Dns na hostname
-                var host = Dns.GetHostEntry(Dns.GetHostName());
-                var ip = host.AddressList.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
-                if (ip != null) return ip.ToString();
-            }
-            catch
-            {
-                // ignore, use default value above
-            }
-
-            return null;
         }
     }
 

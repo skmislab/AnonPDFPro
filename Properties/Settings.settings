@@ -80,5 +80,8 @@
     <Setting Name="DefaultRedactionMode" Type="System.String" Scope="User">
       <Value Profile="(Default)">Cursor</Value>
     </Setting>
+    <Setting Name="PreferredCountry" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
   </Settings>
 </SettingsFile>
