@@ -56059,9 +56059,13 @@ namespace AnonPDF
             float rx2 = pdfRect.Right, ry2 = pdfRect.Bottom;
 
             var sb = new System.Text.StringBuilder();
+            // Emit lines top-to-bottom. YPosition is the line's bottom edge in PDF space
+            // (Y grows upward), so the top line has the LARGER value — order descending to
+            // match the visual reading order used elsewhere (see SearchInCachedLines sort).
+            // Ascending order copied multi-line selections from bottom to top.
             foreach (var line in lines
                 .Where(l => l.PageNumber == pageNumber)
-                .OrderBy(l => l.YPosition))
+                .OrderByDescending(l => l.YPosition))
             {
                 if (line.OcrWordBounds != null && line.OcrWordBounds.Count > 0)
                 {
@@ -56080,7 +56084,7 @@ namespace AnonPDF
                     }
                     if (wordTexts.Count > 0)
                     {
-                        if (sb.Length > 0) sb.Append(' ');
+                        if (sb.Length > 0) sb.Append(Environment.NewLine);
                         sb.Append(string.Join(" ", wordTexts));
                     }
                 }
@@ -56093,7 +56097,7 @@ namespace AnonPDF
                     float lx2 = line.Characters.Max(c => c.BoundingBox != null ? (float)(c.BoundingBox.GetX() + c.BoundingBox.GetWidth()) : float.MinValue);
                     float ly2 = line.Characters.Max(c => c.BoundingBox != null ? (float)(c.BoundingBox.GetY() + c.BoundingBox.GetHeight()) : float.MinValue);
                     if (lx2 < rx1 || lx1 > rx2 || ly2 < ry1 || ly1 > ry2) continue;
-                    if (sb.Length > 0) sb.Append(' ');
+                    if (sb.Length > 0) sb.Append(Environment.NewLine);
                     sb.Append(line.Text.Trim());
                 }
             }
@@ -56150,10 +56154,19 @@ namespace AnonPDF
 
         public async Task CopyTextsFromAllSelectionsOnCurrentPageAsync()
         {
-            // Collect all selections for the current page
+            // Collect all selections for the current page in reading order.
+            // Order by PDF-space coordinates (rotation-independent) so the box order
+            // stays consistent with the in-box line order (GetCachedTextInRect /
+            // SearchInCachedLines both sort by descending PDF Y, where the top of the
+            // page has the larger Y). Ordering by the raw view-space Bounds.Y was only
+            // correct at rotation 0 and reversed the boxes on pages rotated 90/180/270.
+            int pageRotation = GetEffectiveRotationDegrees(currentPage);
             var blocks = redactionBlocks
                 .Where(b => b.PageNumber == currentPage)
-                .OrderBy(b => b.Bounds.Y)
+                .Select(b => new { Block = b, Pdf = ConvertToPdfCoordinates(b.Bounds, currentPage, pageRotation) })
+                .OrderByDescending(x => x.Pdf.Y)
+                .ThenBy(x => x.Pdf.X)
+                .Select(x => x.Block)
                 .ToList();
 
             if (blocks.Count == 0)
