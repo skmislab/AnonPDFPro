@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Win32;
 using Newtonsoft.Json.Linq;
 
 // Suppress spell-check warning for project name 'AnonPDF'
@@ -25,7 +26,9 @@ namespace AnonPDF
             string configFilePath,
             string installBaseDir,
             string userBaseDir,
-            string sourceBaseDir)
+            string sourceBaseDir,
+            string deploymentBaseDir,
+            bool appUpdatesDisabled)
         {
             LicenseFile = licenseFile;
             PublicKeyFile = publicKeyFile;
@@ -38,6 +41,8 @@ namespace AnonPDF
             InstallBaseDir = installBaseDir;
             UserBaseDir = userBaseDir;
             SourceBaseDir = sourceBaseDir;
+            DeploymentBaseDir = deploymentBaseDir;
+            AppUpdatesDisabled = appUpdatesDisabled;
         }
 
         internal string LicenseFile { get; }
@@ -51,7 +56,10 @@ namespace AnonPDF
         internal string InstallBaseDir { get; }
         internal string UserBaseDir { get; }
         internal string SourceBaseDir { get; }
+        internal string DeploymentBaseDir { get; }
+        internal bool AppUpdatesDisabled { get; }
         internal bool IsStandaloneUpdateMode => string.Equals(UpdateMode, "standalone", StringComparison.OrdinalIgnoreCase);
+        internal bool HasDeploymentDirectory => !string.IsNullOrWhiteSpace(DeploymentBaseDir);
 
         internal static AppConfig Load(string installBaseDir, string userBaseDir)
         {
@@ -65,25 +73,41 @@ namespace AnonPDF
                 userBaseDir = installBaseDir;
             }
 
-            // Configuration source is always the application directory.
-            // User directory may contain license files for standalone mode only.
-            string installConfigPath = Path.Combine(installBaseDir, "config.json");
-            JObject installConfig = ParseConfigFile(installConfigPath);
-            string sourceBaseDir = installBaseDir;
-            string configFilePath = installConfigPath;
+            AdminDeploymentSettings adminSettings = AdminDeploymentSettings.Load();
+            string deploymentBaseDir = NormalizeDirectoryPath(adminSettings.DeploymentDirectory);
+            string sourceBaseDir = string.IsNullOrWhiteSpace(deploymentBaseDir)
+                ? installBaseDir
+                : deploymentBaseDir;
+            string configFilePath = Path.Combine(sourceBaseDir, "config.json");
+            JObject installConfig = ParseConfigFile(configFilePath);
+            string updateMode = string.IsNullOrWhiteSpace(deploymentBaseDir)
+                ? GetConfigValue(installConfig, "updateMode", "central")
+                : "central";
 
             return new AppConfig(
                 licenseFile: GetConfigValue(installConfig, "licenseFile", "license.json"),
                 publicKeyFile: GetConfigValue(installConfig, "publicKeyFile", "license_public.xml"),
                 serverBaseUrl: GetConfigValue(installConfig, "serverBaseUrl", "https://misart.pl/anonpdfpro"),
                 versionInfoUrl: GetConfigValue(installConfig, "versionInfoUrl", string.Empty),
-                updateMode: GetConfigValue(installConfig, "updateMode", "central"),
+                updateMode: updateMode,
                 defaultTheme: GetConfigValue(installConfig, "defaultTheme", string.Empty),
                 licenseId: GetConfigValue(installConfig, "licenseId", string.Empty),
                 configFilePath: configFilePath,
                 installBaseDir: installBaseDir,
                 userBaseDir: userBaseDir,
-                sourceBaseDir: sourceBaseDir);
+                sourceBaseDir: sourceBaseDir,
+                deploymentBaseDir: deploymentBaseDir,
+                appUpdatesDisabled: adminSettings.DisableAppUpdates);
+        }
+
+        private static string NormalizeDirectoryPath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return string.Empty;
+            }
+
+            return path.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
 
         private static JObject ParseConfigFile(string path)
@@ -125,6 +149,16 @@ namespace AnonPDF
             return ResolvePath(PublicKeyFile, "license_public.xml");
         }
 
+        internal string ResolveSourceFilePath(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return SourceBaseDir;
+            }
+
+            return Path.Combine(SourceBaseDir, fileName);
+        }
+
         internal string ResolveVersionInfoUrl()
         {
             if (!string.IsNullOrWhiteSpace(VersionInfoUrl))
@@ -157,7 +191,8 @@ namespace AnonPDF
             }
             else
             {
-                // Central mode (or empty/other value): use only app-local files.
+                // Central deployment uses administrator-provided source first.
+                AddCandidate(candidates, Path.Combine(SourceBaseDir, relativePath));
                 AddCandidate(candidates, Path.Combine(InstallBaseDir, relativePath));
             }
 
@@ -193,6 +228,76 @@ namespace AnonPDF
             }
 
             list.Add(candidate);
+        }
+    }
+
+    internal sealed class AdminDeploymentSettings
+    {
+        private const string RegistrySubKey = @"Software\SKMISLAB\AnonPDFPro";
+
+        private AdminDeploymentSettings(string deploymentDirectory, bool disableAppUpdates)
+        {
+            DeploymentDirectory = deploymentDirectory;
+            DisableAppUpdates = disableAppUpdates;
+        }
+
+        internal string DeploymentDirectory { get; }
+        internal bool DisableAppUpdates { get; }
+
+        internal static AdminDeploymentSettings Load()
+        {
+            string deploymentDirectory = string.Empty;
+            bool disableAppUpdates = false;
+
+            foreach (RegistryView view in new[] { RegistryView.Registry64, RegistryView.Registry32, RegistryView.Default })
+            {
+                try
+                {
+                    using (RegistryKey baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view))
+                    using (RegistryKey key = baseKey.OpenSubKey(RegistrySubKey, false))
+                    {
+                        if (key == null)
+                        {
+                            continue;
+                        }
+
+                        if (string.IsNullOrWhiteSpace(deploymentDirectory))
+                        {
+                            deploymentDirectory = key.GetValue("DeploymentDirectory") as string ?? string.Empty;
+                        }
+
+                        object disabled = key.GetValue("DisableAppUpdates");
+                        if (disabled != null && TryReadBoolean(disabled))
+                        {
+                            disableAppUpdates = true;
+                        }
+                    }
+                }
+                catch
+                {
+                    // Missing registry access must not block application startup.
+                }
+            }
+
+            return new AdminDeploymentSettings(deploymentDirectory, disableAppUpdates);
+        }
+
+        private static bool TryReadBoolean(object value)
+        {
+            if (value == null)
+            {
+                return false;
+            }
+
+            if (value is int intValue)
+            {
+                return intValue != 0;
+            }
+
+            string text = value.ToString();
+            return string.Equals(text, "1", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(text, "true", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(text, "yes", StringComparison.OrdinalIgnoreCase);
         }
     }
 

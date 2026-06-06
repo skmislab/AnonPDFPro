@@ -342,6 +342,9 @@
     <Error Condition="!Exists('packages\TesseractOCR.5.5.1\build\TesseractOCR.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\TesseractOCR.5.5.1\build\TesseractOCR.targets'))" />
     <Error Condition="!Exists('packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets'))" />
   </Target>
+  <Target Name="CreateReleasePluginsDirectory" AfterTargets="Build" Condition=" '$(Configuration)' == 'Release' ">
+    <MakeDir Directories="$(TargetDir)plugins" />
+  </Target>
   <Import Project="packages\TesseractOCR.5.5.1\build\TesseractOCR.targets" Condition="Exists('packages\TesseractOCR.5.5.1\build\TesseractOCR.targets')" />
   <Import Project="packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets" Condition="Exists('packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets')" />
 </Project>

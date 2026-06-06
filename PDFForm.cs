@@ -1489,7 +1489,7 @@ namespace AnonPDF
             };
             dpiWatchTimer.Tick += DpiWatchTimer_Tick;
 
-            bool hasServiceFileAtStartup = File.Exists(Path.Combine(Application.StartupPath, "service.json"));
+            bool hasServiceFileAtStartup = File.Exists(GetServiceFilePath());
             if (hasServiceFileAtStartup && !IsVersionMatching())
             {
                 System.Threading.Thread exitThread = new System.Threading.Thread(() =>
@@ -10173,9 +10173,17 @@ namespace AnonPDF
                     || File.Exists(Path.Combine(tutorialDir, "tutorial-en.json")));
             tutorialMenuItem.Enabled = hasTutorialJson;
 
+            if (checkForUpdatesToolStripMenuItem != null)
+            {
+                bool updatesAllowed = LicenseManager.Config?.AppUpdatesDisabled != true;
+                checkForUpdatesToolStripMenuItem.Visible = updatesAllowed;
+                checkForUpdatesToolStripMenuItem.Enabled = updatesAllowed;
+            }
+
             if (activateLicenseToolStripMenuItem != null)
             {
-                bool standaloneMode = LicenseManager.Config?.IsStandaloneUpdateMode == true;
+                bool standaloneMode = LicenseManager.Config?.IsStandaloneUpdateMode == true
+                    && LicenseManager.Config?.AppUpdatesDisabled != true;
                 activateLicenseToolStripMenuItem.Visible = standaloneMode;
                 activateLicenseToolStripMenuItem.Enabled = standaloneMode;
             }
@@ -16772,7 +16780,7 @@ namespace AnonPDF
         {
             try
             {
-                string versionFilePath = Path.Combine(Application.StartupPath, "service.json");
+                string versionFilePath = GetServiceFilePath();
                 if (!File.Exists(versionFilePath))
                 {
                     Console.WriteLine("Version file not found: " + versionFilePath);
@@ -17269,6 +17277,11 @@ namespace AnonPDF
 
         private void CheckForNewVersion(UpdateCheckSource source)
         {
+            if (LicenseManager.Config?.AppUpdatesDisabled == true)
+            {
+                return;
+            }
+
             if (System.Threading.Interlocked.Exchange(ref updateCheckInProgress, 1) == 1)
             {
                 if (source == UpdateCheckSource.Manual)
@@ -17516,6 +17529,11 @@ namespace AnonPDF
 
         private void CheckForUpdatesToolStripMenuItem_Click(object sender, EventArgs e)
         {
+            if (LicenseManager.Config?.AppUpdatesDisabled == true)
+            {
+                return;
+            }
+
             Task.Run(() => CheckForNewVersion(UpdateCheckSource.Manual));
         }
 
@@ -17903,7 +17921,7 @@ namespace AnonPDF
             ApplyRightPanelDividerFromSettings();
             PromptMaintenanceRecoveryIfAvailable();
             UpdateLeftPanelWidth();
-            if (!SuppressStartupUpdateCheck)
+            if (!SuppressStartupUpdateCheck && LicenseManager.Config?.AppUpdatesDisabled != true)
             {
                 Task.Run(() => CheckForNewVersion(UpdateCheckSource.Startup));
             }
@@ -24793,9 +24811,25 @@ namespace AnonPDF
             return Path.Combine(GetUserDataDirectory(), "resume-project.app");
         }
 
+        private static string GetDeploymentSourceFilePath(string fileName)
+        {
+            string configuredPath = LicenseManager.Config?.ResolveSourceFilePath(fileName);
+            if (!string.IsNullOrWhiteSpace(configuredPath))
+            {
+                return configuredPath;
+            }
+
+            return Path.Combine(Application.StartupPath, fileName);
+        }
+
+        private static string GetServiceFilePath()
+        {
+            return GetDeploymentSourceFilePath("service.json");
+        }
+
         private static string GetGlobalExclusionScopesFilePath()
         {
-            return Path.Combine(Application.StartupPath, "exclusion_scopes.json");
+            return GetDeploymentSourceFilePath("exclusion_scopes.json");
         }
 
         private static string GetLocalExclusionScopesFilePath()
@@ -24805,7 +24839,7 @@ namespace AnonPDF
 
         private static string GetGlobalLegalBasesFilePath()
         {
-            return Path.Combine(Application.StartupPath, "legal_bases.json");
+            return GetDeploymentSourceFilePath("legal_bases.json");
         }
 
         private static string GetLocalLegalBasesFilePath()
