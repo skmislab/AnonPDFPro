@@ -53,11 +53,11 @@ Główne okno aplikacji składa się z następujących elementów:
 
 > \- Szukaj: pozwala szybko przejść do pola wyszukiwania.
 
-> \- Opcje: zawiera ustawienia wyglądu, języka i sposobu pracy aplikacji.
+> \- Opcje: zawiera ustawienia wyglądu, języka, kraju (dopasowania zakresów danych) i sposobu pracy aplikacji.
 
 > \- ?: wyświetla instrukcję użytkownika oraz informacje o aplikacji.
 
-- Prawy panel – zawiera zakładki `Lista stron`, `Miniatury` i `Warstwy`. Możesz tam szybko przełączać strony, miniatury oraz atrybuty warstw.
+- Prawy panel – zawiera zakładki `Lista stron`, `Miniatury`, `Warstwy` i `Znalezione`. Możesz tam szybko przełączać strony, miniatury, atrybuty warstw oraz przeglądać wyniki wyszukiwania i wykryte dane osobowe.
 - Główny obszar podglądu – prezentuje aktualnie wybraną stronę PDF, umożliwia rysowanie/wybór obszarów do redakcji.
 - Pasek narzędzi – zawiera przyciski do nawigacji po stronach, przybliżania/oddalania, zaznaczania obszarów do zaciemniania:
 
@@ -120,6 +120,8 @@ Wyszukiwanie działa także w dokumentach skanowanych oraz na obrazach osadzonyc
 
 Jeżeli zeskanowana strona jest lekko przekrzywiona, aplikacja stara się dopasować położenie wyników wyszukiwania do faktycznego miejsca tekstu na stronie.
 
+Przycisk `Dane osobowe` uruchamia wykrywanie danych osobowych w całym dokumencie. Wyniki wyszukiwania oraz wykryte dane osobowe — w tym z tekstów alternatywnych (ALT) i spoza obszaru strony — pojawiają się w zakładce `Znalezione` (zobacz punkt 6.14).
+
 ## 4.4 Zaznaczanie obszarów do redakcji
 
 Aby utworzyć obszar redakcji:
@@ -144,7 +146,7 @@ Wybrane zaznaczenie typu `box` lub `marker` można usunąć także klawiszem `DE
 
 ## 4.5 Podgląd po zmianach
 
-Po wprowadzeniu zaznaczenia tekst, który będzie usunięty, jest od razu wyszarzany na podglądzie.
+Po wprowadzeniu zaznaczenia tekst, który będzie usunięty, jest od razu wyszarzany na podglądzie. Działa to również w dokumentach skanowanych rozpoznanych przez OCR — wówczas wyszarzane są całe dotknięte słowa.
 
 ## 4.6 Zapisywanie projektu
 
@@ -302,6 +304,52 @@ Aplikacja obsługuje warstwy robocze dla anonimizacji i obiektów.
 
 Opcja `Plik -> Zapisz aktualny widok...` pozwala zapisać aktualnie widoczną stronę do pliku graficznego PNG lub BMP. Jest to zapis widoku z podglądu, przydatny np. do dokumentacji pracy lub szybkiego przekazania obrazu strony.
 
+## 6.14 Zakładka „Znalezione”
+
+Zakładka `Znalezione` w prawym panelu zbiera w jednym miejscu wyniki wyszukiwania oraz wykryte dane osobowe.
+
+- Pozycje są pogrupowane według stron i opatrzone polami wyboru.
+- Lista rozwijana filtra pozwala zawęzić widok do kategorii: `Wszystkie`, `Wyszukiwanie`, `Dane osobowe`, `Tekst alternatywny` lub `Poza stroną`.
+- Kliknięcie pozycji przechodzi do odpowiedniej strony i podświetla miejsce w dokumencie.
+- Zaznaczenie pozycji tworzy zaznaczenie anonimizacyjne, a jej odznaczenie je usuwa. Stan pól wyboru jest synchronizowany w obie strony z zaznaczeniami na stronie.
+
+## 6.15 Wykrywanie danych osobowych
+
+Przycisk `Dane osobowe` uruchamia analizę całego dokumentu i prezentuje znalezione dane w zakładce `Znalezione`.
+
+- Rozpoznawanie nazwisk i lokalizacji wymaga zainstalowania dodatkowego modułu rozpoznawania dla wybranego kraju. Bez tego modułu przycisk nie zwróci wyników.
+- Niezależnie od modułu nadal działa wyszukiwanie identyfikatorów (PESEL, numer księgi wieczystej, NIP, REGON, KRS, rachunek bankowy, dowód osobisty, e-mail, kod pocztowy, adres internetowy, VIN) opisane w punkcie 4.3.
+- Wyniki można zbiorczo zamienić na zaznaczenia anonimizacyjne w zakładce `Znalezione`.
+
+## 6.16 Tekst alternatywny (ALT)
+
+Aplikacja wykrywa dane osobowe również w tekstach alternatywnych (opisach) obrazów oraz elementów dokumentu.
+
+- Takie wyniki pojawiają się w zakładce `Znalezione` w kategorii `Tekst alternatywny`.
+- Z menu kontekstowego (prawy przycisk myszy) dostępne są opcje `Edytuj tekst alternatywny` oraz `Wyczyść tekst alternatywny`. Zmiany są zachowywane w zapisanym pliku PDF.
+
+## 6.17 Kopiowanie tekstu z zaznaczeń
+
+Z menu kontekstowego zaznaczenia anonimizacyjnego można wybrać `Kopiuj do schowka`, aby skopiować tekst objęty zaznaczeniem.
+
+- Funkcja działa zarówno dla tekstu natywnego, jak i dla czystych skanów (tekst pochodzący z OCR).
+- Tekst jest składany w naturalnej kolejności czytania (od góry do dołu, od lewej do prawej), także gdy strona jest obrócona.
+
+## 6.18 Wybór kraju
+
+W menu `Opcje -> Kraj` można wskazać kraj dokumentu: `Automatycznie`, `Polska` lub `Niemcy`.
+
+- Ustawienie dopasowuje zakresy danych proponowane do anonimizacji do wybranego kraju i języka.
+- Wybór `Automatycznie` korzysta z ustawień regionalnych systemu oraz wykrytego języka dokumentu.
+
+## 6.19 Obsługa formatu JPEG 2000
+
+Anonimizacja obejmuje teraz także obrazy zapisane w formacie JPEG 2000 (JP2/JPX) — treść w obrębie zaznaczenia jest poprawnie usuwana również z takich obrazów.
+
+## 6.20 Szybszy ponowny przegląd dokumentu
+
+Wyniki analizy dokumentu (w tym tekst rozpoznany przez OCR) są zapamiętywane w pamięci podręcznej na dysku. Dzięki temu ponowne otwarcie tego samego pliku jest szybsze i nie wymaga powtarzania całej analizy.
+
 # 7. Najczęstsze problemy i wskazówki
 
 ## 7.1 Nie można zapisać pliku PDF
@@ -354,3 +402,12 @@ W ostatnich wersjach dodano m.in.:
 - Kopiowanie i wklejanie obiektów przez schowek systemowy także między dwoma instancjami aplikacji, z zachowaniem kolejności nakładania.
 - Funkcje `Cofnij` (`CTRL+Z`) i `Ponów` (`CTRL+Y`).
 - Krótki samouczek startowy dostępny z menu `? -> Jak zacząć?`.
+- Nową zakładkę `Znalezione` z wynikami wyszukiwania i wykrytymi danymi osobowymi, polami wyboru, filtrem kategorii i przejściem do strony.
+- Przycisk `Dane osobowe` uruchamiający wykrywanie danych osobowych (rozpoznawanie nazwisk i lokalizacji wymaga dodatkowego modułu dla wybranego kraju).
+- Wykrywanie i edycję danych osobowych w tekstach alternatywnych (ALT) obrazów i elementów.
+- Grupowanie tekstu spoza obszaru strony w kategorii `Poza stroną`.
+- Wybór kraju dokumentu w menu `Opcje -> Kraj`, dopasowujący zakresy danych do anonimizacji.
+- Kopiowanie tekstu z zaznaczeń do schowka (`Kopiuj do schowka`) w poprawnej kolejności czytania, także na obróconych stronach i czystych skanach.
+- Wyszarzanie dotkniętego tekstu również w czystych skanach (na podstawie rozpoznania OCR).
+- Obsługę anonimizacji obrazów zapisanych w formacie JPEG 2000.
+- Szybszy ponowny przegląd dokumentu dzięki pamięci podręcznej na dysku.

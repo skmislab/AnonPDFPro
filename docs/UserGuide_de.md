@@ -51,7 +51,7 @@ Das Hauptfenster besteht aus folgenden Bereichen:
 
 > \- Obere Menüleiste mit den Bereichen Datei, Werkzeuge, Optionen und ?.
 
-> \- Rechtes Panel mit den Tabs `Seitenliste`, `Miniaturen` und `Ebenen`. Dort können Seiten, Miniaturen und Ebenenattribute schnell umgeschaltet werden.
+> \- Rechtes Panel mit den Tabs `Seitenliste`, `Miniaturen`, `Ebenen` und `Gefunden`. Dort können Seiten, Miniaturen und Ebenenattribute schnell umgeschaltet sowie Suchergebnisse und erkannte Personendaten eingesehen werden.
 
 > \- Hauptvorschau in der Mitte zur Bearbeitung der aktuellen Seite.
 
@@ -85,6 +85,8 @@ Die Suche funktioniert auch in gescannten Dokumenten und auf Bildern, die in ein
 
 Wenn eine gescannte Seite leicht schief ist, versucht die Anwendung, die Positionen der Suchtreffer an die tatsächliche Textposition auf der Seite anzupassen.
 
+Die Schaltfläche `Personendaten` startet die Erkennung personenbezogener Daten im gesamten Dokument. Suchergebnisse und erkannte Personendaten - auch aus Alternativtexten (ALT) und aus Bereichen außerhalb der Seite - erscheinen im Tab `Gefunden` (siehe Abschnitt 6.14).
+
 Zum Markieren eines Bereichs:
 
 > **1.** Wählen Sie Marker oder Box.
@@ -103,7 +105,7 @@ Eine ausgewählte `Box`- oder `Marker`-Markierung kann auch mit der Taste `DELET
 
 ## 4.5 Vorschau der markierten Ausschlüsse
 
-Nach dem Markieren wird der betroffene Text in der Vorschau sofort grau dargestellt.
+Nach dem Markieren wird der betroffene Text in der Vorschau sofort grau dargestellt. Das funktioniert auch in gescannten, per OCR erkannten Dokumenten - dann werden ganze betroffene Wörter grau dargestellt.
 
 ## 4.6 Projekt speichern
 
@@ -281,6 +283,52 @@ Die Anwendung unterstützt Arbeitsebenen für Markierungen und Objekte.
 
 `Datei -> Aktuelle Ansicht speichern...` speichert die aktuell sichtbare Seitenansicht als PNG- oder BMP-Bilddatei. Gespeichert wird der sichtbare Vorschauzustand, zum Beispiel für Dokumentationszwecke oder zur schnellen Weitergabe eines Seitenbildes.
 
+## 6.14 Tab „Gefunden“
+
+Der Tab `Gefunden` im rechten Panel sammelt Suchergebnisse und erkannte Personendaten an einem Ort.
+
+- Die Einträge sind nach Seiten gruppiert und haben Kontrollkästchen.
+- Eine Filter-Auswahlliste schränkt die Ansicht auf eine Kategorie ein: `Alle`, `Suche`, `Personendaten`, `ALT-Text` oder `Außerhalb`.
+- Ein Klick auf einen Eintrag springt zur betreffenden Seite und hebt die Stelle im Dokument hervor.
+- Das Aktivieren eines Eintrags erstellt eine Anonymisierungsmarkierung, das Deaktivieren entfernt sie. Die Kontrollkästchen sind in beide Richtungen mit den Markierungen auf der Seite synchronisiert.
+
+## 6.15 Erkennung personenbezogener Daten
+
+Die Schaltfläche `Personendaten` analysiert das gesamte Dokument und zeigt die Ergebnisse im Tab `Gefunden` an.
+
+- Die Erkennung von Namen und Orten erfordert ein optionales Erkennungsmodul für das gewählte Land. Ohne dieses Modul liefert die Schaltfläche keine Ergebnisse.
+- Unabhängig vom Modul bleibt die Suche nach Identifikatoren (PESEL, Grundbuchnummer, NIP, REGON, KRS, Bankkonto, Ausweis, E-Mail, Postleitzahl, Internetadresse, VIN) aus Abschnitt 4.3 verfügbar.
+- Die Ergebnisse können im Tab `Gefunden` gesammelt in Anonymisierungsmarkierungen umgewandelt werden.
+
+## 6.16 Alternativtext (ALT)
+
+Die Anwendung erkennt personenbezogene Daten auch im Alternativtext (Beschreibungen) von Bildern und Dokumentelementen.
+
+- Solche Ergebnisse erscheinen im Tab `Gefunden` in der Kategorie `ALT-Text`.
+- Das Kontextmenü (Rechtsklick) bietet `Alternativtext bearbeiten` und `Alternativtext löschen`. Änderungen bleiben in der exportierten PDF erhalten.
+
+## 6.17 Text aus Markierungen kopieren
+
+Über das Kontextmenü einer Anonymisierungsmarkierung können Sie `In Zwischenablage kopieren` wählen, um den von der Markierung erfassten Text zu kopieren.
+
+- Das funktioniert sowohl für nativen Text als auch für reine Scans (Text aus OCR).
+- Der Text wird in natürlicher Lesereihenfolge zusammengesetzt (von oben nach unten, von links nach rechts), auch bei gedrehten Seiten.
+
+## 6.18 Landauswahl
+
+Im Menü `Optionen -> Land` können Sie das Land des Dokuments festlegen: `Automatisch`, `Polen` oder `Deutschland`.
+
+- Die Einstellung passt die zur Anonymisierung vorgeschlagenen Datenbereiche an das gewählte Land und die Sprache an.
+- `Automatisch` verwendet die Regionseinstellungen des Systems und die erkannte Dokumentsprache.
+
+## 6.19 Unterstützung für JPEG 2000
+
+Die Anonymisierung umfasst nun auch Bilder im Format JPEG 2000 (JP2/JPX) - Inhalte innerhalb einer Markierung werden auch aus solchen Bildern korrekt entfernt.
+
+## 6.20 Schnellere erneute Durchsicht
+
+Die Analyseergebnisse des Dokuments (einschließlich OCR-Text) werden in einem Festplatten-Cache gespeichert. Dadurch ist das erneute Öffnen derselben Datei schneller und erfordert keine erneute vollständige Analyse.
+
 # 7. Häufige Probleme und Hinweise
 
 ## 7.1 Ausgabe-PDF kann nicht gespeichert werden
@@ -331,3 +379,12 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Kopieren und Einfügen von Objekten über die Systemzwischenablage, auch zwischen zwei laufenden Instanzen der Anwendung, mit erhaltener Stapelreihenfolge.
 - `Rückgängig` (`CTRL+Z`) und `Wiederholen` (`CTRL+Y`).
 - Kurzes Start-Tutorial über `? -> Wie fange ich an?`.
+- Einen neuen Tab `Gefunden` mit Suchergebnissen und erkannten Personendaten, Kontrollkästchen, Kategoriefilter und Sprung zur Seite.
+- Eine Schaltfläche `Personendaten` zur Erkennung personenbezogener Daten (die Erkennung von Namen und Orten erfordert ein optionales Modul für das gewählte Land).
+- Erkennung und Bearbeitung personenbezogener Daten im Alternativtext (ALT) von Bildern und Elementen.
+- Gruppierung von Text außerhalb der Seite in der Kategorie `Außerhalb`.
+- Auswahl des Dokumentlands im Menü `Optionen -> Land`, die die Datenbereiche für die Anonymisierung anpasst.
+- Kopieren von Text aus Markierungen in die Zwischenablage (`In Zwischenablage kopieren`) in korrekter Lesereihenfolge, auch bei gedrehten Seiten und reinen Scans.
+- Graue Vorschau des betroffenen Textes auch bei reinen Scans (auf Basis von OCR).
+- Unterstützung der Anonymisierung von Bildern im Format JPEG 2000.
+- Schnellere erneute Durchsicht des Dokuments dank Festplatten-Cache.

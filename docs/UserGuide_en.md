@@ -55,11 +55,11 @@ The main window consists of the following elements:
 
 > \- Search: quickly move focus to the search field.
 
-> \- Options: change appearance, language, and application behavior.
+> \- Options: change appearance, language, country (to tailor data scopes), and application behavior.
 
 > \- Help: open this user guide.
 
-- Right panel - contains the `Page List`, `Thumbnails`, and `Layers` tabs. You can quickly switch pages, thumbnails, and layer attributes there.
+- Right panel - contains the `Page List`, `Thumbnails`, `Layers`, and `Found` tabs. You can quickly switch pages, thumbnails, layer attributes, and review search results and detected personal data there.
 - Main preview area - displays the currently selected PDF page and allows you to draw/select areas to be redacted.
 - Toolbar - buttons for page navigation, zoom, and selection tools:
 
@@ -122,6 +122,8 @@ Search also works in scanned documents and on images embedded in PDFs. For these
 
 If a scanned page is slightly skewed, the application tries to align search result positions with the actual text location on the page.
 
+The `Personal data` button runs personal-data detection across the whole document. Search results and detected personal data - including from alternative text (ALT) and text outside the page area - appear in the `Found` tab (see section 6.14).
+
 ## 4.4 Mark areas for redaction
 
 To create a redaction area:
@@ -146,7 +148,7 @@ You can also remove a selected `box` or `marker` with the `DELETE` key. In Curso
 
 ## 4.5 Preview pending redactions
 
-After you create a selection, the text that will be removed is immediately shaded gray in the preview.
+After you create a selection, the text that will be removed is immediately shaded gray in the preview. This also works in scanned documents recognized by OCR - in that case whole touched words are shaded.
 
 ## 4.6 Save your redaction project
 
@@ -302,6 +304,52 @@ The application supports working layers for redaction selections and objects.
 
 `File -> Save current view...` saves the currently visible page view to a PNG or BMP image file. This saves the preview image and can be useful for documenting work or quickly sharing a page snapshot.
 
+## 6.14 The "Found" tab
+
+The `Found` tab in the right panel collects search results and detected personal data in one place.
+
+- Items are grouped by page and have checkboxes.
+- A filter drop-down narrows the view to a category: `All`, `Search`, `Personal data`, `ALT text`, or `Outside page`.
+- Clicking an item jumps to the relevant page and highlights its location in the document.
+- Ticking an item creates a redaction selection; unticking it removes the selection. Checkbox states stay synchronized both ways with the selections on the page.
+
+## 6.15 Personal data detection
+
+The `Personal data` button analyzes the whole document and shows the results in the `Found` tab.
+
+- Name and location recognition requires an optional recognition module for the selected country. Without that module the button returns no results.
+- Regardless of the module, identifier search (PESEL, Land and Mortgage Register number, NIP, REGON, KRS, bank account, ID card, email, postal code, website address, VIN) described in section 4.3 remains available.
+- Results can be converted to redaction selections in bulk from the `Found` tab.
+
+## 6.16 Alternative text (ALT)
+
+The application also detects personal data in the alternative text (descriptions) of images and document elements.
+
+- Such results appear in the `Found` tab under the `ALT text` category.
+- The context menu (right-click) offers `Edit alternative text` and `Clear alternative text`. Changes are preserved in the exported PDF.
+
+## 6.17 Copy selection text
+
+From a redaction selection's context menu you can choose `Copy to clipboard` to copy the text covered by the selection.
+
+- This works for both native text and pure scans (text from OCR).
+- The text is assembled in natural reading order (top to bottom, left to right), including on rotated pages.
+
+## 6.18 Country selection
+
+In `Options -> Country` you can set the document country: `Automatic`, `Poland`, or `Germany`.
+
+- This tailors the anonymization data scopes to the chosen country and language.
+- `Automatic` uses the system regional settings and the detected document language.
+
+## 6.19 JPEG 2000 support
+
+Redaction now also covers images stored in the JPEG 2000 format (JP2/JPX) - content within a selection is correctly removed from such images as well.
+
+## 6.20 Faster document re-review
+
+Document analysis results (including OCR text) are stored in an on-disk cache. Reopening the same file is therefore faster and does not require repeating the whole analysis.
+
 # 7. Common Issues and Tips
 
 ## 7.1 Cannot save the output PDF
@@ -356,3 +404,12 @@ Recent versions include:
 - Object copy and paste through the system clipboard, including between two running application instances, with preserved stacking order.
 - `Undo` (`CTRL+Z`) and `Redo` (`CTRL+Y`).
 - A short quick-start tutorial available from `? -> How to start?`.
+- A new `Found` tab with search results and detected personal data, checkboxes, a category filter, and jump-to-page.
+- A `Personal data` button that runs personal-data detection (name and location recognition requires an optional module for the selected country).
+- Detection and editing of personal data in the alternative text (ALT) of images and elements.
+- Grouping of text outside the page area under the `Outside page` category.
+- Document country selection in `Options -> Country` that tailors the anonymization data scopes.
+- Copying selection text to the clipboard (`Copy to clipboard`) in correct reading order, including on rotated pages and pure scans.
+- Gray preview of touched text also on pure scans (based on OCR).
+- Redaction support for images stored in the JPEG 2000 format.
+- Faster document re-review thanks to an on-disk cache.
