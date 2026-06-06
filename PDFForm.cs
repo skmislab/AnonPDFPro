@@ -901,6 +901,7 @@ namespace AnonPDF
         private ToolStripMenuItem _foundFilterInvertItem;
         private HashSet<string> _foundActiveCategories = new HashSet<string>(StringComparer.Ordinal);
         private bool _suppressFilterChange;
+        private bool _foundFilterDirty;
         private ToolStripMenuItem foundContextMenuEdit;
         private ToolStripMenuItem foundContextMenuClear;
         private bool _suppressFoundCheck;
@@ -54298,6 +54299,17 @@ namespace AnonPDF
 
             foundFilterDropDown = new ToolStripDropDown { Padding = new Padding(1), DropShadowEnabled = true };
             foundFilterDropDown.Items.Add(_foundFilterDropHost);
+            // Rebuild the result tree once, when the filter popup closes — toggling
+            // individual category checkboxes only marks the filter dirty, so picking
+            // several categories no longer rebuilds the tree once per click.
+            foundFilterDropDown.Closed += (s, e) =>
+            {
+                if (_foundFilterDirty && !_suppressFilterChange)
+                {
+                    _foundFilterDirty = false;
+                    ApplyFoundFilter();
+                }
+            };
 
             foundTreeView = new NoHScrollTreeView
             {
@@ -55145,7 +55157,8 @@ namespace AnonPDF
 
             foundFilterListBox.Invalidate(foundFilterListBox.GetItemRectangle(idx));
             UpdateFoundFilterMasterState();
-            ApplyFoundFilter();
+            UpdateFoundFilterButtonText();
+            _foundFilterDirty = true;
         }
 
         private void FoundFilterMasterPanel_Paint(object sender, PaintEventArgs e)
@@ -55214,7 +55227,8 @@ namespace AnonPDF
             _foundFilterMasterState = check ? CheckState.Checked : CheckState.Unchecked;
             foundFilterMasterPanel?.Invalidate();
             foundFilterListBox.Invalidate();
-            ApplyFoundFilter();
+            UpdateFoundFilterButtonText();
+            _foundFilterDirty = true;
         }
 
         private void InvertFoundFilter()
@@ -55227,7 +55241,8 @@ namespace AnonPDF
             }
             foundFilterListBox.Invalidate();
             UpdateFoundFilterMasterState();
-            ApplyFoundFilter();
+            UpdateFoundFilterButtonText();
+            _foundFilterDirty = true;
         }
 
         private sealed class FoundFilterItem
