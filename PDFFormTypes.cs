@@ -6485,6 +6485,12 @@ namespace AnonPDF
             if (!string.IsNullOrWhiteSpace(executablePath) && File.Exists(executablePath))
             {
                 string pluginSourceDir = Path.GetDirectoryName(executablePath);
+                if (ShouldUsePluginFromSource(pluginSourceDir))
+                {
+                    fileName = executablePath;
+                    return true;
+                }
+
                 string localDir = EnsurePluginCachedLocally(pluginSourceDir);
                 string localExe = Path.Combine(localDir, Path.GetFileName(executablePath));
                 fileName = File.Exists(localExe) ? localExe : executablePath;
@@ -6701,6 +6707,55 @@ namespace AnonPDF
         // ---------------------------------------------------------------------------
         // Plugin local cache (Variant A — copy from network share to %LOCALAPPDATA%)
         // ---------------------------------------------------------------------------
+
+        private static bool ShouldUsePluginFromSource(string pluginSourceDir)
+        {
+            if (string.IsNullOrWhiteSpace(pluginSourceDir) || !Directory.Exists(pluginSourceDir))
+            {
+                return false;
+            }
+
+            try
+            {
+                string appPluginsDir = Path.GetFullPath(
+                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "plugins"))
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                string sourceDir = Path.GetFullPath(pluginSourceDir)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+
+                if (!sourceDir.StartsWith(appPluginsDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                return IsLocalFixedDrivePath(sourceDir);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsLocalFixedDrivePath(string path)
+        {
+            try
+            {
+                string root = Path.GetPathRoot(Path.GetFullPath(path));
+                if (string.IsNullOrWhiteSpace(root) || root.StartsWith(@"\\", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var drive = new DriveInfo(root);
+                return drive.DriveType == DriveType.Fixed;
+            }
+            catch
+            {
+                return false;
+            }
+        }
 
         private static readonly HashSet<string> _syncedPluginDirs =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase);
