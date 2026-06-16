@@ -110,6 +110,12 @@
     <Reference Include="itext.svg, Version=9.6.0.0, Culture=neutral, PublicKeyToken=8354ae6d2174ddca, processorArchitecture=MSIL">
       <HintPath>packages\itext.9.6.0\lib\net461\itext.svg.dll</HintPath>
     </Reference>
+    <Reference Include="MessagePack, Version=3.1.7.0, Culture=neutral, PublicKeyToken=b4a0369545f0a1be, processorArchitecture=MSIL">
+      <HintPath>packages\MessagePack.3.1.7\lib\net472\MessagePack.dll</HintPath>
+    </Reference>
+    <Reference Include="MessagePack.Annotations, Version=3.1.7.0, Culture=neutral, PublicKeyToken=b4a0369545f0a1be, processorArchitecture=MSIL">
+      <HintPath>packages\MessagePack.Annotations.3.1.7\lib\netstandard2.0\MessagePack.Annotations.dll</HintPath>
+    </Reference>
     <Reference Include="Microsoft.Bcl.AsyncInterfaces, Version=9.0.0.4, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>packages\Microsoft.Bcl.AsyncInterfaces.9.0.4\lib\net462\Microsoft.Bcl.AsyncInterfaces.dll</HintPath>
     </Reference>
@@ -134,14 +140,8 @@
     <Reference Include="Microsoft.Extensions.Primitives, Version=9.0.0.4, Culture=neutral, PublicKeyToken=adb9793829ddae60, processorArchitecture=MSIL">
       <HintPath>packages\Microsoft.Extensions.Primitives.9.0.4\lib\net462\Microsoft.Extensions.Primitives.dll</HintPath>
     </Reference>
-    <Reference Include="MessagePack">
-      <HintPath>packages\MessagePack.2.5.187\lib\net472\MessagePack.dll</HintPath>
-    </Reference>
-    <Reference Include="MessagePack.Annotations">
-      <HintPath>packages\MessagePack.Annotations.2.5.187\lib\netstandard2.0\MessagePack.Annotations.dll</HintPath>
-    </Reference>
-    <Reference Include="System.Collections.Immutable">
-      <HintPath>packages\System.Collections.Immutable.6.0.0\lib\net461\System.Collections.Immutable.dll</HintPath>
+    <Reference Include="Microsoft.NET.StringTools, Version=1.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>packages\Microsoft.NET.StringTools.17.11.4\lib\net472\Microsoft.NET.StringTools.dll</HintPath>
     </Reference>
     <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
       <HintPath>packages\Newtonsoft.Json.13.0.4\lib\net45\Newtonsoft.Json.dll</HintPath>
@@ -154,6 +154,9 @@
     <Reference Include="System" />
     <Reference Include="System.Buffers, Version=4.0.5.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>packages\System.Buffers.4.6.1\lib\net462\System.Buffers.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Collections.Immutable, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>packages\System.Collections.Immutable.8.0.0\lib\net462\System.Collections.Immutable.dll</HintPath>
     </Reference>
     <Reference Include="System.ComponentModel.DataAnnotations" />
     <Reference Include="System.Configuration" />
@@ -341,10 +344,12 @@
     <Error Condition="!Exists('packages\PDFium.WindowsV2.1.1.4\build\PDFium.WindowsV2.props')" Text="$([System.String]::Format('$(ErrorText)', 'packages\PDFium.WindowsV2.1.1.4\build\PDFium.WindowsV2.props'))" />
     <Error Condition="!Exists('packages\TesseractOCR.5.5.1\build\TesseractOCR.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\TesseractOCR.5.5.1\build\TesseractOCR.targets'))" />
     <Error Condition="!Exists('packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets'))" />
+    <Error Condition="!Exists('packages\MessagePackAnalyzer.3.1.7\build\MessagePackAnalyzer.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\MessagePackAnalyzer.3.1.7\build\MessagePackAnalyzer.targets'))" />
   </Target>
   <Target Name="CreateReleasePluginsDirectory" AfterTargets="Build" Condition=" '$(Configuration)' == 'Release' ">
     <MakeDir Directories="$(TargetDir)plugins" />
   </Target>
   <Import Project="packages\TesseractOCR.5.5.1\build\TesseractOCR.targets" Condition="Exists('packages\TesseractOCR.5.5.1\build\TesseractOCR.targets')" />
   <Import Project="packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets" Condition="Exists('packages\System.ValueTuple.4.6.2\build\net471\System.ValueTuple.targets')" />
+  <Import Project="packages\MessagePackAnalyzer.3.1.7\build\MessagePackAnalyzer.targets" Condition="Exists('packages\MessagePackAnalyzer.3.1.7\build\MessagePackAnalyzer.targets')" />
 </Project>

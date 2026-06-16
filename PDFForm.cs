@@ -8061,8 +8061,9 @@ namespace AnonPDF
 
             var page = pdf.Pages[currentPage - 1];
             float pageH = (float)page.Height;
-            float pdfX = docX;
-            float pdfY = pageH - docY;
+            PointF pdfPoint = ConvertPointToPdfCoordinates(new PointF(docX, docY), currentPage, rotation);
+            float pdfX = pdfPoint.X;
+            float pdfY = pdfPoint.Y;
 
             var lines = PdfTextSearcher.GetCachedLines(inputPdfPath);
             if (lines == null || lines.Count == 0)
