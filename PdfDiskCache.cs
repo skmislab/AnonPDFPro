@@ -24,7 +24,7 @@ namespace AnonPDF
 
     internal static class PdfDiskCache
     {
-        private const int FormatVersion = 1;
+        private const int FormatVersion = 3;
 
         private static string CacheDir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -250,6 +250,9 @@ namespace AnonPDF
                     Label  = loc.Label,
                     Text   = loc.Text,
                     Source = (int)loc.Source,
+                    HighlightRectsFlat = loc.HighlightRects != null && loc.HighlightRects.Count > 0
+                        ? RectListToFlat(loc.HighlightRects)
+                        : null,
                 });
             }
             return r;
@@ -330,6 +333,9 @@ namespace AnonPDF
                     Label  = dto.Label,
                     Text   = dto.Text,
                     Source = (LocationSource)dto.Source,
+                    HighlightRects = dto.HighlightRectsFlat != null && dto.HighlightRectsFlat.Length > 0
+                        ? FlatToRectList(dto.HighlightRectsFlat)
+                        : null,
                 });
             return r;
         }
@@ -457,5 +463,6 @@ namespace AnonPDF
         [Key(8)] public string Label          { get; set; }
         [Key(9)] public string Text           { get; set; }
         [Key(10)] public int   Source         { get; set; }
+        [Key(11)] public float[] HighlightRectsFlat { get; set; }
     }
 }

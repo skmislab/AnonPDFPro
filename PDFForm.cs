@@ -29518,7 +29518,6 @@ namespace AnonPDF
 
                     if (TryGetWordBoundsAtPoint(e.Location, out RectangleF wordBounds))
                     {
-                        BeginUndoCapture("Add cursor selection");
                         var block = new RedactionBlock(wordBounds, currentPage)
                         {
                             IsCursorSelection = true,
@@ -29526,6 +29525,16 @@ namespace AnonPDF
                         };
                         StampRedactionBlockCreated(block);
                         NormalizeRedactionBlockMetadata(block);
+                        TryAlignCursorBlockBoundsWithPreviewText(block);
+
+                        if (TryFindDuplicateCursorSelection(block, out RedactionBlock existingCursorBlock))
+                        {
+                            selectedRedactionBlock = existingCursorBlock;
+                            pdfViewer.Invalidate();
+                            return;
+                        }
+
+                        BeginUndoCapture("Add cursor selection");
                         redactionBlocks.Add(block);
                         selectedRedactionBlock = block;
                         InvalidateThumbnailRedactionOverlay(currentPage);
@@ -33159,6 +33168,135 @@ namespace AnonPDF
             {
                 QueueRedactionPreviewRectsForPage(block.PageNumber);
             }
+        }
+
+        private bool TryAlignCursorBlockBoundsWithPreviewText(RedactionBlock block)
+        {
+            if (block == null ||
+                !block.IsCursorSelection ||
+                block.PageNumber < 1 ||
+                string.IsNullOrWhiteSpace(inputPdfPath) ||
+                !File.Exists(inputPdfPath))
+            {
+                return false;
+            }
+
+            try
+            {
+                var props = new ReaderProperties();
+                if (!string.IsNullOrEmpty(userPassword))
+                {
+                    props.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
+                }
+
+                using (var reader = new PdfReader(inputPdfPath, props).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+                using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
+                {
+                    if (block.PageNumber > pdfDoc.GetNumberOfPages())
+                    {
+                        return false;
+                    }
+
+                    var page = pdfDoc.GetPage(block.PageNumber);
+                    int rotation = GetEffectiveRotationDegrees(block.PageNumber);
+                    List<RectangleF> previewRects = ComputeRedactionPreviewRects(page, block, rotation);
+                    if (previewRects == null || previewRects.Count == 0)
+                    {
+                        return false;
+                    }
+
+                    float minX = float.MaxValue;
+                    float minY = float.MaxValue;
+                    float maxX = float.MinValue;
+                    float maxY = float.MinValue;
+                    foreach (RectangleF rect in previewRects)
+                    {
+                        if (rect.Width <= 0f || rect.Height <= 0f)
+                        {
+                            continue;
+                        }
+
+                        minX = Math.Min(minX, rect.Left);
+                        minY = Math.Min(minY, rect.Top);
+                        maxX = Math.Max(maxX, rect.Right);
+                        maxY = Math.Max(maxY, rect.Bottom);
+                    }
+
+                    if (minX >= maxX || minY >= maxY)
+                    {
+                        return false;
+                    }
+
+                    var pdfUnion = new RectangleF(minX, minY, maxX - minX, maxY - minY);
+                    RectangleF viewUnion = ConvertPdfToViewCoordinates(pdfUnion, block.PageNumber, rotation);
+                    if (viewUnion.Width <= 0f || viewUnion.Height <= 0f)
+                    {
+                        return false;
+                    }
+
+                    block.Bounds = viewUnion;
+                    block.PreviewTextRectsPdf = previewRects;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Cursor preview bounds alignment failed: " + ex.Message);
+                return false;
+            }
+        }
+
+        private bool TryFindDuplicateCursorSelection(RedactionBlock candidate, out RedactionBlock existingBlock)
+        {
+            existingBlock = null;
+            if (candidate == null ||
+                !candidate.IsCursorSelection ||
+                candidate.PageNumber < 1 ||
+                candidate.Bounds.Width <= 0f ||
+                candidate.Bounds.Height <= 0f)
+            {
+                return false;
+            }
+
+            foreach (var block in redactionBlocks.Where(block =>
+                         block != null &&
+                         block.IsCursorSelection &&
+                         block.PageNumber == candidate.PageNumber &&
+                         IsLayerVisible(block.LayerId)))
+            {
+                if (IsDuplicateCursorSelectionBounds(candidate.Bounds, block.Bounds))
+                {
+                    existingBlock = block;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsDuplicateCursorSelectionBounds(RectangleF candidate, RectangleF existing)
+        {
+            if (candidate.Width <= 0f || candidate.Height <= 0f || existing.Width <= 0f || existing.Height <= 0f)
+            {
+                return false;
+            }
+
+            RectangleF intersection = RectangleF.Intersect(candidate, existing);
+            if (intersection.Width <= 0f || intersection.Height <= 0f)
+            {
+                return false;
+            }
+
+            float intersectionArea = intersection.Width * intersection.Height;
+            float candidateArea = candidate.Width * candidate.Height;
+            float existingArea = existing.Width * existing.Height;
+            float smallerArea = Math.Min(candidateArea, existingArea);
+            if (smallerArea <= 0f)
+            {
+                return false;
+            }
+
+            return intersectionArea / smallerArea >= 0.85f;
         }
 
         private void EnsureRedactionPreviewRectsForPage(int pageNumber)
@@ -37770,6 +37908,14 @@ namespace AnonPDF
             {
                 if (location.PageNumber == currentPage)
                 {
+                    List<RectangleF> preciseViewRects = GetSearchLocationViewRects(location);
+                    if (preciseViewRects.Count > 1)
+                    {
+                        int preciseRotation = GetEffectiveRotationDegrees(location.PageNumber);
+                        DrawSearchHighlightRects(e.Graphics, preciseViewRects, location, ReferenceEquals(location, selectedSearchLocation), preciseRotation);
+                        continue;
+                    }
+
                     float x = location.Rect.GetX();
                     float y = location.Rect.GetY();
                     float w = location.Rect.GetWidth();
@@ -54550,30 +54696,143 @@ namespace AnonPDF
             }
         }
 
+        private List<RectangleF> GetSearchLocationViewRects(TextLocation loc)
+        {
+            var result = new List<RectangleF>();
+            if (loc == null)
+            {
+                return result;
+            }
+
+            int rotation = GetEffectiveRotationDegrees(loc.PageNumber);
+            foreach (var rect in loc.GetHighlightRects())
+            {
+                if (rect == null || rect.GetWidth() <= 0f || rect.GetHeight() <= 0f)
+                {
+                    continue;
+                }
+
+                var pdfRect = new RectangleF(
+                    rect.GetX(),
+                    rect.GetY(),
+                    rect.GetWidth(),
+                    rect.GetHeight());
+                var convertedRect = ConvertPdfToViewCoordinates(pdfRect, loc.PageNumber, rotation);
+
+                float crX = convertedRect.X;
+                float crY = convertedRect.Y;
+                float crW = convertedRect.Width;
+                float crH = convertedRect.Height;
+                if (crH < 1f && crW > 0f)
+                {
+                    crH = crW * 0.2f;
+                    crY -= crH * 0.8f;
+                }
+                else if (crW < 1f && crH > 0f)
+                {
+                    crW = crH * 0.2f;
+                    crX -= crW * 0.8f;
+                }
+
+                result.Add(new RectangleF(crX, crY, crW, crH));
+            }
+
+            return result;
+        }
+
+        private void DrawSearchHighlightRects(Graphics graphics, IEnumerable<RectangleF> viewRects, TextLocation location, bool isSelected, int rotation)
+        {
+            if (graphics == null || viewRects == null || location == null)
+            {
+                return;
+            }
+
+            foreach (RectangleF viewRect in viewRects)
+            {
+                if (viewRect.Width <= 0f || viewRect.Height <= 0f)
+                {
+                    continue;
+                }
+
+                float scX = viewRect.X * scaleFactor;
+                float scY = viewRect.Y * scaleFactor;
+                float scW = viewRect.Width * scaleFactor;
+                float scH = viewRect.Height * scaleFactor;
+                float highlightPad = location.Source == LocationSource.AltText
+                    ? 2f
+                    : Math.Max(2f, Math.Min(scW, scH) * 0.1f);
+                RectangleF primaryHighlightRect = new RectangleF(
+                    scX - highlightPad,
+                    scY - highlightPad,
+                    scW + (highlightPad * 2f),
+                    scH + (highlightPad * 2f));
+
+                using (Pen pen = new Pen(System.Drawing.Color.FromArgb(128, 255, 215, 0), 3))
+                {
+                    graphics.DrawRectangle(pen, primaryHighlightRect.X, primaryHighlightRect.Y, primaryHighlightRect.Width, primaryHighlightRect.Height);
+                }
+
+                if (!isSelected)
+                {
+                    continue;
+                }
+
+                float selectedPad = location.Source == LocationSource.AltText
+                    ? 4f
+                    : highlightPad + 3f;
+                RectangleF selectedHighlightRect = new RectangleF(
+                    scX - selectedPad,
+                    scY - selectedPad,
+                    scW + (selectedPad * 2f),
+                    scH + (selectedPad * 2f));
+
+                using (Pen pen = new Pen(System.Drawing.Color.FromArgb(255, 128, 128, 128), 3))
+                {
+                    graphics.DrawRectangle(pen, selectedHighlightRect.X, selectedHighlightRect.Y, selectedHighlightRect.Width, selectedHighlightRect.Height);
+                }
+
+                if (DebugLogEnabled && (rotation == 90 || rotation == 270))
+                {
+                    RectangleF scaledRect = new RectangleF(scX, scY, scW, scH);
+                    LogDebug(
+                        $"SearchHighlight page={location.PageNumber} idx={currentLocationIndex} pageRot={rotation} lineRot={NormalizeRotation(location.PageRotation)} " +
+                        $"viewRect={FormatRectFInvariant(viewRect)} scaledRect={FormatRectFInvariant(scaledRect)} " +
+                        $"drawPrimary={FormatRectFInvariant(primaryHighlightRect)} drawSelected={FormatRectFInvariant(selectedHighlightRect)}");
+                }
+            }
+        }
+
         private void ApplyFoundNodeCheck(TreeNode node)
         {
             if (!(node.Tag is TextLocation loc)) return;
 
-            int rotation = GetEffectiveRotationDegrees(loc.PageNumber);
-            var pdfRect = new System.Drawing.RectangleF(
-                loc.Rect.GetX(), loc.Rect.GetY(),
-                loc.Rect.GetWidth(), loc.Rect.GetHeight());
-            var convertedRect = ConvertPdfToViewCoordinates(pdfRect, loc.PageNumber, rotation);
+            List<RectangleF> convertedRects = GetSearchLocationViewRects(loc);
+            if (convertedRects.Count == 0) return;
 
             if (node.Checked)
             {
-                bool exists = redactionBlocks.Any(rb =>
-                    rb.PageNumber == loc.PageNumber &&
-                    RectEquals(ConvertToItTextRectangle(rb.Bounds),
-                               ConvertToItTextRectangle(convertedRect), 0.5f));
-                if (!exists)
+                bool changed = false;
+                foreach (RectangleF convertedRect in convertedRects)
                 {
+                    bool exists = redactionBlocks.Any(rb =>
+                        rb.PageNumber == loc.PageNumber &&
+                        RectEquals(ConvertToItTextRectangle(rb.Bounds),
+                                   ConvertToItTextRectangle(convertedRect), 0.5f));
+                    if (exists)
+                    {
+                        continue;
+                    }
+
                     var rb = CreateRedactionBlockWithAutomaticClassification(convertedRect, loc.PageNumber, false);
                     rb.IsCursorSelection = true;
                     redactionBlocks.Add(rb);
-                    InvalidateThumbnailRedactionOverlay(loc.PageNumber);
                     TryComputeRedactionPreviewRects(rb);
+                    changed = true;
+                }
 
+                if (changed)
+                {
+                    InvalidateThumbnailRedactionOverlay(loc.PageNumber);
                     PageItemStatus pageStatus = allPageStatuses[loc.PageNumber - 1];
                     pageStatus.HasSelections = true;
                     if ((string)filterComboBox.SelectedItem == allComboItem)
@@ -54587,7 +54846,6 @@ namespace AnonPDF
                     {
                         ApplyFilter((string)filterComboBox.SelectedItem);
                     }
-
                     projectWasChangedAfterLastSave = true;
                     saveProjectButton.Enabled = true;
                     saveProjectMenuItem.Enabled = true;
@@ -54595,12 +54853,15 @@ namespace AnonPDF
             }
             else
             {
-                var toRemove = redactionBlocks.FirstOrDefault(rb =>
-                    rb.PageNumber == loc.PageNumber &&
-                    RectEquals(ConvertToItTextRectangle(rb.Bounds),
-                               ConvertToItTextRectangle(convertedRect), 0.5f));
-                if (toRemove != null)
-                    RemoveRedactionBlock(toRemove);
+                foreach (RectangleF convertedRect in convertedRects)
+                {
+                    var toRemove = redactionBlocks.FirstOrDefault(rb =>
+                        rb.PageNumber == loc.PageNumber &&
+                        RectEquals(ConvertToItTextRectangle(rb.Bounds),
+                                   ConvertToItTextRectangle(convertedRect), 0.5f));
+                    if (toRemove != null)
+                        RemoveRedactionBlock(toRemove);
+                }
             }
 
             UpdateSelectionNavigationButtons();
@@ -54614,15 +54875,12 @@ namespace AnonPDF
         private bool CheckLeafHasBlock(TreeNode leaf)
         {
             if (!(leaf.Tag is TextLocation loc)) return false;
-            int rotation = GetEffectiveRotationDegrees(loc.PageNumber);
-            var pdfRect = new System.Drawing.RectangleF(
-                loc.Rect.GetX(), loc.Rect.GetY(),
-                loc.Rect.GetWidth(), loc.Rect.GetHeight());
-            var convertedRect = ConvertPdfToViewCoordinates(pdfRect, loc.PageNumber, rotation);
-            return redactionBlocks.Any(rb =>
-                rb.PageNumber == loc.PageNumber &&
-                RectEquals(ConvertToItTextRectangle(rb.Bounds),
-                           ConvertToItTextRectangle(convertedRect), 0.5f));
+            List<RectangleF> convertedRects = GetSearchLocationViewRects(loc);
+            return convertedRects.Count > 0 &&
+                   convertedRects.All(convertedRect => redactionBlocks.Any(rb =>
+                       rb.PageNumber == loc.PageNumber &&
+                       RectEquals(ConvertToItTextRectangle(rb.Bounds),
+                                  ConvertToItTextRectangle(convertedRect), 0.5f)));
         }
 
         private void SyncFoundTabCheckboxFromBlocks()
@@ -55917,42 +56175,15 @@ namespace AnonPDF
                 return;
             }
 
-            // Convert results - for each result calculate rectangle after width correction
-            var convertedResults = currentPageSearchResults.Select(result =>
+            // Convert results. Multi-chunk entities keep separate rectangles so redactions do not cover gaps.
+            var convertedResults = currentPageSearchResults.SelectMany(result =>
             {
-                int rotation = GetEffectiveRotationDegrees(result.PageNumber);
-                var screenRect = new System.Drawing.RectangleF(
-                    result.Rect.GetX(),
-                    result.Rect.GetY(),
-                    result.Rect.GetWidth(),
-                    result.Rect.GetHeight());
-                // Convert rectangle from iText layout to layout used by redactionBlocks
-                var convertedRect = ConvertPdfToViewCoordinates(screenRect, result.PageNumber, rotation);
-
-                // For pages with rotation=90/270 iText reports text Width=0 (characters
-                // share the same X coordinate; the span is encoded in Height).  After the
-                // axis swap in ConvertPdfToViewCoordinates this means Height=0.
-                // Apply the same fallback the yellow-highlight drawing code uses:
-                // derive the missing dimension from the other one (ratio 0.2×) and shift
-                // the origin so the text sits inside the block.
-                float crX = convertedRect.X;
-                float crY = convertedRect.Y;
-                float crW = convertedRect.Width;
-                float crH = convertedRect.Height;
-                if (crH < 1f && crW > 0f)
+                var rects = GetSearchLocationViewRects(result);
+                return rects.Select(convertedRect =>
                 {
-                    crH = crW * 0.2f;
-                    crY -= crH * 0.8f;
-                }
-                else if (crW < 1f && crH > 0f)
-                {
-                    crW = crH * 0.2f;
-                    crX -= crW * 0.8f;
-                }
-                convertedRect = new System.Drawing.RectangleF(crX, crY, crW, crH);
-
-                Debug.WriteLine($"SearchToSelection: result pdfRect={screenRect} rotation={rotation} isOcr={result.IsOcr} -> convertedRect={convertedRect}");
-                return new { result.PageNumber, ConvertedRect = convertedRect, result.IsOcr };
+                    Debug.WriteLine($"SearchToSelection: result pdfRect={result.Rect} isOcr={result.IsOcr} -> convertedRect={convertedRect}");
+                    return new { result.PageNumber, ConvertedRect = convertedRect, result.IsOcr };
+                });
             }).ToList();
 
             // Check whether the current page already has at least one block matching search results

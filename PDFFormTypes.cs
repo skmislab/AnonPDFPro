@@ -3274,6 +3274,8 @@ namespace AnonPDF
         public LocationSource Source { get; set; } = LocationSource.Normal;
         /// <summary>True when more than one PII type was detected; Label holds the highest-priority one.</summary>
         public bool HasMultipleLabels { get; set; }
+        /// <summary>Precise highlight rectangles for multi-chunk text. Rect remains the union used for navigation and sorting.</summary>
+        public List<iText.Kernel.Geom.Rectangle> HighlightRects { get; set; }
 
         public TextLocation(int pageNumber, int pageRotation, iText.Kernel.Geom.Rectangle rect, bool isOcr = false, bool isExactOcrWord = false)
         {
@@ -3282,6 +3284,18 @@ namespace AnonPDF
             Rect = rect;
             IsOcr = isOcr;
             IsExactOcrWord = isExactOcrWord;
+        }
+
+        public IEnumerable<iText.Kernel.Geom.Rectangle> GetHighlightRects()
+        {
+            if (HighlightRects != null && HighlightRects.Count > 0)
+            {
+                return HighlightRects.Where(rect => rect != null && rect.GetWidth() > 0f && rect.GetHeight() > 0f);
+            }
+
+            return Rect != null
+                ? new[] { Rect }
+                : Enumerable.Empty<iText.Kernel.Geom.Rectangle>();
         }
 
         public override string ToString()
@@ -8068,25 +8082,10 @@ namespace AnonPDF
                     {
                         foreach (var charInfo in charInfos)
                         {
-                            KernelGeom.LineSegment charBaseline = charInfo.GetBaseline();
-                            KernelGeom.LineSegment charAscentLine = charInfo.GetAscentLine();
-                            KernelGeom.LineSegment charDescentLine = charInfo.GetDescentLine();
-
-                            KernelGeom.Vector baselineStart = charBaseline.GetStartPoint();
-                            KernelGeom.Vector baselineEnd = charBaseline.GetEndPoint();
-
-                            KernelGeom.Vector ascentEnd = charAscentLine.GetEndPoint();
-                            KernelGeom.Vector descentStart = charDescentLine.GetStartPoint();
-
-                            float minX = baselineStart.Get(KernelGeom.Vector.I1);
-                            float maxX = baselineEnd.Get(KernelGeom.Vector.I1);
-                            float minY = descentStart.Get(KernelGeom.Vector.I2);  // bottom = descent
-                            float maxY = ascentEnd.Get(KernelGeom.Vector.I2);     // top = ascent
-
                             line.Characters.Add(new CharacterInfo
                             {
                                 Char = charInfo.GetText()[0],
-                                BoundingBox = new KernelGeom.Rectangle(minX, minY, maxX - minX, maxY - minY)
+                                BoundingBox = GetTextRenderInfoBounds(charInfo)
                             });
                         }
                     }
@@ -8122,6 +8121,31 @@ namespace AnonPDF
                 }
 
                 base.EventOccurred(data, type);
+            }
+
+            private static KernelGeom.Rectangle GetTextRenderInfoBounds(TextRenderInfo textInfo)
+            {
+                KernelGeom.LineSegment ascentLine = textInfo.GetAscentLine();
+                KernelGeom.LineSegment descentLine = textInfo.GetDescentLine();
+
+                KernelGeom.Vector[] points =
+                {
+                    ascentLine.GetStartPoint(),
+                    ascentLine.GetEndPoint(),
+                    descentLine.GetStartPoint(),
+                    descentLine.GetEndPoint()
+                };
+
+                float minX = points.Min(point => point.Get(KernelGeom.Vector.I1));
+                float maxX = points.Max(point => point.Get(KernelGeom.Vector.I1));
+                float minY = points.Min(point => point.Get(KernelGeom.Vector.I2));
+                float maxY = points.Max(point => point.Get(KernelGeom.Vector.I2));
+
+                return new KernelGeom.Rectangle(
+                    minX,
+                    minY,
+                    Math.Max(0.1f, maxX - minX),
+                    Math.Max(0.1f, maxY - minY));
             }
         }
 
@@ -8430,11 +8454,13 @@ namespace AnonPDF
 
         private static void AddLocationForSpan(CachedLine line, int startIndex, int length, List<TextLocation> locations)
         {
-            KernelGeom.Rectangle textRect = GetSearchResultRectangle(line, startIndex, length);
+            List<KernelGeom.Rectangle> textRects = GetSearchResultRectangles(line, startIndex, length);
+            KernelGeom.Rectangle textRect = UnionTextRectangles(textRects);
             if (textRect != null)
             {
                 locations.Add(new TextLocation(line.PageNumber, line.PageRotation, textRect, line.IsOcr)
                 {
+                    HighlightRects = textRects != null && textRects.Count > 1 ? textRects : null,
                     Source = IsOutOfPageBounds(textRect, line.PageWidth, line.PageHeight)
                         ? LocationSource.OutOfBounds
                         : LocationSource.Normal
@@ -8444,18 +8470,58 @@ namespace AnonPDF
 
         private static KernelGeom.Rectangle GetSearchResultRectangle(CachedLine line, int startIndex, int length)
         {
+            return UnionTextRectangles(GetSearchResultRectangles(line, startIndex, length));
+        }
+
+        private static List<KernelGeom.Rectangle> GetSearchResultRectangles(CachedLine line, int startIndex, int length)
+        {
+            List<KernelGeom.Rectangle> textRects = GetTextFragmentRectangles(line, startIndex, length);
+            KernelGeom.Rectangle textRect = UnionTextRectangles(textRects);
             if (line?.IsOcr == true && TryGetExactOcrWordRectangle(line, startIndex, length, out KernelGeom.Rectangle exactWordRect))
             {
-                return exactWordRect;
+                if (ShouldPreferExactOcrWordRectangle(exactWordRect, textRect))
+                {
+                    return new List<KernelGeom.Rectangle> { exactWordRect };
+                }
+
+                return textRects;
             }
 
-            KernelGeom.Rectangle textRect = GetTextFragmentRectangle(line, startIndex, length);
             if (textRect == null || line?.IsOcr != true)
             {
-                return textRect;
+                return textRects;
             }
 
-            return ExpandOcrTextFragmentRectangle(line, startIndex, length, textRect);
+            return new List<KernelGeom.Rectangle> { ExpandOcrTextFragmentRectangle(line, startIndex, length, textRect) };
+        }
+
+        private static bool ShouldPreferExactOcrWordRectangle(KernelGeom.Rectangle exactWordRect, KernelGeom.Rectangle textRect)
+        {
+            if (exactWordRect == null || exactWordRect.GetWidth() <= 0f || exactWordRect.GetHeight() <= 0f)
+            {
+                return false;
+            }
+
+            if (textRect == null || textRect.GetWidth() <= 0f || textRect.GetHeight() <= 0f)
+            {
+                return true;
+            }
+
+            float exactArea = exactWordRect.GetWidth() * exactWordRect.GetHeight();
+            float textArea = textRect.GetWidth() * textRect.GetHeight();
+            if (textArea <= 0f)
+            {
+                return true;
+            }
+
+            bool exactMuchWider = exactWordRect.GetWidth() > textRect.GetWidth() * 1.6f;
+            bool exactMuchTaller = exactWordRect.GetHeight() > textRect.GetHeight() * 1.6f;
+            if (exactArea > textArea * 2.25f && (exactMuchWider || exactMuchTaller))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         private static bool TryGetExactOcrWordRectangle(
@@ -8501,9 +8567,10 @@ namespace AnonPDF
                 return fallbackRect;
             }
 
-            float padX = Math.Max(OcrSearchMinimumHorizontalPadding, fallbackRect.GetHeight() * OcrSearchHorizontalPaddingRatio);
-            float padRight = Math.Max(OcrSearchMinimumRightPadding, fallbackRect.GetHeight() * OcrSearchRightPaddingRatio);
-            float padY = Math.Max(OcrSearchMinimumVerticalPadding, fallbackRect.GetHeight() * OcrSearchVerticalPaddingRatio);
+            float paddingBasis = Math.Min(fallbackRect.GetWidth(), fallbackRect.GetHeight());
+            float padX = Math.Max(OcrSearchMinimumHorizontalPadding, paddingBasis * OcrSearchHorizontalPaddingRatio);
+            float padRight = Math.Max(OcrSearchMinimumRightPadding, paddingBasis * OcrSearchRightPaddingRatio);
+            float padY = Math.Max(OcrSearchMinimumVerticalPadding, paddingBasis * OcrSearchVerticalPaddingRatio);
             float left = fallbackRect.GetX() - padX;
             float bottom = fallbackRect.GetY() - padY;
             float right = fallbackRect.GetX() + fallbackRect.GetWidth() + padRight;
@@ -8533,25 +8600,139 @@ namespace AnonPDF
 
         private static KernelGeom.Rectangle GetTextFragmentRectangle(CachedLine line, int startIndex, int length)
         {
+            return UnionTextRectangles(GetTextFragmentRectangles(line, startIndex, length));
+        }
+
+        private static List<KernelGeom.Rectangle> GetTextFragmentRectangles(CachedLine line, int startIndex, int length)
+        {
             if (string.IsNullOrEmpty(line.Text) || startIndex < 0 || startIndex + length > line.Text.Length)
                 return null;
+
+            if (line.Characters == null || line.Characters.Count == 0)
+                return null;
+
+            int endExclusive = Math.Min(startIndex + length, line.Characters.Count);
+            if (startIndex >= endExclusive)
+                return null;
+
+            float maxAllowedGap = GetMaxAllowedTextFragmentGap(line, startIndex, endExclusive);
+            var rectangles = new List<KernelGeom.Rectangle>();
+            float minX = float.MaxValue;
+            float maxX = float.MinValue;
+            float minY = float.MaxValue;
+            float maxY = float.MinValue;
+            float currentRight = float.MinValue;
+
+            for (int i = startIndex; i < endExclusive; i++)
+            {
+                var charInfo = line.Characters[i];
+                if (charInfo?.BoundingBox == null ||
+                    charInfo.BoundingBox.GetWidth() <= 0f ||
+                    charInfo.BoundingBox.GetHeight() <= 0f)
+                {
+                    continue;
+                }
+
+                if (char.IsWhiteSpace(charInfo.Char))
+                {
+                    continue;
+                }
+
+                float charX = charInfo.BoundingBox.GetX();
+                float charRight = charX + charInfo.BoundingBox.GetWidth();
+                if (currentRight > float.MinValue &&
+                    charX - currentRight > maxAllowedGap &&
+                    minX != float.MaxValue)
+                {
+                    rectangles.Add(new KernelGeom.Rectangle(minX, minY, maxX - minX, maxY - minY));
+                    minX = float.MaxValue;
+                    maxX = float.MinValue;
+                    minY = float.MaxValue;
+                    maxY = float.MinValue;
+                }
+
+                minX = Math.Min(minX, charX);
+                maxX = Math.Max(maxX, charRight);
+                minY = Math.Min(minY, charInfo.BoundingBox.GetY());
+                maxY = Math.Max(maxY, charInfo.BoundingBox.GetY() + charInfo.BoundingBox.GetHeight());
+                currentRight = Math.Max(currentRight, charRight);
+            }
+
+            if (minX != float.MaxValue && maxX != float.MinValue && minY != float.MaxValue && maxY != float.MinValue)
+            {
+                rectangles.Add(new KernelGeom.Rectangle(minX, minY, maxX - minX, maxY - minY));
+            }
+
+            return rectangles.Count > 0 ? rectangles : null;
+        }
+
+        private static float GetMaxAllowedTextFragmentGap(CachedLine line, int startIndex, int endExclusive)
+        {
+            const float minimumGap = 4f;
+            const float widthRatio = 2.5f;
+
+            if (line?.Characters == null || startIndex < 0 || endExclusive <= startIndex)
+            {
+                return minimumGap;
+            }
+
+            var widths = new List<float>();
+            for (int i = startIndex; i < endExclusive && i < line.Characters.Count; i++)
+            {
+                CharacterInfo charInfo = line.Characters[i];
+                if (charInfo == null ||
+                    charInfo.BoundingBox == null ||
+                    char.IsWhiteSpace(charInfo.Char))
+                {
+                    continue;
+                }
+
+                float width = charInfo.BoundingBox.GetWidth();
+                if (width > 0.1f)
+                {
+                    widths.Add(width);
+                }
+            }
+
+            if (widths.Count == 0)
+            {
+                return minimumGap;
+            }
+
+            widths.Sort();
+            float medianWidth = widths[widths.Count / 2];
+            return Math.Max(minimumGap, medianWidth * widthRatio);
+        }
+
+        private static KernelGeom.Rectangle UnionTextRectangles(List<KernelGeom.Rectangle> rectangles)
+        {
+            if (rectangles == null || rectangles.Count == 0)
+            {
+                return null;
+            }
 
             float minX = float.MaxValue;
             float maxX = float.MinValue;
             float minY = float.MaxValue;
             float maxY = float.MinValue;
 
-            for (int i = startIndex; i < startIndex + length && i < line.Characters.Count; i++)
+            foreach (KernelGeom.Rectangle rect in rectangles)
             {
-                var charInfo = line.Characters[i];
-                minX = Math.Min(minX, charInfo.BoundingBox.GetX());
-                maxX = Math.Max(maxX, charInfo.BoundingBox.GetX() + charInfo.BoundingBox.GetWidth());
-                minY = Math.Min(minY, charInfo.BoundingBox.GetY());
-                maxY = Math.Max(maxY, charInfo.BoundingBox.GetY() + charInfo.BoundingBox.GetHeight());
+                if (rect == null || rect.GetWidth() <= 0f || rect.GetHeight() <= 0f)
+                {
+                    continue;
+                }
+
+                minX = Math.Min(minX, rect.GetX());
+                maxX = Math.Max(maxX, rect.GetX() + rect.GetWidth());
+                minY = Math.Min(minY, rect.GetY());
+                maxY = Math.Max(maxY, rect.GetY() + rect.GetHeight());
             }
 
             if (minX == float.MaxValue || maxX == float.MinValue || minY == float.MaxValue || maxY == float.MinValue)
+            {
                 return null;
+            }
 
             return new KernelGeom.Rectangle(minX, minY, maxX - minX, maxY - minY);
         }
