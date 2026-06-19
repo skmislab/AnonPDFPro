@@ -7646,8 +7646,6 @@ namespace AnonPDF
                 snapshot.Items[0].Raster != null;
 
             var targetPageSize = GetPageSizeWithOffset(currentPage);
-            float sourcePageWidth = snapshot.SourcePageWidth > 0f ? snapshot.SourcePageWidth : targetPageSize.Width;
-            float sourcePageHeight = snapshot.SourcePageHeight > 0f ? snapshot.SourcePageHeight : targetPageSize.Height;
             float sourceBoundsWidth = Math.Max(1f, snapshot.SourceBounds.Width);
             float sourceBoundsHeight = Math.Max(1f, snapshot.SourceBounds.Height);
             const float pasteMarginDoc = 4f;
@@ -7662,10 +7660,9 @@ namespace AnonPDF
 
             float scaledBoundsWidth = sourceBoundsWidth * pasteScale;
             float scaledBoundsHeight = sourceBoundsHeight * pasteScale;
-            float relativeBaseX = sourcePageWidth > 0f ? snapshot.SourceBounds.X / sourcePageWidth : 0f;
-            float relativeBaseY = sourcePageHeight > 0f ? snapshot.SourceBounds.Y / sourcePageHeight : 0f;
-            float baseX = targetPageSize.Width * relativeBaseX;
-            float baseY = targetPageSize.Height * relativeBaseY;
+            PointF pasteCenter = GetVisibleDocumentCenterPoint();
+            float baseX = pasteCenter.X - (scaledBoundsWidth / 2f);
+            float baseY = pasteCenter.Y - (scaledBoundsHeight / 2f);
             baseX = Math.Max(pasteMarginDoc, Math.Min(targetPageSize.Width - pasteMarginDoc - scaledBoundsWidth, baseX));
             baseY = Math.Max(pasteMarginDoc, Math.Min(targetPageSize.Height - pasteMarginDoc - scaledBoundsHeight, baseY));
             DateTime now = DateTime.UtcNow;
@@ -7769,12 +7766,10 @@ namespace AnonPDF
                         RectangleF bounds;
                         if (isSingleRasterPaste)
                         {
-                            var pageSize = GetPageSizeWithOffset(currentPage);
-                            float centerX = pageSize.Width / 2f;
-                            float centerY = pageSize.Height / 2f;
+                            PointF center = GetVisibleDocumentCenterPoint();
                             bounds = new RectangleF(
-                                centerX - ((item.Bounds.Width * pasteScale) / 2f),
-                                centerY - ((item.Bounds.Height * pasteScale) / 2f),
+                                center.X - ((item.Bounds.Width * pasteScale) / 2f),
+                                center.Y - ((item.Bounds.Height * pasteScale) / 2f),
                                 item.Bounds.Width * pasteScale,
                                 item.Bounds.Height * pasteScale);
                         }
@@ -15502,31 +15497,40 @@ namespace AnonPDF
 
         private RectangleF GetCenteredAnnotationBounds(float width, float height)
         {
-            ZoomPanel panel = mainAppSplitContainer.Panel2.Controls[0] as ZoomPanel;
-            if (panel == null)
+            PointF center = GetVisibleDocumentCenterPoint();
+            return new RectangleF(center.X - width / 2f, center.Y - height / 2f, width, height);
+        }
+
+        private PointF GetVisibleDocumentCenterPoint()
+        {
+            var pageSize = GetPageSizeWithOffset(currentPage);
+            PointF fallbackCenter = new PointF(pageSize.Width / 2f, pageSize.Height / 2f);
+
+            ZoomPanel panel = GetZoomPanel();
+            if (panel == null || pdfViewer == null || scaleFactor <= 0f)
             {
-                return new RectangleF(0f, 0f, width, height);
+                return fallbackCenter;
             }
 
-            if (scaleFactor <= 0f)
+            int viewW = Math.Min(panel.ClientSize.Width, pdfViewer.Width);
+            int viewH = Math.Min(panel.ClientSize.Height, pdfViewer.Height);
+            if (viewW <= 0 || viewH <= 0)
             {
-                return new RectangleF(0f, 0f, width, height);
+                return fallbackCenter;
             }
 
-            int panelW = panel.ClientSize.Width;
-            int panelH = panel.ClientSize.Height;
-            int imgW = pdfViewer.Width;
-            int imgH = pdfViewer.Height;
-            int viewW = Math.Min(panelW, imgW);
-            int viewH = Math.Min(panelH, imgH);
-            int scrollX = panel.HorizontalScroll.Value;
-            int scrollY = panel.VerticalScroll.Value;
-            float docCenterX = (scrollX + viewW / 2f) / scaleFactor;
-            float docCenterY = (scrollY + viewH / 2f) / scaleFactor;
-            float x = docCenterX - width / 2f;
-            float y = docCenterY - height / 2f;
+            float centerX = (panel.HorizontalScroll.Value + viewW / 2f) / scaleFactor;
+            float centerY = (panel.VerticalScroll.Value + viewH / 2f) / scaleFactor;
+            if (pageSize.Width > 0f)
+            {
+                centerX = Math.Max(0f, Math.Min(pageSize.Width, centerX));
+            }
+            if (pageSize.Height > 0f)
+            {
+                centerY = Math.Max(0f, Math.Min(pageSize.Height, centerY));
+            }
 
-            return new RectangleF(x, y, width, height);
+            return new PointF(centerX, centerY);
         }
 
         private void DuplicateAnnotation(TextAnnotation source)
@@ -43045,7 +43049,7 @@ namespace AnonPDF
             }
 
             float defaultLength = Math.Max(60f, Math.Min(pageSize.Width, pageSize.Height) * 0.18f);
-            var center = new PointF(pageSize.Width / 2f, pageSize.Height / 2f);
+            var center = GetVisibleDocumentCenterPoint();
             var start = new PointF(center.X - (defaultLength / 2f), center.Y);
             var end = new PointF(center.X + (defaultLength / 2f), center.Y);
 
@@ -43407,8 +43411,9 @@ namespace AnonPDF
             scale = Math.Min(scale, 1f);
             float width = sourceWidth * scale;
             float height = sourceHeight * scale;
-            float x = (pageSize.Width - width) / 2f;
-            float y = (pageSize.Height - height) / 2f;
+            PointF center = GetVisibleDocumentCenterPoint();
+            float x = center.X - width / 2f;
+            float y = center.Y - height / 2f;
             return new RectangleF(x, y, width, height);
         }
 
@@ -43423,8 +43428,9 @@ namespace AnonPDF
             float viewScale = Math.Max(0.01f, scaleFactor);
             float width = sourceWidth / viewScale;
             float height = sourceHeight / viewScale;
-            float x = (pageSize.Width - width) / 2f;
-            float y = (pageSize.Height - height) / 2f;
+            PointF center = GetVisibleDocumentCenterPoint();
+            float x = center.X - width / 2f;
+            float y = center.Y - height / 2f;
             return new RectangleF(x, y, width, height);
         }
 
