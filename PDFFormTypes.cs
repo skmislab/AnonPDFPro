@@ -2892,6 +2892,7 @@ namespace AnonPDF
 
     public partial class MergeFilesForm : Form
     {
+        private const string MergeFilesDragDataFormat = "AnonPDF.MergeFiles";
         private BindingList<string> pdfFiles = new BindingList<string>();
         private ListBox listBoxFiles;
         private Button buttonAddFiles;
@@ -2902,6 +2903,8 @@ namespace AnonPDF
         private Button buttonClearAll;
         private Button buttonMerge;
         private Button buttonCancel;
+        private Point listBoxDragStartPoint;
+        private int listBoxDragStartIndex = -1;
 
         public MergeFilesForm()
         {
@@ -2925,7 +2928,8 @@ namespace AnonPDF
                 Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(20), PDFForm.ScaleForDpiStatic(20)),
                 Size = PDFForm.ScaleSizeForDpiStatic(400, 280),
                 HorizontalScrollbar = true,
-                SelectionMode = SelectionMode.MultiExtended
+                SelectionMode = SelectionMode.MultiExtended,
+                AllowDrop = true
             };
 
             buttonAddFiles = new Button { Text = Resources.Merge_AddFiles, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(20)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
@@ -2955,6 +2959,10 @@ namespace AnonPDF
             buttonDown.Click += ButtonDown_Click;
             buttonMerge.Click += ButtonMerge_Click;
             buttonCancel.Click += ButtonCancel_Click;
+            listBoxFiles.MouseDown += ListBoxFiles_MouseDown;
+            listBoxFiles.MouseMove += ListBoxFiles_MouseMove;
+            listBoxFiles.DragOver += ListBoxFiles_DragOver;
+            listBoxFiles.DragDrop += ListBoxFiles_DragDrop;
 
             this.CancelButton = buttonCancel;
             this.AcceptButton = null;
@@ -3067,6 +3075,121 @@ namespace AnonPDF
                         listBoxFiles.SetSelected(idx, true);
                 }
             }));
+        }
+
+        private void ListBoxFiles_MouseDown(object sender, MouseEventArgs e)
+        {
+            listBoxDragStartIndex = listBoxFiles.IndexFromPoint(e.Location);
+            listBoxDragStartPoint = e.Location;
+
+            if (e.Button != MouseButtons.Left || listBoxDragStartIndex < 0)
+            {
+                return;
+            }
+
+            if (!listBoxFiles.GetSelected(listBoxDragStartIndex))
+            {
+                listBoxFiles.ClearSelected();
+                listBoxFiles.SetSelected(listBoxDragStartIndex, true);
+            }
+        }
+
+        private void ListBoxFiles_MouseMove(object sender, MouseEventArgs e)
+        {
+            if ((e.Button & MouseButtons.Left) != MouseButtons.Left ||
+                listBoxDragStartIndex < 0 ||
+                listBoxFiles.SelectedItems.Count == 0)
+            {
+                return;
+            }
+
+            var dragRect = new Rectangle(
+                listBoxDragStartPoint.X - SystemInformation.DragSize.Width / 2,
+                listBoxDragStartPoint.Y - SystemInformation.DragSize.Height / 2,
+                SystemInformation.DragSize.Width,
+                SystemInformation.DragSize.Height);
+
+            if (dragRect.Contains(e.Location))
+            {
+                return;
+            }
+
+            var selectedItems = listBoxFiles.SelectedItems.Cast<string>().ToList();
+            listBoxFiles.DoDragDrop(new DataObject(MergeFilesDragDataFormat, selectedItems), DragDropEffects.Move);
+            listBoxDragStartIndex = -1;
+        }
+
+        private void ListBoxFiles_DragOver(object sender, DragEventArgs e)
+        {
+            e.Effect = e.Data.GetDataPresent(MergeFilesDragDataFormat)
+                ? DragDropEffects.Move
+                : DragDropEffects.None;
+        }
+
+        private void ListBoxFiles_DragDrop(object sender, DragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(MergeFilesDragDataFormat))
+            {
+                return;
+            }
+
+            var selectedItems = e.Data.GetData(MergeFilesDragDataFormat) as List<string>;
+            if (selectedItems == null || selectedItems.Count == 0)
+            {
+                return;
+            }
+
+            Point clientPoint = listBoxFiles.PointToClient(new Point(e.X, e.Y));
+            int targetIndex = GetDropTargetIndex(clientPoint);
+            MoveSelectedFilesToIndex(selectedItems, targetIndex);
+        }
+
+        private int GetDropTargetIndex(Point clientPoint)
+        {
+            int index = listBoxFiles.IndexFromPoint(clientPoint);
+            if (index < 0)
+            {
+                return pdfFiles.Count;
+            }
+
+            Rectangle itemRect = listBoxFiles.GetItemRectangle(index);
+            if (clientPoint.Y > itemRect.Top + itemRect.Height / 2)
+            {
+                index++;
+            }
+
+            return Math.Max(0, Math.Min(index, pdfFiles.Count));
+        }
+
+        private void MoveSelectedFilesToIndex(List<string> selectedItems, int targetIndex)
+        {
+            var selectedSet = new HashSet<string>(selectedItems);
+            var selectedIndices = pdfFiles
+                .Select((file, index) => new { file, index })
+                .Where(x => selectedSet.Contains(x.file))
+                .Select(x => x.index)
+                .ToList();
+
+            if (selectedIndices.Count == 0)
+            {
+                return;
+            }
+
+            int adjustedTargetIndex = targetIndex - selectedIndices.Count(i => i < targetIndex);
+            var orderedItems = selectedIndices.Select(i => pdfFiles[i]).ToList();
+
+            for (int i = selectedIndices.Count - 1; i >= 0; i--)
+            {
+                pdfFiles.RemoveAt(selectedIndices[i]);
+            }
+
+            adjustedTargetIndex = Math.Max(0, Math.Min(adjustedTargetIndex, pdfFiles.Count));
+            for (int i = 0; i < orderedItems.Count; i++)
+            {
+                pdfFiles.Insert(adjustedTargetIndex + i, orderedItems[i]);
+            }
+
+            ReselectItems(orderedItems);
         }
 
         private void ButtonCancel_Click(object sender, EventArgs e)
@@ -7885,7 +8008,7 @@ namespace AnonPDF
                 case "PERSON": case "PER": case "persName":
                 case "PESEL": case "NIP": case "REGON": case "KRS": case "KW":
                 case "IDENTITY_CARD": case "BANK_ACCOUNT": case "LOAN_NUMBER":
-                case "PHONE": case "EMAIL": case "VIN":
+                case "PHONE": case "EMAIL": case "ADE": case "VIN":
                     return 0; // personal data — highest priority
                 case "LOCATION": case "LOC": case "GPE": case "placeName": case "geogName":
                 case "POSTAL_CODE":

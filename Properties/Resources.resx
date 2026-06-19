@@ -537,6 +537,9 @@ końcowy i trzeci punkt łuku.</value>
   <data name="Scope_SCOPE_EMAIL" xml:space="preserve">
     <value>Adres e-mail</value>
   </data>
+  <data name="Scope_SCOPE_ADE" xml:space="preserve">
+    <value>Adres ADE</value>
+  </data>
   <data name="Scope_SCOPE_PHONE" xml:space="preserve">
     <value>Numer telefonu</value>
   </data>
@@ -599,6 +602,9 @@ końcowy i trzeci punkt łuku.</value>
   </data>
   <data name="ScopeDesc_SCOPE_EMAIL" xml:space="preserve">
     <value>Adres poczty elektronicznej</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_ADE" xml:space="preserve">
+    <value>Adres do doręczeń elektronicznych (ADE)</value>
   </data>
   <data name="ScopeDesc_SCOPE_PHONE" xml:space="preserve">
     <value>Numer telefonu stacjonarnego lub komórkowego</value>

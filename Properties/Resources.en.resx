@@ -537,6 +537,9 @@ and a third arc point.</value>
   <data name="Scope_SCOPE_EMAIL" xml:space="preserve">
     <value>Email address</value>
   </data>
+  <data name="Scope_SCOPE_ADE" xml:space="preserve">
+    <value>ADE address</value>
+  </data>
   <data name="Scope_SCOPE_PHONE" xml:space="preserve">
     <value>Phone number</value>
   </data>
@@ -599,6 +602,9 @@ and a third arc point.</value>
   </data>
   <data name="ScopeDesc_SCOPE_EMAIL" xml:space="preserve">
     <value>Electronic mail address</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_ADE" xml:space="preserve">
+    <value>Address for electronic delivery (ADE)</value>
   </data>
   <data name="ScopeDesc_SCOPE_PHONE" xml:space="preserve">
     <value>Landline or mobile phone number</value>

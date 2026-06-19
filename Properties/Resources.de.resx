@@ -798,6 +798,9 @@ und dritten Punkt setzen.</value>
   <data name="Scope_SCOPE_EMAIL" xml:space="preserve">
     <value>E-Mail-Adresse</value>
   </data>
+  <data name="Scope_SCOPE_ADE" xml:space="preserve">
+    <value>ADE-Adresse</value>
+  </data>
   <data name="Scope_SCOPE_PHONE" xml:space="preserve">
     <value>Telefonnummer</value>
   </data>
@@ -860,6 +863,9 @@ und dritten Punkt setzen.</value>
   </data>
   <data name="ScopeDesc_SCOPE_EMAIL" xml:space="preserve">
     <value>Elektronische Postanschrift</value>
+  </data>
+  <data name="ScopeDesc_SCOPE_ADE" xml:space="preserve">
+    <value>Adresse für elektronische Zustellung (ADE)</value>
   </data>
   <data name="ScopeDesc_SCOPE_PHONE" xml:space="preserve">
     <value>Festnetz- oder Mobiltelefonnummer</value>

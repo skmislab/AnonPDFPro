@@ -55271,6 +55271,7 @@ namespace AnonPDF
                 case "IDENTITY_CARD": return "Scope_SCOPE_IDENTITY_CARD";
                 case "POSTAL_CODE":   return "Scope_SCOPE_POSTAL_CODE";
                 case "EMAIL":         return "Scope_SCOPE_EMAIL";
+                case "ADE":           return "Scope_SCOPE_ADE";
                 case "PHONE":         return "Scope_SCOPE_PHONE";
                 case "URL":           return "Scope_SCOPE_URL";
                 case "BANK_ACCOUNT":  return "Scope_SCOPE_BANK_ACCOUNT";
