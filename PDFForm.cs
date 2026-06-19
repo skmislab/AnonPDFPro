@@ -32012,6 +32012,7 @@ namespace AnonPDF
             // Sort by area ascending so smaller (more specific) images take priority over full-page backgrounds
             var pageFigs = mergedFigures
                 .Where(f => f.PageNumber == currentPage && f.BBox != null)
+                .Where(f => !IsFullPageScanLikeFigure(f))
                 .OrderBy(f => f.BBox.GetWidth() * f.BBox.GetHeight())
                 .ToList();
             LogDebug($"TryShowAltTextContextMenu: click={location} page={currentPage} rot={rotation} pageFigs={pageFigs.Count}/{allFigures.Count}");
@@ -52165,13 +52166,16 @@ namespace AnonPDF
             if (redactionBlocks.Any(block => block != null && block.PageNumber == currentPage && block.Bounds.Contains(docX, docY)))
                 return true;
 
-            // AltText highlight areas act as interactive content (right-click shows edit menu)
+            // AltText highlight areas act as interactive content (right-click shows edit menu).
+            // Full-page scan images are skipped so right-button panning remains available.
             if (searchLocations != null)
             {
                 int rotation = GetEffectiveRotationDegrees(currentPage);
+                var pageSize = GetPageSizeWithOffset(currentPage);
                 foreach (var loc in searchLocations)
                 {
                     if (loc.Source != LocationSource.AltText || loc.PageNumber != currentPage) continue;
+                    if (IsFullPageScanLikeRect(loc.Rect, pageSize.Width, pageSize.Height)) continue;
                     var vr = ConvertPdfToViewCoordinates(
                         new RectangleF(loc.Rect.GetX(), loc.Rect.GetY(), loc.Rect.GetWidth(), loc.Rect.GetHeight()),
                         currentPage, rotation);
@@ -52193,6 +52197,7 @@ namespace AnonPDF
                 foreach (var fig in figs)
                 {
                     if (fig.PageNumber != currentPage || fig.BBox == null) continue;
+                    if (IsFullPageScanLikeFigure(fig)) continue;
                     var vr = ConvertPdfToViewCoordinates(
                         new RectangleF(fig.BBox.GetX(), fig.BBox.GetY(), fig.BBox.GetWidth(), fig.BBox.GetHeight()),
                         currentPage, figRot);
@@ -52205,6 +52210,37 @@ namespace AnonPDF
             }
 
             return false;
+        }
+
+        private static bool IsFullPageScanLikeFigure(PdfTextSearcher.AltTextEntry fig)
+        {
+            return fig != null && IsFullPageScanLikeRect(fig.BBox, fig.PageWidth, fig.PageHeight);
+        }
+
+        private static bool IsFullPageScanLikeRect(iText.Kernel.Geom.Rectangle rect, float pageWidth, float pageHeight)
+        {
+            if (rect == null || pageWidth <= 0f || pageHeight <= 0f)
+            {
+                return false;
+            }
+
+            float pageArea = pageWidth * pageHeight;
+            if (pageArea <= 0f)
+            {
+                return false;
+            }
+
+            float rectArea = rect.GetWidth() * rect.GetHeight();
+            if (rectArea / pageArea < 0.85f)
+            {
+                return false;
+            }
+
+            const float edgeTolerancePt = 12f;
+            return rect.GetX() <= edgeTolerancePt &&
+                   rect.GetY() <= edgeTolerancePt &&
+                   rect.GetX() + rect.GetWidth() >= pageWidth - edgeTolerancePt &&
+                   rect.GetY() + rect.GetHeight() >= pageHeight - edgeTolerancePt;
         }
 
 
