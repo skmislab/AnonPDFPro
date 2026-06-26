@@ -119,6 +119,12 @@ namespace AnonPDF
 
         public float LeaderHeadWidth { get; set; }
 
+        public int LeaderFillColorArgb { get; set; }
+
+        public int LeaderBorderColorArgb { get; set; }
+
+        public float LeaderBorderWidth { get; set; }
+
         public string AnnotationContentMode { get; set; }
 
         public string AnnotationRichText { get; set; }
@@ -218,6 +224,9 @@ namespace AnonPDF
             LeaderEndPoint = PointF.Empty;
             LeaderHeadLength = PDFForm.DefaultArrowHeadLength;
             LeaderHeadWidth = PDFForm.DefaultArrowHeadWidth;
+            LeaderFillColorArgb = System.Drawing.Color.Transparent.ToArgb();
+            LeaderBorderColorArgb = System.Drawing.Color.Transparent.ToArgb();
+            LeaderBorderWidth = 0f;
             AnnotationContentMode = "plain";
             AnnotationRichText = null;
             AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Left; // Default left alignment
@@ -248,6 +257,9 @@ namespace AnonPDF
             LeaderEndPoint = PointF.Empty;
             LeaderHeadLength = PDFForm.DefaultArrowHeadLength;
             LeaderHeadWidth = PDFForm.DefaultArrowHeadWidth;
+            LeaderFillColorArgb = System.Drawing.Color.Transparent.ToArgb();
+            LeaderBorderColorArgb = System.Drawing.Color.Transparent.ToArgb();
+            LeaderBorderWidth = 0f;
             AnnotationContentMode = "plain";
             AnnotationRichText = null;
             AnnotationAlignment = alignment;
@@ -317,6 +329,12 @@ namespace AnonPDF
         private NumericUpDown nudLeaderHeadLength;
         private Label lblLeaderHeadWidth;
         private NumericUpDown nudLeaderHeadWidth;
+        private Label lblLeaderFillColor;
+        private Button btnLeaderFillColor;
+        private Label lblLeaderBorderColor;
+        private Button btnLeaderBorderColor;
+        private Label lblLeaderBorderWidth;
+        private NumericUpDown nudLeaderBorderWidth;
         private Label lblFontDisplay;
         private GroupBox groupBoxAlignment;
         private RadioButton rbLeft;
@@ -346,6 +364,9 @@ namespace AnonPDF
         public float LeaderLineWidth { get; set; }
         public float LeaderHeadLength { get; set; }
         public float LeaderHeadWidth { get; set; }
+        public System.Drawing.Color LeaderFillColor { get; set; }
+        public System.Drawing.Color LeaderBorderColor { get; set; }
+        public float LeaderBorderWidth { get; set; }
         public bool IsRichTextMode { get; set; }
         public string AnnotationRichText { get; set; }
         public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
@@ -370,6 +391,8 @@ namespace AnonPDF
             if (AnnotationColor == System.Drawing.Color.Empty) AnnotationColor = System.Drawing.Color.Black;
             if (AnnotationBackgroundColor == System.Drawing.Color.Empty) AnnotationBackgroundColor = System.Drawing.Color.Transparent;
             if (AnnotationBorderColor == System.Drawing.Color.Empty) AnnotationBorderColor = System.Drawing.Color.Black;
+            if (LeaderFillColor == System.Drawing.Color.Empty) LeaderFillColor = System.Drawing.Color.Transparent;
+            if (LeaderBorderColor == System.Drawing.Color.Empty) LeaderBorderColor = System.Drawing.Color.Transparent;
             if (AnnotationRichText == null) AnnotationRichText = string.Empty;
             if (AnnotationBackgroundColor.A > 0)
             {
@@ -400,7 +423,7 @@ namespace AnonPDF
             this.Text = Resources.EditText_Title;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
-            this.ClientSize = PDFForm.ScaleSizeForDpiStatic(430, 730);
+            this.ClientSize = PDFForm.ScaleSizeForDpiStatic(430, 760);
             this.MaximizeBox = false;
                         this.MinimizeBox = false;
             this.AutoScroll = true;
@@ -577,7 +600,7 @@ namespace AnonPDF
                 DecimalPlaces = 3,
                 Minimum = 0,
                 Maximum = 24,
-                Increment = 0.001m
+                Increment = 0.1m
             };
             nudBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
 
@@ -620,10 +643,10 @@ namespace AnonPDF
             {
                 Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(399)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
-                DecimalPlaces = 1,
+                DecimalPlaces = 3,
                 Minimum = 0.5m,
                 Maximum = 24,
-                Increment = 0.5m
+                Increment = 0.1m
             };
             nudLeaderLineWidth.ValueChanged += (_, __) => TryApplyChanges();
 
@@ -631,16 +654,16 @@ namespace AnonPDF
             {
                 Text = GetResourceText("EditText_LabelLeaderHeadLength"),
                 AutoSize = true,
-                Location = new Point(PDFForm.ScaleForDpiStatic(235), PDFForm.ScaleForDpiStatic(402))
+                Location = new Point(PDFForm.ScaleForDpiStatic(235), PDFForm.ScaleForDpiStatic(430))
             };
             nudLeaderHeadLength = new NumericUpDown
             {
-                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(399)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(427)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
-                DecimalPlaces = 1,
+                DecimalPlaces = 3,
                 Minimum = 4,
                 Maximum = 120,
-                Increment = 1m
+                Increment = 0.1m
             };
             nudLeaderHeadLength.ValueChanged += (_, __) => TryApplyChanges();
 
@@ -654,18 +677,65 @@ namespace AnonPDF
             {
                 Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(427)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
-                DecimalPlaces = 1,
+                DecimalPlaces = 3,
                 Minimum = 4,
                 Maximum = 120,
-                Increment = 1m
+                Increment = 0.1m
             };
             nudLeaderHeadWidth.ValueChanged += (_, __) => TryApplyChanges();
+
+            lblLeaderFillColor = new Label
+            {
+                Text = GetResourceText("EditText_LabelLeaderFillColor"),
+                AutoSize = true,
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(458))
+            };
+            btnLeaderFillColor = new Button
+            {
+                Text = GetChooseColorButtonText(),
+                Location = new Point(PDFForm.ScaleForDpiStatic(145), PDFForm.ScaleForDpiStatic(454)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(28)),
+                UseVisualStyleBackColor = false
+            };
+            btnLeaderFillColor.Click += BtnLeaderFillColor_Click;
+
+            lblLeaderBorderColor = new Label
+            {
+                Text = GetResourceText("EditText_LabelLeaderBorderColor"),
+                AutoSize = true,
+                Location = new Point(PDFForm.ScaleForDpiStatic(235), PDFForm.ScaleForDpiStatic(458))
+            };
+            btnLeaderBorderColor = new Button
+            {
+                Text = GetChooseColorButtonText(),
+                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(454)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(28)),
+                UseVisualStyleBackColor = false
+            };
+            btnLeaderBorderColor.Click += BtnLeaderBorderColor_Click;
+
+            lblLeaderBorderWidth = new Label
+            {
+                Text = GetResourceText("EditText_LabelLeaderBorderWidth"),
+                AutoSize = true,
+                Location = new Point(PDFForm.ScaleForDpiStatic(235), PDFForm.ScaleForDpiStatic(402))
+            };
+            nudLeaderBorderWidth = new NumericUpDown
+            {
+                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(399)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(22)),
+                DecimalPlaces = 3,
+                Minimum = 0,
+                Maximum = 24,
+                Increment = 0.1m
+            };
+            nudLeaderBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
 
             // GroupBox for alignment selection
             groupBoxAlignment = new GroupBox
             {
                 Text = Resources.EditText_GroupAlignment,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(462)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(492)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(50))
             };
 
@@ -706,7 +776,7 @@ namespace AnonPDF
             groupBoxRotation = new GroupBox
             {
                 Text = Resources.EditText_GroupRotation,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(522)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(552)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(55))
             };
 
@@ -761,7 +831,7 @@ namespace AnonPDF
             groupBoxSymbols = new GroupBox
             {
                 Text = Resources.EditText_GroupSymbols,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(592)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(622)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(400), PDFForm.ScaleForDpiStatic(65))
             };
 
@@ -805,7 +875,7 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(PDFForm.ScaleForDpiStatic(240), PDFForm.ScaleForDpiStatic(678)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(240), PDFForm.ScaleForDpiStatic(708)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.OK
             };
@@ -814,7 +884,7 @@ namespace AnonPDF
             btnRestoreDefaults = new Button
             {
                 Text = GetResourceText("UI_Button_RestoreSettings"),
-                Location = new Point(PDFForm.ScaleForDpiStatic(90), PDFForm.ScaleForDpiStatic(678)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(90), PDFForm.ScaleForDpiStatic(708)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(140), PDFForm.ScaleForDpiStatic(30))
             };
             btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
@@ -822,7 +892,7 @@ namespace AnonPDF
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(678)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(330), PDFForm.ScaleForDpiStatic(708)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.Cancel
             };
@@ -852,6 +922,12 @@ namespace AnonPDF
             this.Controls.Add(nudLeaderHeadLength);
             this.Controls.Add(lblLeaderHeadWidth);
             this.Controls.Add(nudLeaderHeadWidth);
+            this.Controls.Add(lblLeaderFillColor);
+            this.Controls.Add(btnLeaderFillColor);
+            this.Controls.Add(lblLeaderBorderColor);
+            this.Controls.Add(btnLeaderBorderColor);
+            this.Controls.Add(lblLeaderBorderWidth);
+            this.Controls.Add(nudLeaderBorderWidth);
             this.Controls.Add(groupBoxAlignment);
             this.Controls.Add(groupBoxRotation);
             this.Controls.Add(groupBoxSymbols);
@@ -977,6 +1053,18 @@ namespace AnonPDF
             {
                 nudLeaderHeadWidth.Value = (decimal)PDFForm.NormalizeLeaderHeadWidth(LeaderHeadWidth);
             }
+            if (nudLeaderBorderWidth != null)
+            {
+                nudLeaderBorderWidth.Value = (decimal)NormalizeLeaderBorderWidth(LeaderBorderWidth);
+            }
+            if (btnLeaderFillColor != null)
+            {
+                LeaderFillColor = LeaderFillColor.IsEmpty ? System.Drawing.Color.Transparent : LeaderFillColor;
+            }
+            if (btnLeaderBorderColor != null)
+            {
+                LeaderBorderColor = LeaderBorderColor.IsEmpty ? System.Drawing.Color.Transparent : LeaderBorderColor;
+            }
             if (chkNoBackgroundColor != null)
             {
                 chkNoBackgroundColor.Checked = AnnotationBackgroundColor.A <= 0;
@@ -996,6 +1084,7 @@ namespace AnonPDF
             SetRichMode(IsRichTextMode, updateState: false, reloadEditorContent: false, applyFormatting: false);
             ApplyAlignmentToEditor();
             UpdateLeaderControlsState();
+            UpdateColorControls();
         }
 
         private void UpdateLeaderControlsState()
@@ -1024,6 +1113,30 @@ namespace AnonPDF
             if (nudLeaderHeadWidth != null)
             {
                 nudLeaderHeadWidth.Enabled = enabled;
+            }
+            if (lblLeaderFillColor != null)
+            {
+                lblLeaderFillColor.Enabled = enabled;
+            }
+            if (btnLeaderFillColor != null)
+            {
+                btnLeaderFillColor.Enabled = enabled;
+            }
+            if (lblLeaderBorderColor != null)
+            {
+                lblLeaderBorderColor.Enabled = enabled;
+            }
+            if (btnLeaderBorderColor != null)
+            {
+                btnLeaderBorderColor.Enabled = enabled;
+            }
+            if (lblLeaderBorderWidth != null)
+            {
+                lblLeaderBorderWidth.Enabled = enabled;
+            }
+            if (nudLeaderBorderWidth != null)
+            {
+                nudLeaderBorderWidth.Enabled = enabled;
             }
         }
 
@@ -1101,12 +1214,63 @@ namespace AnonPDF
                 btnBorderColor.Text = GetChooseColorButtonText();
                 btnBorderColor.UseVisualStyleBackColor = false;
             }
+
+            if (lblLeaderFillColor != null) lblLeaderFillColor.ForeColor = labelColor;
+            if (btnLeaderFillColor != null)
+            {
+                System.Drawing.Color previewColor = GetLeaderFillPreviewColor();
+                btnLeaderFillColor.BackColor = previewColor;
+                btnLeaderFillColor.ForeColor = GetContrastingTextColor(previewColor);
+                btnLeaderFillColor.Text = GetChooseColorButtonText();
+                btnLeaderFillColor.UseVisualStyleBackColor = false;
+            }
+
+            if (lblLeaderBorderColor != null) lblLeaderBorderColor.ForeColor = labelColor;
+            if (btnLeaderBorderColor != null)
+            {
+                System.Drawing.Color previewColor = GetLeaderBorderPreviewColor();
+                btnLeaderBorderColor.BackColor = previewColor;
+                btnLeaderBorderColor.ForeColor = GetContrastingTextColor(previewColor);
+                btnLeaderBorderColor.Text = GetChooseColorButtonText();
+                btnLeaderBorderColor.UseVisualStyleBackColor = false;
+            }
+        }
+
+        private System.Drawing.Color GetLeaderFillPreviewColor()
+        {
+            if (LeaderFillColor.A > 0)
+            {
+                return LeaderFillColor;
+            }
+
+            if (AnnotationBackgroundColor.A > 0)
+            {
+                return AnnotationBackgroundColor;
+            }
+
+            if (AnnotationBorderColor.A > 0)
+            {
+                return AnnotationBorderColor;
+            }
+
+            return AnnotationColor.IsEmpty ? System.Drawing.Color.Black : AnnotationColor;
+        }
+
+        private System.Drawing.Color GetLeaderBorderPreviewColor()
+        {
+            if (LeaderBorderColor.A > 0)
+            {
+                return LeaderBorderColor;
+            }
+
+            return AnnotationBorderColor.A > 0 ? AnnotationBorderColor : System.Drawing.Color.Black;
         }
 
         private void SetRichMode(bool richMode, bool updateState, bool reloadEditorContent = true, bool applyFormatting = true)
         {
             IsRichTextMode = richMode;
             richTextToolbarPanel.Visible = richMode;
+            ApplyRichModeLayout(richMode);
 
             // Global font must remain available in both modes.
             btnFont.Enabled = true;
@@ -1151,6 +1315,54 @@ namespace AnonPDF
                 ScheduleApplyChanges();
             }
             UpdateColorControls();
+        }
+
+        private void ApplyRichModeLayout(bool richMode)
+        {
+            int offset = richMode ? 0 : -32;
+            SetControlTop(btnFont, 198 + offset);
+            SetControlTop(lblFontDisplay, 205 + offset);
+            SetControlTop(lblTextColor, 237 + offset);
+            SetControlTop(btnColor, 230 + offset);
+            SetControlTop(lblBackgroundColor, 271 + offset);
+            SetControlTop(btnBackgroundColor, 264 + offset);
+            SetControlTop(chkNoBackgroundColor, 271 + offset);
+            SetControlTop(lblBorderColor, 305 + offset);
+            SetControlTop(btnBorderColor, 298 + offset);
+            SetControlTop(lblBorderWidth, 339 + offset);
+            SetControlTop(nudBorderWidth, 336 + offset);
+            SetControlTop(lblFrameMargin, 339 + offset);
+            SetControlTop(nudFrameMargin, 336 + offset);
+            SetControlTop(chkLeaderArrow, 370 + offset);
+            SetControlTop(lblLeaderLineWidth, 402 + offset);
+            SetControlTop(nudLeaderLineWidth, 399 + offset);
+            SetControlTop(lblLeaderBorderWidth, 402 + offset);
+            SetControlTop(nudLeaderBorderWidth, 399 + offset);
+            SetControlTop(lblLeaderHeadWidth, 430 + offset);
+            SetControlTop(nudLeaderHeadWidth, 427 + offset);
+            SetControlTop(lblLeaderHeadLength, 430 + offset);
+            SetControlTop(nudLeaderHeadLength, 427 + offset);
+            SetControlTop(lblLeaderFillColor, 458 + offset);
+            SetControlTop(btnLeaderFillColor, 454 + offset);
+            SetControlTop(lblLeaderBorderColor, 458 + offset);
+            SetControlTop(btnLeaderBorderColor, 454 + offset);
+            SetControlTop(groupBoxAlignment, 492 + offset);
+            SetControlTop(groupBoxRotation, 552 + offset);
+            SetControlTop(groupBoxSymbols, 622 + offset);
+            SetControlTop(btnRestoreDefaults, 708 + offset);
+            SetControlTop(btnOK, 708 + offset);
+            SetControlTop(btnCancel, 708 + offset);
+            ClientSize = PDFForm.ScaleSizeForDpiStatic(430, richMode ? 760 : 728);
+        }
+
+        private static void SetControlTop(Control control, int top)
+        {
+            if (control == null)
+            {
+                return;
+            }
+
+            control.Location = new Point(control.Location.X, PDFForm.ScaleForDpiStatic(top));
         }
 
         private void UpdateFontDisplay()
@@ -1422,12 +1634,49 @@ namespace AnonPDF
             }
         }
 
+        private void BtnLeaderFillColor_Click(object sender, EventArgs e)
+        {
+            using (ColorDialog colorDialog = new ColorDialog())
+            {
+                colorDialog.Color = GetLeaderFillPreviewColor();
+                if (colorDialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    LeaderFillColor = colorDialog.Color;
+                    if (chkLeaderArrow != null)
+                    {
+                        chkLeaderArrow.Checked = true;
+                    }
+                    UpdateColorControls();
+                    TryApplyChanges();
+                }
+            }
+        }
+
+        private void BtnLeaderBorderColor_Click(object sender, EventArgs e)
+        {
+            using (ColorDialog colorDialog = new ColorDialog())
+            {
+                colorDialog.Color = GetLeaderBorderPreviewColor();
+                if (colorDialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    LeaderBorderColor = colorDialog.Color;
+                    if (chkLeaderArrow != null)
+                    {
+                        chkLeaderArrow.Checked = true;
+                    }
+                    UpdateColorControls();
+                    TryApplyChanges();
+                }
+            }
+        }
+
         private void RichModeCheckedChanged(object sender, EventArgs e)
         {
             if (suppressAutoApply && suppressEditorPresentationRefresh)
             {
                 IsRichTextMode = chkRichTextMode.Checked;
                 richTextToolbarPanel.Visible = IsRichTextMode;
+                ApplyRichModeLayout(IsRichTextMode);
                 UpdateColorControls();
                 return;
             }
@@ -1488,6 +1737,9 @@ namespace AnonPDF
             LeaderLineWidth = PDFForm.NormalizeLeaderLineWidth((float)nudLeaderLineWidth.Value);
             LeaderHeadLength = PDFForm.NormalizeLeaderHeadLength((float)nudLeaderHeadLength.Value);
             LeaderHeadWidth = PDFForm.NormalizeLeaderHeadWidth((float)nudLeaderHeadWidth.Value);
+            LeaderFillColor = LeaderFillColor.IsEmpty ? System.Drawing.Color.Transparent : LeaderFillColor;
+            LeaderBorderColor = LeaderBorderColor.IsEmpty ? System.Drawing.Color.Transparent : LeaderBorderColor;
+            LeaderBorderWidth = NormalizeLeaderBorderWidth((float)nudLeaderBorderWidth.Value);
         }
 
         private static int NormalizeAngle(int rotation)
@@ -1561,7 +1813,20 @@ namespace AnonPDF
             LeaderLineWidth = PDFForm.NormalizeLeaderLineWidth((float)nudLeaderLineWidth.Value);
             LeaderHeadLength = PDFForm.NormalizeLeaderHeadLength((float)nudLeaderHeadLength.Value);
             LeaderHeadWidth = PDFForm.NormalizeLeaderHeadWidth((float)nudLeaderHeadWidth.Value);
+            LeaderFillColor = LeaderFillColor.IsEmpty ? System.Drawing.Color.Transparent : LeaderFillColor;
+            LeaderBorderColor = LeaderBorderColor.IsEmpty ? System.Drawing.Color.Transparent : LeaderBorderColor;
+            LeaderBorderWidth = NormalizeLeaderBorderWidth((float)nudLeaderBorderWidth.Value);
             ApplyChanges?.Invoke();
+        }
+
+        private static float NormalizeLeaderBorderWidth(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+            {
+                return 0f;
+            }
+
+            return Math.Max(0f, Math.Min(24f, value));
         }
 
         private string BuildRichTextForApply()
@@ -1656,6 +1921,8 @@ namespace AnonPDF
         private CheckBox chkTransparentBackground;
         private Label lblOpacity;
         private NumericUpDown nudOpacity;
+        private CheckBox chkRecolorInk;
+        private Button btnRecolorInkColor;
 
         private GroupBox groupSource;
         private Label lblSourceValue;
@@ -1679,6 +1946,8 @@ namespace AnonPDF
         public int Rotation { get; set; }
         public float RasterOpacity { get; set; }
         public bool TransparentBackground { get; set; }
+        public bool RecolorInkEnabled { get; set; }
+        public System.Drawing.Color RecolorInkColor { get; set; } = System.Drawing.Color.Red;
         public bool LockAspect { get; set; }
         public bool IsLocked { get; set; }
         public string SourceType { get; set; }
@@ -1708,9 +1977,11 @@ namespace AnonPDF
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             Width = PDFForm.ScaleForDpiStatic(430);
-            Height = PDFForm.ScaleForDpiStatic(470);
+            Height = PDFForm.ScaleForDpiStatic(506);
             MaximizeBox = false;
             MinimizeBox = false;
+            AutoScroll = true;
+            AutoScrollMargin = new Size(0, PDFForm.ScaleForDpiStatic(12));
 
             groupGeometry = new GroupBox
             {
@@ -1796,7 +2067,7 @@ namespace AnonPDF
             {
                 Text = Resources.EditRaster_GroupOptions,
                 Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(194)),
-                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(86))
+                Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(122))
             };
             chkLockAspect = new CheckBox
             {
@@ -1836,16 +2107,38 @@ namespace AnonPDF
             };
             nudOpacity.ValueChanged += AnyControlValueChanged;
             chkLocked.CheckedChanged += AnyControlValueChanged;
+            chkRecolorInk = new CheckBox
+            {
+                Text = R("EditRaster_CheckRecolorInk"),
+                Location = new Point(PDFForm.ScaleForDpiStatic(12), PDFForm.ScaleForDpiStatic(88)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(170), PDFForm.ScaleForDpiStatic(24)),
+                AutoEllipsis = true
+            };
+            chkRecolorInk.CheckedChanged += (_, __) =>
+            {
+                UpdateRecolorInkColorButton();
+                TryApplyChanges();
+            };
+            btnRecolorInkColor = new Button
+            {
+                Text = R("EditRaster_ButtonRecolorInkColor"),
+                Location = new Point(PDFForm.ScaleForDpiStatic(190), PDFForm.ScaleForDpiStatic(84)),
+                Size = new Size(PDFForm.ScaleForDpiStatic(180), PDFForm.ScaleForDpiStatic(28)),
+                UseVisualStyleBackColor = false
+            };
+            btnRecolorInkColor.Click += BtnRecolorInkColor_Click;
             groupOptions.Controls.Add(chkLockAspect);
             groupOptions.Controls.Add(chkLocked);
             groupOptions.Controls.Add(chkTransparentBackground);
             groupOptions.Controls.Add(lblOpacity);
             groupOptions.Controls.Add(nudOpacity);
+            groupOptions.Controls.Add(chkRecolorInk);
+            groupOptions.Controls.Add(btnRecolorInkColor);
 
             groupSource = new GroupBox
             {
                 Text = Resources.EditRaster_GroupSource,
-                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(288)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(324)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(394), PDFForm.ScaleForDpiStatic(86))
             };
             lblSourceValue = new Label
@@ -1883,7 +2176,7 @@ namespace AnonPDF
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(PDFForm.ScaleForDpiStatic(238), PDFForm.ScaleForDpiStatic(386)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(238), PDFForm.ScaleForDpiStatic(422)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.OK
             };
@@ -1892,7 +2185,7 @@ namespace AnonPDF
             btnRestoreDefaults = new Button
             {
                 Text = Resources.ResourceManager.GetString("UI_Button_RestoreSettings", Resources.Culture ?? CultureInfo.CurrentUICulture) ?? "UI_Button_RestoreSettings",
-                Location = new Point(PDFForm.ScaleForDpiStatic(92), PDFForm.ScaleForDpiStatic(386)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(92), PDFForm.ScaleForDpiStatic(422)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(136), PDFForm.ScaleForDpiStatic(30))
             };
             btnRestoreDefaults.Click += BtnRestoreDefaults_Click;
@@ -1900,7 +2193,7 @@ namespace AnonPDF
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(324), PDFForm.ScaleForDpiStatic(386)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(324), PDFForm.ScaleForDpiStatic(422)),
                 Size = new Size(PDFForm.ScaleForDpiStatic(80), PDFForm.ScaleForDpiStatic(30)),
                 DialogResult = DialogResult.Cancel
             };
@@ -1931,6 +2224,12 @@ namespace AnonPDF
             };
         }
 
+        private static string R(string key)
+        {
+            string value = Resources.ResourceManager.GetString(key, Resources.Culture ?? CultureInfo.CurrentUICulture);
+            return string.IsNullOrWhiteSpace(value) ? key : value;
+        }
+
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
@@ -1944,8 +2243,10 @@ namespace AnonPDF
             nudRotation.Value = NormalizeAngle(Rotation);
             nudOpacity.Value = ClampDecimal((decimal)(Math.Max(0f, Math.Min(1f, RasterOpacity)) * 100f), nudOpacity.Minimum, nudOpacity.Maximum);
             chkTransparentBackground.Checked = TransparentBackground;
+            chkRecolorInk.Checked = RecolorInkEnabled;
             chkLockAspect.Checked = LockAspect;
             chkLocked.Checked = IsLocked;
+            UpdateRecolorInkColorButton();
             ReplacementImagePath = string.Empty;
             btnResetAspect.Enabled = SourceAspectRatio > 0m;
             btnResetOneToOne.Enabled = SourcePixelWidth > 0 && SourcePixelHeight > 0;
@@ -1964,6 +2265,10 @@ namespace AnonPDF
         {
             dialogTheme = theme;
             DialogThemeApplier.ApplyTo(this, theme);
+            if (btnRecolorInkColor != null)
+            {
+                UpdateRecolorInkColorButton();
+            }
         }
 
         private static decimal ClampDecimal(decimal value, decimal min, decimal max)
@@ -2042,6 +2347,29 @@ namespace AnonPDF
         private void AnyControlValueChanged(object sender, EventArgs e)
         {
             TryApplyChanges();
+        }
+
+        private void BtnRecolorInkColor_Click(object sender, EventArgs e)
+        {
+            using (var colorDialog = new ColorDialog())
+            {
+                colorDialog.Color = RecolorInkColor.IsEmpty ? System.Drawing.Color.Red : RecolorInkColor;
+                if (colorDialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    RecolorInkColor = colorDialog.Color;
+                    chkRecolorInk.Checked = true;
+                    UpdateRecolorInkColorButton();
+                    TryApplyChanges();
+                }
+            }
+        }
+
+        private void UpdateRecolorInkColorButton()
+        {
+            System.Drawing.Color color = RecolorInkColor.IsEmpty ? System.Drawing.Color.Red : RecolorInkColor;
+            btnRecolorInkColor.Enabled = chkRecolorInk.Checked;
+            btnRecolorInkColor.BackColor = color;
+            btnRecolorInkColor.ForeColor = color.GetBrightness() < 0.55f ? System.Drawing.Color.White : System.Drawing.Color.Black;
         }
 
         private void RotationPresetButton_Click(object sender, EventArgs e)
@@ -2265,6 +2593,8 @@ namespace AnonPDF
                 nudRotation.Value = NormalizeAngle(Rotation);
                 nudOpacity.Value = ClampDecimal((decimal)(Math.Max(0f, Math.Min(1f, RasterOpacity)) * 100f), nudOpacity.Minimum, nudOpacity.Maximum);
                 chkTransparentBackground.Checked = TransparentBackground;
+                chkRecolorInk.Checked = RecolorInkEnabled;
+                UpdateRecolorInkColorButton();
                 chkLockAspect.Checked = LockAspect;
                 chkLocked.Checked = IsLocked;
                 RecalculateAspectRatio();
@@ -2287,6 +2617,7 @@ namespace AnonPDF
             Rotation = NormalizeAngle((int)nudRotation.Value);
             RasterOpacity = (float)(nudOpacity.Value / 100m);
             TransparentBackground = chkTransparentBackground.Checked;
+            RecolorInkEnabled = chkRecolorInk.Checked;
             LockAspect = chkLockAspect.Checked;
             IsLocked = chkLocked.Checked;
         }
@@ -2309,6 +2640,10 @@ namespace AnonPDF
                 nudRotation.Value = NormalizeAngle(rasterObject.Rotation);
                 nudOpacity.Value = ClampDecimal((decimal)(Math.Max(0f, Math.Min(1f, rasterObject.Opacity)) * 100f), nudOpacity.Minimum, nudOpacity.Maximum);
                 chkTransparentBackground.Checked = rasterObject.TransparentBackground;
+                RecolorInkEnabled = rasterObject.RecolorInkEnabled;
+                RecolorInkColor = System.Drawing.Color.FromArgb(rasterObject.RecolorInkColorArgb);
+                chkRecolorInk.Checked = RecolorInkEnabled;
+                UpdateRecolorInkColorButton();
                 chkLockAspect.Checked = rasterObject.LockAspect;
                 chkLocked.Checked = rasterObject.IsLocked;
                 SourceType = rasterObject.SourceType;
@@ -2397,8 +2732,8 @@ namespace AnonPDF
                 Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
                 Minimum = 1,
                 Maximum = 24,
-                DecimalPlaces = 1,
-                Increment = 0.5m
+                DecimalPlaces = 3,
+                Increment = 0.1m
             };
             nudThickness.ValueChanged += (_, __) => TryApplyChanges();
 
@@ -2414,7 +2749,7 @@ namespace AnonPDF
                 Minimum = 0,
                 Maximum = 24,
                 DecimalPlaces = 3,
-                Increment = 0.001m
+                Increment = 0.1m
             };
             nudBorderWidth.ValueChanged += (_, __) => TryApplyChanges();
 
@@ -2425,8 +2760,8 @@ namespace AnonPDF
                 Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
                 Minimum = 4,
                 Maximum = 120,
-                DecimalPlaces = 1,
-                Increment = 1m
+                DecimalPlaces = 3,
+                Increment = 0.1m
             };
             nudHeadLength.ValueChanged += (_, __) => TryApplyChanges();
 
@@ -2437,8 +2772,8 @@ namespace AnonPDF
                 Size = new Size(PDFForm.ScaleForDpiStatic(160), PDFForm.ScaleForDpiStatic(22)),
                 Minimum = 4,
                 Maximum = 120,
-                DecimalPlaces = 1,
-                Increment = 1m
+                DecimalPlaces = 3,
+                Increment = 0.1m
             };
             nudHeadWidth.ValueChanged += (_, __) => TryApplyChanges();
 
@@ -3782,6 +4117,8 @@ namespace AnonPDF
         public int Rotation { get; set; }
         public float Opacity { get; set; } = 1f;
         public bool TransparentBackground { get; set; } = false;
+        public bool RecolorInkEnabled { get; set; } = false;
+        public int RecolorInkColorArgb { get; set; } = System.Drawing.Color.Red.ToArgb();
         public bool LockAspect { get; set; }
         public bool IsLocked { get; set; }
         public string SourceType { get; set; }

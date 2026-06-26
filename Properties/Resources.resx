@@ -1258,6 +1258,12 @@ Aplikacja zostanie zamknięta.</value>
   <data name="EditRaster_LabelOpacity" xml:space="preserve">
     <value>Przezroczystość (%):</value>
   </data>
+  <data name="EditRaster_CheckRecolorInk" xml:space="preserve">
+    <value>Przekoloruj tusz</value>
+  </data>
+  <data name="EditRaster_ButtonRecolorInkColor" xml:space="preserve">
+    <value>Kolor tuszu</value>
+  </data>
   <data name="EditRaster_GroupSource" xml:space="preserve">
     <value>Źródło obrazu</value>
   </data>
@@ -2088,6 +2094,15 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   </data>
   <data name="EditText_LabelLeaderHeadWidth" xml:space="preserve">
     <value>Szeroko&#347;&#263; grotu:</value>
+  </data>
+  <data name="EditText_LabelLeaderFillColor" xml:space="preserve">
+    <value>T&#322;o strza&#322;ki:</value>
+  </data>
+  <data name="EditText_LabelLeaderBorderColor" xml:space="preserve">
+    <value>Kraw&#281;d&#378; strza&#322;ki:</value>
+  </data>
+  <data name="EditText_LabelLeaderBorderWidth" xml:space="preserve">
+    <value>Grubo&#347;&#263; kraw&#281;dzi:</value>
   </data>
   <data name="EditText_LabelLeaderLineWidth" xml:space="preserve">
     <value>Grubo&#347;&#263; linii strza&#322;ki:</value>

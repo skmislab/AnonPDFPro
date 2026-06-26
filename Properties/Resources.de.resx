@@ -1362,6 +1362,12 @@ Repository: https://github.com/skmislab/AnonPDFPro</value>
   <data name="EditRaster_LabelOpacity" xml:space="preserve">
     <value>Transparenz (%):</value>
   </data>
+  <data name="EditRaster_CheckRecolorInk" xml:space="preserve">
+    <value>Tinte einfärben</value>
+  </data>
+  <data name="EditRaster_ButtonRecolorInkColor" xml:space="preserve">
+    <value>Tintenfarbe</value>
+  </data>
   <data name="EditRaster_GroupSource" xml:space="preserve">
     <value>Bildquelle</value>
   </data>
@@ -2041,6 +2047,15 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   </data>
   <data name="EditText_LabelLeaderHeadWidth" xml:space="preserve">
     <value>Spitzenbreite:</value>
+  </data>
+  <data name="EditText_LabelLeaderFillColor" xml:space="preserve">
+    <value>Pfeilf&#252;llung:</value>
+  </data>
+  <data name="EditText_LabelLeaderBorderColor" xml:space="preserve">
+    <value>Pfeilkante:</value>
+  </data>
+  <data name="EditText_LabelLeaderBorderWidth" xml:space="preserve">
+    <value>Kantenbreite:</value>
   </data>
   <data name="EditText_LabelLeaderLineWidth" xml:space="preserve">
     <value>Liniendicke des Pfeils:</value>

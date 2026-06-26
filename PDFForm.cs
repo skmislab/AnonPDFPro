@@ -357,6 +357,7 @@ namespace AnonPDF
         private float textScaleStartLeaderLineWidth;
         private float textScaleStartLeaderHeadLength;
         private float textScaleStartLeaderHeadWidth;
+        private float textScaleStartLeaderBorderWidth;
         private TextLeaderAnchorKind textScaleStartLeaderAnchorKind = TextLeaderAnchorKind.RightCenter;
         private RectangleF textRotationStartBounds = RectangleF.Empty;
         private PointF textLeaderDragStartEndPoint = PointF.Empty;
@@ -577,6 +578,7 @@ namespace AnonPDF
             public float TextLeaderLineWidth { get; set; }
             public float TextLeaderHeadLength { get; set; }
             public float TextLeaderHeadWidth { get; set; }
+            public float TextLeaderBorderWidth { get; set; }
             public float ArrowThickness { get; set; }
             public float ArrowBorderWidth { get; set; }
             public float ArrowHeadLength { get; set; }
@@ -728,6 +730,9 @@ namespace AnonPDF
             public float LeaderLineWidth { get; set; }
             public float LeaderHeadLength { get; set; }
             public float LeaderHeadWidth { get; set; }
+            public int LeaderFillColorArgb { get; set; }
+            public int LeaderBorderColorArgb { get; set; }
+            public float LeaderBorderWidth { get; set; }
             public bool IsRichTextMode { get; set; }
             public System.Windows.Forms.HorizontalAlignment AnnotationAlignment { get; set; }
             public int AnnotationRotation { get; set; }
@@ -746,6 +751,9 @@ namespace AnonPDF
                     LeaderLineWidth = 1.5f,
                     LeaderHeadLength = DefaultArrowHeadLength,
                     LeaderHeadWidth = DefaultArrowHeadWidth,
+                    LeaderFillColorArgb = System.Drawing.Color.Transparent.ToArgb(),
+                    LeaderBorderColorArgb = System.Drawing.Color.Transparent.ToArgb(),
+                    LeaderBorderWidth = 0f,
                     IsRichTextMode = false,
                     AnnotationAlignment = System.Windows.Forms.HorizontalAlignment.Left,
                     AnnotationRotation = 0
@@ -766,6 +774,9 @@ namespace AnonPDF
                     LeaderLineWidth = LeaderLineWidth,
                     LeaderHeadLength = LeaderHeadLength,
                     LeaderHeadWidth = LeaderHeadWidth,
+                    LeaderFillColorArgb = LeaderFillColorArgb,
+                    LeaderBorderColorArgb = LeaderBorderColorArgb,
+                    LeaderBorderWidth = LeaderBorderWidth,
                     IsRichTextMode = IsRichTextMode,
                     AnnotationAlignment = AnnotationAlignment,
                     AnnotationRotation = AnnotationRotation
@@ -802,6 +813,8 @@ namespace AnonPDF
             public int Rotation { get; set; }
             public float RasterOpacity { get; set; }
             public bool TransparentBackground { get; set; }
+            public bool RecolorInkEnabled { get; set; }
+            public int RecolorInkColorArgb { get; set; }
             public bool LockAspect { get; set; }
             public bool IsLocked { get; set; }
 
@@ -812,6 +825,8 @@ namespace AnonPDF
                     Rotation = 0,
                     RasterOpacity = 1f,
                     TransparentBackground = false,
+                    RecolorInkEnabled = false,
+                    RecolorInkColorArgb = System.Drawing.Color.Red.ToArgb(),
                     LockAspect = true,
                     IsLocked = false
                 };
@@ -824,6 +839,8 @@ namespace AnonPDF
                     Rotation = Rotation,
                     RasterOpacity = RasterOpacity,
                     TransparentBackground = TransparentBackground,
+                    RecolorInkEnabled = RecolorInkEnabled,
+                    RecolorInkColorArgb = RecolorInkColorArgb,
                     LockAspect = LockAspect,
                     IsLocked = IsLocked
                 };
@@ -5352,6 +5369,7 @@ namespace AnonPDF
             annotation.LeaderLineWidth = NormalizeLeaderLineWidth(annotation.LeaderLineWidth <= 0f ? 1.5f : annotation.LeaderLineWidth);
             annotation.LeaderHeadLength = NormalizeTextLeaderHeadLength(annotation.LeaderHeadLength <= 0f ? DefaultArrowHeadLength : annotation.LeaderHeadLength);
             annotation.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(annotation.LeaderHeadWidth <= 0f ? DefaultArrowHeadWidth : annotation.LeaderHeadWidth);
+            annotation.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(annotation.LeaderBorderWidth);
             annotation.LeaderAnchorKind = NormalizeTextLeaderAnchorKind(annotation.LeaderAnchorKind);
             if (!annotation.HasLeaderArrow)
             {
@@ -6489,6 +6507,9 @@ namespace AnonPDF
                 LeaderEndPoint = source.LeaderEndPoint,
                 LeaderHeadLength = NormalizeTextLeaderHeadLength(source.LeaderHeadLength),
                 LeaderHeadWidth = NormalizeTextLeaderHeadWidth(source.LeaderHeadWidth),
+                LeaderFillColorArgb = source.LeaderFillColorArgb,
+                LeaderBorderColorArgb = source.LeaderBorderColorArgb,
+                LeaderBorderWidth = NormalizeTextLeaderBorderWidth(source.LeaderBorderWidth),
                 AnnotationContentMode = source.AnnotationContentMode,
                 AnnotationRichText = source.AnnotationRichText,
                 AnnotationAlignment = source.AnnotationAlignment,
@@ -6521,6 +6542,9 @@ namespace AnonPDF
             target.LeaderEndPoint = snapshot.LeaderEndPoint;
             target.LeaderHeadLength = NormalizeTextLeaderHeadLength(snapshot.LeaderHeadLength);
             target.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(snapshot.LeaderHeadWidth);
+            target.LeaderFillColorArgb = snapshot.LeaderFillColorArgb;
+            target.LeaderBorderColorArgb = snapshot.LeaderBorderColorArgb;
+            target.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(snapshot.LeaderBorderWidth);
             target.AnnotationContentMode = snapshot.AnnotationContentMode;
             target.AnnotationRichText = snapshot.AnnotationRichText;
             target.AnnotationAlignment = snapshot.AnnotationAlignment;
@@ -6826,6 +6850,9 @@ namespace AnonPDF
                                 textAnnotation.LeaderEndPoint.Y - snapshotSourceBounds.Y),
                             LeaderHeadLength = NormalizeTextLeaderHeadLength(textAnnotation.LeaderHeadLength),
                             LeaderHeadWidth = NormalizeTextLeaderHeadWidth(textAnnotation.LeaderHeadWidth),
+                            LeaderFillColorArgb = textAnnotation.LeaderFillColorArgb,
+                            LeaderBorderColorArgb = textAnnotation.LeaderBorderColorArgb,
+                            LeaderBorderWidth = NormalizeTextLeaderBorderWidth(textAnnotation.LeaderBorderWidth),
                             AnnotationContentMode = textAnnotation.AnnotationContentMode,
                             AnnotationRichText = textAnnotation.AnnotationRichText,
                             AnnotationAlignment = textAnnotation.AnnotationAlignment,
@@ -6857,6 +6884,8 @@ namespace AnonPDF
                             Rotation = rasterObject.Rotation,
                             Opacity = rasterObject.Opacity,
                             TransparentBackground = rasterObject.TransparentBackground,
+                            RecolorInkEnabled = rasterObject.RecolorInkEnabled,
+                            RecolorInkColorArgb = rasterObject.RecolorInkColorArgb,
                             LockAspect = rasterObject.LockAspect,
                             IsLocked = rasterObject.IsLocked,
                             SourceType = rasterObject.SourceType,
@@ -7250,6 +7279,9 @@ namespace AnonPDF
                 ["LeaderEndPointY"] = text.LeaderEndPoint.Y,
                 ["LeaderHeadLength"] = NormalizeTextLeaderHeadLength(text.LeaderHeadLength),
                 ["LeaderHeadWidth"] = NormalizeTextLeaderHeadWidth(text.LeaderHeadWidth),
+                ["LeaderFillColorArgb"] = text.LeaderFillColorArgb,
+                ["LeaderBorderColorArgb"] = text.LeaderBorderColorArgb,
+                ["LeaderBorderWidth"] = NormalizeTextLeaderBorderWidth(text.LeaderBorderWidth),
                 ["AnnotationBoundsX"] = text.AnnotationBounds.X,
                 ["AnnotationBoundsY"] = text.AnnotationBounds.Y,
                 ["AnnotationBoundsWidth"] = text.AnnotationBounds.Width,
@@ -7286,6 +7318,9 @@ namespace AnonPDF
                     textJson.Value<float?>("LeaderEndPointY") ?? 0f),
                 LeaderHeadLength = NormalizeTextLeaderHeadLength(textJson.Value<float?>("LeaderHeadLength") ?? DefaultArrowHeadLength),
                 LeaderHeadWidth = NormalizeTextLeaderHeadWidth(textJson.Value<float?>("LeaderHeadWidth") ?? DefaultArrowHeadWidth),
+                LeaderFillColorArgb = textJson.Value<int?>("LeaderFillColorArgb") ?? System.Drawing.Color.Transparent.ToArgb(),
+                LeaderBorderColorArgb = textJson.Value<int?>("LeaderBorderColorArgb") ?? System.Drawing.Color.Transparent.ToArgb(),
+                LeaderBorderWidth = NormalizeTextLeaderBorderWidth(textJson.Value<float?>("LeaderBorderWidth") ?? 0f),
                 AnnotationBounds = new RectangleF(
                     textJson.Value<float?>("AnnotationBoundsX") ?? 0f,
                     textJson.Value<float?>("AnnotationBoundsY") ?? 0f,
@@ -7311,6 +7346,8 @@ namespace AnonPDF
                 ["Rotation"] = raster.Rotation,
                 ["Opacity"] = raster.Opacity,
                 ["TransparentBackground"] = raster.TransparentBackground,
+                ["RecolorInkEnabled"] = raster.RecolorInkEnabled,
+                ["RecolorInkColorArgb"] = raster.RecolorInkColorArgb,
                 ["LockAspect"] = raster.LockAspect,
                 ["IsLocked"] = raster.IsLocked,
                 ["SourceType"] = raster.SourceType,
@@ -7346,6 +7383,8 @@ namespace AnonPDF
                 Rotation = rasterJson.Value<int?>("Rotation") ?? 0,
                 Opacity = rasterJson.Value<float?>("Opacity") ?? 1f,
                 TransparentBackground = rasterJson.Value<bool?>("TransparentBackground") ?? false,
+                RecolorInkEnabled = rasterJson.Value<bool?>("RecolorInkEnabled") ?? false,
+                RecolorInkColorArgb = rasterJson.Value<int?>("RecolorInkColorArgb") ?? System.Drawing.Color.Red.ToArgb(),
                 LockAspect = rasterJson.Value<bool?>("LockAspect") ?? false,
                 IsLocked = rasterJson.Value<bool?>("IsLocked") ?? false,
                 SourceType = rasterJson.Value<string>("SourceType"),
@@ -7730,6 +7769,9 @@ namespace AnonPDF
                                 baseY + (item.Text.LeaderEndPoint.Y * pasteScale) + boundsDeltaY),
                             LeaderHeadLength = NormalizeTextLeaderHeadLength(item.Text.LeaderHeadLength),
                             LeaderHeadWidth = NormalizeTextLeaderHeadWidth(item.Text.LeaderHeadWidth),
+                            LeaderFillColorArgb = item.Text.LeaderFillColorArgb,
+                            LeaderBorderColorArgb = item.Text.LeaderBorderColorArgb,
+                            LeaderBorderWidth = NormalizeTextLeaderBorderWidth(item.Text.LeaderBorderWidth),
                             AnnotationContentMode = item.Text.AnnotationContentMode,
                             AnnotationRichText = item.Text.AnnotationRichText,
                             AnnotationAlignment = item.Text.AnnotationAlignment,
@@ -7750,6 +7792,7 @@ namespace AnonPDF
                         textCopy.LeaderLineWidth = NormalizeLeaderLineWidth(textCopy.LeaderLineWidth * pasteScale);
                         textCopy.LeaderHeadLength = NormalizeTextLeaderHeadLength(textCopy.LeaderHeadLength * pasteScale);
                         textCopy.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(textCopy.LeaderHeadWidth * pasteScale);
+                        textCopy.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(textCopy.LeaderBorderWidth * pasteScale);
                         StampTextAnnotationCreated(textCopy);
                         textAnnotations.Add(textCopy);
                         pastedTextAnnotations.Add(textCopy);
@@ -7792,6 +7835,8 @@ namespace AnonPDF
                             Rotation = item.Raster.Rotation,
                             Opacity = item.Raster.Opacity,
                             TransparentBackground = item.Raster.TransparentBackground,
+                            RecolorInkEnabled = item.Raster.RecolorInkEnabled,
+                            RecolorInkColorArgb = item.Raster.RecolorInkColorArgb,
                             LockAspect = item.Raster.LockAspect,
                             IsLocked = item.Raster.IsLocked,
                             SourceType = item.Raster.SourceType,
@@ -7987,6 +8032,29 @@ namespace AnonPDF
             selectedRedactionBlock = null;
             ClearGroupSelection();
             UpdateObjectSelectionInfoLabel();
+        }
+
+        private bool HasObjectSelectionOnCurrentPage()
+        {
+            return GetTotalSelectedObjectsCount() > 0 ||
+                   (selectedCommentAnnotation != null &&
+                    selectedCommentAnnotation.PageNumber == currentPage &&
+                    IsLayerVisible(selectedCommentAnnotation.LayerId)) ||
+                   (selectedRedactionBlock != null &&
+                    selectedRedactionBlock.PageNumber == currentPage &&
+                    IsLayerVisible(selectedRedactionBlock.LayerId));
+        }
+
+        private bool TryClearObjectSelectionWithEscape()
+        {
+            if (!HasObjectSelectionOnCurrentPage())
+            {
+                return false;
+            }
+
+            ClearAllObjectSelections();
+            pdfViewer?.Invalidate();
+            return true;
         }
 
         private void ResetRedactionResizeState()
@@ -9423,7 +9491,8 @@ namespace AnonPDF
                     TextLeaderEndPoint = text.LeaderEndPoint,
                     TextLeaderLineWidth = NormalizeLeaderLineWidth(text.LeaderLineWidth),
                     TextLeaderHeadLength = NormalizeTextLeaderHeadLength(text.LeaderHeadLength),
-                    TextLeaderHeadWidth = NormalizeTextLeaderHeadWidth(text.LeaderHeadWidth)
+                    TextLeaderHeadWidth = NormalizeTextLeaderHeadWidth(text.LeaderHeadWidth),
+                    TextLeaderBorderWidth = NormalizeTextLeaderBorderWidth(text.LeaderBorderWidth)
                 });
 
                 minX = Math.Min(minX, visualBounds.Left);
@@ -9706,6 +9775,7 @@ namespace AnonPDF
                                 entry.Text.LeaderLineWidth = NormalizeLeaderLineWidth(entry.TextLeaderLineWidth * uniformScale);
                                 entry.Text.LeaderHeadLength = NormalizeTextLeaderHeadLength(entry.TextLeaderHeadLength * uniformScale);
                                 entry.Text.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(entry.TextLeaderHeadWidth * uniformScale);
+                                entry.Text.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(entry.TextLeaderBorderWidth * uniformScale);
                                 entry.Text.LeaderAnchorKind = GetClosestTextLeaderAnchorKind(entry.Text, entry.Text.LeaderEndPoint);
                             }
                             TouchTextAnnotation(entry.Text);
@@ -15150,6 +15220,9 @@ namespace AnonPDF
             annotation.LeaderLineWidth = NormalizeLeaderLineWidth(dlg.LeaderLineWidth);
             annotation.LeaderHeadLength = NormalizeTextLeaderHeadLength(dlg.LeaderHeadLength);
             annotation.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(dlg.LeaderHeadWidth);
+            annotation.LeaderFillColorArgb = (dlg.LeaderFillColor.IsEmpty ? System.Drawing.Color.Transparent : dlg.LeaderFillColor).ToArgb();
+            annotation.LeaderBorderColorArgb = (dlg.LeaderBorderColor.IsEmpty ? System.Drawing.Color.Transparent : dlg.LeaderBorderColor).ToArgb();
+            annotation.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(dlg.LeaderBorderWidth);
             annotation.AnnotationContentMode = dlg.IsRichTextMode ? "rich" : "plain";
             annotation.AnnotationRichText = dlg.IsRichTextMode ? dlg.AnnotationRichText : null;
             annotation.AnnotationAlignment = dlg.AnnotationAlignment;
@@ -15374,6 +15447,9 @@ namespace AnonPDF
                     dlg.LeaderLineWidth = NormalizeLeaderLineWidth(annotation.LeaderLineWidth);
                     dlg.LeaderHeadLength = NormalizeTextLeaderHeadLength(annotation.LeaderHeadLength);
                     dlg.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(annotation.LeaderHeadWidth);
+                    dlg.LeaderFillColor = System.Drawing.Color.FromArgb(annotation.LeaderFillColorArgb);
+                    dlg.LeaderBorderColor = System.Drawing.Color.FromArgb(annotation.LeaderBorderColorArgb);
+                    dlg.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(annotation.LeaderBorderWidth);
                     dlg.IsRichTextMode = string.Equals(annotation.AnnotationContentMode, "rich", StringComparison.OrdinalIgnoreCase);
                     dlg.AnnotationRichText = annotation.AnnotationRichText;
                     dlg.AnnotationAlignment = annotation.AnnotationAlignment;
@@ -15444,6 +15520,9 @@ namespace AnonPDF
                             LeaderAnchorKind = TextLeaderAnchorKind.RightCenter,
                             LeaderHeadLength = NormalizeTextLeaderHeadLength(dlg.LeaderHeadLength),
                             LeaderHeadWidth = NormalizeTextLeaderHeadWidth(dlg.LeaderHeadWidth),
+                            LeaderFillColorArgb = (dlg.LeaderFillColor.IsEmpty ? System.Drawing.Color.Transparent : dlg.LeaderFillColor).ToArgb(),
+                            LeaderBorderColorArgb = (dlg.LeaderBorderColor.IsEmpty ? System.Drawing.Color.Transparent : dlg.LeaderBorderColor).ToArgb(),
+                            LeaderBorderWidth = NormalizeTextLeaderBorderWidth(dlg.LeaderBorderWidth),
                             AnnotationContentMode = dlg.IsRichTextMode ? "rich" : "plain",
                             AnnotationRichText = dlg.IsRichTextMode ? dlg.AnnotationRichText : null,
                             AnnotationAlignment = dlg.AnnotationAlignment,
@@ -15566,6 +15645,9 @@ namespace AnonPDF
                     : PointF.Empty,
                 LeaderHeadLength = NormalizeTextLeaderHeadLength(source.LeaderHeadLength),
                 LeaderHeadWidth = NormalizeTextLeaderHeadWidth(source.LeaderHeadWidth),
+                LeaderFillColorArgb = source.LeaderFillColorArgb,
+                LeaderBorderColorArgb = source.LeaderBorderColorArgb,
+                LeaderBorderWidth = NormalizeTextLeaderBorderWidth(source.LeaderBorderWidth),
                 AnnotationContentMode = source.AnnotationContentMode,
                 AnnotationRichText = source.AnnotationRichText,
                 AnnotationAlignment = source.AnnotationAlignment,
@@ -19852,6 +19934,9 @@ namespace AnonPDF
             dialog.LeaderLineWidth = NormalizeLeaderLineWidth(defaults.LeaderLineWidth);
             dialog.LeaderHeadLength = NormalizeArrowHeadLength(defaults.LeaderHeadLength);
             dialog.LeaderHeadWidth = NormalizeArrowHeadWidth(defaults.LeaderHeadWidth);
+            dialog.LeaderFillColor = System.Drawing.Color.FromArgb(defaults.LeaderFillColorArgb);
+            dialog.LeaderBorderColor = System.Drawing.Color.FromArgb(defaults.LeaderBorderColorArgb);
+            dialog.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(defaults.LeaderBorderWidth);
         }
 
         private void CaptureTextDialogDefaults(EditTextDialog dialog)
@@ -19875,7 +19960,10 @@ namespace AnonPDF
                 HasLeaderArrow = dialog.HasLeaderArrow,
                 LeaderLineWidth = NormalizeLeaderLineWidth(dialog.LeaderLineWidth),
                 LeaderHeadLength = NormalizeArrowHeadLength(dialog.LeaderHeadLength),
-                LeaderHeadWidth = NormalizeArrowHeadWidth(dialog.LeaderHeadWidth)
+                LeaderHeadWidth = NormalizeArrowHeadWidth(dialog.LeaderHeadWidth),
+                LeaderFillColorArgb = (dialog.LeaderFillColor.IsEmpty ? System.Drawing.Color.Transparent : dialog.LeaderFillColor).ToArgb(),
+                LeaderBorderColorArgb = (dialog.LeaderBorderColor.IsEmpty ? System.Drawing.Color.Transparent : dialog.LeaderBorderColor).ToArgb(),
+                LeaderBorderWidth = NormalizeTextLeaderBorderWidth(dialog.LeaderBorderWidth)
             };
         }
 
@@ -33809,8 +33897,10 @@ namespace AnonPDF
             float rotSin = (float)Math.Sin(annotationRotationRadians);
             PointF rotationOffset = GetRotationOffsetForBounds(annotationRotation, layoutWidth, layoutHeight);
             System.Drawing.Color annotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
-            System.Drawing.Color leaderLineColor = GetEffectiveTextLeaderLineColor(annotation);
+            System.Drawing.Color leaderFillColor = GetEffectiveTextLeaderFillColor(annotation);
+            System.Drawing.Color leaderBorderColor = GetEffectiveTextLeaderBorderColor(annotation);
             float leaderLineWidthPt = Math.Max(0.5f, GetEffectiveTextLeaderLineWidth(annotation) * ((scaleX + scaleY) / 2f));
+            float leaderBorderWidthPt = Math.Max(0f, GetEffectiveTextLeaderBorderWidth(annotation) * ((scaleX + scaleY) / 2f));
             SharedRichLayoutResult sharedRichLayout = null;
             RichHtmlPdfRenderResult richHtmlRender = null;
             float richFrameTopShiftPt = 0f;
@@ -33911,14 +34001,14 @@ namespace AnonPDF
                     PointF leaderLineEndPdf = ConvertPointToPdfCoordinates(leaderLineEndView, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked);
                     pdfCanvas.SaveState();
 
-                    if (annotationBorderColor.A > 0 && annotationBorderWidthPt > 0f)
+                    if (leaderBorderColor.A > 0 && leaderBorderWidthPt > 0f)
                     {
                         PointF[] expandedHeadView;
                         if (!TryBuildExpandedArrowHeadTriangle(
                                 leaderEndView,
                                 leaderLeftView,
                                 leaderRightView,
-                                Math.Max(annotationBorderWidthPt, 0.5f),
+                                Math.Max(leaderBorderWidthPt, 0.5f),
                                 out expandedHeadView))
                         {
                             expandedHeadView = new[] { leaderEndView, leaderLeftView, leaderRightView };
@@ -33928,13 +34018,13 @@ namespace AnonPDF
                             .Select(point => ConvertPointToPdfCoordinates(point, annotation.PageNumber, rotation, includeBaseRotation: !baseRotationBaked))
                             .ToArray();
 
-                        pdfCanvas.SetLineWidth(Math.Max(0.1f, leaderLineWidthPt + (annotationBorderWidthPt * 2f)));
-                        pdfCanvas.SetStrokeColor(new DeviceRgb(annotationBorderColor.R, annotationBorderColor.G, annotationBorderColor.B));
+                        pdfCanvas.SetLineWidth(Math.Max(0.1f, leaderLineWidthPt + (leaderBorderWidthPt * 2f)));
+                        pdfCanvas.SetStrokeColor(new DeviceRgb(leaderBorderColor.R, leaderBorderColor.G, leaderBorderColor.B));
                         pdfCanvas.MoveTo(leaderAnchorPdf.X, leaderAnchorPdf.Y);
                         pdfCanvas.LineTo(leaderLineEndPdf.X, leaderLineEndPdf.Y);
                         pdfCanvas.Stroke();
 
-                        pdfCanvas.SetFillColor(new DeviceRgb(annotationBorderColor.R, annotationBorderColor.G, annotationBorderColor.B));
+                        pdfCanvas.SetFillColor(new DeviceRgb(leaderBorderColor.R, leaderBorderColor.G, leaderBorderColor.B));
                         pdfCanvas.MoveTo(expandedHeadPdf[0].X, expandedHeadPdf[0].Y);
                         pdfCanvas.LineTo(expandedHeadPdf[1].X, expandedHeadPdf[1].Y);
                         pdfCanvas.LineTo(expandedHeadPdf[2].X, expandedHeadPdf[2].Y);
@@ -33942,8 +34032,8 @@ namespace AnonPDF
                     }
 
                     pdfCanvas.SetLineWidth(leaderLineWidthPt);
-                    pdfCanvas.SetStrokeColor(new DeviceRgb(leaderLineColor.R, leaderLineColor.G, leaderLineColor.B));
-                    pdfCanvas.SetFillColor(new DeviceRgb(leaderLineColor.R, leaderLineColor.G, leaderLineColor.B));
+                    pdfCanvas.SetStrokeColor(new DeviceRgb(leaderFillColor.R, leaderFillColor.G, leaderFillColor.B));
+                    pdfCanvas.SetFillColor(new DeviceRgb(leaderFillColor.R, leaderFillColor.G, leaderFillColor.B));
                     pdfCanvas.MoveTo(leaderAnchorPdf.X, leaderAnchorPdf.Y);
                     pdfCanvas.LineTo(leaderLineEndPdf.X, leaderLineEndPdf.Y);
                     pdfCanvas.Stroke();
@@ -36167,7 +36257,8 @@ namespace AnonPDF
                 bool isSelectedAnnotation = IsTextAnnotationSelected(annotation);
                 System.Drawing.Color annotationBackgroundColor = GetAnnotationBackgroundColor(annotation);
                 System.Drawing.Color annotationBorderColor = GetAnnotationBorderColor(annotation);
-                System.Drawing.Color leaderLineColor = GetEffectiveTextLeaderLineColor(annotation);
+                System.Drawing.Color leaderFillColor = GetEffectiveTextLeaderFillColor(annotation);
+                System.Drawing.Color leaderBorderColor = GetEffectiveTextLeaderBorderColor(annotation);
                 float annotationBorderWidthPx = GetAnnotationBorderWidthScreenPx(annotation.AnnotationBorderWidth, scaleFactor, graphics.DpiX, graphics.DpiY);
                 float framePaddingX = (annotationBorderWidth + annotationFrameMargin) * scaleFactor * 72f / graphics.DpiX;
                 float framePaddingY = (annotationBorderWidth + annotationFrameMargin) * scaleFactor * 72f / graphics.DpiY;
@@ -36226,9 +36317,9 @@ namespace AnonPDF
                     TryBuildAnnotationLeaderGeometryFromScreenFrame(annotation, textFrameCorners, out PointF leaderAnchor, out PointF leaderEnd, out PointF leaderLeft, out PointF leaderRight, out PointF leaderLineEnd))
                 {
                     float lineWidthPx = Math.Max(1f, GetEffectiveTextLeaderLineWidth(annotation) * scaleFactor);
-                    float borderWidthPx = Math.Max(0f, annotationBorderWidth * scaleFactor);
+                    float borderWidthPx = Math.Max(0f, GetEffectiveTextLeaderBorderWidth(annotation) * scaleFactor);
 
-                    if (annotationBorderColor.A > 0 && borderWidthPx > 0f)
+                    if (leaderBorderColor.A > 0 && borderWidthPx > 0f)
                     {
                         PointF[] expandedHeadPoints;
                         if (!TryBuildExpandedArrowHeadTriangle(
@@ -36241,7 +36332,7 @@ namespace AnonPDF
                             expandedHeadPoints = new[] { leaderEnd, leaderLeft, leaderRight };
                         }
 
-                        using (var borderPen = new Pen(annotationBorderColor, lineWidthPx + (borderWidthPx * 2f)))
+                        using (var borderPen = new Pen(leaderBorderColor, lineWidthPx + (borderWidthPx * 2f)))
                         {
                             borderPen.StartCap = LineCap.Round;
                             borderPen.EndCap = LineCap.Round;
@@ -36249,13 +36340,13 @@ namespace AnonPDF
                             graphics.DrawLine(borderPen, leaderAnchor, leaderLineEnd);
                         }
 
-                        using (var borderBrush = new SolidBrush(annotationBorderColor))
+                        using (var borderBrush = new SolidBrush(leaderBorderColor))
                         {
                             graphics.FillPolygon(borderBrush, expandedHeadPoints);
                         }
                     }
 
-                    using (var leaderPen = new Pen(leaderLineColor, lineWidthPx))
+                    using (var leaderPen = new Pen(leaderFillColor, lineWidthPx))
                     {
                         leaderPen.StartCap = LineCap.Round;
                         leaderPen.EndCap = LineCap.Round;
@@ -36263,7 +36354,7 @@ namespace AnonPDF
                         graphics.DrawLine(leaderPen, leaderAnchor, leaderLineEnd);
                     }
 
-                    using (var leaderBrush = new SolidBrush(leaderLineColor))
+                    using (var leaderBrush = new SolidBrush(leaderFillColor))
                     {
                         graphics.FillPolygon(leaderBrush, new[] { leaderEnd, leaderLeft, leaderRight });
                     }
@@ -39455,14 +39546,35 @@ namespace AnonPDF
                         1f,
                         Math.Min(2.2f, NormalizeLeaderLineWidth(annotation.LeaderLineWidth) * widthScale));
 
-                    using (var leaderPen = new Pen(strokeColor, leaderThickness))
+                    System.Drawing.Color leaderFillColor = GetEffectiveTextLeaderFillColor(annotation);
+                    System.Drawing.Color leaderBorderColor = GetEffectiveTextLeaderBorderColor(annotation);
+                    float leaderBorderThickness = Math.Max(
+                        0f,
+                        Math.Min(1.8f, GetEffectiveTextLeaderBorderWidth(annotation) * widthScale));
+
+                    if (leaderBorderColor.A > 0 && leaderBorderThickness > 0f)
+                    {
+                        using (var leaderBorderPen = new Pen(leaderBorderColor, leaderThickness + (leaderBorderThickness * 2f)))
+                        {
+                            leaderBorderPen.StartCap = LineCap.Round;
+                            leaderBorderPen.EndCap = LineCap.Round;
+                            graphics.DrawLine(leaderBorderPen, anchorThumb, lineEndThumb);
+                        }
+
+                        using (var leaderBorderBrush = new SolidBrush(leaderBorderColor))
+                        {
+                            graphics.FillPolygon(leaderBorderBrush, new[] { endThumb, leftThumb, rightThumb });
+                        }
+                    }
+
+                    using (var leaderPen = new Pen(leaderFillColor, leaderThickness))
                     {
                         leaderPen.StartCap = LineCap.Round;
                         leaderPen.EndCap = LineCap.Round;
                         graphics.DrawLine(leaderPen, anchorThumb, lineEndThumb);
                     }
 
-                    using (var leaderBrush = new SolidBrush(strokeColor))
+                    using (var leaderBrush = new SolidBrush(leaderFillColor))
                     {
                         graphics.FillPolygon(leaderBrush, new[] { endThumb, leftThumb, rightThumb });
                     }
@@ -41246,6 +41358,9 @@ namespace AnonPDF
                    AreSamePoint(left.LeaderEndPoint, right.LeaderEndPoint) &&
                    AreSameFloat(left.LeaderHeadLength, right.LeaderHeadLength) &&
                    AreSameFloat(left.LeaderHeadWidth, right.LeaderHeadWidth) &&
+                   left.LeaderFillColorArgb == right.LeaderFillColorArgb &&
+                   left.LeaderBorderColorArgb == right.LeaderBorderColorArgb &&
+                   AreSameFloat(left.LeaderBorderWidth, right.LeaderBorderWidth) &&
                    string.Equals(left.AnnotationContentMode, right.AnnotationContentMode, StringComparison.OrdinalIgnoreCase) &&
                    string.Equals(left.AnnotationRichText, right.AnnotationRichText, StringComparison.Ordinal) &&
                    left.AnnotationAlignment == right.AnnotationAlignment &&
@@ -41264,6 +41379,8 @@ namespace AnonPDF
                    NormalizeRotationStatic(left.Rotation) == NormalizeRotationStatic(right.Rotation) &&
                    AreSameFloat(NormalizeOpacityStatic(left.Opacity), NormalizeOpacityStatic(right.Opacity)) &&
                    left.TransparentBackground == right.TransparentBackground &&
+                   left.RecolorInkEnabled == right.RecolorInkEnabled &&
+                   left.RecolorInkColorArgb == right.RecolorInkColorArgb &&
                    left.LockAspect == right.LockAspect &&
                    left.IsLocked == right.IsLocked &&
                    string.Equals(left.SourceType, right.SourceType, StringComparison.OrdinalIgnoreCase) &&
@@ -42313,6 +42430,7 @@ namespace AnonPDF
                                     entry.Text.LeaderLineWidth = NormalizeLeaderLineWidth(entry.TextLeaderLineWidth);
                                     entry.Text.LeaderHeadLength = NormalizeTextLeaderHeadLength(entry.TextLeaderHeadLength);
                                     entry.Text.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(entry.TextLeaderHeadWidth);
+                                    entry.Text.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(entry.TextLeaderBorderWidth);
                                     entry.Text.LeaderAnchorKind = GetClosestTextLeaderAnchorKind(entry.Text, entry.Text.LeaderEndPoint);
                                 }
                                 TouchTextAnnotation(entry.Text);
@@ -42409,6 +42527,7 @@ namespace AnonPDF
                         textToRestore.LeaderLineWidth = NormalizeLeaderLineWidth(textScaleStartLeaderLineWidth);
                         textToRestore.LeaderHeadLength = NormalizeTextLeaderHeadLength(textScaleStartLeaderHeadLength);
                         textToRestore.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(textScaleStartLeaderHeadWidth);
+                        textToRestore.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(textScaleStartLeaderBorderWidth);
                         textToRestore.LeaderAnchorKind = NormalizeTextLeaderAnchorKind(textScaleStartLeaderAnchorKind);
                     }
                     TouchTextAnnotation(textToRestore);
@@ -42597,6 +42716,11 @@ namespace AnonPDF
                 }
 
                 if (TryCancelActiveDrawActionWithEscape())
+                {
+                    return true;
+                }
+
+                if (TryClearObjectSelectionWithEscape())
                 {
                     return true;
                 }
@@ -42988,6 +43112,8 @@ namespace AnonPDF
                 Rotation = NormalizeRotation(activeRasterDialogDefaults.Rotation),
                 Opacity = NormalizeOpacity(activeRasterDialogDefaults.RasterOpacity),
                 TransparentBackground = activeRasterDialogDefaults.TransparentBackground,
+                RecolorInkEnabled = activeRasterDialogDefaults.RecolorInkEnabled,
+                RecolorInkColorArgb = activeRasterDialogDefaults.RecolorInkColorArgb,
                 LockAspect = activeRasterDialogDefaults.LockAspect,
                 IsLocked = activeRasterDialogDefaults.IsLocked,
                 SourceType = sourceType,
@@ -43633,6 +43759,7 @@ namespace AnonPDF
             textScaleStartLeaderLineWidth = 0f;
             textScaleStartLeaderHeadLength = 0f;
             textScaleStartLeaderHeadWidth = 0f;
+            textScaleStartLeaderBorderWidth = 0f;
             textScaleStartLeaderAnchorKind = TextLeaderAnchorKind.RightCenter;
             textMoveStartContentSize = SizeF.Empty;
             textTransformStartContentSize = SizeF.Empty;
@@ -45687,6 +45814,9 @@ namespace AnonPDF
                     LeaderEndPoint = sourceAnnotation.LeaderEndPoint,
                     LeaderHeadLength = NormalizeTextLeaderHeadLength(sourceAnnotation.LeaderHeadLength),
                     LeaderHeadWidth = NormalizeTextLeaderHeadWidth(sourceAnnotation.LeaderHeadWidth),
+                    LeaderFillColorArgb = sourceAnnotation.LeaderFillColorArgb,
+                    LeaderBorderColorArgb = sourceAnnotation.LeaderBorderColorArgb,
+                    LeaderBorderWidth = NormalizeTextLeaderBorderWidth(sourceAnnotation.LeaderBorderWidth),
                     AnnotationContentMode = sourceAnnotation.AnnotationContentMode,
                     AnnotationRichText = sourceAnnotation.AnnotationRichText,
                     AnnotationAlignment = sourceAnnotation.AnnotationAlignment,
@@ -45742,6 +45872,8 @@ namespace AnonPDF
                     Rotation = sourceRaster.Rotation,
                     Opacity = sourceRaster.Opacity,
                     TransparentBackground = sourceRaster.TransparentBackground,
+                    RecolorInkEnabled = sourceRaster.RecolorInkEnabled,
+                    RecolorInkColorArgb = sourceRaster.RecolorInkColorArgb,
                     LockAspect = sourceRaster.LockAspect,
                     IsLocked = sourceRaster.IsLocked,
                     SourceType = sourceRaster.SourceType,
@@ -48869,6 +49001,38 @@ namespace AnonPDF
             return annotation.AnnotationColor;
         }
 
+        private static System.Drawing.Color GetEffectiveTextLeaderFillColor(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return System.Drawing.Color.Black;
+            }
+
+            System.Drawing.Color fill = System.Drawing.Color.FromArgb(annotation.LeaderFillColorArgb);
+            return fill.A > 0 ? fill : GetEffectiveTextLeaderLineColor(annotation);
+        }
+
+        private static System.Drawing.Color GetEffectiveTextLeaderBorderColor(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return System.Drawing.Color.Transparent;
+            }
+
+            System.Drawing.Color border = System.Drawing.Color.FromArgb(annotation.LeaderBorderColorArgb);
+            return border.A > 0 ? border : GetAnnotationBorderColor(annotation);
+        }
+
+        private static float GetEffectiveTextLeaderBorderWidth(TextAnnotation annotation)
+        {
+            if (annotation == null)
+            {
+                return 0f;
+            }
+
+            return NormalizeTextLeaderBorderWidth(annotation.LeaderBorderWidth);
+        }
+
         private static float GetEffectiveTextLeaderLineWidth(TextAnnotation annotation)
         {
             if (annotation == null)
@@ -48887,6 +49051,11 @@ namespace AnonPDF
         private static float NormalizeTextLeaderHeadWidth(float value)
         {
             return NormalizeArrowHeadWidth(value);
+        }
+
+        private static float NormalizeTextLeaderBorderWidth(float value)
+        {
+            return NormalizeAnnotationBorderWidth(value);
         }
 
         private static TextLeaderAnchorKind NormalizeTextLeaderAnchorKind(TextLeaderAnchorKind value)
@@ -49396,6 +49565,7 @@ namespace AnonPDF
             textScaleStartLeaderLineWidth = NormalizeLeaderLineWidth(selectedTextAnnotation.LeaderLineWidth);
             textScaleStartLeaderHeadLength = NormalizeTextLeaderHeadLength(selectedTextAnnotation.LeaderHeadLength);
             textScaleStartLeaderHeadWidth = NormalizeTextLeaderHeadWidth(selectedTextAnnotation.LeaderHeadWidth);
+            textScaleStartLeaderBorderWidth = NormalizeTextLeaderBorderWidth(selectedTextAnnotation.LeaderBorderWidth);
             textScaleStartLeaderAnchorKind = NormalizeTextLeaderAnchorKind(selectedTextAnnotation.LeaderAnchorKind);
             PrimeActiveTextInteractionPreview(selectedTextAnnotation, dpiX, dpiY, interactionStartContentSize);
             this.Cursor = GetCursorForObjectScaleHandle(handleCorner);
@@ -49508,6 +49678,7 @@ namespace AnonPDF
                 annotationToScale.LeaderLineWidth = NormalizeLeaderLineWidth(textScaleStartLeaderLineWidth * uniformScale);
                 annotationToScale.LeaderHeadLength = NormalizeTextLeaderHeadLength(textScaleStartLeaderHeadLength * uniformScale);
                 annotationToScale.LeaderHeadWidth = NormalizeTextLeaderHeadWidth(textScaleStartLeaderHeadWidth * uniformScale);
+                annotationToScale.LeaderBorderWidth = NormalizeTextLeaderBorderWidth(textScaleStartLeaderBorderWidth * uniformScale);
                 annotationToScale.LeaderAnchorKind = textScaleStartLeaderAnchorKind;
             }
 
@@ -49523,6 +49694,7 @@ namespace AnonPDF
                    !AreSameFloat(textScaleStartLeaderLineWidth, annotationToScale.LeaderLineWidth) ||
                    !AreSameFloat(textScaleStartLeaderHeadLength, annotationToScale.LeaderHeadLength) ||
                    !AreSameFloat(textScaleStartLeaderHeadWidth, annotationToScale.LeaderHeadWidth) ||
+                   !AreSameFloat(textScaleStartLeaderBorderWidth, annotationToScale.LeaderBorderWidth) ||
                    textScaleStartLeaderAnchorKind != annotationToScale.LeaderAnchorKind));
             this.Cursor = GetCursorForObjectScaleHandle(activeObjectScaleHandleCorner);
             pdfViewer.Invalidate();
@@ -49743,6 +49915,8 @@ namespace AnonPDF
                 Rotation = source.Rotation,
                 Opacity = source.Opacity,
                 TransparentBackground = source.TransparentBackground,
+                RecolorInkEnabled = source.RecolorInkEnabled,
+                RecolorInkColorArgb = source.RecolorInkColorArgb,
                 LockAspect = source.LockAspect,
                 IsLocked = source.IsLocked,
                 SourceType = source.SourceType,
@@ -49841,6 +50015,8 @@ namespace AnonPDF
             int newRotation,
             float newOpacity,
             bool newTransparentBackground,
+            bool newRecolorInkEnabled,
+            int newRecolorInkColorArgb,
             bool newLockAspect,
             bool newIsLocked,
             string newFilePath)
@@ -49864,6 +50040,12 @@ namespace AnonPDF
             }
 
             if (rasterObject.TransparentBackground != newTransparentBackground)
+            {
+                return true;
+            }
+
+            if (rasterObject.RecolorInkEnabled != newRecolorInkEnabled ||
+                rasterObject.RecolorInkColorArgb != newRecolorInkColorArgb)
             {
                 return true;
             }
@@ -49996,6 +50178,8 @@ namespace AnonPDF
             int updatedRotation = NormalizeRotation(dlg.Rotation);
             float updatedOpacity = NormalizeOpacity(dlg.RasterOpacity);
             bool updatedTransparentBackground = dlg.TransparentBackground;
+            bool updatedRecolorInkEnabled = dlg.RecolorInkEnabled;
+            int updatedRecolorInkColorArgb = (dlg.RecolorInkColor.IsEmpty ? System.Drawing.Color.Red : dlg.RecolorInkColor).ToArgb();
             bool updatedLockAspect = dlg.LockAspect;
             bool updatedLocked = dlg.IsLocked;
             string selectedPathToApply = dlg.ReplacementImagePath;
@@ -50019,6 +50203,8 @@ namespace AnonPDF
                     updatedRotation,
                     updatedOpacity,
                     updatedTransparentBackground,
+                    updatedRecolorInkEnabled,
+                    updatedRecolorInkColorArgb,
                     updatedLockAspect,
                     updatedLocked,
                     string.IsNullOrWhiteSpace(selectedPathToApply) ? rasterObject.FilePath : selectedPathToApply);
@@ -50031,6 +50217,8 @@ namespace AnonPDF
                 rasterObject.Rotation = updatedRotation;
                 rasterObject.Opacity = updatedOpacity;
                 rasterObject.TransparentBackground = updatedTransparentBackground;
+                rasterObject.RecolorInkEnabled = updatedRecolorInkEnabled;
+                rasterObject.RecolorInkColorArgb = updatedRecolorInkColorArgb;
                 rasterObject.LockAspect = updatedLockAspect;
                 rasterObject.IsLocked = updatedLocked;
 
@@ -50085,6 +50273,8 @@ namespace AnonPDF
                 dlg.Rotation = NormalizeRotation(rasterObject.Rotation);
                 dlg.RasterOpacity = NormalizeOpacity(rasterObject.Opacity);
                 dlg.TransparentBackground = rasterObject.TransparentBackground;
+                dlg.RecolorInkEnabled = rasterObject.RecolorInkEnabled;
+                dlg.RecolorInkColor = System.Drawing.Color.FromArgb(rasterObject.RecolorInkColorArgb);
                 dlg.LockAspect = rasterObject.LockAspect;
                 dlg.IsLocked = rasterObject.IsLocked;
                 dlg.SourceType = rasterObject.SourceType;
@@ -50131,6 +50321,8 @@ namespace AnonPDF
             dialog.Rotation = defaults.Rotation;
             dialog.RasterOpacity = defaults.RasterOpacity;
             dialog.TransparentBackground = defaults.TransparentBackground;
+            dialog.RecolorInkEnabled = defaults.RecolorInkEnabled;
+            dialog.RecolorInkColor = System.Drawing.Color.FromArgb(defaults.RecolorInkColorArgb);
             dialog.LockAspect = defaults.LockAspect;
             dialog.IsLocked = defaults.IsLocked;
         }
@@ -50147,6 +50339,8 @@ namespace AnonPDF
                 Rotation = NormalizeRotation(dialog.Rotation),
                 RasterOpacity = NormalizeOpacity(dialog.RasterOpacity),
                 TransparentBackground = dialog.TransparentBackground,
+                RecolorInkEnabled = dialog.RecolorInkEnabled,
+                RecolorInkColorArgb = (dialog.RecolorInkColor.IsEmpty ? System.Drawing.Color.Red : dialog.RecolorInkColor).ToArgb(),
                 LockAspect = dialog.LockAspect,
                 IsLocked = dialog.IsLocked
             };
@@ -50588,6 +50782,108 @@ namespace AnonPDF
             return working;
         }
 
+        private static bool HasRasterImageTransform(RasterObject rasterObject)
+        {
+            return rasterObject != null &&
+                   (rasterObject.TransparentBackground || rasterObject.RecolorInkEnabled);
+        }
+
+        private static Bitmap ApplyRasterObjectImageTransforms(Bitmap source, RasterObject rasterObject)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            Bitmap transformed = rasterObject != null && rasterObject.TransparentBackground
+                ? ApplyTransparentBackgroundFromTopLeft(source)
+                : new Bitmap(source);
+
+            if (rasterObject != null && rasterObject.RecolorInkEnabled)
+            {
+                Bitmap recolored = ApplyRasterInkRecolor(transformed, System.Drawing.Color.FromArgb(rasterObject.RecolorInkColorArgb));
+                transformed.Dispose();
+                transformed = recolored;
+            }
+
+            return transformed;
+        }
+
+        private static Bitmap ApplyRasterInkRecolor(Bitmap source, System.Drawing.Color targetColor)
+        {
+            if (source == null)
+            {
+                return null;
+            }
+
+            Bitmap working = new Bitmap(source.Width, source.Height, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(working))
+            {
+                g.DrawImage(source, 0, 0, source.Width, source.Height);
+            }
+
+            Rectangle rect = new Rectangle(0, 0, working.Width, working.Height);
+            BitmapData data = null;
+            try
+            {
+                data = working.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+                int stride = data.Stride;
+                int rowBytes = Math.Abs(stride);
+                int totalBytes = rowBytes * working.Height;
+                byte[] buffer = new byte[totalBytes];
+                Marshal.Copy(data.Scan0, buffer, 0, totalBytes);
+
+                const int backgroundThreshold = 20;
+                byte targetR = targetColor.R;
+                byte targetG = targetColor.G;
+                byte targetB = targetColor.B;
+
+                for (int y = 0; y < working.Height; y++)
+                {
+                    int rowStart = stride >= 0 ? y * rowBytes : (working.Height - 1 - y) * rowBytes;
+                    for (int x = 0; x < working.Width; x++)
+                    {
+                        int idx = rowStart + (x * 4);
+                        byte alpha = buffer[idx + 3];
+                        if (alpha == 0)
+                        {
+                            continue;
+                        }
+
+                        int distanceFromWhite = Math.Max(
+                            255 - buffer[idx + 2],
+                            Math.Max(255 - buffer[idx + 1], 255 - buffer[idx]));
+                        if (distanceFromWhite <= backgroundThreshold)
+                        {
+                            continue;
+                        }
+
+                        float inkCoverage = Math.Min(1f, distanceFromWhite / 255f);
+                        buffer[idx] = BlendChannelWithWhite(targetB, inkCoverage);
+                        buffer[idx + 1] = BlendChannelWithWhite(targetG, inkCoverage);
+                        buffer[idx + 2] = BlendChannelWithWhite(targetR, inkCoverage);
+                    }
+                }
+
+                Marshal.Copy(buffer, 0, data.Scan0, totalBytes);
+            }
+            finally
+            {
+                if (data != null)
+                {
+                    working.UnlockBits(data);
+                }
+            }
+
+            return working;
+        }
+
+        private static byte BlendChannelWithWhite(byte channel, float coverage)
+        {
+            coverage = Math.Max(0f, Math.Min(1f, coverage));
+            return (byte)Math.Max(0, Math.Min(255, (int)Math.Round(255f - ((255f - channel) * coverage))));
+        }
+
         private static bool TryCreateRasterPreviewImage(RasterObject rasterObject, out DrawingImage image)
         {
             image = null;
@@ -50602,13 +50898,9 @@ namespace AnonPDF
                 {
                     using (var ms = new MemoryStream(rasterObject.EmbeddedBytes))
                     using (var src = DrawingImage.FromStream(ms))
+                    using (var baseBitmap = new Bitmap(src))
                     {
-                        using (var baseBitmap = new Bitmap(src))
-                        {
-                            image = rasterObject.TransparentBackground
-                                ? ApplyTransparentBackgroundFromTopLeft(baseBitmap)
-                                : new Bitmap(baseBitmap);
-                        }
+                        image = ApplyRasterObjectImageTransforms(baseBitmap, rasterObject);
                         return true;
                     }
                 }
@@ -50616,13 +50908,9 @@ namespace AnonPDF
                 if (!string.IsNullOrWhiteSpace(rasterObject.FilePath) && File.Exists(rasterObject.FilePath))
                 {
                     using (var src = DrawingImage.FromFile(rasterObject.FilePath))
+                    using (var baseBitmap = new Bitmap(src))
                     {
-                        using (var baseBitmap = new Bitmap(src))
-                        {
-                            image = rasterObject.TransparentBackground
-                                ? ApplyTransparentBackgroundFromTopLeft(baseBitmap)
-                                : new Bitmap(baseBitmap);
-                        }
+                        image = ApplyRasterObjectImageTransforms(baseBitmap, rasterObject);
                         return true;
                     }
                 }
@@ -50647,7 +50935,7 @@ namespace AnonPDF
             {
                 if (rasterObject.EmbeddedBytes != null && rasterObject.EmbeddedBytes.Length > 0)
                 {
-                    if (!rasterObject.TransparentBackground)
+                    if (!HasRasterImageTransform(rasterObject))
                     {
                         imageData = iText.IO.Image.ImageDataFactory.Create(rasterObject.EmbeddedBytes);
                         return true;
@@ -50656,7 +50944,7 @@ namespace AnonPDF
                     using (var ms = new MemoryStream(rasterObject.EmbeddedBytes))
                     using (var src = DrawingImage.FromStream(ms))
                     using (var baseBitmap = new Bitmap(src))
-                    using (var transformed = ApplyTransparentBackgroundFromTopLeft(baseBitmap))
+                    using (var transformed = ApplyRasterObjectImageTransforms(baseBitmap, rasterObject))
                     using (var pngStream = new MemoryStream())
                     {
                         transformed.Save(pngStream, ImageFormat.Png);
@@ -50667,7 +50955,7 @@ namespace AnonPDF
 
                 if (!string.IsNullOrWhiteSpace(rasterObject.FilePath) && File.Exists(rasterObject.FilePath))
                 {
-                    if (!rasterObject.TransparentBackground)
+                    if (!HasRasterImageTransform(rasterObject))
                     {
                         byte[] fileBytes = File.ReadAllBytes(rasterObject.FilePath);
                         imageData = iText.IO.Image.ImageDataFactory.Create(fileBytes);
@@ -50676,7 +50964,7 @@ namespace AnonPDF
 
                     using (var src = DrawingImage.FromFile(rasterObject.FilePath))
                     using (var baseBitmap = new Bitmap(src))
-                    using (var transformed = ApplyTransparentBackgroundFromTopLeft(baseBitmap))
+                    using (var transformed = ApplyRasterObjectImageTransforms(baseBitmap, rasterObject))
                     using (var pngStream = new MemoryStream())
                     {
                         transformed.Save(pngStream, ImageFormat.Png);
