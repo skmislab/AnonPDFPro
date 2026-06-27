@@ -8783,6 +8783,80 @@ namespace AnonPDF
             return result;
         }
 
+        private bool IsPointOverSelectedObjectInteractionHandle(Point location, float dpiX, float dpiY)
+        {
+            if (GetGroupSelectionCount() > 0 &&
+                CanInteractWithCurrentGroupSelection() &&
+                TryGetCurrentGroupSelectionScreenBounds(dpiX, dpiY, out RectangleF groupBounds) &&
+                TryGetObjectScaleHandleAtPoint(groupBounds, location, out _))
+            {
+                return true;
+            }
+
+            if (selectedTextAnnotation != null &&
+                selectedTextAnnotation.PageNumber == currentPage &&
+                !IsTextAnnotationEffectivelyLocked(selectedTextAnnotation))
+            {
+                if (TryGetTextLeaderHandleRect(selectedTextAnnotation, dpiX, dpiY, out RectangleF leaderHandleRect) &&
+                    leaderHandleRect.Contains(location))
+                {
+                    return true;
+                }
+
+                if (TryGetTextScaleHandleAtPoint(selectedTextAnnotation, location, dpiX, dpiY, out _, out _))
+                {
+                    return true;
+                }
+
+                if (TryGetAnnotationRotationHandleRect(selectedTextAnnotation, dpiX, dpiY, out RectangleF rotationHandleRect, out _) &&
+                    rotationHandleRect.Contains(location))
+                {
+                    return true;
+                }
+            }
+
+            if (selectedRasterObject != null &&
+                selectedRasterObject.PageNumber == currentPage &&
+                !IsRasterObjectEffectivelyLocked(selectedRasterObject))
+            {
+                if (TryGetRasterResizeHandleAtPoint(selectedRasterObject, location, out _) ||
+                    (TryGetRasterRotationHandleRect(selectedRasterObject, out RectangleF rasterRotationHandleRect, out _) &&
+                     rasterRotationHandleRect.Contains(location)))
+                {
+                    return true;
+                }
+            }
+
+            if (selectedArrowObject != null &&
+                selectedArrowObject.PageNumber == currentPage &&
+                !IsArrowObjectEffectivelyLocked(selectedArrowObject))
+            {
+                if ((TryGetArrowHandleAtPoint(selectedArrowObject, location, out ArrowHandleType arrowHandle) &&
+                     arrowHandle != ArrowHandleType.None) ||
+                    (TryGetArrowScreenBounds(selectedArrowObject, out RectangleF arrowBounds) &&
+                     TryGetObjectScaleHandleAtPoint(arrowBounds, location, out _)))
+                {
+                    return true;
+                }
+            }
+
+            if (selectedVectorShape != null &&
+                selectedVectorShape.PageNumber == currentPage &&
+                !IsVectorShapeEffectivelyLocked(selectedVectorShape))
+            {
+                if (TryGetVectorHandleAtPoint(selectedVectorShape, location, out _) ||
+                    (TryGetVectorShapeScreenBounds(selectedVectorShape, out RectangleF vectorBounds) &&
+                     TryGetObjectScaleHandleAtPoint(vectorBounds, location, out _)) ||
+                    (TryGetVectorRotationHandleRect(selectedVectorShape, out RectangleF vectorRotationHandleRect, out _) &&
+                     vectorRotationHandleRect.Contains(location)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private bool TryGetCycledSelectableObjectAtPoint(Point location, float dpiX, float dpiY, bool advanceCycle, out object hitObject)
         {
             hitObject = null;
@@ -29337,6 +29411,7 @@ namespace AnonPDF
                 }
 
                 if (GetSelectableObjectsAtPoint(e.Location, dpiX, dpiY).Count == 0 &&
+                    !IsPointOverSelectedObjectInteractionHandle(e.Location, dpiX, dpiY) &&
                     TryRestoreRedactionSelectionModeFromHitBlock(e.Location))
                 {
                     ResetObjectSelectionCycle();
