@@ -125,6 +125,9 @@
   <data name="Menu_Print" xml:space="preserve">
     <value>Drukuj</value>
   </data>
+  <data name="Menu_PreviewPdf" xml:space="preserve">
+    <value>Podgląd</value>
+  </data>
   <data name="Menu_SelectSignaturesToRemove" xml:space="preserve">
     <value>Wybierz podpisy do usunięcia</value>
   </data>
@@ -2022,6 +2025,27 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   </data>
   <data name="Msg_Print_JobSubmitted" xml:space="preserve">
     <value>Dokument został wysłany do drukarki.</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Title" xml:space="preserve">
+    <value>Podgląd anonimizacji - {0}</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Previous" xml:space="preserve">
+    <value>Poprzednia</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Next" xml:space="preserve">
+    <value>Następna</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Fit" xml:space="preserve">
+    <value>Dopasuj</value>
+  </data>
+  <data name="Dialog_PreviewPdf_PageLabel" xml:space="preserve">
+    <value>Strona {0} z {1}</value>
+  </data>
+  <data name="Dialog_Button_Close" xml:space="preserve">
+    <value>Zamknij</value>
+  </data>
+  <data name="Err_PreviewPdf" xml:space="preserve">
+    <value>Błąd podglądu: {0}</value>
   </data>
   <data name="Layer_Work_DefaultName" xml:space="preserve">
     <value>Robocza</value>

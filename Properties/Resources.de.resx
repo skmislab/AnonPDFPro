@@ -389,6 +389,9 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="Menu_Print" xml:space="preserve">
     <value>Drucken</value>
   </data>
+  <data name="Menu_PreviewPdf" xml:space="preserve">
+    <value>Vorschau</value>
+  </data>
   <data name="Menu_SelectSignaturesToRemove" xml:space="preserve">
     <value>Signaturen zum Entfernen wählen</value>
   </data>
@@ -1975,6 +1978,27 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   </data>
   <data name="Msg_Print_JobSubmitted" xml:space="preserve">
     <value>Dokument wurde an den Drucker gesendet.</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Title" xml:space="preserve">
+    <value>Anonymisierungsvorschau - {0}</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Previous" xml:space="preserve">
+    <value>Zurück</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Next" xml:space="preserve">
+    <value>Weiter</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Fit" xml:space="preserve">
+    <value>Anpassen</value>
+  </data>
+  <data name="Dialog_PreviewPdf_PageLabel" xml:space="preserve">
+    <value>Seite {0} von {1}</value>
+  </data>
+  <data name="Dialog_Button_Close" xml:space="preserve">
+    <value>Schliessen</value>
+  </data>
+  <data name="Err_PreviewPdf" xml:space="preserve">
+    <value>Vorschaufehler: {0}</value>
   </data>
   <data name="Layer_Work_DefaultName" xml:space="preserve">
     <value>Arbeitsbereich</value>

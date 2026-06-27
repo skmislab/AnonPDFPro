@@ -10062,6 +10062,10 @@ namespace AnonPDF
             {
                 savePdfPageRangeMenuItem.Text = LocalizedText("Menu_SavePdfPageRange");
             }
+            if (previewPdfMenuItem != null)
+            {
+                previewPdfMenuItem.Text = LocalizedText("Menu_PreviewPdf");
+            }
             if (printPdfMenuItem != null)
             {
                 printPdfMenuItem.Text = LocalizedText("Menu_Print");
@@ -22574,6 +22578,10 @@ namespace AnonPDF
             {
                 savePdfPageRangeMenuItem.Enabled = true;
             }
+            if (previewPdfMenuItem != null)
+            {
+                previewPdfMenuItem.Enabled = true;
+            }
             if (printPdfMenuItem != null)
             {
                 printPdfMenuItem.Enabled = true;
@@ -23211,6 +23219,10 @@ namespace AnonPDF
             if (savePdfPageRangeMenuItem != null)
             {
                 savePdfPageRangeMenuItem.Enabled = false;
+            }
+            if (previewPdfMenuItem != null)
+            {
+                previewPdfMenuItem.Enabled = false;
             }
             if (printPdfMenuItem != null)
             {
@@ -24688,6 +24700,652 @@ namespace AnonPDF
             }
         }
 
+        private void PreviewPdfMenuItem_Click(object sender, EventArgs e)
+        {
+            if (pdf == null || numPages <= 0 || string.IsNullOrWhiteSpace(inputPdfPath))
+            {
+                return;
+            }
+
+            if (!EnsureInterestSubjectForRequiredBases())
+            {
+                return;
+            }
+
+            string previewTempPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_preview_{Guid.NewGuid():N}.pdf");
+            try
+            {
+                this.Cursor = Cursors.WaitCursor;
+                BuildRedactedPdfForOutput(
+                    previewTempPath,
+                    additionalPagesToRemove: null,
+                    includeSupplementaryPages: true,
+                    showSuccessMessage: false);
+            }
+            catch (Exception ex)
+            {
+                TryDeleteFile(previewTempPath);
+                MessageBox.Show(
+                    this,
+                    string.Format(LocalizedText("Err_PreviewPdf"), ex.Message),
+                    Resources.Title_Error,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return;
+            }
+            finally
+            {
+                this.Cursor = Cursors.Default;
+            }
+
+            string previewPassword = (!string.IsNullOrWhiteSpace(userNewPassword) && setSavePassword.Checked)
+                ? userNewPassword
+                : userPassword;
+
+            try
+            {
+                using (var dialog = new RedactedPdfPreviewDialog(
+                    previewTempPath,
+                    previewPassword,
+                    Path.GetFileName(inputPdfPath),
+                    this,
+                    RenderPageBitmapForPrint,
+                    CreateDialogTheme()))
+                {
+                    dialog.ShowDialog(this);
+                }
+            }
+            catch (Exception ex)
+            {
+                TryDeleteFile(previewTempPath);
+                MessageBox.Show(
+                    this,
+                    string.Format(LocalizedText("Err_PreviewPdf"), ex.Message),
+                    Resources.Title_Error,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        private static void TryDeleteFile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return;
+            }
+
+            try
+            {
+                File.Delete(path);
+            }
+            catch
+            {
+                // best effort cleanup
+            }
+        }
+
+        private sealed class RedactedPdfPreviewDialog : Form
+        {
+            private readonly string previewPdfPath;
+            private readonly string previewPdfPassword;
+            private readonly string sourceName;
+            private readonly PDFForm ownerForm;
+            private readonly Func<PDFiumSharp.PdfDocument, int, Size, int, Bitmap> renderPage;
+            private readonly PDFiumSharp.PdfDocument previewPdf;
+            private readonly Panel pagePanel;
+            private readonly PictureBox pagePictureBox;
+            private readonly Label pageLabel;
+            private readonly Button previousButton;
+            private readonly Button nextButton;
+            private readonly Button zoomOutButton;
+            private readonly Button zoomInButton;
+            private readonly Button fitButton;
+            private readonly Button printButton;
+            private readonly Button closeButton;
+            private readonly Panel pageNumberInputHost;
+            private readonly TextBox pageNumberInput;
+            private readonly VScrollBar documentScrollBar;
+            private int currentPreviewPage = 1;
+            private float zoomMultiplier = 1f;
+            private bool fitToWindow = true;
+            private bool updatingPageControls;
+
+            public RedactedPdfPreviewDialog(
+                string previewPdfPath,
+                string password,
+                string sourceName,
+                PDFForm ownerForm,
+                Func<PDFiumSharp.PdfDocument, int, Size, int, Bitmap> renderPage,
+                DialogTheme theme)
+            {
+                this.previewPdfPath = previewPdfPath;
+                this.previewPdfPassword = password;
+                this.sourceName = sourceName;
+                this.ownerForm = ownerForm ?? throw new ArgumentNullException(nameof(ownerForm));
+                this.renderPage = renderPage ?? throw new ArgumentNullException(nameof(renderPage));
+                previewPdf = string.IsNullOrWhiteSpace(password)
+                    ? new PDFiumSharp.PdfDocument(previewPdfPath)
+                    : new PDFiumSharp.PdfDocument(previewPdfPath, password);
+
+                Text = string.Format(CultureInfo.CurrentCulture, LocalizedText("Dialog_PreviewPdf_Title"), sourceName);
+                StartPosition = FormStartPosition.CenterParent;
+                MinimizeBox = false;
+                ShowIcon = false;
+                ShowInTaskbar = false;
+                KeyPreview = true;
+                Size = PDFForm.ScaleSizeForDpiStatic(1000, 768);
+                MinimumSize = PDFForm.ScaleSizeForDpiStatic(860, 480);
+
+                var toolbar = new FlowLayoutPanel
+                {
+                    Dock = DockStyle.Top,
+                    Height = PDFForm.ScaleForDpiStatic(42),
+                    FlowDirection = FlowDirection.LeftToRight,
+                    WrapContents = false,
+                    Padding = new Padding(PDFForm.ScaleForDpiStatic(8), PDFForm.ScaleForDpiStatic(7), PDFForm.ScaleForDpiStatic(8), 0)
+                };
+
+                previousButton = CreateToolbarButton(LocalizedText("Dialog_PreviewPdf_Previous"));
+                nextButton = CreateToolbarButton(LocalizedText("Dialog_PreviewPdf_Next"));
+                zoomOutButton = CreateToolbarButton("-");
+                zoomInButton = CreateToolbarButton("+");
+                fitButton = CreateToolbarButton(LocalizedText("Dialog_PreviewPdf_Fit"));
+                printButton = CreateToolbarButton(LocalizedText("Menu_Print"));
+                closeButton = CreateToolbarButton(LocalizedText("Dialog_Button_Close"));
+                int toolbarControlHeight = PDFForm.ScaleForDpiStatic(28);
+                pageNumberInputHost = new Panel
+                {
+                    Width = PDFForm.ScaleForDpiStatic(74),
+                    Height = toolbarControlHeight,
+                    BorderStyle = BorderStyle.FixedSingle,
+                    BackColor = SystemColors.Window,
+                    Margin = new Padding(PDFForm.ScaleForDpiStatic(8), 0, PDFForm.ScaleForDpiStatic(8), 0)
+                };
+                pageNumberInput = new TextBox
+                {
+                    AutoSize = true,
+                    Text = "1",
+                    Font = new Font(Font.FontFamily, Font.Size + 2f, FontStyle.Regular),
+                    TextAlign = HorizontalAlignment.Center,
+                    BorderStyle = BorderStyle.None
+                };
+                pageNumberInputHost.Controls.Add(pageNumberInput);
+                pageLabel = new Label
+                {
+                    AutoSize = false,
+                    Width = PDFForm.ScaleForDpiStatic(190),
+                    Height = toolbarControlHeight,
+                    Font = new Font(Font.FontFamily, Font.Size + 2f, FontStyle.Regular),
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Margin = new Padding(PDFForm.ScaleForDpiStatic(8), 0, PDFForm.ScaleForDpiStatic(8), 0)
+                };
+
+                toolbar.Controls.Add(previousButton);
+                toolbar.Controls.Add(nextButton);
+                toolbar.Controls.Add(pageNumberInputHost);
+                toolbar.Controls.Add(pageLabel);
+                toolbar.Controls.Add(zoomOutButton);
+                toolbar.Controls.Add(zoomInButton);
+                toolbar.Controls.Add(fitButton);
+                toolbar.Controls.Add(printButton);
+                toolbar.Controls.Add(closeButton);
+
+                documentScrollBar = new VScrollBar
+                {
+                    Dock = DockStyle.Right,
+                    Minimum = 1,
+                    Maximum = Math.Max(1, previewPdf.Pages.Count),
+                    LargeChange = 1,
+                    SmallChange = 1,
+                    Value = 1
+                };
+
+                pagePanel = new Panel
+                {
+                    Dock = DockStyle.Fill,
+                    AutoScroll = true,
+                    TabStop = true,
+                    Padding = new Padding(PDFForm.ScaleForDpiStatic(14))
+                };
+
+                pagePictureBox = new PictureBox
+                {
+                    SizeMode = PictureBoxSizeMode.AutoSize,
+                    BackColor = System.Drawing.Color.White
+                };
+                pagePanel.Controls.Add(pagePictureBox);
+
+                Controls.Add(pagePanel);
+                Controls.Add(documentScrollBar);
+                Controls.Add(toolbar);
+
+                previousButton.Click += (_, __) => ShowPage(currentPreviewPage - 1);
+                nextButton.Click += (_, __) => ShowPage(currentPreviewPage + 1);
+                zoomOutButton.Click += (_, __) => ApplyZoom(zoomMultiplier / 1.25f);
+                zoomInButton.Click += (_, __) => ApplyZoom(zoomMultiplier * 1.25f);
+                pageNumberInput.KeyPress += PageNumberInput_KeyPress;
+                pageNumberInput.KeyDown += PageNumberInput_KeyDown;
+                pageNumberInput.Leave += (_, __) => CommitPageNumberInput();
+                pageNumberInput.Enter += (_, __) => SelectPageNumberInputText();
+                pageNumberInput.Click += (_, __) => SelectPageNumberInputText();
+                pageNumberInput.MouseUp += (_, __) => SelectPageNumberInputText();
+                pageNumberInputHost.Resize += (_, __) => LayoutPageNumberInput();
+                documentScrollBar.ValueChanged += (_, __) =>
+                {
+                    if (!updatingPageControls)
+                    {
+                        ShowPage(documentScrollBar.Value);
+                    }
+                };
+                fitButton.Click += (_, __) =>
+                {
+                    fitToWindow = true;
+                    zoomMultiplier = 1f;
+                    RenderCurrentPage();
+                };
+                printButton.Click += (_, __) => PrintPreviewDocument();
+                closeButton.Click += (_, __) => Close();
+                pagePanel.Click += (_, __) => pagePanel.Focus();
+                pagePanel.MouseWheel += PreviewMouseWheel;
+                pagePictureBox.Click += (_, __) => pagePanel.Focus();
+                pagePictureBox.MouseWheel += PreviewMouseWheel;
+                pagePanel.Resize += (_, __) =>
+                {
+                    if (fitToWindow)
+                    {
+                        RenderCurrentPage();
+                    }
+                };
+                Shown += (_, __) => RenderCurrentPage();
+                KeyDown += RedactedPdfPreviewDialog_KeyDown;
+
+                DialogThemeApplier.ApplyTo(this, theme, pagePictureBox);
+                pageNumberInputHost.BackColor = pageNumberInput.BackColor;
+                LayoutPageNumberInput();
+                pagePanel.BackColor = theme?.PanelBackColor ?? SystemColors.ControlDark;
+            }
+
+            private static Button CreateToolbarButton(string text)
+            {
+                return new Button
+                {
+                    Text = text,
+                    Width = PDFForm.ScaleForDpiStatic(82),
+                    Height = PDFForm.ScaleForDpiStatic(28),
+                    Margin = new Padding(PDFForm.ScaleForDpiStatic(2), 0, PDFForm.ScaleForDpiStatic(2), 0)
+                };
+            }
+
+            private void RedactedPdfPreviewDialog_KeyDown(object sender, KeyEventArgs e)
+            {
+                if (pageNumberInput.Focused)
+                {
+                    return;
+                }
+
+                if (e.KeyCode == Keys.Left || e.KeyCode == Keys.PageUp)
+                {
+                    ShowPage(currentPreviewPage - 1);
+                    e.Handled = true;
+                }
+                else if (e.KeyCode == Keys.Right || e.KeyCode == Keys.PageDown)
+                {
+                    ShowPage(currentPreviewPage + 1);
+                    e.Handled = true;
+                }
+                else if (e.KeyCode == Keys.Escape)
+                {
+                    Close();
+                    e.Handled = true;
+                }
+            }
+
+            private void PageNumberInput_KeyPress(object sender, KeyPressEventArgs e)
+            {
+                if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
+                {
+                    e.Handled = true;
+                }
+            }
+
+            private void PageNumberInput_KeyDown(object sender, KeyEventArgs e)
+            {
+                if (e.KeyCode == Keys.Enter)
+                {
+                    CommitPageNumberInput();
+                    e.SuppressKeyPress = true;
+                    e.Handled = true;
+                }
+                else if (e.Control && e.KeyCode == Keys.A)
+                {
+                    pageNumberInput.SelectAll();
+                    e.SuppressKeyPress = true;
+                    e.Handled = true;
+                }
+            }
+
+            private void CommitPageNumberInput()
+            {
+                if (updatingPageControls)
+                {
+                    return;
+                }
+
+                int pageCount = previewPdf?.Pages.Count ?? 0;
+                if (pageCount <= 0)
+                {
+                    return;
+                }
+
+                if (!int.TryParse(pageNumberInput.Text, NumberStyles.Integer, CultureInfo.CurrentCulture, out int requestedPage))
+                {
+                    requestedPage = currentPreviewPage;
+                }
+
+                int clampedPage = Math.Max(1, Math.Min(pageCount, requestedPage));
+                if (clampedPage == currentPreviewPage)
+                {
+                    UpdatePageControls(pageCount);
+                }
+                else
+                {
+                    ShowPage(clampedPage);
+                }
+
+                if (pageNumberInput.Focused)
+                {
+                    SelectPageNumberInputText();
+                }
+            }
+
+            private void SelectPageNumberInputText()
+            {
+                BeginInvoke((Action)(() =>
+                {
+                    if (!pageNumberInput.IsDisposed && pageNumberInput.Focused)
+                    {
+                        pageNumberInput.Select(0, pageNumberInput.Text.Length);
+                    }
+                }));
+            }
+
+            private void LayoutPageNumberInput()
+            {
+                int inset = PDFForm.ScaleForDpiStatic(4);
+                pageNumberInput.Width = Math.Max(1, pageNumberInputHost.ClientSize.Width - inset * 2);
+                int x = Math.Max(0, (pageNumberInputHost.ClientSize.Width - pageNumberInput.Width) / 2);
+                int y = Math.Max(0, (pageNumberInputHost.ClientSize.Height - pageNumberInput.Height) / 2);
+                pageNumberInput.Location = new Point(x, y);
+            }
+
+            protected override void OnMouseWheel(MouseEventArgs e)
+            {
+                base.OnMouseWheel(e);
+
+                if (!pageNumberInput.Focused && ClientRectangle.Contains(PointToClient(MousePosition)))
+                {
+                    PreviewMouseWheel(this, e);
+                }
+            }
+
+            private void PreviewMouseWheel(object sender, MouseEventArgs e)
+            {
+                if (!fitToWindow)
+                {
+                    return;
+                }
+
+                if (e.Delta > 0)
+                {
+                    ShowPage(currentPreviewPage - 1);
+                }
+                else if (e.Delta < 0)
+                {
+                    ShowPage(currentPreviewPage + 1);
+                }
+
+                if (e is HandledMouseEventArgs handled)
+                {
+                    handled.Handled = true;
+                }
+            }
+
+            private void PrintPreviewDocument()
+            {
+                int pageCount = previewPdf?.Pages.Count ?? 0;
+                if (pageCount <= 0)
+                {
+                    return;
+                }
+
+                using (var printDocument = new PrintDocument())
+                {
+                    printDocument.DocumentName = string.IsNullOrWhiteSpace(sourceName)
+                        ? Path.GetFileName(previewPdfPath)
+                        : sourceName;
+                    printDocument.OriginAtMargins = false;
+                    printDocument.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
+                    printDocument.PrinterSettings.MinimumPage = 1;
+                    printDocument.PrinterSettings.MaximumPage = pageCount;
+                    printDocument.PrinterSettings.FromPage = currentPreviewPage;
+                    printDocument.PrinterSettings.ToPage = currentPreviewPage;
+
+                    int fromPage = currentPreviewPage;
+                    int toPage = currentPreviewPage;
+                    int pageToPrint = currentPreviewPage;
+
+                    printDocument.BeginPrint += (_, __) => pageToPrint = fromPage;
+                    printDocument.PrintPage += (_, args) =>
+                    {
+                        var sourcePage = previewPdf?.Pages[pageToPrint - 1];
+                        if (sourcePage == null)
+                        {
+                            args.HasMorePages = false;
+                            return;
+                        }
+
+                        float sourceWidthPoints = (float)sourcePage.Width;
+                        float sourceHeightPoints = (float)sourcePage.Height;
+                        float targetWidthHundredths = Math.Max(1f, sourceWidthPoints * 100f / 72f);
+                        float targetHeightHundredths = Math.Max(1f, sourceHeightPoints * 100f / 72f);
+                        int targetPixelWidth = Math.Max(1, (int)Math.Round(targetWidthHundredths * args.Graphics.DpiX / 100f));
+                        int targetPixelHeight = Math.Max(1, (int)Math.Round(targetHeightHundredths * args.Graphics.DpiY / 100f));
+                        float x = -args.PageSettings.HardMarginX;
+                        float y = -args.PageSettings.HardMarginY;
+
+                        using (Bitmap pageBitmap = renderPage(previewPdf, pageToPrint, new Size(targetPixelWidth, targetPixelHeight), 0))
+                        {
+                            if (pageBitmap != null)
+                            {
+                                args.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                args.Graphics.DrawImage(pageBitmap, x, y, targetWidthHundredths, targetHeightHundredths);
+                            }
+                        }
+
+                        pageToPrint++;
+                        args.HasMorePages = pageToPrint <= toPage;
+                    };
+
+                    using (var printDialog = new PrintDialog())
+                    {
+                        printDialog.UseEXDialog = false;
+                        printDialog.AllowCurrentPage = true;
+                        printDialog.AllowSomePages = true;
+                        printDialog.AllowSelection = false;
+                        printDialog.Document = printDocument;
+
+                        if (printDialog.ShowDialog(this) != DialogResult.OK)
+                        {
+                            return;
+                        }
+
+                        if (printDialog.PrinterSettings != null)
+                        {
+                            printDocument.PrinterSettings = printDialog.PrinterSettings;
+                        }
+                    }
+
+                    ResolvePrintPageRange(printDocument.PrinterSettings, pageCount, currentPreviewPage, out fromPage, out toPage);
+
+                    string rangeTempPath = null;
+                    try
+                    {
+                        printButton.Enabled = false;
+                        Cursor = Cursors.WaitCursor;
+
+                        string pdfExportSourcePath = previewPdfPath;
+                        if (IsPdfTargetPrinter(printDocument.PrinterSettings) && (fromPage != 1 || toPage != pageCount))
+                        {
+                            rangeTempPath = ownerForm.CreatePdfPageRangeCopy(previewPdfPath, previewPdfPassword, fromPage, toPage);
+                            pdfExportSourcePath = rangeTempPath;
+                        }
+
+                        if (ownerForm.TryExportPrintRangeToPdf(printDocument.PrinterSettings, fromPage, toPage, pdfExportSourcePath))
+                        {
+                            return;
+                        }
+
+                        printDocument.Print();
+                        ownerForm.ShowInfoMessage(LocalizedText("Msg_Print_JobSubmitted"));
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(
+                            this,
+                            string.Format(LocalizedText("Err_Print"), ex.Message),
+                            Resources.Title_Error,
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
+                    finally
+                    {
+                        TryDeleteFile(rangeTempPath);
+                        Cursor = Cursors.Default;
+                        printButton.Enabled = true;
+                    }
+                }
+            }
+
+            private void ShowPage(int pageNumber)
+            {
+                int pageCount = previewPdf?.Pages.Count ?? 0;
+                if (pageCount <= 0)
+                {
+                    return;
+                }
+
+                int clampedPage = Math.Max(1, Math.Min(pageCount, pageNumber));
+                if (clampedPage == currentPreviewPage && pagePictureBox.Image != null)
+                {
+                    return;
+                }
+
+                currentPreviewPage = clampedPage;
+                RenderCurrentPage();
+            }
+
+            private void ApplyZoom(float nextZoom)
+            {
+                fitToWindow = false;
+                zoomMultiplier = Math.Max(0.15f, Math.Min(6f, nextZoom));
+                RenderCurrentPage();
+            }
+
+            private void RenderCurrentPage()
+            {
+                if (previewPdf == null || previewPdf.Pages.Count == 0 || pagePanel.ClientSize.Width <= 0 || pagePanel.ClientSize.Height <= 0)
+                {
+                    return;
+                }
+
+                int pageCount = previewPdf.Pages.Count;
+                currentPreviewPage = Math.Max(1, Math.Min(pageCount, currentPreviewPage));
+                var page = previewPdf.Pages[currentPreviewPage - 1];
+                float pageWidth = Math.Max(1f, (float)page.Width);
+                float pageHeight = Math.Max(1f, (float)page.Height);
+
+                int availableWidth = Math.Max(80, pagePanel.ClientSize.Width - pagePanel.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth);
+                int availableHeight = Math.Max(80, pagePanel.ClientSize.Height - pagePanel.Padding.Vertical - SystemInformation.HorizontalScrollBarHeight);
+                float fitScale = Math.Min(availableWidth / pageWidth, availableHeight / pageHeight);
+                if (fitScale <= 0f || float.IsNaN(fitScale) || float.IsInfinity(fitScale))
+                {
+                    fitScale = 1f;
+                }
+
+                float effectiveScale = fitToWindow ? fitScale : fitScale * zoomMultiplier;
+                int targetWidth = Math.Max(1, (int)Math.Round(pageWidth * effectiveScale));
+                int targetHeight = Math.Max(1, (int)Math.Round(pageHeight * effectiveScale));
+
+                Bitmap nextImage = renderPage(previewPdf, currentPreviewPage, new Size(targetWidth, targetHeight), 0);
+                Image previousImage = pagePictureBox.Image;
+                pagePictureBox.Image = nextImage;
+                previousImage?.Dispose();
+
+                CenterPreviewImage();
+                UpdatePageControls(pageCount);
+            }
+
+            private void UpdatePageControls(int pageCount)
+            {
+                updatingPageControls = true;
+                try
+                {
+                    int maximumPage = Math.Max(1, pageCount);
+                    pageNumberInput.Text = Math.Max(1, Math.Min(maximumPage, currentPreviewPage)).ToString(CultureInfo.CurrentCulture);
+
+                    documentScrollBar.Maximum = maximumPage;
+                    documentScrollBar.Value = Math.Max(documentScrollBar.Minimum, Math.Min(maximumPage, currentPreviewPage));
+                    documentScrollBar.Enabled = maximumPage > 1;
+
+                    pageLabel.Text = string.Format(CultureInfo.CurrentCulture, LocalizedText("Dialog_PreviewPdf_PageLabel"), currentPreviewPage, pageCount);
+                    previousButton.Enabled = currentPreviewPage > 1;
+                    nextButton.Enabled = currentPreviewPage < pageCount;
+                }
+                finally
+                {
+                    updatingPageControls = false;
+                }
+            }
+
+            private void CenterPreviewImage()
+            {
+                if (pagePictureBox.Image == null)
+                {
+                    return;
+                }
+
+                int x = Math.Max(pagePanel.Padding.Left, (pagePanel.ClientSize.Width - pagePictureBox.Width) / 2);
+                int y = Math.Max(pagePanel.Padding.Top, (pagePanel.ClientSize.Height - pagePictureBox.Height) / 2);
+                pagePictureBox.Location = new Point(x, y);
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    Image image = pagePictureBox?.Image;
+                    if (pagePictureBox != null)
+                    {
+                        pagePictureBox.Image = null;
+                    }
+                    image?.Dispose();
+
+                    try
+                    {
+                        previewPdf?.Close();
+                    }
+                    catch
+                    {
+                        // ignore disposal errors
+                    }
+
+                    TryDeleteFile(previewPdfPath);
+                }
+
+                base.Dispose(disposing);
+            }
+        }
+
         private static void ResolvePrintPageRange(PrinterSettings printerSettings, int totalPages, int currentPageNumber, out int fromPage, out int toPage)
         {
             fromPage = currentPageNumber;
@@ -24713,6 +25371,63 @@ namespace AnonPDF
                     fromPage = 1;
                     toPage = totalPages;
                     break;
+            }
+        }
+
+        private string CreatePdfPageRangeCopy(string sourcePdfPath, string password, int fromPage, int toPage)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePdfPath) || !File.Exists(sourcePdfPath))
+            {
+                throw new FileNotFoundException("Missing prepared print file.", sourcePdfPath);
+            }
+
+            string targetPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_print_range_{Guid.NewGuid():N}.pdf");
+            try
+            {
+                var readerProps = new ReaderProperties();
+                if (!string.IsNullOrWhiteSpace(password))
+                {
+                    readerProps.SetPassword(System.Text.Encoding.UTF8.GetBytes(password));
+                }
+
+                var writerProps = new WriterProperties();
+                writerProps.SetCompressionLevel(9);
+                writerProps.SetFullCompressionMode(true);
+                if (setSavePassword.Checked && !string.IsNullOrWhiteSpace(userNewPassword))
+                {
+                    byte[] pwdSaveBytes = System.Text.Encoding.UTF8.GetBytes(userNewPassword);
+                    writerProps.SetStandardEncryption(
+                        userPassword: pwdSaveBytes,
+                        ownerPassword: pwdSaveBytes,
+                        permissions: EncryptionConstants.ALLOW_PRINTING | EncryptionConstants.ALLOW_COPY,
+                        encryptionAlgorithm: EncryptionConstants.ENCRYPTION_AES_256);
+                }
+
+                using (var reader = new PdfReader(sourcePdfPath, readerProps).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+                using (var srcDoc = new iText.Kernel.Pdf.PdfDocument(reader))
+                using (var writer = new PdfWriter(targetPath, writerProps))
+                using (var destDoc = new iText.Kernel.Pdf.PdfDocument(writer))
+                {
+                    int totalPages = srcDoc.GetNumberOfPages();
+                    int firstPage = Math.Max(1, Math.Min(totalPages, fromPage));
+                    int lastPage = Math.Max(1, Math.Min(totalPages, toPage));
+                    if (firstPage > lastPage)
+                    {
+                        int swap = firstPage;
+                        firstPage = lastPage;
+                        lastPage = swap;
+                    }
+
+                    srcDoc.CopyPagesTo(firstPage, lastPage, destDoc);
+                    EnsureITextMetadataCompliance(destDoc, "print-range");
+                }
+
+                return targetPath;
+            }
+            catch
+            {
+                TryDeleteFile(targetPath);
+                throw;
             }
         }
 

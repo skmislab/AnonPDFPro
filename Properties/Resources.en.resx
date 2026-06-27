@@ -125,6 +125,9 @@
   <data name="Menu_Print" xml:space="preserve">
     <value>Print</value>
   </data>
+  <data name="Menu_PreviewPdf" xml:space="preserve">
+    <value>Preview</value>
+  </data>
   <data name="Menu_SelectSignaturesToRemove" xml:space="preserve">
     <value>Select signatures to remove</value>
   </data>
@@ -2022,6 +2025,27 @@ Close the application and run the installer now?</value>
   </data>
   <data name="Msg_Print_JobSubmitted" xml:space="preserve">
     <value>Document was sent to the printer.</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Title" xml:space="preserve">
+    <value>Anonymization preview - {0}</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Previous" xml:space="preserve">
+    <value>Previous</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Next" xml:space="preserve">
+    <value>Next</value>
+  </data>
+  <data name="Dialog_PreviewPdf_Fit" xml:space="preserve">
+    <value>Fit</value>
+  </data>
+  <data name="Dialog_PreviewPdf_PageLabel" xml:space="preserve">
+    <value>Page {0} of {1}</value>
+  </data>
+  <data name="Dialog_Button_Close" xml:space="preserve">
+    <value>Close</value>
+  </data>
+  <data name="Err_PreviewPdf" xml:space="preserve">
+    <value>Preview error: {0}</value>
   </data>
   <data name="Layer_Work_DefaultName" xml:space="preserve">
     <value>Work</value>

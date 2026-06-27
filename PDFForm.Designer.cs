@@ -44,6 +44,7 @@ namespace AnonPDF
             this.savePdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.savePdfPageRangeMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuItemPrintSeparator = new System.Windows.Forms.ToolStripSeparator();
+            this.previewPdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.printPdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuItem1 = new System.Windows.Forms.ToolStripSeparator();
             this.importProjectMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -242,6 +243,7 @@ namespace AnonPDF
             this.savePdfMenuItem,
             this.savePdfPageRangeMenuItem,
             this.toolStripMenuItemPrintSeparator,
+            this.previewPdfMenuItem,
             this.printPdfMenuItem,
             this.toolStripMenuItem1,
             this.importProjectMenuItem,
@@ -326,6 +328,15 @@ namespace AnonPDF
             //
             this.toolStripMenuItemPrintSeparator.Name = "toolStripMenuItemPrintSeparator";
             this.toolStripMenuItemPrintSeparator.Size = new System.Drawing.Size(221, 6);
+            //
+            // previewPdfMenuItem
+            //
+            this.previewPdfMenuItem.Enabled = false;
+            this.previewPdfMenuItem.Name = "previewPdfMenuItem";
+            this.previewPdfMenuItem.ShortcutKeys = ((System.Windows.Forms.Keys)((System.Windows.Forms.Keys.Control | System.Windows.Forms.Keys.F2)));
+            this.previewPdfMenuItem.Size = new System.Drawing.Size(224, 22);
+            this.previewPdfMenuItem.Text = "Menu_PreviewPdf";
+            this.previewPdfMenuItem.Click += new System.EventHandler(this.PreviewPdfMenuItem_Click);
             //
             // printPdfMenuItem
             //
@@ -1654,6 +1665,7 @@ namespace AnonPDF
         private System.Windows.Forms.ToolStripMenuItem savePdfMenuItem;
         private System.Windows.Forms.ToolStripMenuItem savePdfPageRangeMenuItem;
         private System.Windows.Forms.ToolStripSeparator toolStripMenuItemPrintSeparator;
+        private System.Windows.Forms.ToolStripMenuItem previewPdfMenuItem;
         private System.Windows.Forms.ToolStripMenuItem printPdfMenuItem;
         private System.Windows.Forms.ToolStripSeparator toolStripMenuItem1;
         private System.Windows.Forms.ToolStripMenuItem recentFilesMenuItem;
