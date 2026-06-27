@@ -165,6 +165,7 @@ namespace AnonPDF
         private bool isMarkerCtrlBoxMode;
         private bool suppressRedactionModeTracking;
         private enum RedactionMode { Cursor, Marker, Box }
+        private enum RedactedPdfOutputFormat { Pdf, PdfA }
         private RedactionMode? lastManualRedactionMode;
         private bool isMoving;
         private bool isScalingTextAnnotation;
@@ -21429,7 +21430,8 @@ namespace AnonPDF
             bool includeSupplementaryPages = true,
             bool showSuccessMessage = true,
             bool skipPasswordPrompt = false,
-            bool forcePdfStructureCompression = false)
+            bool forcePdfStructureCompression = false,
+            bool disableOutputEncryption = false)
         {
             iText.Kernel.Colors.Color cleanUpColorBlack = new DeviceRgb(0, 0, 0);
             iText.Kernel.Colors.Color cleanUpColorWhite = new DeviceRgb(255, 255, 255);
@@ -21466,7 +21468,7 @@ namespace AnonPDF
                 writerProps.SetCompressionLevel(9);
                 writerProps.SetFullCompressionMode(true);
             }
-            if (setSavePassword.Checked)
+            if (setSavePassword.Checked && !disableOutputEncryption)
             {
                 if (!skipPasswordPrompt)
                 {
@@ -23765,7 +23767,7 @@ namespace AnonPDF
 
             using (SaveFileDialog saveFileDialog = new SaveFileDialog())
             {
-                saveFileDialog.Filter = Resources.Dialog_Filter_PDF;
+                ConfigureRedactedPdfSaveDialog(saveFileDialog, additionalPagesToRemove: null);
                 saveFileDialog.Title = Resources.Dialog_Title_SavePdfAs;
                 if (!string.IsNullOrWhiteSpace(lastRedactedPdfOutputPath))
                 {
@@ -23784,8 +23786,15 @@ namespace AnonPDF
 
                 if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
                 {
-                    if (SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove: null))
+                    RedactedPdfOutputFormat outputFormat = GetSelectedRedactedPdfOutputFormat(saveFileDialog);
+                    if (outputFormat == RedactedPdfOutputFormat.PdfA && !ConfirmPdfASaveWithoutPasswordIfNeeded())
                     {
+                        return;
+                    }
+
+                    if (SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove: null, outputFormat: outputFormat))
+                    {
+                        RememberScannedPdfOutputFormat(outputFormat, additionalPagesToRemove: null);
                         lastRedactedPdfOutputPath = saveFileDialog.FileName;
                     }
                 }
@@ -23826,15 +23835,91 @@ namespace AnonPDF
 
             using (SaveFileDialog saveFileDialog = new SaveFileDialog())
             {
-                saveFileDialog.Filter = Resources.Dialog_Filter_PDF;
+                ConfigureRedactedPdfSaveDialog(saveFileDialog, additionalPagesToRemove);
                 saveFileDialog.Title = Resources.Dialog_Title_SavePdfAs;
                 saveFileDialog.FileName = $"{System.IO.Path.GetFileNameWithoutExtension(inputPdfPath)}_anon_p{fromPage}-{toPage}.pdf";
 
                 if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
                 {
-                    SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove);
+                    RedactedPdfOutputFormat outputFormat = GetSelectedRedactedPdfOutputFormat(saveFileDialog);
+                    if (outputFormat == RedactedPdfOutputFormat.PdfA && !ConfirmPdfASaveWithoutPasswordIfNeeded())
+                    {
+                        return;
+                    }
+
+                    if (SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove, outputFormat: outputFormat))
+                    {
+                        RememberScannedPdfOutputFormat(outputFormat, additionalPagesToRemove);
+                    }
                 }
             }
+        }
+
+        private void ConfigureRedactedPdfSaveDialog(SaveFileDialog saveFileDialog, ISet<int> additionalPagesToRemove)
+        {
+            if (saveFileDialog == null)
+            {
+                return;
+            }
+
+            bool pdfAEligible = IsPdfAExportEligible(additionalPagesToRemove);
+            saveFileDialog.Filter = BuildRedactedPdfSaveFilter(pdfAEligible);
+            saveFileDialog.FilterIndex = pdfAEligible && Properties.Settings.Default.LastScannedPdfSaveAsPdfA ? 2 : 1;
+        }
+
+        private string BuildRedactedPdfSaveFilter(ISet<int> additionalPagesToRemove)
+        {
+            return BuildRedactedPdfSaveFilter(IsPdfAExportEligible(additionalPagesToRemove));
+        }
+
+        private string BuildRedactedPdfSaveFilter(bool pdfAEligible)
+        {
+            if (pdfAEligible)
+            {
+                return Resources.Dialog_Filter_PDF + "|" + LocalizedText("Dialog_Filter_PDFA");
+            }
+
+            return Resources.Dialog_Filter_PDF;
+        }
+
+        private static RedactedPdfOutputFormat GetSelectedRedactedPdfOutputFormat(SaveFileDialog saveFileDialog)
+        {
+            return saveFileDialog != null && saveFileDialog.FilterIndex == 2
+                ? RedactedPdfOutputFormat.PdfA
+                : RedactedPdfOutputFormat.Pdf;
+        }
+
+        private bool ConfirmPdfASaveWithoutPasswordIfNeeded()
+        {
+            if (!setSavePassword.Checked)
+            {
+                return true;
+            }
+
+            return MessageBox.Show(
+                this,
+                LocalizedText("Msg_PdfA_SaveWithoutPasswordConfirm"),
+                Resources.Title_Warning,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+        }
+
+        private void RememberScannedPdfOutputFormat(RedactedPdfOutputFormat outputFormat, ISet<int> additionalPagesToRemove)
+        {
+            if (!IsPdfAExportEligible(additionalPagesToRemove))
+            {
+                return;
+            }
+
+            bool preferPdfA = outputFormat == RedactedPdfOutputFormat.PdfA;
+            if (Properties.Settings.Default.LastScannedPdfSaveAsPdfA == preferPdfA)
+            {
+                return;
+            }
+
+            Properties.Settings.Default.LastScannedPdfSaveAsPdfA = preferPdfA;
+            Properties.Settings.Default.Save();
         }
 
         private HashSet<int> BuildPagesOutsideRange(int totalPages, int fromPage, int toPage)
@@ -23859,12 +23944,16 @@ namespace AnonPDF
             return pagesOutsideRange;
         }
 
-        private bool SaveRedactedPdfToFile(string outputFilePath, ISet<int> additionalPagesToRemove, bool includeSupplementaryPages = true)
+        private bool SaveRedactedPdfToFile(
+            string outputFilePath,
+            ISet<int> additionalPagesToRemove,
+            bool includeSupplementaryPages = true,
+            RedactedPdfOutputFormat outputFormat = RedactedPdfOutputFormat.Pdf)
         {
             try
             {
                 this.Cursor = Cursors.WaitCursor;
-                BuildRedactedPdfForOutput(outputFilePath, additionalPagesToRemove, includeSupplementaryPages, showSuccessMessage: true);
+                BuildRedactedPdfForOutput(outputFilePath, additionalPagesToRemove, includeSupplementaryPages, showSuccessMessage: true, outputFormat: outputFormat);
 
                 this.Cursor = Cursors.Default;
                 if (openSavedPDFCheckBox.Checked)
@@ -23905,7 +23994,8 @@ namespace AnonPDF
             bool showSuccessMessage = true,
             bool reduceFileSizeMode = false,
             bool skipPasswordPrompt = false,
-            bool forcePdfStructureCompression = false)
+            bool forcePdfStructureCompression = false,
+            bool disableOutputEncryption = false)
         {
             string tempFile = Path.Combine(Path.GetTempPath(), $"pdfreencoded_{DateTime.Now.Ticks}.pdf");
             try
@@ -23921,7 +24011,8 @@ namespace AnonPDF
                         includeSupplementaryPages,
                         showSuccessMessage,
                         skipPasswordPrompt,
-                        forcePdfStructureCompression);
+                        forcePdfStructureCompression,
+                        disableOutputEncryption);
                 }
                 else
                 {
@@ -23932,7 +24023,8 @@ namespace AnonPDF
                         includeSupplementaryPages: includeSupplementaryPages,
                         showSuccessMessage: showSuccessMessage,
                         skipPasswordPrompt: skipPasswordPrompt,
-                        forcePdfStructureCompression: forcePdfStructureCompression);
+                        forcePdfStructureCompression: forcePdfStructureCompression,
+                        disableOutputEncryption: disableOutputEncryption);
                 }
             }
             finally
@@ -23955,8 +24047,16 @@ namespace AnonPDF
             string outputFilePath,
             ISet<int> additionalPagesToRemove,
             bool includeSupplementaryPages = true,
-            bool showSuccessMessage = true)
+            bool showSuccessMessage = true,
+            RedactedPdfOutputFormat outputFormat = RedactedPdfOutputFormat.Pdf,
+            bool disableOutputEncryption = false)
         {
+            if (outputFormat == RedactedPdfOutputFormat.PdfA)
+            {
+                BuildPdfAForOutput(outputFilePath, additionalPagesToRemove, includeSupplementaryPages, showSuccessMessage);
+                return;
+            }
+
             bool noContentChanges = IsNoContentChangeExport(additionalPagesToRemove, includeSupplementaryPages);
             bool structuralOnlyChanges = IsStructuralOnlyExport(additionalPagesToRemove, includeSupplementaryPages);
 
@@ -23987,7 +24087,8 @@ namespace AnonPDF
                         showSuccessMessage: false,
                         reduceFileSizeMode: true,
                         skipPasswordPrompt: false,
-                        forcePdfStructureCompression: true);
+                        forcePdfStructureCompression: true,
+                        disableOutputEncryption: disableOutputEncryption);
 
                     ApplyLicenseMetadataOnly(noChangeMetadataOnlyOutputPath);
                     WriteCompactPdfWithLicenseMetadata(noChangeCompactOutputPath, additionalPagesToRemove);
@@ -24114,7 +24215,8 @@ namespace AnonPDF
                         showSuccessMessage: false,
                         reduceFileSizeMode: true,
                         skipPasswordPrompt: false,
-                        forcePdfStructureCompression: true);
+                        forcePdfStructureCompression: true,
+                        disableOutputEncryption: disableOutputEncryption);
 
                     WriteCompactPdfWithLicenseMetadata(structuralCompactOutputPath, additionalPagesToRemove);
 
@@ -24191,7 +24293,8 @@ namespace AnonPDF
                     showSuccessMessage,
                     reduceFileSizeMode: false,
                     skipPasswordPrompt: false,
-                    forcePdfStructureCompression: false);
+                    forcePdfStructureCompression: false,
+                    disableOutputEncryption: disableOutputEncryption);
                 if (DebugLogEnabled && File.Exists(outputFilePath))
                 {
                     long inputSize = File.Exists(inputPdfPath) ? new FileInfo(inputPdfPath).Length : -1;
@@ -24213,7 +24316,8 @@ namespace AnonPDF
                     showSuccessMessage: false,
                     reduceFileSizeMode: true,
                     skipPasswordPrompt: false,
-                    forcePdfStructureCompression: true);
+                    forcePdfStructureCompression: true,
+                    disableOutputEncryption: disableOutputEncryption);
 
                 // Second pass: baseline without size reduction (no second password prompt).
                 BuildRedactedPdfForOutputCore(
@@ -24223,7 +24327,8 @@ namespace AnonPDF
                     showSuccessMessage: false,
                     reduceFileSizeMode: false,
                     skipPasswordPrompt: true,
-                    forcePdfStructureCompression: true);
+                    forcePdfStructureCompression: true,
+                    disableOutputEncryption: disableOutputEncryption);
 
                 bool optimizedExists = File.Exists(optimizedOutputPath);
                 bool baselineExists = File.Exists(baselineOutputPath);
@@ -24294,6 +24399,449 @@ namespace AnonPDF
                     }
                 }
             }
+        }
+
+        private void BuildPdfAForOutput(
+            string outputFilePath,
+            ISet<int> additionalPagesToRemove,
+            bool includeSupplementaryPages,
+            bool showSuccessMessage)
+        {
+            if (!IsPdfAExportEligible(additionalPagesToRemove))
+            {
+                throw new InvalidOperationException(LocalizedText("Err_PdfA_NotAvailable"));
+            }
+
+            string intermediatePdfPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_pdfa_source_{Guid.NewGuid():N}.pdf");
+            try
+            {
+                BuildRedactedPdfForOutput(
+                    intermediatePdfPath,
+                    additionalPagesToRemove,
+                    includeSupplementaryPages,
+                    showSuccessMessage: false,
+                    outputFormat: RedactedPdfOutputFormat.Pdf,
+                    disableOutputEncryption: true);
+
+                ConvertRedactedPdfToPdfA(intermediatePdfPath, outputFilePath, additionalPagesToRemove);
+
+                if (showSuccessMessage)
+                {
+                    MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            finally
+            {
+                if (File.Exists(intermediatePdfPath))
+                {
+                    try
+                    {
+                        File.Delete(intermediatePdfPath);
+                    }
+                    catch
+                    {
+                        // best effort cleanup
+                    }
+                }
+            }
+        }
+
+        private List<int> BuildExportedSourcePageNumbers(ISet<int> additionalPagesToRemove)
+        {
+            var pagesToSkip = new HashSet<int>(pagesToRemove);
+            if (additionalPagesToRemove != null)
+            {
+                pagesToSkip.UnionWith(additionalPagesToRemove);
+            }
+
+            return Enumerable.Range(1, Math.Max(0, numPages))
+                .Where(pageNumber => !pagesToSkip.Contains(pageNumber))
+                .ToList();
+        }
+
+        private bool IsPdfAExportEligible(ISet<int> additionalPagesToRemove)
+        {
+            if (string.IsNullOrWhiteSpace(inputPdfPath) || !File.Exists(inputPdfPath) || numPages <= 0)
+            {
+                return false;
+            }
+
+            List<int> exportedPages = BuildExportedSourcePageNumbers(additionalPagesToRemove);
+            if (exportedPages.Count == 0)
+            {
+                return false;
+            }
+
+            List<PdfTextSearcher.CachedLine> cachedLines = PdfTextSearcher.GetCachedLines(inputPdfPath);
+            if (cachedLines == null || cachedLines.Count == 0)
+            {
+                return false;
+            }
+
+            var ocrPages = new HashSet<int>(
+                cachedLines
+                    .Where(line => line != null &&
+                                   line.IsOcr &&
+                                   line.OcrWords != null &&
+                                   line.OcrWords.Any(word => word != null &&
+                                                             !string.IsNullOrWhiteSpace(word.Text) &&
+                                                             word.BoundingBox != null &&
+                                                             word.BoundingBox.GetWidth() > 0f &&
+                                                             word.BoundingBox.GetHeight() > 0f))
+                    .Select(line => line.PageNumber));
+
+            if (exportedPages.Any(pageNumber => !ocrPages.Contains(pageNumber)))
+            {
+                return false;
+            }
+
+            try
+            {
+                var readerProps = new ReaderProperties();
+                if (!string.IsNullOrEmpty(userPassword))
+                {
+                    readerProps.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
+                }
+
+                using (var reader = new PdfReader(inputPdfPath, readerProps).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+                using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
+                {
+                    foreach (int pageNumber in exportedPages)
+                    {
+                        if (pageNumber < 1 || pageNumber > pdfDoc.GetNumberOfPages())
+                        {
+                            return false;
+                        }
+
+                        var page = pdfDoc.GetPage(pageNumber);
+                        string nativeText = PdfTextExtractor.GetTextFromPage(page);
+                        if (!string.IsNullOrWhiteSpace(nativeText))
+                        {
+                            return false;
+                        }
+
+                        RasterPageImageInfo primaryRaster = GetPrimaryRasterInfoForPage(page);
+                        if (primaryRaster == null || primaryRaster.CoverageRatio < 0.95d)
+                        {
+                            return false;
+                        }
+                    }
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (DebugLogEnabled)
+                {
+                    LogDebug("PDF/A eligibility check failed: " + ex.Message);
+                }
+
+                return false;
+            }
+        }
+
+        private void ConvertRedactedPdfToPdfA(string redactedPdfPath, string outputFilePath, ISet<int> additionalPagesToRemove)
+        {
+            string iccProfilePath = ResolvePdfAIccProfilePath();
+            List<int> exportedSourcePages = BuildExportedSourcePageNumbers(additionalPagesToRemove);
+            List<PdfTextSearcher.CachedLine> cachedLines = PdfTextSearcher.GetCachedLines(inputPdfPath) ?? new List<PdfTextSearcher.CachedLine>();
+
+            using (var iccStream = File.OpenRead(iccProfilePath))
+            using (var writer = new PdfWriter(outputFilePath))
+            using (var pdfiumDoc = new PDFiumSharp.PdfDocument(redactedPdfPath))
+            {
+                var outputIntent = new PdfOutputIntent(
+                    "sRGB IEC61966-2.1",
+                    string.Empty,
+                    "http://www.color.org",
+                    "sRGB IEC61966-2.1",
+                    iccStream);
+
+                using (var pdfaDoc = new iText.Pdfa.PdfADocument(writer, PdfAConformance.PDF_A_2B, outputIntent))
+                {
+                    EnsureITextMetadataCompliance(pdfaDoc, "pdfa");
+                    PdfFont ocrFont = CreatePdfAOcrFont();
+
+                    for (int pageIndex = 0; pageIndex < pdfiumDoc.Pages.Count; pageIndex++)
+                    {
+                        using (var pdfiumPage = pdfiumDoc.Pages[pageIndex])
+                        {
+                            float pageWidthPoints = (float)pdfiumPage.Width;
+                            float pageHeightPoints = (float)pdfiumPage.Height;
+                            byte[] imageBytes = RenderPdfAImagePage(pdfiumPage, pageWidthPoints, pageHeightPoints, pageIndex + 1);
+
+                            var pageSize = new KernelGeom.PageSize(pageWidthPoints, pageHeightPoints);
+                            var page = pdfaDoc.AddNewPage(pageSize);
+                            var pageRect = new KernelGeom.Rectangle(0, 0, pageWidthPoints, pageHeightPoints);
+                            var canvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page);
+                            var imageData = iText.IO.Image.ImageDataFactory.Create(imageBytes);
+                            canvas.AddImageFittedIntoRectangle(imageData, pageRect, false);
+
+                            if (pageIndex < exportedSourcePages.Count)
+                            {
+                                AddInvisibleOcrTextLayer(
+                                    canvas,
+                                    ocrFont,
+                                    cachedLines,
+                                    exportedSourcePages[pageIndex],
+                                    pageWidthPoints,
+                                    pageHeightPoints);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private byte[] RenderPdfAImagePage(PDFiumSharp.PdfPage pdfiumPage, float pageWidthPoints, float pageHeightPoints, int pageNumber)
+        {
+            int dpi = Math.Max(72, reencodingDPI);
+            int bmpWidth = Math.Max(1, (int)Math.Round(pageWidthPoints * dpi / 72.0));
+            int bmpHeight = Math.Max(1, (int)Math.Round(pageHeightPoints * dpi / 72.0));
+
+            using (var pdfiumBitmap = new PDFiumBitmap(bmpWidth, bmpHeight, true))
+            {
+                pdfiumBitmap.FillRectangle(0, 0, bmpWidth, bmpHeight, 0xFFFFFFFF);
+                pdfiumPage.Render(renderTarget: pdfiumBitmap, flags: RenderingFlags.Annotations);
+
+                using (var bitmapStream = new MemoryStream())
+                {
+                    pdfiumBitmap.Save(bitmapStream);
+                    bitmapStream.Position = 0;
+                    using (var renderedImage = (Bitmap)DrawingImage.FromStream(bitmapStream))
+                    {
+                        var profile = BuildRasterOptimizationProfile(
+                            renderedImage,
+                            primaryRaster: null,
+                            originalFilter: "PDF/A",
+                            pageNumber: pageNumber,
+                            sourceDpiX: dpi,
+                            sourceDpiY: dpi,
+                            widthPx: bmpWidth,
+                            heightPx: bmpHeight,
+                            renderedWidthPoints: pageWidthPoints,
+                            renderedHeightPoints: pageHeightPoints);
+
+                        return EncodeBestForScannedPage(renderedImage, profile, out _);
+                    }
+                }
+            }
+        }
+
+        private void AddInvisibleOcrTextLayer(
+            iText.Kernel.Pdf.Canvas.PdfCanvas canvas,
+            PdfFont ocrFont,
+            List<PdfTextSearcher.CachedLine> cachedLines,
+            int sourcePageNumber,
+            float pageWidthPoints,
+            float pageHeightPoints)
+        {
+            if (canvas == null || ocrFont == null || cachedLines == null || sourcePageNumber < 1)
+            {
+                return;
+            }
+
+            var words = cachedLines
+                .Where(line => line != null && line.IsOcr && line.PageNumber == sourcePageNumber && line.OcrWords != null)
+                .SelectMany(line => line.OcrWords)
+                .Where(word => word != null && !string.IsNullOrWhiteSpace(word.Text) && word.BoundingBox != null)
+                .ToList();
+
+            if (words.Count == 0)
+            {
+                return;
+            }
+
+            List<KernelGeom.Rectangle> suppressedTextRects = BuildPdfAOcrSuppressionRects(sourcePageNumber);
+
+            canvas.SaveState();
+            canvas.BeginText();
+            canvas.SetTextRenderingMode(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.TextRenderingMode.INVISIBLE);
+
+            foreach (PdfTextSearcher.OcrWordInfo word in words)
+            {
+                if (IntersectsAnyPdfARect(word.BoundingBox, suppressedTextRects))
+                {
+                    continue;
+                }
+
+                KernelGeom.Rectangle rect = ConvertOcrWordBoundsToPdfAVisualRect(
+                    word.BoundingBox,
+                    sourcePageNumber,
+                    pageWidthPoints,
+                    pageHeightPoints);
+
+                if (rect == null || rect.GetWidth() <= 0.1f || rect.GetHeight() <= 0.1f)
+                {
+                    continue;
+                }
+
+                string text = word.Text.Trim();
+                if (string.IsNullOrEmpty(text))
+                {
+                    continue;
+                }
+
+                float fontSize = Math.Max(1f, Math.Min(96f, rect.GetHeight() * 0.86f));
+                float textWidth = Math.Max(0.01f, ocrFont.GetWidth(text, fontSize));
+                float horizontalScaling = Math.Max(10f, Math.Min(2000f, (rect.GetWidth() / textWidth) * 100f));
+                float ascent = ocrFont.GetAscent(text, fontSize);
+                float descent = ocrFont.GetDescent(text, fontSize);
+                float textHeight = Math.Max(0.01f, ascent - descent);
+                float baselineY = rect.GetY() + ((rect.GetHeight() - textHeight) / 2f) - descent;
+
+                canvas.SetFontAndSize(ocrFont, fontSize);
+                canvas.SetHorizontalScaling(horizontalScaling);
+                canvas.SetTextMatrix(1, 0, 0, 1, rect.GetX(), baselineY);
+                canvas.ShowText(text);
+            }
+
+            canvas.SetHorizontalScaling(100f);
+            canvas.EndText();
+            canvas.RestoreState();
+        }
+
+        private List<KernelGeom.Rectangle> BuildPdfAOcrSuppressionRects(int sourcePageNumber)
+        {
+            var result = new List<KernelGeom.Rectangle>();
+            if (sourcePageNumber < 1)
+            {
+                return result;
+            }
+
+            int rotation = GetEffectiveRotationDegrees(sourcePageNumber);
+            foreach (RedactionBlock block in redactionBlocks.Where(block => block != null &&
+                                                                            block.PageNumber == sourcePageNumber &&
+                                                                            ShouldExportLayer(block.LayerId)))
+            {
+                RectangleF pdfCoordinates = ConvertToPdfCoordinates(block.Bounds, sourcePageNumber, rotation);
+                if (pdfCoordinates.Width <= 0f || pdfCoordinates.Height <= 0f)
+                {
+                    continue;
+                }
+
+                result.Add(new KernelGeom.Rectangle(
+                    pdfCoordinates.X,
+                    pdfCoordinates.Y,
+                    pdfCoordinates.Width,
+                    pdfCoordinates.Height));
+            }
+
+            return result;
+        }
+
+        private static bool IntersectsAnyPdfARect(KernelGeom.Rectangle rect, List<KernelGeom.Rectangle> candidates)
+        {
+            if (rect == null || candidates == null || candidates.Count == 0)
+            {
+                return false;
+            }
+
+            const float tolerance = 0.5f;
+            float left = rect.GetLeft() - tolerance;
+            float right = rect.GetRight() + tolerance;
+            float bottom = rect.GetBottom() - tolerance;
+            float top = rect.GetTop() + tolerance;
+
+            foreach (KernelGeom.Rectangle candidate in candidates)
+            {
+                if (candidate == null)
+                {
+                    continue;
+                }
+
+                if (left < candidate.GetRight() &&
+                    right > candidate.GetLeft() &&
+                    bottom < candidate.GetTop() &&
+                    top > candidate.GetBottom())
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private KernelGeom.Rectangle ConvertOcrWordBoundsToPdfAVisualRect(
+            KernelGeom.Rectangle sourceRect,
+            int sourcePageNumber,
+            float pageWidthPoints,
+            float pageHeightPoints)
+        {
+            if (sourceRect == null || sourceRect.GetWidth() <= 0f || sourceRect.GetHeight() <= 0f)
+            {
+                return null;
+            }
+
+            int rotation = GetEffectiveRotationDegrees(sourcePageNumber);
+            var sourceRectangle = new RectangleF(
+                sourceRect.GetX(),
+                sourceRect.GetY(),
+                sourceRect.GetWidth(),
+                sourceRect.GetHeight());
+            RectangleF viewRect = ConvertPdfToViewCoordinates(sourceRectangle, sourcePageNumber, rotation);
+
+            float left = Math.Max(0f, Math.Min(pageWidthPoints, viewRect.Left));
+            float right = Math.Max(0f, Math.Min(pageWidthPoints, viewRect.Right));
+            float top = Math.Max(0f, Math.Min(pageHeightPoints, viewRect.Top));
+            float bottom = Math.Max(0f, Math.Min(pageHeightPoints, viewRect.Bottom));
+            if (right <= left || bottom <= top)
+            {
+                return null;
+            }
+
+            return new KernelGeom.Rectangle(left, pageHeightPoints - bottom, right - left, bottom - top);
+        }
+
+        private PdfFont CreatePdfAOcrFont()
+        {
+            foreach (string familyName in new[] { "Arial", "Segoe UI", "Times New Roman" })
+            {
+                string fontPath = GetFontFilePathFromRegistry(familyName, FontStyle.Regular);
+                if (string.IsNullOrWhiteSpace(fontPath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    return PdfFontFactory.CreateFont(fontPath, PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                }
+                catch (Exception ex)
+                {
+                    if (DebugLogEnabled)
+                    {
+                        LogDebug($"PDF/A OCR font load failed family={familyName}: {ex.Message}");
+                    }
+                }
+            }
+
+            throw new InvalidOperationException(LocalizedText("Err_PdfA_EmbeddedFontMissing"));
+        }
+
+        private string ResolvePdfAIccProfilePath()
+        {
+            var candidates = new List<string>
+            {
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "color", "sRGB.icc"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "color", "sRGB.icm"),
+                Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                    "System32",
+                    "spool",
+                    "drivers",
+                    "color",
+                    "sRGB Color Space Profile.icm")
+            };
+
+            string profilePath = candidates.FirstOrDefault(File.Exists);
+            if (string.IsNullOrWhiteSpace(profilePath))
+            {
+                throw new FileNotFoundException(LocalizedText("Err_PdfA_IccProfileMissing"));
+            }
+
+            return profilePath;
         }
 
         private void ApplyLicenseMetadataOnly(string outputFilePath)

@@ -115,6 +115,12 @@ Speichern Sie den Bearbeitungsstand Über Projekt speichern oder Projekt speiche
 
 Klicken Sie auf PDF speichern, wählen Sie den Zielpfad und speichern Sie die finale Datei mit angewendeten Ausschlüssen.
 
+Vor dem Speichern können Sie `Datei -> Vorschau` (`CTRL+F2`) verwenden. Diese Funktion öffnet eine eingebaute Vorschau des Dokuments nach der Anonymisierung, ohne einen externen PDF-Viewer zu starten. Im Vorschaufenster können Sie zwischen Seiten wechseln, eine Seitenzahl eingeben und das Dokument in der Form drucken, in der es gespeichert wird.
+
+Bei vollständig gescannten Dokumenten ohne eigene Textebene kann im Speichern-Dialog zusätzlich der Typ `PDF/A-Dateien (*.pdf)` verfügbar sein. Dadurch wird eine PDF/A-Datei für Archivierung und digitale Veröffentlichung erstellt, mit dem Seitenbild und einer unsichtbaren Textebene aus der OCR-Erkennung. Das Ergebnis lässt sich leichter durchsuchen und eignet sich besser für die digitale Bereitstellung.
+
+Wenn Sie für ein gescanntes Dokument PDF/A auswählen, merkt sich die Anwendung diese Auswahl und verwendet PDF/A beim nächsten Speichern eines ähnlichen gescannten Dokuments als Standardtyp. Im Feld `Dateityp` können Sie jederzeit wieder auf eine normale PDF-Datei umstellen.
+
 # 5. Navigation und Zoom
 
 ## 5.1 Seitennavigation
@@ -358,7 +364,9 @@ AnonPDF Pro ermöglicht eine schnelle und nachvollziehbare Bearbeitung von PDF-D
 In den letzten Versionen wurden u. a. ergänzt:
 
 - Drucken über das Menü `Datei` (`CTRL+P`) mit Auswahl: aktuelle Seite, Seitenbereich oder gesamtes Dokument.
+- Eingebaute `Vorschau` im Menü `Datei` (`CTRL+F2`), die das Dokument nach der Anonymisierung ohne externen PDF-Viewer anzeigt.
 - Option `Seitenbereich als PDF speichern` im Menü `Datei`, standardmäßig mit der aktuellen Seite vorbelegt.
+- Speichern vollständig gescannter Dokumente als PDF/A mit unsichtbarer OCR-Textebene sowie Merken des zuletzt gewählten Speichertyps für Scans.
 - Drei Tabs auf der rechten Seite: `Seitenliste`, `Miniaturen` und `Ebenen`.
 - Dynamische Erzeugung von Miniaturen sowie Miniatur-Cache für bessere Leistung bei großen Dokumenten.
 - Verbesserte Aktualisierung der Miniaturen nach Änderung des Seitenfilters.

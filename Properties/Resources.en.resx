@@ -1064,6 +1064,15 @@ Click again to remove marks.</value>
   <data name="Err_Save" xml:space="preserve">
     <value>Error while saving: {0}</value>
   </data>
+  <data name="Err_PdfA_NotAvailable" xml:space="preserve">
+    <value>PDF/A saving is available only for fully scanned documents without a native text layer and with a ready OCR layer.</value>
+  </data>
+  <data name="Err_PdfA_IccProfileMissing" xml:space="preserve">
+    <value>The sRGB color profile required to create a PDF/A document was not found.</value>
+  </data>
+  <data name="Err_PdfA_EmbeddedFontMissing" xml:space="preserve">
+    <value>No font that can be embedded in the PDF/A document for the OCR layer was found.</value>
+  </data>
   <data name="Err_Print" xml:space="preserve">
     <value>Printing error: {0}</value>
   </data>
@@ -1436,6 +1445,9 @@ Contact the application author.</value>
   <data name="Msg_PreviewSavedPdf" xml:space="preserve">
     <value>Check the saved PDF document in the preview.</value>
   </data>
+  <data name="Msg_PdfA_SaveWithoutPasswordConfirm" xml:space="preserve">
+    <value>The PDF/A standard does not allow saving a document with a password. The selected PDF/A file will be saved without encryption. Continue?</value>
+  </data>
   <data name="Msg_Confirm_OpenNewWithUnsavedSelections" xml:space="preserve">
     <value>Are you sure you want to open a new PDF?
 
@@ -1530,6 +1542,9 @@ Project: {0}</value>
   </data>
   <data name="Dialog_Filter_PDF" xml:space="preserve">
     <value>PDF files (*.pdf)|*.pdf</value>
+  </data>
+  <data name="Dialog_Filter_PDFA" xml:space="preserve">
+    <value>PDF/A files (*.pdf)|*.pdf</value>
   </data>
   <data name="Dialog_Filter_PAP" xml:space="preserve">
     <value>APP project files (*.app)|*.app|Legacy PAP files (*.pap)|*.pap</value>

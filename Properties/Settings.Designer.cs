@@ -346,5 +346,17 @@ namespace AnonPDF.Properties {
                 this["PreferredCountry"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool LastScannedPdfSaveAsPdfA {
+            get {
+                return ((bool)(this["LastScannedPdfSaveAsPdfA"]));
+            }
+            set {
+                this["LastScannedPdfSaveAsPdfA"] = value;
+            }
+        }
     }
 }

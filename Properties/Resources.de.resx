@@ -1275,6 +1275,9 @@ Repository: https://github.com/skmislab/AnonPDFPro</value>
   <data name="Dialog_Filter_PDF" xml:space="preserve">
     <value>PDF-Dateien (*.pdf)|*.pdf</value>
   </data>
+  <data name="Dialog_Filter_PDFA" xml:space="preserve">
+    <value>PDF/A-Dateien (*.pdf)|*.pdf</value>
+  </data>
   <data name="Dialog_Title_OpenPap" xml:space="preserve">
     <value>Projektdatei für {0} auswählen</value>
   </data>
@@ -1453,6 +1456,15 @@ Kontaktieren Sie den Autor der Anwendung.</value>
   <data name="Err_Save" xml:space="preserve">
     <value>Fehler beim Speichern: {0}</value>
   </data>
+  <data name="Err_PdfA_NotAvailable" xml:space="preserve">
+    <value>Das Speichern als PDF/A ist nur für vollständig gescannte Dokumente ohne native Textebene und mit fertiger OCR-Ebene verfügbar.</value>
+  </data>
+  <data name="Err_PdfA_IccProfileMissing" xml:space="preserve">
+    <value>Das zum Erstellen eines PDF/A-Dokuments erforderliche sRGB-Farbprofil wurde nicht gefunden.</value>
+  </data>
+  <data name="Err_PdfA_EmbeddedFontMissing" xml:space="preserve">
+    <value>Es wurde keine Schriftart gefunden, die für die OCR-Ebene in das PDF/A-Dokument eingebettet werden kann.</value>
+  </data>
   <data name="Err_Print" xml:space="preserve">
     <value>Druckfehler: {0}</value>
   </data>
@@ -1572,6 +1584,9 @@ Möchten Sie sie wirklich verwerfen?</value>
 und möglicherweise keine korrekten Ergebnisse liefern.
 
 Möchten Sie fortfahren?</value>
+  </data>
+  <data name="Msg_PdfA_SaveWithoutPasswordConfirm" xml:space="preserve">
+    <value>Der PDF/A-Standard erlaubt das Speichern eines Dokuments mit Passwort nicht. Die ausgewählte PDF/A-Datei wird ohne Verschlüsselung gespeichert. Fortfahren?</value>
   </data>
   <data name="Msg_Confirm_OpenNewWithUnsavedSelections" xml:space="preserve">
     <value>Möchten Sie wirklich eine neue PDF öffnen?

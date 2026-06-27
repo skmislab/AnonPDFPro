@@ -1064,6 +1064,15 @@ Ponowne kliknięcie usunie zaznaczenia.</value>
   <data name="Err_Save" xml:space="preserve">
     <value>Błąd podczas zapisywania: {0}</value>
   </data>
+  <data name="Err_PdfA_NotAvailable" xml:space="preserve">
+    <value>Zapis PDF/A jest dostępny tylko dla dokumentów w pełni skanowanych bez natywnej warstwy tekstowej oraz z gotową warstwą OCR.</value>
+  </data>
+  <data name="Err_PdfA_IccProfileMissing" xml:space="preserve">
+    <value>Nie znaleziono profilu kolorów sRGB wymaganego do utworzenia dokumentu PDF/A.</value>
+  </data>
+  <data name="Err_PdfA_EmbeddedFontMissing" xml:space="preserve">
+    <value>Nie znaleziono czcionki, którą można osadzić w dokumencie PDF/A dla warstwy OCR.</value>
+  </data>
   <data name="Err_Print" xml:space="preserve">
     <value>Błąd drukowania: {0}</value>
   </data>
@@ -1436,6 +1445,9 @@ Skontaktuj się z autorem aplikacji.</value>
   <data name="Msg_PreviewSavedPdf" xml:space="preserve">
     <value>Sprawdź zapisany dokument PDF na podglądzie.</value>
   </data>
+  <data name="Msg_PdfA_SaveWithoutPasswordConfirm" xml:space="preserve">
+    <value>Standard PDF/A nie pozwala na zapis dokumentu z hasłem. Wybrany plik PDF/A zostanie zapisany bez szyfrowania. Czy kontynuować?</value>
+  </data>
   <data name="Msg_Confirm_OpenNewWithUnsavedSelections" xml:space="preserve">
     <value>Czy na pewno chcesz otworzyć nowy plik PDF?
 
@@ -1530,6 +1542,9 @@ Projekt: {0}</value>
   </data>
   <data name="Dialog_Filter_PDF" xml:space="preserve">
     <value>Pliki PDF (*.pdf)|*.pdf</value>
+  </data>
+  <data name="Dialog_Filter_PDFA" xml:space="preserve">
+    <value>Pliki PDF/A (*.pdf)|*.pdf</value>
   </data>
   <data name="Dialog_Filter_PAP" xml:space="preserve">
     <value>Pliki APP (*.app)|*.app|Starsze projekty (*.pap)|*.pap</value>

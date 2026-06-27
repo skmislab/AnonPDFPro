@@ -156,6 +156,12 @@ Jeśli chcesz zapisać stan zaznaczeń do późniejszej edycji, wybierz Zapisz p
 
 Po zaznaczeniu odpowiednich obszarów wybierz przycisk Zapisz plik PDF (lub z paska menu Plik → Zapisz plik PDF). Wskaż docelowy plik wynikowy, w którym uwzględnione zostaną zaznaczone obszary. Po zakończeniu procesu aplikacja wygeneruje nowy, zredagowany plik PDF.
 
+Przed zapisaniem możesz użyć opcji `Plik -> Podgląd` (`CTRL+F2`). Otwiera ona wbudowany podgląd dokumentu po zastosowaniu anonimizacji, bez uruchamiania zewnętrznej przeglądarki PDF. W oknie podglądu możesz przechodzić między stronami, wpisać numer strony oraz wydrukować dokument w takiej postaci, w jakiej zostanie zapisany.
+
+W przypadku dokumentów w pełni skanowanych, bez własnej warstwy tekstowej, w oknie zapisu może być dostępny dodatkowy typ `Pliki PDF/A (*.pdf)`. Taki zapis tworzy plik PDF/A przeznaczony do archiwizacji i publikacji, z obrazem strony oraz niewidoczną warstwą tekstową przygotowaną na podstawie rozpoznania OCR. Dzięki temu dokument może być łatwiej przeszukiwany i lepiej nadaje się do udostępniania cyfrowego.
+
+Jeżeli dla skanowanego dokumentu wybierzesz zapis jako PDF/A, aplikacja zapamięta ten wybór i przy kolejnym zapisie podobnego dokumentu ustawi PDF/A jako domyślny typ pliku. W każdej chwili możesz w tym samym polu `Zapisz jako typ` wrócić do zwykłego pliku PDF.
+
 # 5. Anonimizacja i nawigacja
 
 ## 5.1 Nawigacja stron
@@ -381,7 +387,9 @@ Aplikacja AnonPDF Pro pozwala w szybki i intuicyjny sposób usuwać wybrane obsz
 W ostatnich wersjach dodano m.in.:
 
 - Drukowanie z menu `Plik` (`CTRL+P`) z wyborem: bieżąca strona, zakres stron lub cały dokument.
+- Wbudowany `Podgląd` w menu `Plik` (`CTRL+F2`) pokazujący dokument po anonimizacji bez zewnętrznej przeglądarki PDF.
 - Opcję `Zapisz zakres stron do PDF` (menu `Plik`) z domyślnym zakresem ustawionym na bieżącą stronę.
+- Zapis dokumentów w pełni skanowanych jako PDF/A z niewidoczną warstwą tekstową OCR oraz zapamiętywaniem ostatnio wybranego typu zapisu dla skanów.
 - Trzy zakładki po prawej stronie: `Lista stron`, `Miniatury` i `Warstwy`.
 - Dynamiczne generowanie miniaturek stron oraz pamięć podręczną miniaturek dla szybszej pracy na dużych dokumentach.
 - Poprawione odświeżanie miniatur po zmianie filtra stron.
