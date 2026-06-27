@@ -386,6 +386,9 @@ Anwendung schließen und Installer jetzt starten?</value>
   <data name="Menu_SavePdfPageRange" xml:space="preserve">
     <value>Seitenbereich als PDF speichern</value>
   </data>
+  <data name="Menu_SaveJpegPageRange" xml:space="preserve">
+    <value>Seitenbereich als JPEG speichern</value>
+  </data>
   <data name="Menu_Print" xml:space="preserve">
     <value>Drucken</value>
   </data>
@@ -1292,6 +1295,19 @@ Repository: https://github.com/skmislab/AnonPDFPro</value>
   </data>
   <data name="Dialog_Title_SavePdfAs" xml:space="preserve">
     <value>PDF unter anderem Namen speichern</value>
+  </data>
+  <data name="Dialog_Title_SelectJpegOutputFolder" xml:space="preserve">
+    <value>JPEG-Ausgabeordner auswählen</value>
+  </data>
+  <data name="Msg_JpegPageRangeSaved" xml:space="preserve">
+    <value>JPEG-Bilder gespeichert:
+{0}</value>
+  </data>
+  <data name="Msg_JpegPageRangePreparing" xml:space="preserve">
+    <value>Seiten für JPEG-Export werden vorbereitet...</value>
+  </data>
+  <data name="Msg_JpegPageRangeProgress" xml:space="preserve">
+    <value>JPEG wird gespeichert: {0}/{1}, Seite {2}</value>
   </data>
   <data name="EditText_AlignCenter" xml:space="preserve">
     <value>Zentriert</value>

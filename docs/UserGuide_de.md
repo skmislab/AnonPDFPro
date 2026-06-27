@@ -117,6 +117,8 @@ Klicken Sie auf PDF speichern, wählen Sie den Zielpfad und speichern Sie die fi
 
 Vor dem Speichern können Sie `Datei -> Vorschau` (`CTRL+F2`) verwenden. Diese Funktion öffnet eine eingebaute Vorschau des Dokuments nach der Anonymisierung, ohne einen externen PDF-Viewer zu starten. Im Vorschaufenster können Sie zwischen Seiten wechseln, eine Seitenzahl eingeben und das Dokument in der Form drucken, in der es gespeichert wird.
 
+Wenn Sie Seitenbilder statt einer PDF-Datei benötigen, wählen Sie `Datei -> Seitenbereich als JPEG speichern`. Nach Auswahl eines Ordners erstellt die Anwendung darin einen Unterordner mit dem Namen der aktuellen PDF-Datei und speichert die ausgewählten Seiten als einzelne, nummerierte `.jpg`-Dateien. Der Fortschritt wird während des Speicherns oben in der Ansicht angezeigt.
+
 Bei vollständig gescannten Dokumenten ohne eigene Textebene kann im Speichern-Dialog zusätzlich der Typ `PDF/A-Dateien (*.pdf)` verfügbar sein. Dadurch wird eine PDF/A-Datei für Archivierung und digitale Veröffentlichung erstellt, mit dem Seitenbild und einer unsichtbaren Textebene aus der OCR-Erkennung. Das Ergebnis lässt sich leichter durchsuchen und eignet sich besser für die digitale Bereitstellung.
 
 Wenn Sie für ein gescanntes Dokument PDF/A auswählen, merkt sich die Anwendung diese Auswahl und verwendet PDF/A beim nächsten Speichern eines ähnlichen gescannten Dokuments als Standardtyp. Im Feld `Dateityp` können Sie jederzeit wieder auf eine normale PDF-Datei umstellen.
@@ -366,6 +368,7 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Drucken über das Menü `Datei` (`CTRL+P`) mit Auswahl: aktuelle Seite, Seitenbereich oder gesamtes Dokument.
 - Eingebaute `Vorschau` im Menü `Datei` (`CTRL+F2`), die das Dokument nach der Anonymisierung ohne externen PDF-Viewer anzeigt.
 - Option `Seitenbereich als PDF speichern` im Menü `Datei`, standardmäßig mit der aktuellen Seite vorbelegt.
+- Option `Seitenbereich als JPEG speichern` im Menü `Datei`, die ausgewählte Seiten als nummerierte `.jpg`-Dateien in einem separaten Ordner speichert.
 - Speichern vollständig gescannter Dokumente als PDF/A mit unsichtbarer OCR-Textebene sowie Merken des zuletzt gewählten Speichertyps für Scans.
 - Drei Tabs auf der rechten Seite: `Seitenliste`, `Miniaturen` und `Ebenen`.
 - Dynamische Erzeugung von Miniaturen sowie Miniatur-Cache für bessere Leistung bei großen Dokumenten.
@@ -394,5 +397,6 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Auswahl des Dokumentlands im Menü `Optionen -> Land`, die die Datenbereiche für die Anonymisierung anpasst.
 - Kopieren von Text aus Markierungen in die Zwischenablage (`In Zwischenablage kopieren`) in korrekter Lesereihenfolge, auch bei gedrehten Seiten und reinen Scans.
 - Graue Vorschau des betroffenen Textes auch bei reinen Scans (auf Basis von OCR).
+- Speichern eines ausgewählten Seitenbereichs in nummerierte JPEG-Dateien.
 - Unterstützung der Anonymisierung von Bildern im Format JPEG 2000.
 - Schnellere erneute Durchsicht des Dokuments dank Festplatten-Cache.

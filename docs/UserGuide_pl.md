@@ -158,6 +158,8 @@ Po zaznaczeniu odpowiednich obszarów wybierz przycisk Zapisz plik PDF (lub z pa
 
 Przed zapisaniem możesz użyć opcji `Plik -> Podgląd` (`CTRL+F2`). Otwiera ona wbudowany podgląd dokumentu po zastosowaniu anonimizacji, bez uruchamiania zewnętrznej przeglądarki PDF. W oknie podglądu możesz przechodzić między stronami, wpisać numer strony oraz wydrukować dokument w takiej postaci, w jakiej zostanie zapisany.
 
+Jeśli potrzebujesz obrazów stron zamiast pliku PDF, wybierz `Plik -> Zapisz zakres stron do JPEG`. Po wskazaniu katalogu aplikacja utworzy w nim podfolder o nazwie bieżącego pliku PDF i zapisze wybrane strony jako osobne, ponumerowane pliki `.jpg`. Podczas zapisu postęp jest pokazywany w etykiecie u góry widoku.
+
 W przypadku dokumentów w pełni skanowanych, bez własnej warstwy tekstowej, w oknie zapisu może być dostępny dodatkowy typ `Pliki PDF/A (*.pdf)`. Taki zapis tworzy plik PDF/A przeznaczony do archiwizacji i publikacji, z obrazem strony oraz niewidoczną warstwą tekstową przygotowaną na podstawie rozpoznania OCR. Dzięki temu dokument może być łatwiej przeszukiwany i lepiej nadaje się do udostępniania cyfrowego.
 
 Jeżeli dla skanowanego dokumentu wybierzesz zapis jako PDF/A, aplikacja zapamięta ten wybór i przy kolejnym zapisie podobnego dokumentu ustawi PDF/A jako domyślny typ pliku. W każdej chwili możesz w tym samym polu `Zapisz jako typ` wrócić do zwykłego pliku PDF.
@@ -389,6 +391,7 @@ W ostatnich wersjach dodano m.in.:
 - Drukowanie z menu `Plik` (`CTRL+P`) z wyborem: bieżąca strona, zakres stron lub cały dokument.
 - Wbudowany `Podgląd` w menu `Plik` (`CTRL+F2`) pokazujący dokument po anonimizacji bez zewnętrznej przeglądarki PDF.
 - Opcję `Zapisz zakres stron do PDF` (menu `Plik`) z domyślnym zakresem ustawionym na bieżącą stronę.
+- Opcję `Zapisz zakres stron do JPEG` (menu `Plik`) zapisującą wybrane strony jako ponumerowane pliki `.jpg` w osobnym katalogu.
 - Zapis dokumentów w pełni skanowanych jako PDF/A z niewidoczną warstwą tekstową OCR oraz zapamiętywaniem ostatnio wybranego typu zapisu dla skanów.
 - Trzy zakładki po prawej stronie: `Lista stron`, `Miniatury` i `Warstwy`.
 - Dynamiczne generowanie miniaturek stron oraz pamięć podręczną miniaturek dla szybszej pracy na dużych dokumentach.
@@ -417,5 +420,6 @@ W ostatnich wersjach dodano m.in.:
 - Wybór kraju dokumentu w menu `Opcje -> Kraj`, dopasowujący zakresy danych do anonimizacji.
 - Kopiowanie tekstu z zaznaczeń do schowka (`Kopiuj do schowka`) w poprawnej kolejności czytania, także na obróconych stronach i czystych skanach.
 - Wyszarzanie dotkniętego tekstu również w czystych skanach (na podstawie rozpoznania OCR).
+- Zapis wybranego zakresu stron do ponumerowanych plików JPEG.
 - Obsługę anonimizacji obrazów zapisanych w formacie JPEG 2000.
 - Szybszy ponowny przegląd dokumentu dzięki pamięci podręcznej na dysku.

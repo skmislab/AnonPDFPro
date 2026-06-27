@@ -43,6 +43,7 @@ namespace AnonPDF
             this.saveProjectMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.savePdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.savePdfPageRangeMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.saveJpegPageRangeMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripMenuItemPrintSeparator = new System.Windows.Forms.ToolStripSeparator();
             this.previewPdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.printPdfMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -242,6 +243,7 @@ namespace AnonPDF
             this.saveProjectMenuItem,
             this.savePdfMenuItem,
             this.savePdfPageRangeMenuItem,
+            this.saveJpegPageRangeMenuItem,
             this.toolStripMenuItemPrintSeparator,
             this.previewPdfMenuItem,
             this.printPdfMenuItem,
@@ -323,6 +325,14 @@ namespace AnonPDF
             this.savePdfPageRangeMenuItem.Size = new System.Drawing.Size(224, 22);
             this.savePdfPageRangeMenuItem.Text = "Menu_SavePdfPageRange";
             this.savePdfPageRangeMenuItem.Click += new System.EventHandler(this.SavePdfPageRangeMenuItem_Click);
+            //
+            // saveJpegPageRangeMenuItem
+            //
+            this.saveJpegPageRangeMenuItem.Enabled = false;
+            this.saveJpegPageRangeMenuItem.Name = "saveJpegPageRangeMenuItem";
+            this.saveJpegPageRangeMenuItem.Size = new System.Drawing.Size(224, 22);
+            this.saveJpegPageRangeMenuItem.Text = "Menu_SaveJpegPageRange";
+            this.saveJpegPageRangeMenuItem.Click += new System.EventHandler(this.SaveJpegPageRangeMenuItem_Click);
             //
             // toolStripMenuItemPrintSeparator
             //
@@ -1664,6 +1674,7 @@ namespace AnonPDF
         private System.Windows.Forms.ToolStripMenuItem saveProjectMenuItem;
         private System.Windows.Forms.ToolStripMenuItem savePdfMenuItem;
         private System.Windows.Forms.ToolStripMenuItem savePdfPageRangeMenuItem;
+        private System.Windows.Forms.ToolStripMenuItem saveJpegPageRangeMenuItem;
         private System.Windows.Forms.ToolStripSeparator toolStripMenuItemPrintSeparator;
         private System.Windows.Forms.ToolStripMenuItem previewPdfMenuItem;
         private System.Windows.Forms.ToolStripMenuItem printPdfMenuItem;

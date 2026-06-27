@@ -86,6 +86,7 @@ namespace AnonPDF
         private Label maintenanceCountdownLabel;
         private Label objectSelectionInfoLabel;
         private Label indexingStatusLabel;
+        private Label jpegExportStatusLabel;
         private QuickStartTutorialOverlay quickStartTutorialOverlay;
         private string serviceEndDate = "";
         private static System.Timers.Timer maintenanceCheckTimer;
@@ -10064,6 +10065,10 @@ namespace AnonPDF
             {
                 savePdfPageRangeMenuItem.Text = LocalizedText("Menu_SavePdfPageRange");
             }
+            if (saveJpegPageRangeMenuItem != null)
+            {
+                saveJpegPageRangeMenuItem.Text = LocalizedText("Menu_SaveJpegPageRange");
+            }
             if (previewPdfMenuItem != null)
             {
                 previewPdfMenuItem.Text = LocalizedText("Menu_PreviewPdf");
@@ -17168,6 +17173,69 @@ namespace AnonPDF
 
         // Single reposition-handler registration guard — avoids duplicate SizeChanged subscriptions
         // when multiple Ensure* methods are called over the lifetime of the form.
+        private void EnsureJpegExportStatusOverlay()
+        {
+            if (jpegExportStatusLabel != null)
+            {
+                return;
+            }
+
+            jpegExportStatusLabel = new Label
+            {
+                AutoSize = true,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Microsoft Sans Serif", 8.25F, FontStyle.Bold),
+                Padding = new Padding(6, 2, 6, 2),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Visible = false
+            };
+
+            this.Controls.Add(jpegExportStatusLabel);
+            jpegExportStatusLabel.BringToFront();
+            EnsureOverlayRepositionHandlers();
+            ApplyThemeToJpegExportStatusLabel();
+            RepositionOverlayLabels();
+        }
+
+        private void ShowJpegExportStatus(string text)
+        {
+            EnsureJpegExportStatusOverlay();
+            Rectangle previousBounds = jpegExportStatusLabel.Visible ? jpegExportStatusLabel.Bounds : Rectangle.Empty;
+            ApplyThemeToJpegExportStatusLabel();
+            jpegExportStatusLabel.Text = text;
+            jpegExportStatusLabel.Visible = true;
+            RepositionOverlayLabels();
+            InvalidatePreviousOverlayBounds(previousBounds, jpegExportStatusLabel.Bounds);
+            jpegExportStatusLabel.Refresh();
+        }
+
+        private void HideJpegExportStatus()
+        {
+            Rectangle previousBounds = jpegExportStatusLabel != null && jpegExportStatusLabel.Visible
+                ? jpegExportStatusLabel.Bounds
+                : Rectangle.Empty;
+
+            if (jpegExportStatusLabel != null)
+            {
+                jpegExportStatusLabel.Visible = false;
+            }
+
+            RepositionOverlayLabels();
+            InvalidatePreviousOverlayBounds(previousBounds, Rectangle.Empty);
+        }
+
+        private void InvalidatePreviousOverlayBounds(Rectangle previousBounds, Rectangle currentBounds)
+        {
+            if (previousBounds.IsEmpty || previousBounds == currentBounds)
+            {
+                return;
+            }
+
+            previousBounds.Inflate(2, 2);
+            Invalidate(previousBounds, true);
+            Update();
+        }
+
         private bool _overlayRepositionHandlersRegistered;
 
         private void EnsureOverlayRepositionHandlers()
@@ -17194,7 +17262,7 @@ namespace AnonPDF
             int y = origin.Y + margin;
 
             // Priority order: maintenance (danger) → selection info → indexing status
-            Label[] stack = { maintenanceCountdownLabel, objectSelectionInfoLabel, indexingStatusLabel };
+            Label[] stack = { maintenanceCountdownLabel, objectSelectionInfoLabel, indexingStatusLabel, jpegExportStatusLabel };
             foreach (var label in stack)
             {
                 if (label == null || !label.Visible) continue;
@@ -17224,6 +17292,17 @@ namespace AnonPDF
 
             indexingStatusLabel.BackColor = CurrentTheme.SelectionBackColor;
             indexingStatusLabel.ForeColor = CurrentTheme.SelectionForeColor;
+        }
+
+        private void ApplyThemeToJpegExportStatusLabel()
+        {
+            if (jpegExportStatusLabel == null)
+            {
+                return;
+            }
+
+            jpegExportStatusLabel.BackColor = CurrentTheme.SelectionBackColor;
+            jpegExportStatusLabel.ForeColor = CurrentTheme.SelectionForeColor;
         }
 
         private Point GetPanel2OriginInForm()
@@ -18224,6 +18303,7 @@ namespace AnonPDF
             ApplyThemeToMaintenanceCountdownLabel();
             ApplyThemeToObjectSelectionInfoLabel();
             ApplyThemeToIndexingStatusLabel();
+            ApplyThemeToJpegExportStatusLabel();
             UpdateObjectSelectionInfoLabel();
             ApplyTitleBarColor();
             UpdateSaveGroupState();
@@ -22582,6 +22662,10 @@ namespace AnonPDF
             {
                 savePdfPageRangeMenuItem.Enabled = true;
             }
+            if (saveJpegPageRangeMenuItem != null)
+            {
+                saveJpegPageRangeMenuItem.Enabled = true;
+            }
             if (previewPdfMenuItem != null)
             {
                 previewPdfMenuItem.Enabled = true;
@@ -23225,6 +23309,10 @@ namespace AnonPDF
             {
                 savePdfPageRangeMenuItem.Enabled = false;
             }
+            if (saveJpegPageRangeMenuItem != null)
+            {
+                saveJpegPageRangeMenuItem.Enabled = false;
+            }
             if (previewPdfMenuItem != null)
             {
                 previewPdfMenuItem.Enabled = false;
@@ -23850,6 +23938,175 @@ namespace AnonPDF
                     if (SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove, outputFormat: outputFormat))
                     {
                         RememberScannedPdfOutputFormat(outputFormat, additionalPagesToRemove);
+                    }
+                }
+            }
+        }
+
+        private void SaveJpegPageRangeMenuItem_Click(object sender, EventArgs e)
+        {
+            if (numPages <= 0 || string.IsNullOrWhiteSpace(inputPdfPath))
+            {
+                return;
+            }
+
+            if (!PromptForDuplicateSelectionOptions(
+                    numPages,
+                    LocalizedText("Menu_SaveJpegPageRange"),
+                    out int fromPage,
+                    out int toPage,
+                    defaultFromPage: currentPage,
+                    defaultToPage: currentPage))
+            {
+                return;
+            }
+
+            var additionalPagesToRemove = BuildPagesOutsideRange(numPages, fromPage, toPage);
+            var exportedSourcePages = BuildExportedSourcePageNumbers(additionalPagesToRemove);
+            if (exportedSourcePages.Count == 0)
+            {
+                MessageBox.Show(this, Resources.Err_AllPagesMarked, Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (!EnsureInterestSubjectForRequiredBases())
+            {
+                return;
+            }
+
+            using (var folderDialog = new FolderBrowserDialog())
+            {
+                folderDialog.Description = LocalizedText("Dialog_Title_SelectJpegOutputFolder");
+                folderDialog.SelectedPath = GetDefaultJpegExportParentDirectory();
+                folderDialog.ShowNewFolderButton = true;
+
+                if (folderDialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                string sourceBaseName = Path.GetFileNameWithoutExtension(inputPdfPath);
+                string outputDirectory = Path.Combine(folderDialog.SelectedPath, GetSafeDirectoryName(sourceBaseName));
+                ExportPageRangeToJpeg(outputDirectory, additionalPagesToRemove, exportedSourcePages);
+            }
+        }
+
+        private string GetDefaultJpegExportParentDirectory()
+        {
+            string sourceDirectory = null;
+            if (!string.IsNullOrWhiteSpace(inputPdfPath))
+            {
+                sourceDirectory = Path.GetDirectoryName(inputPdfPath);
+            }
+
+            if (!string.IsNullOrWhiteSpace(sourceDirectory) && Directory.Exists(sourceDirectory))
+            {
+                return sourceDirectory;
+            }
+
+            return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        }
+
+        private static string GetSafeDirectoryName(string directoryName)
+        {
+            if (string.IsNullOrWhiteSpace(directoryName))
+            {
+                return "PDF";
+            }
+
+            string safeName = directoryName;
+            foreach (char invalidChar in Path.GetInvalidFileNameChars())
+            {
+                safeName = safeName.Replace(invalidChar, '_');
+            }
+
+            safeName = safeName.Trim();
+            return string.IsNullOrWhiteSpace(safeName) ? "PDF" : safeName;
+        }
+
+        private void ExportPageRangeToJpeg(string outputDirectory, ISet<int> additionalPagesToRemove, List<int> exportedSourcePages)
+        {
+            string tempPdfPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_jpeg_{Guid.NewGuid():N}.pdf");
+
+            try
+            {
+                BeginBusyCursor();
+                Directory.CreateDirectory(outputDirectory);
+                ShowJpegExportStatus(LocalizedText("Msg_JpegPageRangePreparing"));
+
+                BuildRedactedPdfForOutput(
+                    tempPdfPath,
+                    additionalPagesToRemove,
+                    includeSupplementaryPages: false,
+                    showSuccessMessage: false,
+                    outputFormat: RedactedPdfOutputFormat.Pdf,
+                    disableOutputEncryption: true);
+
+                using (var pdfDocument = new PDFiumSharp.PdfDocument(tempPdfPath))
+                {
+                    int pageCount = Math.Min(pdfDocument.Pages.Count, exportedSourcePages.Count);
+                    for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+                    {
+                        int sourcePageNumber = exportedSourcePages[pageIndex];
+                        ShowJpegExportStatus(LocalizedFormat("Msg_JpegPageRangeProgress", pageIndex + 1, pageCount, sourcePageNumber));
+                        string outputPath = Path.Combine(outputDirectory, $"page_{sourcePageNumber:D4}.jpg");
+                        using (var pdfPage = pdfDocument.Pages[pageIndex])
+                        {
+                            SavePdfPageAsJpeg(pdfPage, outputPath);
+                        }
+                    }
+                }
+
+                MessageBox.Show(
+                    this,
+                    LocalizedFormat("Msg_JpegPageRangeSaved", outputDirectory),
+                    Resources.Title_Success,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, string.Format(Resources.Err_Save, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                HideJpegExportStatus();
+                EndBusyCursor();
+                if (File.Exists(tempPdfPath))
+                {
+                    try
+                    {
+                        File.Delete(tempPdfPath);
+                    }
+                    catch
+                    {
+                        // best effort cleanup
+                    }
+                }
+            }
+        }
+
+        private void SavePdfPageAsJpeg(PDFiumSharp.PdfPage pdfPage, string outputPath)
+        {
+            int dpi = Math.Max(72, reencodingDPI);
+            int widthPx = Math.Max(1, (int)Math.Round(pdfPage.Width * dpi / 72.0));
+            int heightPx = Math.Max(1, (int)Math.Round(pdfPage.Height * dpi / 72.0));
+
+            using (var pdfiumBitmap = new PDFiumBitmap(widthPx, heightPx, true))
+            {
+                pdfiumBitmap.FillRectangle(0, 0, widthPx, heightPx, 0xFFFFFFFF);
+                pdfPage.Render(
+                    renderTarget: pdfiumBitmap,
+                    flags: RenderingFlags.Annotations | RenderingFlags.Printing | RenderingFlags.LimitImageCache);
+
+                using (var bitmapStream = new MemoryStream())
+                {
+                    pdfiumBitmap.Save(bitmapStream);
+                    bitmapStream.Position = 0;
+                    using (var renderedImage = (Bitmap)DrawingImage.FromStream(bitmapStream))
+                    {
+                        renderedImage.SetResolution(dpi, dpi);
+                        File.WriteAllBytes(outputPath, EncodeToJpeg(renderedImage, quality: 90L));
                     }
                 }
             }
@@ -25404,6 +25661,7 @@ namespace AnonPDF
                 KeyPreview = true;
                 Size = PDFForm.ScaleSizeForDpiStatic(1000, 768);
                 MinimumSize = PDFForm.ScaleSizeForDpiStatic(860, 480);
+                WindowState = FormWindowState.Maximized;
 
                 var toolbar = new FlowLayoutPanel
                 {

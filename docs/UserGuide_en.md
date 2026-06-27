@@ -160,6 +160,8 @@ After marking all required areas, click Save PDF (or File → Save PDF). Select 
 
 Before saving, you can use `File -> Preview` (`CTRL+F2`). This opens a built-in preview of the document after redaction, without launching an external PDF viewer. In the preview window you can move between pages, enter a page number, and print the document in the same form in which it will be saved.
 
+If you need page images instead of a PDF file, choose `File -> Save page range to JPEG`. After you select a folder, the application creates a subfolder named after the current PDF file and saves the selected pages as separate, numbered `.jpg` files. Export progress is shown in a label at the top of the view.
+
 For fully scanned documents without their own text layer, the save dialog may also offer the `PDF/A files (*.pdf)` type. This creates an archival PDF/A file with the page image and an invisible text layer based on OCR recognition. The result is easier to search and better suited for digital publication or archiving.
 
 If you choose PDF/A for a scanned document, the application remembers that choice and uses PDF/A as the default save type the next time a similar scanned document is saved. You can always switch back to the regular PDF type in the same `Save as type` field.
@@ -389,6 +391,7 @@ Recent versions include:
 - Printing from the `File` menu (`CTRL+P`) with range options: current page, selected page range, or whole document.
 - Built-in `Preview` in the `File` menu (`CTRL+F2`) showing the document after redaction without an external PDF viewer.
 - `Save page range to PDF` in the `File` menu, with the current page prefilled by default.
+- `Save page range to JPEG` in the `File` menu, saving selected pages as numbered `.jpg` files in a separate folder.
 - Saving fully scanned documents as PDF/A with an invisible OCR text layer, including remembering the last selected save type for scanned documents.
 - Three right-side tabs: `Page List`, `Thumbnails`, and `Layers`.
 - Dynamic thumbnail generation plus thumbnail cache for better performance on large documents.
@@ -419,5 +422,6 @@ Recent versions include:
 - Document country selection in `Options -> Country` that tailors the anonymization data scopes.
 - Copying selection text to the clipboard (`Copy to clipboard`) in correct reading order, including on rotated pages and pure scans.
 - Gray preview of touched text also on pure scans (based on OCR).
+- Saving a selected page range to numbered JPEG files.
 - Redaction support for images stored in the JPEG 2000 format.
 - Faster document re-review thanks to an on-disk cache.

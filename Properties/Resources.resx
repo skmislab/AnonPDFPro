@@ -122,6 +122,9 @@
   <data name="Menu_SavePdfPageRange" xml:space="preserve">
     <value>Zapisz zakres stron do PDF</value>
   </data>
+  <data name="Menu_SaveJpegPageRange" xml:space="preserve">
+    <value>Zapisz zakres stron do JPEG</value>
+  </data>
   <data name="Menu_Print" xml:space="preserve">
     <value>Drukuj</value>
   </data>
@@ -1557,6 +1560,19 @@ Projekt: {0}</value>
   </data>
   <data name="Dialog_Title_SavePdfAs" xml:space="preserve">
     <value>Zapisz plik PDF pod inną nazwą niż bieżąca</value>
+  </data>
+  <data name="Dialog_Title_SelectJpegOutputFolder" xml:space="preserve">
+    <value>Wybierz katalog zapisu obrazów JPEG</value>
+  </data>
+  <data name="Msg_JpegPageRangeSaved" xml:space="preserve">
+    <value>Zapisano obrazy JPEG:
+{0}</value>
+  </data>
+  <data name="Msg_JpegPageRangePreparing" xml:space="preserve">
+    <value>Przygotowywanie stron do zapisu JPEG...</value>
+  </data>
+  <data name="Msg_JpegPageRangeProgress" xml:space="preserve">
+    <value>Zapisywanie JPEG: {0}/{1}, strona {2}</value>
   </data>
   <data name="Dialog_Title_OpenPap" xml:space="preserve">
     <value>Wybierz plik projektu {0}</value>
