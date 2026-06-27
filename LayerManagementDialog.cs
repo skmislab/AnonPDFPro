@@ -11,6 +11,8 @@ namespace AnonPDF
 {
     internal sealed class LayerManagementDialog : Form
     {
+        private const string LayerRowDragDataFormat = "AnonPDF.LayerManagementDialog.LayerRow";
+
         private readonly BindingList<LayerRowModel> layerRows;
         private readonly Dictionary<string, int> layerUsageCounts;
         private readonly DataGridView layersGridView;
@@ -22,7 +24,12 @@ namespace AnonPDF
         private readonly Button cancelButton;
         private readonly CheckBox exportVisibleLayersOnlyCheckBox;
         private readonly DialogTheme dialogTheme;
+        private readonly Color checkBoxBorderColor;
+        private readonly Color checkBoxAccentColor;
+        private readonly Color checkBoxBackColor;
         private readonly List<LayerDeletionAction> pendingLayerDeletionActions = new List<LayerDeletionAction>();
+        private Point layerDragStartPoint;
+        private int layerDragSourceIndex = -1;
 
         internal event Action<List<LayerDefinition>, string> PreviewChanged;
 
@@ -37,6 +44,9 @@ namespace AnonPDF
             DialogTheme dialogTheme = null)
         {
             this.dialogTheme = dialogTheme;
+            this.checkBoxBorderColor = checkBoxBorderColor;
+            this.checkBoxAccentColor = checkBoxAccentColor;
+            this.checkBoxBackColor = checkBoxBackColor;
             layerUsageCounts = new Dictionary<string, int>(usageCounts ?? new Dictionary<string, int>(), StringComparer.OrdinalIgnoreCase);
             layerRows = new BindingList<LayerRowModel>(
                 (layers ?? Enumerable.Empty<LayerDefinition>())
@@ -70,21 +80,27 @@ namespace AnonPDF
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect,
                 MultiSelect = false,
                 EditMode = DataGridViewEditMode.EditProgrammatically,
+                AllowDrop = true,
                 DataSource = layerRows
             };
             layersGridView.CurrentCellDirtyStateChanged += LayersGridView_CurrentCellDirtyStateChanged;
             layersGridView.CellValueChanged += LayersGridView_CellValueChanged;
             layersGridView.CellDoubleClick += LayersGridView_CellDoubleClick;
-            layersGridView.CellContentClick += LayersGridView_CellContentClick;
+            layersGridView.CellClick += LayersGridView_CellClick;
             layersGridView.CellPainting += LayersGridView_CellPainting;
+            layersGridView.MouseDown += LayersGridView_MouseDown;
+            layersGridView.MouseMove += LayersGridView_MouseMove;
+            layersGridView.DragOver += LayersGridView_DragOver;
+            layersGridView.DragDrop += LayersGridView_DragDrop;
             layersGridView.SelectionChanged += (_, __) => UpdateButtonState();
 
-            layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
+            layersGridView.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "DialogLayersActiveColumn",
                 DataPropertyName = nameof(LayerRowModel.IsActive),
                 HeaderText = Tr("Dialog_Layers_Column_Active"),
                 Width = 56,
+                ReadOnly = true,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
             layersGridView.Columns.Add(new DataGridViewTextBoxColumn
@@ -107,28 +123,31 @@ namespace AnonPDF
                 MinimumWidth = 140,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
-            layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
+            layersGridView.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "DialogLayersVisibleColumn",
                 DataPropertyName = nameof(LayerRowModel.IsVisible),
                 HeaderText = Tr("Dialog_Layers_Column_Visible"),
                 Width = 76,
+                ReadOnly = true,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
-            layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
+            layersGridView.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "DialogLayersLockedColumn",
                 DataPropertyName = nameof(LayerRowModel.IsLocked),
                 HeaderText = Tr("Dialog_Layers_Column_Locked"),
                 Width = 82,
+                ReadOnly = true,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
-            layersGridView.Columns.Add(new DataGridViewCheckBoxColumn
+            layersGridView.Columns.Add(new DataGridViewTextBoxColumn
             {
                 Name = "DialogLayersExportColumn",
                 DataPropertyName = nameof(LayerRowModel.ExportEnabled),
                 HeaderText = Tr("Dialog_Layers_Column_Export"),
                 Width = 82,
+                ReadOnly = true,
                 SortMode = DataGridViewColumnSortMode.NotSortable
             });
             layersGridView.Columns.Add(new DataGridViewTextBoxColumn
@@ -213,6 +232,8 @@ namespace AnonPDF
             CancelButton = cancelButton;
 
             DialogThemeApplier.ApplyTo(this, dialogTheme);
+            DisableAlternatingRowBackColor();
+            DisableHeaderSelectionBackColor();
 
             if (layerRows.Count > 0)
             {
@@ -220,6 +241,32 @@ namespace AnonPDF
             }
 
             UpdateButtonState();
+        }
+
+        private void DisableAlternatingRowBackColor()
+        {
+            if (layersGridView == null)
+            {
+                return;
+            }
+
+            layersGridView.AlternatingRowsDefaultCellStyle.BackColor = layersGridView.DefaultCellStyle.BackColor;
+            layersGridView.AlternatingRowsDefaultCellStyle.ForeColor = layersGridView.DefaultCellStyle.ForeColor;
+            layersGridView.AlternatingRowsDefaultCellStyle.SelectionBackColor = layersGridView.DefaultCellStyle.SelectionBackColor;
+            layersGridView.AlternatingRowsDefaultCellStyle.SelectionForeColor = layersGridView.DefaultCellStyle.SelectionForeColor;
+        }
+
+        private void DisableHeaderSelectionBackColor()
+        {
+            if (layersGridView == null)
+            {
+                return;
+            }
+
+            layersGridView.ColumnHeadersDefaultCellStyle.SelectionBackColor = layersGridView.ColumnHeadersDefaultCellStyle.BackColor;
+            layersGridView.ColumnHeadersDefaultCellStyle.SelectionForeColor = layersGridView.ColumnHeadersDefaultCellStyle.ForeColor;
+            layersGridView.RowHeadersDefaultCellStyle.SelectionBackColor = layersGridView.RowHeadersDefaultCellStyle.BackColor;
+            layersGridView.RowHeadersDefaultCellStyle.SelectionForeColor = layersGridView.RowHeadersDefaultCellStyle.ForeColor;
         }
 
         internal List<LayerDefinition> GetLayers()
@@ -650,6 +697,156 @@ namespace AnonPDF
             RaisePreviewChanged();
         }
 
+        private void LayersGridView_MouseDown(object sender, MouseEventArgs e)
+        {
+            layerDragSourceIndex = -1;
+            layerDragStartPoint = e.Location;
+
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            DataGridView.HitTestInfo hit = layersGridView.HitTest(e.X, e.Y);
+            if (hit.RowIndex < 1 || hit.RowIndex >= layerRows.Count)
+            {
+                return;
+            }
+
+            LayerRowModel row = layerRows[hit.RowIndex];
+            if (IsWorkLayer(row))
+            {
+                return;
+            }
+
+            layerDragSourceIndex = hit.RowIndex;
+        }
+
+        private void LayersGridView_MouseMove(object sender, MouseEventArgs e)
+        {
+            if ((e.Button & MouseButtons.Left) != MouseButtons.Left ||
+                layerDragSourceIndex < 1 ||
+                layerDragSourceIndex >= layerRows.Count)
+            {
+                return;
+            }
+
+            var dragRect = new Rectangle(
+                layerDragStartPoint.X - SystemInformation.DragSize.Width / 2,
+                layerDragStartPoint.Y - SystemInformation.DragSize.Height / 2,
+                SystemInformation.DragSize.Width,
+                SystemInformation.DragSize.Height);
+
+            if (dragRect.Contains(e.Location))
+            {
+                return;
+            }
+
+            LayerRowModel row = layerRows[layerDragSourceIndex];
+            if (IsWorkLayer(row))
+            {
+                layerDragSourceIndex = -1;
+                return;
+            }
+
+            layersGridView.DoDragDrop(new DataObject(LayerRowDragDataFormat, row), DragDropEffects.Move);
+            layerDragSourceIndex = -1;
+        }
+
+        private void LayersGridView_DragOver(object sender, DragEventArgs e)
+        {
+            e.Effect = DragDropEffects.None;
+            if (!e.Data.GetDataPresent(LayerRowDragDataFormat))
+            {
+                return;
+            }
+
+            LayerRowModel row = e.Data.GetData(LayerRowDragDataFormat) as LayerRowModel;
+            if (row == null || IsWorkLayer(row) || layerRows.IndexOf(row) < 1)
+            {
+                return;
+            }
+
+            Point clientPoint = layersGridView.PointToClient(new Point(e.X, e.Y));
+            int targetIndex = GetLayerDropTargetIndex(clientPoint);
+            if (targetIndex >= 1 && targetIndex <= layerRows.Count)
+            {
+                e.Effect = DragDropEffects.Move;
+            }
+        }
+
+        private void LayersGridView_DragDrop(object sender, DragEventArgs e)
+        {
+            if (!e.Data.GetDataPresent(LayerRowDragDataFormat))
+            {
+                return;
+            }
+
+            LayerRowModel row = e.Data.GetData(LayerRowDragDataFormat) as LayerRowModel;
+            if (row == null || IsWorkLayer(row))
+            {
+                return;
+            }
+
+            Point clientPoint = layersGridView.PointToClient(new Point(e.X, e.Y));
+            MoveLayerRowToIndex(row, GetLayerDropTargetIndex(clientPoint));
+        }
+
+        private int GetLayerDropTargetIndex(Point clientPoint)
+        {
+            DataGridView.HitTestInfo hit = layersGridView.HitTest(clientPoint.X, clientPoint.Y);
+            if (hit.RowIndex < 0)
+            {
+                return layerRows.Count;
+            }
+
+            int index = hit.RowIndex;
+            Rectangle rowRectangle = layersGridView.GetRowDisplayRectangle(index, false);
+            if (clientPoint.Y > rowRectangle.Top + rowRectangle.Height / 2)
+            {
+                index++;
+            }
+
+            return Math.Max(1, Math.Min(index, layerRows.Count));
+        }
+
+        private void MoveLayerRowToIndex(LayerRowModel row, int targetIndex)
+        {
+            int oldIndex = layerRows.IndexOf(row);
+            if (oldIndex < 1 || IsWorkLayer(row))
+            {
+                return;
+            }
+
+            targetIndex = Math.Max(1, Math.Min(targetIndex, layerRows.Count));
+            int adjustedTargetIndex = targetIndex > oldIndex ? targetIndex - 1 : targetIndex;
+            if (adjustedTargetIndex == oldIndex)
+            {
+                return;
+            }
+
+            layerRows.RemoveAt(oldIndex);
+            layerRows.Insert(adjustedTargetIndex, row);
+            NormalizeRowOrder();
+
+            int newIndex = layerRows.IndexOf(row);
+            if (newIndex >= 0 && newIndex < layersGridView.Rows.Count)
+            {
+                layersGridView.ClearSelection();
+                layersGridView.Rows[newIndex].Selected = true;
+                layersGridView.CurrentCell = layersGridView.Rows[newIndex].Cells[1];
+            }
+
+            UpdateButtonState();
+            RaisePreviewChanged();
+        }
+
+        private static bool IsWorkLayer(LayerRowModel row)
+        {
+            return row != null &&
+                   string.Equals(row.Id, PDFForm.WorkLayerId, StringComparison.OrdinalIgnoreCase);
+        }
+
         private void SaveButton_Click(object sender, EventArgs e)
         {
             foreach (LayerRowModel row in layerRows)
@@ -839,6 +1036,22 @@ namespace AnonPDF
             LayersGridView_CellValueChanged(sender, new DataGridViewCellEventArgs(e.ColumnIndex, e.RowIndex));
         }
 
+        private void LayersGridView_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= layerRows.Count || e.ColumnIndex < 0)
+            {
+                return;
+            }
+
+            DataGridViewColumn column = layersGridView.Columns[e.ColumnIndex];
+            if (!IsLayerCheckBoxProperty(column.DataPropertyName))
+            {
+                return;
+            }
+
+            LayersGridView_CellContentClick(sender, e);
+        }
+
         private void LayersGridView_CellPainting(object sender, DataGridViewCellPaintingEventArgs e)
         {
             if (e.RowIndex < 0 || e.RowIndex >= layerRows.Count || e.ColumnIndex < 0)
@@ -848,14 +1061,164 @@ namespace AnonPDF
 
             LayerRowModel row = layerRows[e.RowIndex];
             string propertyName = layersGridView.Columns[e.ColumnIndex].DataPropertyName;
-            if (!string.Equals(propertyName, nameof(LayerRowModel.ExportEnabled), StringComparison.Ordinal) ||
-                !string.Equals(row.Id, PDFForm.WorkLayerId, StringComparison.OrdinalIgnoreCase))
+
+            if (IsLayerCheckBoxProperty(propertyName))
+            {
+                PaintLayerCheckBoxCellBackground(e);
+
+                if (!string.Equals(propertyName, nameof(LayerRowModel.ExportEnabled), StringComparison.Ordinal) ||
+                    !string.Equals(row.Id, PDFForm.WorkLayerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    DrawThemedCheckBoxCell(e.Graphics, e.CellBounds, GetLayerCheckBoxValue(row, propertyName), enabled: true);
+                }
+
+                e.Handled = true;
+                return;
+            }
+
+            return;
+        }
+
+        private void PaintLayerCheckBoxCellBackground(DataGridViewCellPaintingEventArgs e)
+        {
+            bool selected = (e.State & DataGridViewElementStates.Selected) == DataGridViewElementStates.Selected;
+            Color backColor = selected
+                ? layersGridView.DefaultCellStyle.SelectionBackColor
+                : layersGridView.DefaultCellStyle.BackColor;
+
+            using (var backBrush = new SolidBrush(backColor))
+            {
+                e.Graphics.FillRectangle(backBrush, e.CellBounds);
+            }
+
+            using (var gridPen = new Pen(layersGridView.GridColor))
+            {
+                e.Graphics.DrawLine(gridPen, e.CellBounds.Left, e.CellBounds.Bottom - 1, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
+                e.Graphics.DrawLine(gridPen, e.CellBounds.Right - 1, e.CellBounds.Top, e.CellBounds.Right - 1, e.CellBounds.Bottom - 1);
+            }
+        }
+
+        private static bool IsLayerCheckBoxProperty(string propertyName)
+        {
+            return string.Equals(propertyName, nameof(LayerRowModel.IsActive), StringComparison.Ordinal) ||
+                   string.Equals(propertyName, nameof(LayerRowModel.IsVisible), StringComparison.Ordinal) ||
+                   string.Equals(propertyName, nameof(LayerRowModel.IsLocked), StringComparison.Ordinal) ||
+                   string.Equals(propertyName, nameof(LayerRowModel.ExportEnabled), StringComparison.Ordinal);
+        }
+
+        private static bool GetLayerCheckBoxValue(LayerRowModel row, string propertyName)
+        {
+            if (row == null)
+            {
+                return false;
+            }
+
+            if (string.Equals(propertyName, nameof(LayerRowModel.IsActive), StringComparison.Ordinal))
+            {
+                return row.IsActive;
+            }
+
+            if (string.Equals(propertyName, nameof(LayerRowModel.IsVisible), StringComparison.Ordinal))
+            {
+                return row.IsVisible;
+            }
+
+            if (string.Equals(propertyName, nameof(LayerRowModel.IsLocked), StringComparison.Ordinal))
+            {
+                return row.IsLocked;
+            }
+
+            if (string.Equals(propertyName, nameof(LayerRowModel.ExportEnabled), StringComparison.Ordinal))
+            {
+                return row.ExportEnabled;
+            }
+
+            return false;
+        }
+
+        private void DrawThemedCheckBoxCell(Graphics graphics, Rectangle bounds, bool isChecked, bool enabled)
+        {
+            if (graphics == null)
             {
                 return;
             }
 
-            e.Paint(e.CellBounds, DataGridViewPaintParts.Background | DataGridViewPaintParts.Border);
-            e.Handled = true;
+            int side = GetCheckBoxSide(layersGridView?.Font);
+            var glyphRect = new Rectangle(
+                bounds.Left + (bounds.Width - side) / 2,
+                bounds.Top + (bounds.Height - side) / 2,
+                side,
+                side);
+
+            var previousSmoothingMode = graphics.SmoothingMode;
+            graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+            Color borderColor = enabled ? DarkenColor(checkBoxBorderColor, 0.18f) : ControlPaint.Light(checkBoxBorderColor);
+            Color accentColor = enabled ? checkBoxAccentColor : ControlPaint.Light(checkBoxAccentColor);
+            Color backColor = enabled ? checkBoxBackColor : ControlPaint.Light(checkBoxBackColor);
+
+            using (var backBrush = new SolidBrush(backColor))
+            using (var borderPen = new Pen(borderColor, 1f))
+            {
+                graphics.FillRectangle(backBrush, glyphRect);
+                graphics.DrawRectangle(borderPen, glyphRect.X, glyphRect.Y, glyphRect.Width - 1, glyphRect.Height - 1);
+            }
+
+            if (isChecked)
+            {
+                Rectangle fillRect = Rectangle.Inflate(glyphRect, -2, -2);
+                using (var accentBrush = new SolidBrush(accentColor))
+                {
+                    graphics.FillRectangle(accentBrush, fillRect);
+                }
+
+                Color checkColor = GetContrastColor(accentColor);
+                using (var checkPen = new Pen(checkColor, 2f))
+                {
+                    checkPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                    checkPen.EndCap = System.Drawing.Drawing2D.LineCap.Round;
+
+                    int x1 = glyphRect.Left + (int)(glyphRect.Width * 0.24f);
+                    int y1 = glyphRect.Top + (int)(glyphRect.Height * 0.55f);
+                    int x2 = glyphRect.Left + (int)(glyphRect.Width * 0.44f);
+                    int y2 = glyphRect.Top + (int)(glyphRect.Height * 0.74f);
+                    int x3 = glyphRect.Left + (int)(glyphRect.Width * 0.76f);
+                    int y3 = glyphRect.Top + (int)(glyphRect.Height * 0.30f);
+
+                    graphics.DrawLines(checkPen, new[]
+                    {
+                        new Point(x1, y1),
+                        new Point(x2, y2),
+                        new Point(x3, y3)
+                    });
+                }
+            }
+
+            graphics.SmoothingMode = previousSmoothingMode;
+        }
+
+        private static int GetCheckBoxSide(Font font)
+        {
+            int fontHeight = font?.Height ?? SystemFonts.DefaultFont.Height;
+            float scale = fontHeight / 13f;
+            int minimum = Math.Max(13, (int)Math.Round(13 * scale));
+            int maximum = Math.Max(18, (int)Math.Round(18 * scale));
+            return Math.Max(minimum, Math.Min(maximum, fontHeight - 1));
+        }
+
+        private static Color GetContrastColor(Color color)
+        {
+            double luminance = ((0.299 * color.R) + (0.587 * color.G) + (0.114 * color.B)) / 255d;
+            return luminance > 0.55 ? Color.Black : Color.White;
+        }
+
+        private static Color DarkenColor(Color color, float amount)
+        {
+            amount = Math.Max(0f, Math.Min(1f, amount));
+            int r = (int)Math.Round(color.R * (1f - amount));
+            int g = (int)Math.Round(color.G * (1f - amount));
+            int b = (int)Math.Round(color.B * (1f - amount));
+            return Color.FromArgb(color.A, Math.Max(0, r), Math.Max(0, g), Math.Max(0, b));
         }
 
         private void LayersGridView_CellValueChanged(object sender, DataGridViewCellEventArgs e)
