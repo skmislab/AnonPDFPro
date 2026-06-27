@@ -93,6 +93,7 @@ namespace AnonPDF
         private ToolStripMenuItem saveCurrentViewMenuItem;
         private string inputPdfPath = "";
         private string inputProjectPath = "";
+        private string lastRedactedPdfOutputPath = "";
         private int currentPage = 1;
         private int numPages = 0;
         private const int RecentFilesLimit = 10;
@@ -22323,6 +22324,7 @@ namespace AnonPDF
             {
             CancelPreviewRender();
             userPassword = "";
+            lastRedactedPdfOutputPath = "";
             PdfReader reader = null;
             iText.Kernel.Pdf.PdfDocument pdfDoc = null;
 
@@ -23154,6 +23156,7 @@ namespace AnonPDF
             pdf = null;
             inputPdfPath = string.Empty;
             inputProjectPath = string.Empty;
+            lastRedactedPdfOutputPath = string.Empty;
             userPassword = string.Empty;
             userNewPassword = null;
             numPages = 0;
@@ -23764,11 +23767,27 @@ namespace AnonPDF
             {
                 saveFileDialog.Filter = Resources.Dialog_Filter_PDF;
                 saveFileDialog.Title = Resources.Dialog_Title_SavePdfAs;
-                saveFileDialog.FileName = $"{System.IO.Path.GetFileNameWithoutExtension(inputPdfPath)}_anon.pdf";
+                if (!string.IsNullOrWhiteSpace(lastRedactedPdfOutputPath))
+                {
+                    string lastDirectory = Path.GetDirectoryName(lastRedactedPdfOutputPath);
+                    if (!string.IsNullOrWhiteSpace(lastDirectory) && Directory.Exists(lastDirectory))
+                    {
+                        saveFileDialog.InitialDirectory = lastDirectory;
+                    }
+
+                    saveFileDialog.FileName = Path.GetFileName(lastRedactedPdfOutputPath);
+                }
+                else
+                {
+                    saveFileDialog.FileName = $"{System.IO.Path.GetFileNameWithoutExtension(inputPdfPath)}_anon.pdf";
+                }
 
                 if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
                 {
-                    SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove: null);
+                    if (SaveRedactedPdfToFile(saveFileDialog.FileName, additionalPagesToRemove: null))
+                    {
+                        lastRedactedPdfOutputPath = saveFileDialog.FileName;
+                    }
                 }
             }
         }
@@ -23840,7 +23859,7 @@ namespace AnonPDF
             return pagesOutsideRange;
         }
 
-        private void SaveRedactedPdfToFile(string outputFilePath, ISet<int> additionalPagesToRemove, bool includeSupplementaryPages = true)
+        private bool SaveRedactedPdfToFile(string outputFilePath, ISet<int> additionalPagesToRemove, bool includeSupplementaryPages = true)
         {
             try
             {
@@ -23869,11 +23888,13 @@ namespace AnonPDF
                 }
 
                 OpenDiagnosticLogIfEnabled();
+                return true;
             }
             catch (Exception ex)
             {
                 MessageBox.Show(this, string.Format(Resources.Err_Save, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 this.Cursor = Cursors.Default;
+                return false;
             }
         }
 
