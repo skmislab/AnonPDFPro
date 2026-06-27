@@ -10504,7 +10504,7 @@ namespace AnonPDF
                 mergeForm = new MergeFilesForm();
             }
 
-            ApplyThemeToDialog(mergeForm);
+            mergeForm.ApplyDialogTheme(CreateDialogTheme());
             if (!mergeForm.Visible)
             {
                 mergeForm.Show(this);

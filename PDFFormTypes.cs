@@ -3240,6 +3240,7 @@ namespace AnonPDF
         private Button buttonCancel;
         private Point listBoxDragStartPoint;
         private int listBoxDragStartIndex = -1;
+        private DialogTheme dialogTheme;
 
         public MergeFilesForm()
         {
@@ -3258,13 +3259,14 @@ namespace AnonPDF
             this.MinimizeBox = false;
 
 
-            listBoxFiles = new ListBox
+            listBoxFiles = new MergeFilesListBox
             {
                 Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(20), PDFForm.ScaleForDpiStatic(20)),
                 Size = PDFForm.ScaleSizeForDpiStatic(400, 280),
                 HorizontalScrollbar = true,
                 SelectionMode = SelectionMode.MultiExtended,
-                AllowDrop = true
+                AllowDrop = true,
+                DrawMode = DrawMode.OwnerDrawFixed
             };
 
             buttonAddFiles = new Button { Text = Resources.Merge_AddFiles, Location = new System.Drawing.Point(PDFForm.ScaleForDpiStatic(440), PDFForm.ScaleForDpiStatic(20)), Width = PDFForm.ScaleForDpiStatic(100), Height = PDFForm.ScaleForDpiStatic(28) };
@@ -3298,9 +3300,17 @@ namespace AnonPDF
             listBoxFiles.MouseMove += ListBoxFiles_MouseMove;
             listBoxFiles.DragOver += ListBoxFiles_DragOver;
             listBoxFiles.DragDrop += ListBoxFiles_DragDrop;
+            listBoxFiles.DrawItem += ListBoxFiles_DrawItem;
 
             this.CancelButton = buttonCancel;
             this.AcceptButton = null;
+        }
+
+        internal void ApplyDialogTheme(DialogTheme theme)
+        {
+            dialogTheme = theme;
+            DialogThemeApplier.ApplyTo(this, theme);
+            listBoxFiles?.Invalidate();
         }
 
         private void MergeFilesForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -3416,17 +3426,6 @@ namespace AnonPDF
         {
             listBoxDragStartIndex = listBoxFiles.IndexFromPoint(e.Location);
             listBoxDragStartPoint = e.Location;
-
-            if (e.Button != MouseButtons.Left || listBoxDragStartIndex < 0)
-            {
-                return;
-            }
-
-            if (!listBoxFiles.GetSelected(listBoxDragStartIndex))
-            {
-                listBoxFiles.ClearSelected();
-                listBoxFiles.SetSelected(listBoxDragStartIndex, true);
-            }
         }
 
         private void ListBoxFiles_MouseMove(object sender, MouseEventArgs e)
@@ -3525,6 +3524,120 @@ namespace AnonPDF
             }
 
             ReselectItems(orderedItems);
+        }
+
+        private void ListBoxFiles_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0 || e.Index >= listBoxFiles.Items.Count)
+            {
+                return;
+            }
+
+            bool selected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            System.Drawing.Color backColor = selected
+                ? (dialogTheme != null ? dialogTheme.SelectionBackColor : SystemColors.Highlight)
+                : listBoxFiles.BackColor;
+            System.Drawing.Color foreColor = selected
+                ? (dialogTheme != null ? dialogTheme.SelectionForeColor : SystemColors.HighlightText)
+                : listBoxFiles.ForeColor;
+
+            using (var backBrush = new SolidBrush(backColor))
+            {
+                e.Graphics.FillRectangle(backBrush, e.Bounds);
+            }
+
+            string text = listBoxFiles.Items[e.Index]?.ToString() ?? string.Empty;
+            Rectangle textRect = new Rectangle(
+                e.Bounds.Left + PDFForm.ScaleForDpiStatic(3),
+                e.Bounds.Top,
+                Math.Max(0, e.Bounds.Width - PDFForm.ScaleForDpiStatic(6)),
+                e.Bounds.Height);
+
+            TextRenderer.DrawText(
+                e.Graphics,
+                text,
+                e.Font,
+                textRect,
+                foreColor,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+
+            if ((e.State & DrawItemState.Focus) == DrawItemState.Focus)
+            {
+                e.DrawFocusRectangle();
+            }
+        }
+
+        private sealed class MergeFilesListBox : ListBox
+        {
+            private const int WM_LBUTTONDOWN = 0x0201;
+            private const int WM_LBUTTONUP = 0x0202;
+            private const int WM_MOUSEMOVE = 0x0200;
+
+            private int pendingSingleSelectIndex = -1;
+            private Point pendingSingleSelectPoint;
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == WM_LBUTTONDOWN)
+                {
+                    Point point = PointFromLParam(m.LParam);
+                    int index = IndexFromPoint(point);
+                    Keys modifiers = Control.ModifierKeys & (Keys.Shift | Keys.Control);
+
+                    if (index >= 0 &&
+                        modifiers == Keys.None &&
+                        SelectedIndices.Count > 1 &&
+                        GetSelected(index))
+                    {
+                        pendingSingleSelectIndex = index;
+                        pendingSingleSelectPoint = point;
+                        Focus();
+                        Capture = true;
+                        OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, point.X, point.Y, 0));
+                        return;
+                    }
+                }
+                else if (m.Msg == WM_MOUSEMOVE && pendingSingleSelectIndex >= 0)
+                {
+                    Point point = PointFromLParam(m.LParam);
+                    Rectangle dragRect = new Rectangle(
+                        pendingSingleSelectPoint.X - SystemInformation.DragSize.Width / 2,
+                        pendingSingleSelectPoint.Y - SystemInformation.DragSize.Height / 2,
+                        SystemInformation.DragSize.Width,
+                        SystemInformation.DragSize.Height);
+
+                    if (!dragRect.Contains(point))
+                    {
+                        pendingSingleSelectIndex = -1;
+                    }
+                }
+                else if (m.Msg == WM_LBUTTONUP && pendingSingleSelectIndex >= 0)
+                {
+                    Point point = PointFromLParam(m.LParam);
+                    int index = pendingSingleSelectIndex;
+                    pendingSingleSelectIndex = -1;
+
+                    if (index >= 0 && index < Items.Count)
+                    {
+                        ClearSelected();
+                        SetSelected(index, true);
+                    }
+
+                    Capture = false;
+                    OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, point.X, point.Y, 0));
+                    return;
+                }
+
+                base.WndProc(ref m);
+            }
+
+            private static Point PointFromLParam(IntPtr lParam)
+            {
+                int value = lParam.ToInt32();
+                return new Point(
+                    unchecked((short)(value & 0xffff)),
+                    unchecked((short)((value >> 16) & 0xffff)));
+            }
         }
 
         private void ButtonCancel_Click(object sender, EventArgs e)
