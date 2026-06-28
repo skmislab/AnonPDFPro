@@ -87,6 +87,8 @@ namespace AnonPDF
         private Label objectSelectionInfoLabel;
         private Label indexingStatusLabel;
         private Label jpegExportStatusLabel;
+        private bool jpegExportInProgress;
+        private JpegExportInputBlocker jpegExportInputBlocker;
         private QuickStartTutorialOverlay quickStartTutorialOverlay;
         private string serviceEndDate = "";
         private static System.Timers.Timer maintenanceCheckTimer;
@@ -141,6 +143,38 @@ namespace AnonPDF
         private const int WmSettingChange = 0x001A;
         private const string RasterSourceClipboard = "Clipboard";
         private const string RasterSourceFile = "File";
+
+        private sealed class JpegExportInputBlocker : IMessageFilter
+        {
+            private readonly Func<bool> isActive;
+
+            public JpegExportInputBlocker(Func<bool> isActive)
+            {
+                this.isActive = isActive ?? (() => false);
+            }
+
+            public bool PreFilterMessage(ref Message m)
+            {
+                if (!isActive())
+                {
+                    return false;
+                }
+
+                return IsMouseMessage(m.Msg) || IsKeyboardMessage(m.Msg) || m.Msg == 0x007B; // WM_CONTEXTMENU
+            }
+
+            private static bool IsMouseMessage(int message)
+            {
+                return (message >= 0x0200 && message <= 0x020E) ||
+                       (message >= 0x00A0 && message <= 0x00AD);
+            }
+
+            private static bool IsKeyboardMessage(int message)
+            {
+                return message >= 0x0100 && message <= 0x0109;
+            }
+        }
+
         private static readonly System.Drawing.Color DefaultCommentHighlightColor = System.Drawing.Color.FromArgb(255, 235, 59);
         private static readonly System.Drawing.Color DefaultCommentTextColor = System.Drawing.Color.Black;
         private readonly PrivateFontCollection shapeIconPrivateFontCollection = new PrivateFontCollection();
@@ -17236,6 +17270,38 @@ namespace AnonPDF
             Update();
         }
 
+        private void SetJpegExportUiBusy(bool busy)
+        {
+            jpegExportInProgress = busy;
+
+            if (saveJpegPageRangeMenuItem != null)
+            {
+                saveJpegPageRangeMenuItem.Enabled = !busy && numPages > 0 && !string.IsNullOrWhiteSpace(inputPdfPath);
+            }
+        }
+
+        private void InstallJpegExportInputBlocker()
+        {
+            if (jpegExportInputBlocker != null)
+            {
+                return;
+            }
+
+            jpegExportInputBlocker = new JpegExportInputBlocker(() => jpegExportInProgress);
+            Application.AddMessageFilter(jpegExportInputBlocker);
+        }
+
+        private void RemoveJpegExportInputBlocker()
+        {
+            if (jpegExportInputBlocker == null)
+            {
+                return;
+            }
+
+            Application.RemoveMessageFilter(jpegExportInputBlocker);
+            jpegExportInputBlocker = null;
+        }
+
         private bool _overlayRepositionHandlersRegistered;
 
         private void EnsureOverlayRepositionHandlers()
@@ -23902,7 +23968,9 @@ namespace AnonPDF
                     out int fromPage,
                     out int toPage,
                     defaultFromPage: currentPage,
-                    defaultToPage: currentPage))
+                    defaultToPage: currentPage,
+                    showSaveRangeShortcuts: true,
+                    shortcutCurrentPage: currentPage))
             {
                 return;
             }
@@ -23943,8 +24011,13 @@ namespace AnonPDF
             }
         }
 
-        private void SaveJpegPageRangeMenuItem_Click(object sender, EventArgs e)
+        private async void SaveJpegPageRangeMenuItem_Click(object sender, EventArgs e)
         {
+            if (jpegExportInProgress)
+            {
+                return;
+            }
+
             if (numPages <= 0 || string.IsNullOrWhiteSpace(inputPdfPath))
             {
                 return;
@@ -23956,7 +24029,9 @@ namespace AnonPDF
                     out int fromPage,
                     out int toPage,
                     defaultFromPage: currentPage,
-                    defaultToPage: currentPage))
+                    defaultToPage: currentPage,
+                    showSaveRangeShortcuts: true,
+                    shortcutCurrentPage: currentPage))
             {
                 return;
             }
@@ -23987,7 +24062,7 @@ namespace AnonPDF
 
                 string sourceBaseName = Path.GetFileNameWithoutExtension(inputPdfPath);
                 string outputDirectory = Path.Combine(folderDialog.SelectedPath, GetSafeDirectoryName(sourceBaseName));
-                ExportPageRangeToJpeg(outputDirectory, additionalPagesToRemove, exportedSourcePages);
+                await ExportPageRangeToJpegAsync(outputDirectory, additionalPagesToRemove, exportedSourcePages);
             }
         }
 
@@ -24024,15 +24099,20 @@ namespace AnonPDF
             return string.IsNullOrWhiteSpace(safeName) ? "PDF" : safeName;
         }
 
-        private void ExportPageRangeToJpeg(string outputDirectory, ISet<int> additionalPagesToRemove, List<int> exportedSourcePages)
+        private async Task ExportPageRangeToJpegAsync(string outputDirectory, ISet<int> additionalPagesToRemove, List<int> exportedSourcePages)
         {
             string tempPdfPath = Path.Combine(Path.GetTempPath(), $"anonpdfpro_jpeg_{Guid.NewGuid():N}.pdf");
+            bool saved = false;
+            Exception error = null;
 
             try
             {
+                SetJpegExportUiBusy(true);
+                InstallJpegExportInputBlocker();
                 BeginBusyCursor();
                 Directory.CreateDirectory(outputDirectory);
                 ShowJpegExportStatus(LocalizedText("Msg_JpegPageRangePreparing"));
+                Application.DoEvents();
 
                 BuildRedactedPdfForOutput(
                     tempPdfPath,
@@ -24042,36 +24122,21 @@ namespace AnonPDF
                     outputFormat: RedactedPdfOutputFormat.Pdf,
                     disableOutputEncryption: true);
 
-                using (var pdfDocument = new PDFiumSharp.PdfDocument(tempPdfPath))
-                {
-                    int pageCount = Math.Min(pdfDocument.Pages.Count, exportedSourcePages.Count);
-                    for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
-                    {
-                        int sourcePageNumber = exportedSourcePages[pageIndex];
-                        ShowJpegExportStatus(LocalizedFormat("Msg_JpegPageRangeProgress", pageIndex + 1, pageCount, sourcePageNumber));
-                        string outputPath = Path.Combine(outputDirectory, $"page_{sourcePageNumber:D4}.jpg");
-                        using (var pdfPage = pdfDocument.Pages[pageIndex])
-                        {
-                            SavePdfPageAsJpeg(pdfPage, outputPath);
-                        }
-                    }
-                }
-
-                MessageBox.Show(
-                    this,
-                    LocalizedFormat("Msg_JpegPageRangeSaved", outputDirectory),
-                    Resources.Title_Success,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Information);
+                string progressFormat = LocalizedText("Msg_JpegPageRangeProgress");
+                var progress = new Progress<string>(ShowJpegExportStatus);
+                await Task.Run(() => ExportPdfPagesToJpeg(tempPdfPath, outputDirectory, exportedSourcePages, progressFormat, progress));
+                saved = true;
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, string.Format(Resources.Err_Save, ex.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                error = ex;
             }
             finally
             {
                 HideJpegExportStatus();
                 EndBusyCursor();
+                RemoveJpegExportInputBlocker();
+                SetJpegExportUiBusy(false);
                 if (File.Exists(tempPdfPath))
                 {
                     try
@@ -24084,6 +24149,43 @@ namespace AnonPDF
                     }
                 }
             }
+
+            if (error != null)
+            {
+                MessageBox.Show(this, string.Format(Resources.Err_Save, error.Message), Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            else if (saved)
+            {
+                MessageBox.Show(
+                    this,
+                    LocalizedFormat("Msg_JpegPageRangeSaved", outputDirectory),
+                    Resources.Title_Success,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+        }
+
+        private void ExportPdfPagesToJpeg(
+            string tempPdfPath,
+            string outputDirectory,
+            List<int> exportedSourcePages,
+            string progressFormat,
+            IProgress<string> progress)
+        {
+            using (var pdfDocument = new PDFiumSharp.PdfDocument(tempPdfPath))
+            {
+                int pageCount = Math.Min(pdfDocument.Pages.Count, exportedSourcePages.Count);
+                for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+                {
+                    int sourcePageNumber = exportedSourcePages[pageIndex];
+                    progress?.Report(string.Format(progressFormat, pageIndex + 1, pageCount));
+                    string outputPath = Path.Combine(outputDirectory, $"page_{sourcePageNumber:D4}.jpg");
+                    using (var pdfPage = pdfDocument.Pages[pageIndex])
+                    {
+                        SavePdfPageAsJpeg(pdfPage, outputPath);
+                    }
+                }
+            }
         }
 
         private void SavePdfPageAsJpeg(PDFiumSharp.PdfPage pdfPage, string outputPath)
@@ -24092,23 +24194,29 @@ namespace AnonPDF
             int widthPx = Math.Max(1, (int)Math.Round(pdfPage.Width * dpi / 72.0));
             int heightPx = Math.Max(1, (int)Math.Round(pdfPage.Height * dpi / 72.0));
 
-            using (var pdfiumBitmap = new PDFiumBitmap(widthPx, heightPx, true))
+            byte[] renderedBmpBytes;
+            lock (pdfRenderSync)
             {
-                pdfiumBitmap.FillRectangle(0, 0, widthPx, heightPx, 0xFFFFFFFF);
-                pdfPage.Render(
-                    renderTarget: pdfiumBitmap,
-                    flags: RenderingFlags.Annotations | RenderingFlags.Printing | RenderingFlags.LimitImageCache);
-
-                using (var bitmapStream = new MemoryStream())
+                using (var pdfiumBitmap = new PDFiumBitmap(widthPx, heightPx, true))
                 {
-                    pdfiumBitmap.Save(bitmapStream);
-                    bitmapStream.Position = 0;
-                    using (var renderedImage = (Bitmap)DrawingImage.FromStream(bitmapStream))
+                    pdfiumBitmap.FillRectangle(0, 0, widthPx, heightPx, 0xFFFFFFFF);
+                    pdfPage.Render(
+                        renderTarget: pdfiumBitmap,
+                        flags: RenderingFlags.Annotations | RenderingFlags.Printing | RenderingFlags.LimitImageCache);
+
+                    using (var bitmapStream = new MemoryStream())
                     {
-                        renderedImage.SetResolution(dpi, dpi);
-                        File.WriteAllBytes(outputPath, EncodeToJpeg(renderedImage, quality: 90L));
+                        pdfiumBitmap.Save(bitmapStream);
+                        renderedBmpBytes = bitmapStream.ToArray();
                     }
                 }
+            }
+
+            using (var bitmapStream = new MemoryStream(renderedBmpBytes))
+            using (var renderedImage = (Bitmap)DrawingImage.FromStream(bitmapStream))
+            {
+                renderedImage.SetResolution(dpi, dpi);
+                File.WriteAllBytes(outputPath, EncodeToJpeg(renderedImage, quality: 90L));
             }
         }
 
@@ -47794,7 +47902,9 @@ namespace AnonPDF
             out int fromPage,
             out int toPage,
             int? defaultFromPage = null,
-            int? defaultToPage = null)
+            int? defaultToPage = null,
+            bool showSaveRangeShortcuts = false,
+            int? shortcutCurrentPage = null)
         {
             int normalizedDefaultFrom = defaultFromPage ?? 1;
             int normalizedDefaultTo = defaultToPage ?? totalPages;
@@ -47809,6 +47919,8 @@ namespace AnonPDF
 
             fromPage = normalizedDefaultFrom;
             toPage = normalizedDefaultTo;
+            int normalizedShortcutCurrent = shortcutCurrentPage ?? normalizedDefaultFrom;
+            normalizedShortcutCurrent = Math.Max(1, Math.Min(totalPages, normalizedShortcutCurrent));
 
             using (Form prompt = new Form())
             {
@@ -47817,7 +47929,7 @@ namespace AnonPDF
                     : dialogTitle;
                 prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
-                prompt.ClientSize = ScaleSizeForCurrentDpi(370, 130);
+                prompt.ClientSize = ScaleSizeForCurrentDpi(370, showSaveRangeShortcuts ? 170 : 130);
                 prompt.MinimizeBox = false;
                 prompt.MaximizeBox = false;
                 prompt.ShowInTaskbar = false;
@@ -47869,7 +47981,7 @@ namespace AnonPDF
                 var buttonOk = new Button
                 {
                     Left = ScaleForCurrentDpi(176),
-                    Top = ScaleForCurrentDpi(84),
+                    Top = ScaleForCurrentDpi(showSaveRangeShortcuts ? 124 : 84),
                     Width = ScaleForCurrentDpi(84),
                     Height = ScaleForCurrentDpi(28),
                     DialogResult = DialogResult.OK,
@@ -47879,12 +47991,35 @@ namespace AnonPDF
                 var buttonCancel = new Button
                 {
                     Left = ScaleForCurrentDpi(268),
-                    Top = ScaleForCurrentDpi(84),
+                    Top = ScaleForCurrentDpi(showSaveRangeShortcuts ? 124 : 84),
                     Width = ScaleForCurrentDpi(84),
                     Height = ScaleForCurrentDpi(28),
                     DialogResult = DialogResult.Cancel,
                     Text = Resources.Merge_Cancel
                 };
+
+                Button currentPageButton = null;
+                Button toEndButton = null;
+                if (showSaveRangeShortcuts)
+                {
+                    currentPageButton = new Button
+                    {
+                        Left = ScaleForCurrentDpi(18),
+                        Top = ScaleForCurrentDpi(70),
+                        Width = ScaleForCurrentDpi(158),
+                        Height = ScaleForCurrentDpi(28),
+                        Text = LocalizedText("Dialog_Range_CurrentPage")
+                    };
+
+                    toEndButton = new Button
+                    {
+                        Left = ScaleForCurrentDpi(184),
+                        Top = ScaleForCurrentDpi(70),
+                        Width = ScaleForCurrentDpi(168),
+                        Height = ScaleForCurrentDpi(28),
+                        Text = LocalizedText("Dialog_Range_ToDocumentEnd")
+                    };
+                }
 
                 fromPageInput.ValueChanged += (_, __) =>
                 {
@@ -47901,11 +48036,30 @@ namespace AnonPDF
                     }
                 };
 
+                if (showSaveRangeShortcuts)
+                {
+                    currentPageButton.Click += (_, __) =>
+                    {
+                        fromPageInput.Value = normalizedShortcutCurrent;
+                        toPageInput.Value = normalizedShortcutCurrent;
+                    };
+
+                    toEndButton.Click += (_, __) =>
+                    {
+                        toPageInput.Value = totalPages;
+                    };
+                }
+
                 prompt.Controls.Add(rangeLabel);
                 prompt.Controls.Add(fromPageLabel);
                 prompt.Controls.Add(fromPageInput);
                 prompt.Controls.Add(toPageLabel);
                 prompt.Controls.Add(toPageInput);
+                if (showSaveRangeShortcuts)
+                {
+                    prompt.Controls.Add(currentPageButton);
+                    prompt.Controls.Add(toEndButton);
+                }
                 prompt.Controls.Add(buttonOk);
                 prompt.Controls.Add(buttonCancel);
                 prompt.AcceptButton = buttonOk;

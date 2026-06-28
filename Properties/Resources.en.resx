@@ -1572,7 +1572,7 @@ Project: {0}</value>
     <value>Preparing pages for JPEG export...</value>
   </data>
   <data name="Msg_JpegPageRangeProgress" xml:space="preserve">
-    <value>Saving JPEG: {0}/{1}, page {2}</value>
+    <value>Saving JPEG: {0}/{1}</value>
   </data>
   <data name="Dialog_Title_OpenPap" xml:space="preserve">
     <value>Select a project file for {0}</value>
@@ -1993,6 +1993,12 @@ Close the application and run the installer now?</value>
   </data>
   <data name="Footnotes_DuplicateSelection_ToPage" xml:space="preserve">
     <value>To:</value>
+  </data>
+  <data name="Dialog_Range_CurrentPage" xml:space="preserve">
+    <value>Current page</value>
+  </data>
+  <data name="Dialog_Range_ToDocumentEnd" xml:space="preserve">
+    <value>To document end</value>
   </data>
   <data name="Footnotes_DuplicateSelection_PageCount" xml:space="preserve">
     <value>Page count:</value>

@@ -1307,7 +1307,7 @@ Repository: https://github.com/skmislab/AnonPDFPro</value>
     <value>Seiten für JPEG-Export werden vorbereitet...</value>
   </data>
   <data name="Msg_JpegPageRangeProgress" xml:space="preserve">
-    <value>JPEG wird gespeichert: {0}/{1}, Seite {2}</value>
+    <value>JPEG wird gespeichert: {0}/{1}</value>
   </data>
   <data name="EditText_AlignCenter" xml:space="preserve">
     <value>Zentriert</value>
@@ -1946,6 +1946,12 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   </data>
   <data name="Footnotes_DuplicateSelection_ToPage" xml:space="preserve">
     <value>Bis:</value>
+  </data>
+  <data name="Dialog_Range_CurrentPage" xml:space="preserve">
+    <value>Aktuelle Seite</value>
+  </data>
+  <data name="Dialog_Range_ToDocumentEnd" xml:space="preserve">
+    <value>Bis Dokumentende</value>
   </data>
   <data name="Footnotes_DuplicateSelection_PageCount" xml:space="preserve">
     <value>Anzahl der Seiten:</value>

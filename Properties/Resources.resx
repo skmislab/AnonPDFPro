@@ -1572,7 +1572,7 @@ Projekt: {0}</value>
     <value>Przygotowywanie stron do zapisu JPEG...</value>
   </data>
   <data name="Msg_JpegPageRangeProgress" xml:space="preserve">
-    <value>Zapisywanie JPEG: {0}/{1}, strona {2}</value>
+    <value>Zapisywanie JPEG: {0}/{1}</value>
   </data>
   <data name="Dialog_Title_OpenPap" xml:space="preserve">
     <value>Wybierz plik projektu {0}</value>
@@ -1993,6 +1993,12 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   </data>
   <data name="Footnotes_DuplicateSelection_ToPage" xml:space="preserve">
     <value>Do:</value>
+  </data>
+  <data name="Dialog_Range_CurrentPage" xml:space="preserve">
+    <value>Bieżąca strona</value>
+  </data>
+  <data name="Dialog_Range_ToDocumentEnd" xml:space="preserve">
+    <value>Do końca dokumentu</value>
   </data>
   <data name="Footnotes_DuplicateSelection_PageCount" xml:space="preserve">
     <value>Liczba stron:</value>
