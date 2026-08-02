@@ -1659,6 +1659,15 @@ namespace AnonPDF.Properties {
                 return ResourceManager.GetString("Signatures_Report_Field_SignDate", resourceCulture);
             }
         }
+
+        /// <summary>
+        /// Wyszukuje zlokalizowany ciąg podobny do ciągu Podpis niekompletny lub uszkodzony.
+        /// </summary>
+        internal static string Signatures_Unreadable {
+            get {
+                return ResourceManager.GetString("Signatures_Unreadable", resourceCulture);
+            }
+        }
         
         /// <summary>
         /// Wyszukuje zlokalizowany ciąg podobny do ciągu Sygnatariusz.

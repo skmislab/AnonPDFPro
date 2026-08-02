@@ -21688,7 +21688,16 @@ namespace AnonPDF
 
                         foreach (SignatureInfo sig in signatures)
                         {
-                            if (sig.SignerName != "")
+                            if (!sig.IsReadable)
+                            {
+                                shiftStart -= shift;
+                                pdfCanvas.BeginText()
+                                     .SetFontAndSize(font, 12)
+                                     .MoveText(50, shiftStart)
+                                     .ShowText($"   {Resources.Signatures_Unreadable}")
+                                     .EndText();
+                            }
+                            else if (!string.IsNullOrWhiteSpace(sig.SignerName))
                             {
                                 shiftStart -= shift;
                                 pdfCanvas.BeginText()
@@ -21697,7 +21706,7 @@ namespace AnonPDF
                                      .ShowText($"   {Resources.Signatures_Report_Field_SignerName}: {sig.SignerName}")
                                      .EndText();
                             }
-                            if (sig.SignerTitle != "")
+                            if (sig.IsReadable && !string.IsNullOrWhiteSpace(sig.SignerTitle))
                             {
                                 shiftStart -= shift;
                                 pdfCanvas.BeginText()
@@ -21706,7 +21715,7 @@ namespace AnonPDF
                                      .ShowText($"   {Resources.Signatures_Report_Field_SignerTitle}: {sig.SignerTitle}")
                                      .EndText();
                             }
-                            if (!string.IsNullOrWhiteSpace(sig.SignerOrganization))
+                            if (sig.IsReadable && !string.IsNullOrWhiteSpace(sig.SignerOrganization))
                             {
                                 shiftStart -= shift;
                                 string organizationLabel = LocalizedText("Signatures_Field_Organization");
@@ -21716,7 +21725,7 @@ namespace AnonPDF
                                  .ShowText($"   {organizationLabel}: {sig.SignerOrganization}")
                                  .EndText();
                             }
-                            if (sig.SignDate.ToString() != "")
+                            if (sig.IsReadable && sig.SignDate != default(DateTime))
                             {
                                 shiftStart -= shift;
                                 pdfCanvas.BeginText()
@@ -21846,20 +21855,24 @@ namespace AnonPDF
                                                 : string.Empty;
 
                                             var lines = new List<string> { LocalizedText("Signatures_SourceDocumentSignature") };
-                                            if (!string.IsNullOrWhiteSpace(signerName))
+                                            if (signatureInfo != null && !signatureInfo.IsReadable)
+                                            {
+                                                lines.Add(Resources.Signatures_Unreadable);
+                                            }
+                                            else if (!string.IsNullOrWhiteSpace(signerName))
                                             {
                                                 lines.Add($"{Resources.Signatures_Report_Field_SignerName}: {signerName}");
                                             }
-                                            if (!string.IsNullOrWhiteSpace(signerTitle))
+                                            if (signatureInfo?.IsReadable != false && !string.IsNullOrWhiteSpace(signerTitle))
                                             {
                                                 lines.Add($"{Resources.Signatures_Report_Field_SignerTitle}: {signerTitle}");
                                             }
-                                            if (!string.IsNullOrWhiteSpace(signerOrganization))
+                                            if (signatureInfo?.IsReadable != false && !string.IsNullOrWhiteSpace(signerOrganization))
                                             {
                                                 string organizationLabel = LocalizedText("Signatures_Field_Organization");
                                                 lines.Add($"{organizationLabel}: {signerOrganization}");
                                             }
-                                            if (!string.IsNullOrWhiteSpace(signDate))
+                                            if (signatureInfo?.IsReadable != false && !string.IsNullOrWhiteSpace(signDate))
                                             {
                                                 lines.Add($"{Resources.Signatures_Report_Field_SignDate}: {signDate}");
                                             }
@@ -54923,46 +54936,78 @@ namespace AnonPDF
         public void ExtractSignatures()
         {
             signatures.Clear();
-            var props = new ReaderProperties();
-            if (!string.IsNullOrEmpty(userPassword))
+            try
             {
-                props.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
-            }
-            using (PdfReader reader = new PdfReader(inputPdfPath, props).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
-            using (iText.Kernel.Pdf.PdfDocument pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
-            {
-                // Tool for handling signatures
-                SignatureUtil signUtil = new SignatureUtil(pdfDoc);
-
-                // Gets list of field names where signature actually exists
-                IList<string> sigNames = signUtil.GetSignatureNames();
-
-                foreach (string name in sigNames)
+                var props = new ReaderProperties();
+                if (!string.IsNullOrEmpty(userPassword))
                 {
-                    PdfPKCS7 pkcs7 = signUtil.ReadSignatureData(name);
-
-                    DateTime signDate = pkcs7.GetSignDate().ToLocalTime();
-
-                    IX509Certificate cert = pkcs7.GetSigningCertificate();
-                    var subject = CertificateInfo.GetSubjectFields(cert);
-
-                    string certCn = subject.GetField("CN") ?? "";
-                    string certT = subject.GetField("T") ?? "";
-                    string certO = subject.GetField("O") ?? "";
-                    if (string.IsNullOrWhiteSpace(certO))
+                    props.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
+                }
+                using (PdfReader reader = new PdfReader(inputPdfPath, props).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+                using (iText.Kernel.Pdf.PdfDocument pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader))
+                {
+                    SignatureUtil signUtil = new SignatureUtil(pdfDoc);
+                    IList<string> sigNames;
+                    try
                     {
-                        certO = subject.GetField("OU") ?? "";
+                        sigNames = signUtil.GetSignatureNames();
+                    }
+                    catch (Exception ex)
+                    {
+                        LogDebug("Signature name detection failed: " + ex);
+                        PdfAcroForm form = PdfAcroForm.GetAcroForm(pdfDoc, false);
+                        sigNames = form?.GetAllFormFields()
+                            .Where(field => field.Value is PdfSignatureFormField)
+                            .Select(field => field.Key)
+                            .ToList() ?? new List<string>();
                     }
 
-                    signatures.Add(new SignatureInfo
+                    foreach (string name in sigNames.Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase))
                     {
-                        FieldName = name,
-                        SignerName = certCn,
-                        SignerTitle = certT,
-                        SignerOrganization = certO,
-                        SignDate = signDate
-                    });
+                        try
+                        {
+                            PdfPKCS7 pkcs7 = signUtil.ReadSignatureData(name);
+                            DateTime signDate = pkcs7.GetSignDate().ToLocalTime();
+
+                            IX509Certificate cert = pkcs7.GetSigningCertificate();
+                            var subject = CertificateInfo.GetSubjectFields(cert);
+
+                            string certCn = subject.GetField("CN") ?? "";
+                            string certT = subject.GetField("T") ?? "";
+                            string certO = subject.GetField("O") ?? "";
+                            if (string.IsNullOrWhiteSpace(certO))
+                            {
+                                certO = subject.GetField("OU") ?? "";
+                            }
+
+                            signatures.Add(new SignatureInfo
+                            {
+                                FieldName = name,
+                                SignerName = certCn,
+                                SignerTitle = certT,
+                                SignerOrganization = certO,
+                                SignDate = signDate
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            LogDebug($"Signature metadata unreadable field={name}: {ex}");
+                            signatures.Add(new SignatureInfo
+                            {
+                                FieldName = name,
+                                SignerName = string.Empty,
+                                SignerTitle = string.Empty,
+                                SignerOrganization = string.Empty,
+                                SignDate = default(DateTime),
+                                IsReadable = false
+                            });
+                        }
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Signature extraction failed: " + ex);
             }
 
             groupBoxSignatures.Enabled = (signatures.Count > 0);

@@ -1624,6 +1624,9 @@ Repository: https://github.com/skmislab/AnonPDFPro</value>
   <data name="Signatures_Report_Field_SignDate" xml:space="preserve">
     <value>Sign date</value>
   </data>
+  <data name="Signatures_Unreadable" xml:space="preserve">
+    <value>Incomplete or corrupted signature</value>
+  </data>
   <data name="Menu_Help_CheckForUpdates" xml:space="preserve">
     <value>Check for updates...</value>
   </data>

@@ -3976,6 +3976,7 @@ namespace AnonPDF
         public string SignerTitle { get; set; }
         public string SignerOrganization { get; set; }
         public DateTime SignDate { get; set; }
+        public bool IsReadable { get; set; } = true;
     }
 
     public class SelectSignaturesDialog : Form
@@ -4018,7 +4019,9 @@ namespace AnonPDF
 
             foreach (SignatureInfo sig in signatures)
             {
-                string signer = string.IsNullOrWhiteSpace(sig.SignerName) ? "-" : sig.SignerName;
+                string signer = !sig.IsReadable
+                    ? Resources.Signatures_Unreadable
+                    : (string.IsNullOrWhiteSpace(sig.SignerName) ? "-" : sig.SignerName);
                 string title = string.IsNullOrWhiteSpace(sig.SignerTitle) ? "-" : sig.SignerTitle;
                 string date = sig.SignDate == DateTime.MinValue ? "-" : sig.SignDate.ToString("g", CultureInfo.CurrentCulture);
 

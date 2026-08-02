@@ -1771,6 +1771,9 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="Signatures_Report_Field_SignDate" xml:space="preserve">
     <value>Signaturdatum</value>
   </data>
+  <data name="Signatures_Unreadable" xml:space="preserve">
+    <value>Unvollständige oder beschädigte Signatur</value>
+  </data>
   <data name="Signatures_Report_Field_SignerName" xml:space="preserve">
     <value>Name des Unterzeichners</value>
   </data>
