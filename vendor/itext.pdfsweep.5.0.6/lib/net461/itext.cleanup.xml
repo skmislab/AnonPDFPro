@@ -1480,6 +1480,14 @@
             <param name="clearedImage"><see cref="T:iText.Kernel.Pdf.Xobject.PdfImageXObject"/> of the cleared image</param>
             <returns>true if the image infos are the same</returns>
         </member>
+        <member name="M:iText.PdfCleanup.Util.CleanUpCsCompareUtil.IsSpecialColorSpace(iText.Kernel.Pdf.PdfDictionary)">
+            <summary>
+            Checks whether the image uses a Separation or DeviceN colorspace.
+            </summary>
+            <remarks>GetAsArray() resolves indirect PDF object references before returning.</remarks>
+            <param name="imageDict">the image XObject dictionary</param>
+            <returns>true if the colorspace is Separation or DeviceN</returns>
+        </member>
         <member name="T:iText.PdfCleanup.Util.CleanUpHelperUtil">
             <summary>Utility class providing clean up helping methods.</summary>
         </member>
@@ -1508,6 +1516,12 @@
             <summary>Clean up an image using a List of Rectangles that need to be redacted</summary>
             <param name="imageBytes">the image to be cleaned up</param>
             <param name="areasToBeCleaned">the List of Rectangles that need to be redacted out of the image</param>
+        </member>
+        <member name="M:iText.PdfCleanup.Util.CleanUpImageUtil.CleanUpImage(System.Byte[],System.Collections.Generic.IList{iText.Kernel.Geom.Rectangle},System.Drawing.Color)">
+            <summary>Clean up an image filling the redacted areas with the given color.</summary>
+            <param name="imageBytes">the image to be cleaned up</param>
+            <param name="areasToBeCleaned">the List of Rectangles that need to be redacted out of the image</param>
+            <param name="fillColor">the color used to fill the redacted areas</param>
         </member>
         <member name="M:iText.PdfCleanup.Util.CleanUpImageUtil.CleanImage(System.Drawing.Image,System.Collections.Generic.IList{iText.Kernel.Geom.Rectangle},System.Drawing.Color)">
             <summary>Clean up a BufferedImage using a List of Rectangles that need to be redacted</summary>
