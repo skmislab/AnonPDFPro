@@ -3969,6 +3969,20 @@ namespace AnonPDF
         }
     }
 
+    public enum SignatureVerificationStatus
+    {
+        Indeterminate = 0,
+        Valid = 1,
+        Invalid = 2,
+        Unreadable = 3
+    }
+
+    public class SignatureWidgetInfo
+    {
+        public int PageNumber { get; set; }
+        public RectangleF Bounds { get; set; }
+    }
+
     public class SignatureInfo
     {
         public string FieldName { get; set; }
@@ -3977,15 +3991,34 @@ namespace AnonPDF
         public string SignerOrganization { get; set; }
         public DateTime SignDate { get; set; }
         public bool IsReadable { get; set; } = true;
+        public SignatureVerificationStatus VerificationStatus { get; set; } = SignatureVerificationStatus.Indeterminate;
+        public List<SignatureWidgetInfo> Widgets { get; set; } = new List<SignatureWidgetInfo>();
     }
 
     public class SelectSignaturesDialog : Form
     {
         private readonly ListView listView;
+        private readonly Button btnSelectAll;
+        private readonly Button btnDeselectAll;
         private readonly Button btnOK;
         private readonly Button btnCancel;
 
         public List<string> SelectedFieldNames { get; private set; } = new List<string>();
+
+        private static string GetVerificationStatusText(SignatureVerificationStatus status)
+        {
+            switch (status)
+            {
+                case SignatureVerificationStatus.Valid:
+                    return Resources.Signatures_Verification_Valid;
+                case SignatureVerificationStatus.Invalid:
+                    return Resources.Signatures_Verification_Invalid;
+                case SignatureVerificationStatus.Unreadable:
+                    return Resources.Signatures_Unreadable;
+                default:
+                    return Resources.Signatures_Verification_Indeterminate;
+            }
+        }
 
         public SelectSignaturesDialog(List<SignatureInfo> signatures, IEnumerable<string> preselectedFields)
         {
@@ -3994,7 +4027,7 @@ namespace AnonPDF
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
-            this.Width = PDFForm.ScaleForDpiStatic(520);
+            this.Width = PDFForm.ScaleForDpiStatic(720);
             this.Height = PDFForm.ScaleForDpiStatic(360);
 
             listView = new ListView
@@ -4004,12 +4037,13 @@ namespace AnonPDF
                 FullRowSelect = true,
                 GridLines = true,
                 Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(10)),
-                Size = PDFForm.ScaleSizeForDpiStatic(480, 260)
+                Size = PDFForm.ScaleSizeForDpiStatic(680, 260)
             };
 
-            listView.Columns.Add(Resources.Signatures_Select_Column_Name, PDFForm.ScaleForDpiStatic(180));
-            listView.Columns.Add(Resources.Signatures_Select_Column_Title, PDFForm.ScaleForDpiStatic(140));
-            listView.Columns.Add(Resources.Signatures_Select_Column_Date, PDFForm.ScaleForDpiStatic(140));
+            listView.Columns.Add(Resources.Signatures_Select_Column_Name, PDFForm.ScaleForDpiStatic(170));
+            listView.Columns.Add(Resources.Signatures_Select_Column_Title, PDFForm.ScaleForDpiStatic(120));
+            listView.Columns.Add(Resources.Signatures_Select_Column_Date, PDFForm.ScaleForDpiStatic(130));
+            listView.Columns.Add(Resources.Signatures_Report_Field_Status, PDFForm.ScaleForDpiStatic(220));
 
             HashSet<string> preselected = null;
             if (preselectedFields != null)
@@ -4019,24 +4053,39 @@ namespace AnonPDF
 
             foreach (SignatureInfo sig in signatures)
             {
-                string signer = !sig.IsReadable
-                    ? Resources.Signatures_Unreadable
-                    : (string.IsNullOrWhiteSpace(sig.SignerName) ? "-" : sig.SignerName);
+                string signer = string.IsNullOrWhiteSpace(sig.SignerName) ? "-" : sig.SignerName;
                 string title = string.IsNullOrWhiteSpace(sig.SignerTitle) ? "-" : sig.SignerTitle;
                 string date = sig.SignDate == DateTime.MinValue ? "-" : sig.SignDate.ToString("g", CultureInfo.CurrentCulture);
 
                 ListViewItem item = new ListViewItem(signer);
                 item.SubItems.Add(title);
                 item.SubItems.Add(date);
+                item.SubItems.Add(GetVerificationStatusText(sig.VerificationStatus));
                 item.Tag = sig.FieldName ?? string.Empty;
-                item.Checked = preselected == null || preselected.Contains(sig.FieldName ?? string.Empty);
+                item.Checked = preselected != null && preselected.Contains(sig.FieldName ?? string.Empty);
                 listView.Items.Add(item);
             }
+
+            btnSelectAll = new Button
+            {
+                Text = Resources.ResourceManager.GetString("Found_SelectAll", CultureInfo.CurrentUICulture) ?? "Select all",
+                Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(280)),
+                Size = PDFForm.ScaleSizeForDpiStatic(110, 30)
+            };
+            btnSelectAll.Click += (_, __) => SetAllItemsChecked(true);
+
+            btnDeselectAll = new Button
+            {
+                Text = Resources.ResourceManager.GetString("Found_DeselectAll", CultureInfo.CurrentUICulture) ?? "Clear all",
+                Location = new Point(PDFForm.ScaleForDpiStatic(130), PDFForm.ScaleForDpiStatic(280)),
+                Size = PDFForm.ScaleSizeForDpiStatic(110, 30)
+            };
+            btnDeselectAll.Click += (_, __) => SetAllItemsChecked(false);
 
             btnOK = new Button
             {
                 Text = Resources.Merge_OK,
-                Location = new Point(PDFForm.ScaleForDpiStatic(320), PDFForm.ScaleForDpiStatic(280)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(520), PDFForm.ScaleForDpiStatic(280)),
                 Size = PDFForm.ScaleSizeForDpiStatic(80, 30),
                 DialogResult = DialogResult.OK
             };
@@ -4044,17 +4093,27 @@ namespace AnonPDF
             btnCancel = new Button
             {
                 Text = Resources.Merge_Cancel,
-                Location = new Point(PDFForm.ScaleForDpiStatic(410), PDFForm.ScaleForDpiStatic(280)),
+                Location = new Point(PDFForm.ScaleForDpiStatic(610), PDFForm.ScaleForDpiStatic(280)),
                 Size = PDFForm.ScaleSizeForDpiStatic(80, 30),
                 DialogResult = DialogResult.Cancel
             };
 
             this.Controls.Add(listView);
+            this.Controls.Add(btnSelectAll);
+            this.Controls.Add(btnDeselectAll);
             this.Controls.Add(btnOK);
             this.Controls.Add(btnCancel);
 
             this.AcceptButton = btnOK;
             this.CancelButton = btnCancel;
+        }
+
+        private void SetAllItemsChecked(bool isChecked)
+        {
+            foreach (ListViewItem item in listView.Items)
+            {
+                item.Checked = isChecked;
+            }
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
@@ -4214,6 +4273,7 @@ namespace AnonPDF
         public int? ThumbnailsTopPage { get; set; }
         public List<string> SignaturesToRemove { get; set; }
         public string SignaturesMode { get; set; }
+        public string SignatureAppearance { get; set; }
         public bool? AutoFootnotesEnabled { get; set; }
         public string ExclusionAuthority { get; set; }
         public bool ExportVisibleLayersOnly { get; set; }

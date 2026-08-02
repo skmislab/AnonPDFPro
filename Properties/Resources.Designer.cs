@@ -1668,6 +1668,42 @@ namespace AnonPDF.Properties {
                 return ResourceManager.GetString("Signatures_Unreadable", resourceCulture);
             }
         }
+
+        /// <summary>
+        /// Wyszukuje zlokalizowany ciąg podobny do ciągu Prawidłowy podpis.
+        /// </summary>
+        internal static string Signatures_Verification_Valid {
+            get {
+                return ResourceManager.GetString("Signatures_Verification_Valid", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        /// Wyszukuje zlokalizowany ciąg podobny do ciągu Nieprawidłowy podpis.
+        /// </summary>
+        internal static string Signatures_Verification_Invalid {
+            get {
+                return ResourceManager.GetString("Signatures_Verification_Invalid", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        /// Wyszukuje zlokalizowany ciąg podobny do ciągu Nie można potwierdzić podpisu.
+        /// </summary>
+        internal static string Signatures_Verification_Indeterminate {
+            get {
+                return ResourceManager.GetString("Signatures_Verification_Indeterminate", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        /// Wyszukuje zlokalizowany ciąg podobny do ciągu Status.
+        /// </summary>
+        internal static string Signatures_Report_Field_Status {
+            get {
+                return ResourceManager.GetString("Signatures_Report_Field_Status", resourceCulture);
+            }
+        }
         
         /// <summary>
         /// Wyszukuje zlokalizowany ciąg podobny do ciągu Sygnatariusz.

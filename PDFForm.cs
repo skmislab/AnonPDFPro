@@ -17,6 +17,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Principal;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using iText.Html2pdf;
 using iText.Kernel.Pdf;
 using iText.PdfCleanup;
@@ -114,6 +115,8 @@ namespace AnonPDF
         private const string SignatureModeOriginal = "original";
         private const string SignatureModeRemove = "remove";
         private const string SignatureModeReport = "report";
+        private const string SignatureAppearanceOriginal = "original";
+        private const string SignatureAppearanceAnonPdfPro = "anonpdfpro";
         private const string ClassificationSourceNone = "none";
         private const string ClassificationSourceAuto = "auto";
         private const string ClassificationSourceManual = "manual";
@@ -243,6 +246,7 @@ namespace AnonPDF
         private List<string> signaturesToRemove = new List<string>();
         private bool hasCustomSignatureSelection = false;
         private bool suppressSignatureModeChange;
+        private bool suppressSignatureAppearanceChange;
         private List<TextAnnotation> textAnnotations = new List<TextAnnotation>();
         private List<CommentAnnotation> commentAnnotations = new List<CommentAnnotation>();
         private List<RasterObject> rasterObjects = new List<RasterObject>();
@@ -1706,6 +1710,7 @@ namespace AnonPDF
             filterComboBox.DrawMode = DrawMode.OwnerDrawFixed;
             filterComboBox.SelectedIndexChanged += FilterComboBox_SelectedIndexChanged;
             filterComboBox.DrawItem += FilterComboBox_DrawItem;
+            InitializeSignatureAppearanceComboBox();
 
             zoomMinButton.Text = "\uE7C3";
             zoomMaxButton.Text = "\uE7C3";
@@ -1724,7 +1729,6 @@ namespace AnonPDF
             cursorRadioButton.CheckedChanged += CursorRadioButton_CheckedChanged;
             markerRadioButton.CheckedChanged += MarkerRadioButton_CheckedChanged;
             boxRadioButton.CheckedChanged += BoxRadioButton_CheckedChanged;
-            signaturesRemoveRadioButton.CheckedChanged += SignaturesRemoveRadioButton_CheckedChanged;
             signaturesOriginalRadioButton.CheckedChanged += SignaturesOriginalRadioButton_CheckedChanged;
             signaturesReportRadioButton.CheckedChanged += SignaturesReportRadioButton_CheckedChanged;
 
@@ -1788,9 +1792,10 @@ namespace AnonPDF
             colorCheckBox.Checked = Properties.Settings.Default.LastColorCheckBoxState;
             outlineCheckBox.Checked = Properties.Settings.Default.LastOutlineCheckBoxState;
             openSavedPDFCheckBox.Checked = Properties.Settings.Default.LastOpenSavedPDFCheckBoxState;
-            signaturesRemoveRadioButton.Checked = Properties.Settings.Default.LastSignaturesRemoveRadioButton;
-            signaturesOriginalRadioButton.Checked = Properties.Settings.Default.LastSignaturesOriginalRadioButton;
+            suppressSignatureModeChange = true;
             signaturesReportRadioButton.Checked = Properties.Settings.Default.LastSignaturesRaportRadioButton;
+            signaturesOriginalRadioButton.Checked = !signaturesReportRadioButton.Checked;
+            suppressSignatureModeChange = false;
             exclusionAuthorityName = (Properties.Settings.Default.ExclusionAuthorityName ?? string.Empty).Trim();
             BootstrapExclusionAuthorityFromLicenseIfMissing();
 
@@ -10208,9 +10213,10 @@ namespace AnonPDF
             try { openSavedPDFCheckBox.Text = Resources.UI_Check_PreviewAfterSave; } catch { }
             try { safeModeCheckBox.Text = Resources.UI_Check_SafeMode; } catch { }
             try { setSavePassword.Text = Resources.UI_Check_SetPassword; } catch { }
-            try { signaturesRemoveRadioButton.Text = Resources.UI_Radio_Signatures_Remove; } catch { }
-            try { signaturesOriginalRadioButton.Text = Resources.UI_Radio_Signatures_Original; } catch { }
+            try { signaturesOriginalRadioButton.Text = LocalizedText("UI_Radio_Signatures_Kept"); } catch { }
             try { signaturesReportRadioButton.Text = Resources.UI_Radio_Signatures_Report; } catch { }
+            try { signatureAppearanceLabel.Text = LocalizedText("UI_Label_SignatureAppearance"); } catch { }
+            try { UpdateSignatureAppearanceComboItems(); } catch { }
             try { cursorRadioButton.Text = LocalizedText("UI_Radio_Cursor"); } catch { }
             try { markerRadioButton.Text = LocalizedText("UI_Radio_Marker"); } catch { }
             try { boxRadioButton.Text = LocalizedText("UI_Radio_Box"); } catch { }
@@ -10270,8 +10276,8 @@ namespace AnonPDF
             try { toolTip1.SetToolTip(removePageButton, Resources.Tooltip_RemovePage); } catch { }
             try { toolTip1.SetToolTip(removePageRangeButton, Resources.Tooltip_RemovePageRange); } catch { }
             try { toolTip1.SetToolTip(signaturesReportRadioButton, Resources.Tooltip_Signatures_Report); } catch { }
-            try { toolTip1.SetToolTip(signaturesOriginalRadioButton, Resources.Tooltip_Signatures_Original); } catch { }
-            try { toolTip1.SetToolTip(signaturesRemoveRadioButton, Resources.Tooltip_Signatures_Remove); } catch { }
+            try { toolTip1.SetToolTip(signaturesOriginalRadioButton, LocalizedText("Tooltip_Signatures_Kept")); } catch { }
+            try { toolTip1.SetToolTip(signatureAppearanceComboBox, LocalizedText("Tooltip_SignatureAppearance")); } catch { }
             try { toolTip1.SetToolTip(pageNumberTextBox, Resources.Tooltip_PageNumber); } catch { }
             try { toolTip1.SetToolTip(buttonFirst, Resources.Tooltip_FirstPage); } catch { }
             try { toolTip1.SetToolTip(buttonNextPage, Resources.Tooltip_NextPage); } catch { }
@@ -20096,12 +20102,15 @@ namespace AnonPDF
             }
         }
 
-        private DrawingImage RenderOriginalPage(int pageNumber)
+        private DrawingImage RenderOriginalPage(int pageNumber, bool includeSignatureVerificationOverlays = false)
         {
-            return RenderOriginalPageAtScale(pageNumber, scaleFactor);
+            return RenderOriginalPageAtScale(pageNumber, scaleFactor, includeSignatureVerificationOverlays);
         }
 
-        private DrawingImage RenderOriginalPageAtScale(int pageNumber, float renderScale)
+        private DrawingImage RenderOriginalPageAtScale(
+            int pageNumber,
+            float renderScale,
+            bool includeSignatureVerificationOverlays = false)
         {
             if (pdf == null || pageNumber < 1 || pageNumber > pdf.Pages.Count)
             {
@@ -20131,6 +20140,14 @@ namespace AnonPDF
                         bmp.Save(ms);
                         ms.Position = 0;
                         var image = DrawingImage.FromStream(ms);
+                        if (includeSignatureVerificationOverlays)
+                        {
+                            ApplySignatureVerificationOverlaysToImage(
+                                image,
+                                pageNumber,
+                                renderScale,
+                                GetBaseRotationDegrees(pageNumber));
+                        }
                         ApplyRotationOffset(image, offset);
                         return image;
                     }
@@ -20660,7 +20677,7 @@ namespace AnonPDF
             DrawingImage renderedPage;
             try
             {
-                renderedPage = RenderOriginalPage(pageNumber);
+                renderedPage = RenderOriginalPage(pageNumber, includeSignatureVerificationOverlays: true);
             }
             catch
             {
@@ -21189,6 +21206,145 @@ namespace AnonPDF
             return null;
         }
 
+        private static bool DrawSignatureVerificationAppearance(
+            SignatureInfo signatureInfo,
+            iText.Kernel.Pdf.Canvas.PdfCanvas canvas,
+            PdfFont font,
+            float width,
+            float height,
+            out string sourceInfo)
+        {
+            sourceInfo = "none";
+            if (signatureInfo == null || canvas == null || font == null || width <= 0f || height <= 0f)
+            {
+                return false;
+            }
+
+            DeviceRgb fillColor;
+            DeviceRgb borderColor;
+            switch (signatureInfo.VerificationStatus)
+            {
+                case SignatureVerificationStatus.Valid:
+                    fillColor = new DeviceRgb(235, 248, 239);
+                    borderColor = new DeviceRgb(38, 133, 69);
+                    break;
+                case SignatureVerificationStatus.Invalid:
+                    fillColor = new DeviceRgb(253, 237, 237);
+                    borderColor = new DeviceRgb(183, 45, 45);
+                    break;
+                case SignatureVerificationStatus.Unreadable:
+                    fillColor = new DeviceRgb(242, 242, 242);
+                    borderColor = new DeviceRgb(105, 105, 105);
+                    break;
+                default:
+                    fillColor = new DeviceRgb(255, 248, 224);
+                    borderColor = new DeviceRgb(178, 126, 22);
+                    break;
+            }
+
+            float padding = Math.Max(2f, Math.Min(width, height) * 0.05f);
+            float iconSize = Math.Min(14f, Math.Max(9f, height * 0.28f));
+            float iconX = padding;
+            float iconY = height - padding - iconSize;
+
+            canvas.SaveState();
+            canvas.SetFillColor(fillColor);
+            canvas.SetStrokeColor(borderColor);
+            canvas.SetLineWidth(Math.Max(0.6f, Math.Min(width, height) * 0.015f));
+            canvas.Rectangle(0, 0, width, height);
+            canvas.FillStroke();
+
+            canvas.SetFillColor(borderColor);
+            canvas.Rectangle(iconX, iconY, iconSize, iconSize);
+            canvas.Fill();
+            canvas.SetStrokeColor(new DeviceRgb(255, 255, 255));
+            canvas.SetLineWidth(Math.Max(1.1f, iconSize * 0.13f));
+            if (signatureInfo.VerificationStatus == SignatureVerificationStatus.Valid)
+            {
+                canvas.MoveTo(iconX + iconSize * 0.20f, iconY + iconSize * 0.52f);
+                canvas.LineTo(iconX + iconSize * 0.42f, iconY + iconSize * 0.27f);
+                canvas.LineTo(iconX + iconSize * 0.82f, iconY + iconSize * 0.76f);
+                canvas.Stroke();
+            }
+            else if (signatureInfo.VerificationStatus == SignatureVerificationStatus.Indeterminate)
+            {
+                canvas.MoveTo(iconX + iconSize * 0.50f, iconY + iconSize * 0.72f);
+                canvas.LineTo(iconX + iconSize * 0.50f, iconY + iconSize * 0.38f);
+                canvas.Stroke();
+                canvas.Rectangle(iconX + iconSize * 0.44f, iconY + iconSize * 0.17f, iconSize * 0.12f, iconSize * 0.12f);
+                canvas.Fill();
+            }
+            else
+            {
+                canvas.MoveTo(iconX + iconSize * 0.24f, iconY + iconSize * 0.24f);
+                canvas.LineTo(iconX + iconSize * 0.76f, iconY + iconSize * 0.76f);
+                canvas.MoveTo(iconX + iconSize * 0.76f, iconY + iconSize * 0.24f);
+                canvas.LineTo(iconX + iconSize * 0.24f, iconY + iconSize * 0.76f);
+                canvas.Stroke();
+            }
+            canvas.RestoreState();
+
+            float fontSize = Math.Max(5.5f, Math.Min(8f, height / 6.2f));
+            float lineHeight = fontSize * 1.18f;
+            float currentY = height - padding - fontSize;
+            float statusX = iconX + iconSize + Math.Max(2f, padding);
+            float statusWidth = Math.Max(8f, width - statusX - padding);
+            string statusText = GetSignatureVerificationText(signatureInfo.VerificationStatus);
+            IList<string> statusLines = WrapTextToWidth(font, statusText, fontSize, statusWidth);
+
+            canvas.BeginText();
+            canvas.SetFillColor(borderColor);
+            canvas.SetFontAndSize(font, fontSize);
+            foreach (string line in statusLines)
+            {
+                if (currentY < padding)
+                {
+                    break;
+                }
+                canvas.SetTextMatrix(1, 0, 0, 1, statusX, currentY);
+                canvas.ShowText(line);
+                currentY -= lineHeight;
+            }
+            canvas.EndText();
+
+            currentY = Math.Min(currentY, iconY - fontSize - Math.Max(1f, padding * 0.35f));
+            var details = new List<string>();
+            if (signatureInfo.IsReadable && !string.IsNullOrWhiteSpace(signatureInfo.SignerName))
+            {
+                details.Add(signatureInfo.SignerName);
+            }
+            if (signatureInfo.IsReadable && signatureInfo.SignDate != default(DateTime))
+            {
+                details.Add(signatureInfo.SignDate.ToString("g", CultureInfo.CurrentCulture));
+            }
+            details.Add(LocalizedText("Signatures_SourceDocumentSignature"));
+
+            canvas.BeginText();
+            canvas.SetFillColor(new DeviceRgb(35, 35, 35));
+            canvas.SetFontAndSize(font, fontSize);
+            foreach (string detail in details)
+            {
+                foreach (string line in WrapTextToWidth(font, detail, fontSize, Math.Max(8f, width - (2f * padding))))
+                {
+                    if (currentY < padding)
+                    {
+                        break;
+                    }
+                    canvas.SetTextMatrix(1, 0, 0, 1, padding, currentY);
+                    canvas.ShowText(line);
+                    currentY -= lineHeight;
+                }
+                if (currentY < padding)
+                {
+                    break;
+                }
+            }
+            canvas.EndText();
+
+            sourceInfo = $"verification:{signatureInfo.VerificationStatus}";
+            return true;
+        }
+
         private static bool TryDrawOriginalSignatureWatermark(
             PdfDictionary widgetObject,
             PdfDictionary widgetAp,
@@ -21663,7 +21819,7 @@ namespace AnonPDF
                     flattenPages = DetermineFlattenPagesForScanMerge(pdfDoc, effectivePagesToRemove);
                 }
 
-                if (signatures.Count > 0 && !signaturesOriginalRadioButton.Checked)
+                if (signatures.Count > 0)
                 {
                     if (includeSupplementaryPages && signaturesReportRadioButton.Checked)
                     {
@@ -21688,16 +21844,14 @@ namespace AnonPDF
 
                         foreach (SignatureInfo sig in signatures)
                         {
-                            if (!sig.IsReadable)
-                            {
-                                shiftStart -= shift;
-                                pdfCanvas.BeginText()
-                                     .SetFontAndSize(font, 12)
-                                     .MoveText(50, shiftStart)
-                                     .ShowText($"   {Resources.Signatures_Unreadable}")
-                                     .EndText();
-                            }
-                            else if (!string.IsNullOrWhiteSpace(sig.SignerName))
+                            shiftStart -= shift;
+                            pdfCanvas.BeginText()
+                                 .SetFontAndSize(font, 12)
+                                 .MoveText(50, shiftStart)
+                                 .ShowText($"   {Resources.Signatures_Report_Field_Status}: {GetSignatureVerificationText(sig.VerificationStatus)}")
+                                 .EndText();
+
+                            if (sig.IsReadable && !string.IsNullOrWhiteSpace(sig.SignerName))
                             {
                                 shiftStart -= shift;
                                 pdfCanvas.BeginText()
@@ -21738,7 +21892,7 @@ namespace AnonPDF
                         }
                     }
 
-                    if (signaturesRemoveRadioButton.Checked || signaturesReportRadioButton.Checked)
+                    if (signaturesReportRadioButton.Checked || signaturesToRemove.Count > 0)
                     {
                         PdfAcroForm form = PdfAcroForm.GetAcroForm(pdfDoc, false);
                         if (form != null)
@@ -21754,7 +21908,7 @@ namespace AnonPDF
                                 .ToList();
 
                             List<string> signatureKeysToRemove = signatureFieldKeys;
-                            if (signaturesRemoveRadioButton.Checked && hasCustomSignatureSelection)
+                            if (!signaturesReportRadioButton.Checked)
                             {
                                 var selected = new HashSet<string>(signaturesToRemove, StringComparer.OrdinalIgnoreCase);
                                 signatureKeysToRemove = signatureFieldKeys
@@ -21829,13 +21983,27 @@ namespace AnonPDF
                                         var apCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(replacementAppearance, pdfDoc);
 
                                         string watermarkInfo;
-                                        bool watermarkDrawn = TryDrawOriginalSignatureWatermark(
-                                            widget.GetPdfObject(),
-                                            widget.GetAppearanceDictionary(),
-                                            apCanvas,
-                                            appW,
-                                            appH,
-                                            out watermarkInfo);
+                                        bool watermarkDrawn;
+                                        if (UseAnonPdfProSignatureAppearance())
+                                        {
+                                            watermarkDrawn = DrawSignatureVerificationAppearance(
+                                                signatureInfo,
+                                                apCanvas,
+                                                signaturePlaceholderFont,
+                                                appW,
+                                                appH,
+                                                out watermarkInfo);
+                                        }
+                                        else
+                                        {
+                                            watermarkDrawn = TryDrawOriginalSignatureWatermark(
+                                                widget.GetPdfObject(),
+                                                widget.GetAppearanceDictionary(),
+                                                apCanvas,
+                                                appW,
+                                                appH,
+                                                out watermarkInfo);
+                                        }
                                         if (!watermarkDrawn)
                                         {
                                             apCanvas.SaveState();
@@ -22988,7 +23156,7 @@ namespace AnonPDF
                 || vectorShapes.Count > 0
                 || pagesToRemove.Count > 0
                 || pageRotationOffsets.Count > 0
-                || hasCustomSignatureSelection
+                || HasSignatureProjectContent()
                 || HasLayerProjectContent();
         }
 
@@ -25385,7 +25553,10 @@ namespace AnonPDF
                 return false;
             }
 
-            if (signatures.Count > 0 && !signaturesOriginalRadioButton.Checked)
+            if (signatures.Count > 0 &&
+                (!signaturesOriginalRadioButton.Checked ||
+                 signaturesToRemove.Count > 0 ||
+                 UseAnonPdfProSignatureAppearance()))
             {
                 return false;
             }
@@ -25449,7 +25620,10 @@ namespace AnonPDF
                 return false;
             }
 
-            if (signatures.Count > 0 && !signaturesOriginalRadioButton.Checked)
+            if (signatures.Count > 0 &&
+                (!signaturesOriginalRadioButton.Checked ||
+                 signaturesToRemove.Count > 0 ||
+                 UseAnonPdfProSignatureAppearance()))
             {
                 return false;
             }
@@ -27211,8 +27385,16 @@ namespace AnonPDF
                 || vectorShapes.Count > 0
                 || pagesToRemove.Count > 0
                 || pageRotationOffsets.Count > 0
-                || hasCustomSignatureSelection
+                || HasSignatureProjectContent()
                 || HasLayerProjectContent();
+        }
+
+        private bool HasSignatureProjectContent()
+        {
+            return signatures.Count > 0 &&
+                   (hasCustomSignatureSelection ||
+                    signaturesReportRadioButton.Checked ||
+                    GetSelectedSignatureAppearance() != SignatureAppearanceOriginal);
         }
 
         private bool HasLayerProjectContent()
@@ -27778,7 +27960,8 @@ namespace AnonPDF
                 PagesListTopPage = pagesListTopPage,
                 ThumbnailsTopPage = thumbnailsTopPage,
                 SignaturesMode = GetSignatureModeForProject(),
-                SignaturesToRemove = hasCustomSignatureSelection ? new List<string>(signaturesToRemove) : null,
+                SignaturesToRemove = new List<string>(signaturesToRemove),
+                SignatureAppearance = GetSelectedSignatureAppearance(),
                 AutoFootnotesEnabled = autoFootnotesEnabled,
                 ExclusionAuthority = exclusionAuthorityName,
                 ExportVisibleLayersOnly = exportVisibleLayersOnly,
@@ -28191,6 +28374,7 @@ namespace AnonPDF
             SyncSignatureSelectionWithAvailableSignatures();
             UpdateSignatureSelectionMenuState();
             ApplySignatureModeFromProject(projectData.SignaturesMode);
+            ApplySignatureAppearanceFromProject(projectData.SignatureAppearance);
 
             autoFootnotesEnabled = projectData.AutoFootnotesEnabled ?? Properties.Settings.Default.AutoFootnotesEnabled;
             if (!string.IsNullOrWhiteSpace(projectData.ExclusionAuthority))
@@ -39484,6 +39668,194 @@ namespace AnonPDF
             }
         }
 
+        private void ApplySignatureVerificationOverlaysToImage(
+            DrawingImage image,
+            int pageNumber,
+            float renderScale,
+            int rotation)
+        {
+            if (image == null)
+            {
+                return;
+            }
+
+            using (Graphics graphics = Graphics.FromImage(image))
+            {
+                DrawSignatureVerificationOverlays(graphics, pageNumber, renderScale, rotation);
+            }
+        }
+
+        private void DrawSignatureVerificationOverlays(
+            Graphics graphics,
+            int pageNumber,
+            float renderScale,
+            int rotation)
+        {
+            if (graphics == null ||
+                signatures == null ||
+                signatures.Count == 0 ||
+                pageNumber <= 0 ||
+                renderScale <= 0f ||
+                !UseAnonPdfProSignatureAppearance())
+            {
+                return;
+            }
+
+            foreach (SignatureInfo signature in signatures)
+            {
+                if (signature == null || IsSignatureSelectedForRemoval(signature.FieldName))
+                {
+                    continue;
+                }
+
+                foreach (SignatureWidgetInfo widget in signature.Widgets.Where(item => item != null && item.PageNumber == pageNumber))
+                {
+                    RectangleF viewBounds = ConvertPdfToViewCoordinates(widget.Bounds, pageNumber, rotation);
+                    RectangleF bounds = new RectangleF(
+                        viewBounds.X * renderScale,
+                        viewBounds.Y * renderScale,
+                        viewBounds.Width * renderScale,
+                        viewBounds.Height * renderScale);
+                    if (bounds.Width < 8f || bounds.Height < 8f)
+                    {
+                        continue;
+                    }
+
+                    DrawSignatureVerificationOverlay(graphics, bounds, signature, renderScale);
+                }
+            }
+        }
+
+        private void DrawSignatureVerificationOverlay(Graphics graphics, RectangleF bounds, SignatureInfo signature, float renderScale)
+        {
+            System.Drawing.Color fillColor;
+            System.Drawing.Color borderColor;
+            switch (signature.VerificationStatus)
+            {
+                case SignatureVerificationStatus.Valid:
+                    fillColor = System.Drawing.Color.FromArgb(235, 248, 239);
+                    borderColor = System.Drawing.Color.FromArgb(38, 133, 69);
+                    break;
+                case SignatureVerificationStatus.Invalid:
+                    fillColor = System.Drawing.Color.FromArgb(253, 237, 237);
+                    borderColor = System.Drawing.Color.FromArgb(183, 45, 45);
+                    break;
+                case SignatureVerificationStatus.Unreadable:
+                    fillColor = System.Drawing.Color.FromArgb(242, 242, 242);
+                    borderColor = System.Drawing.Color.FromArgb(105, 105, 105);
+                    break;
+                default:
+                    fillColor = System.Drawing.Color.FromArgb(255, 248, 224);
+                    borderColor = System.Drawing.Color.FromArgb(178, 126, 22);
+                    break;
+            }
+
+            GraphicsState state = graphics.Save();
+            try
+            {
+                graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+
+                float padding = Math.Max(2f, Math.Min(bounds.Width, bounds.Height) * 0.05f);
+                float borderWidth = Math.Max(1f, Math.Min(bounds.Width, bounds.Height) * 0.015f);
+                using (var fillBrush = new SolidBrush(fillColor))
+                using (var borderPen = new Pen(borderColor, borderWidth))
+                {
+                    graphics.FillRectangle(fillBrush, bounds);
+                    graphics.DrawRectangle(borderPen, bounds.X, bounds.Y, Math.Max(1f, bounds.Width - borderWidth), Math.Max(1f, bounds.Height - borderWidth));
+                }
+
+                float normalizedHeight = bounds.Height / renderScale;
+                float baseIconSize = Math.Min(18f, Math.Max(9f, normalizedHeight * 0.28f));
+                float iconSize = baseIconSize * renderScale;
+                RectangleF iconBounds = new RectangleF(bounds.X + padding, bounds.Y + padding, iconSize, iconSize);
+                using (var iconBrush = new SolidBrush(borderColor))
+                {
+                    graphics.FillRectangle(iconBrush, iconBounds);
+                }
+                using (var iconPen = new Pen(System.Drawing.Color.White, Math.Max(1.2f, iconSize * 0.13f)))
+                {
+                    if (signature.VerificationStatus == SignatureVerificationStatus.Valid)
+                    {
+                        graphics.DrawLines(iconPen, new[]
+                        {
+                            new PointF(iconBounds.X + iconSize * 0.20f, iconBounds.Y + iconSize * 0.52f),
+                            new PointF(iconBounds.X + iconSize * 0.42f, iconBounds.Y + iconSize * 0.76f),
+                            new PointF(iconBounds.X + iconSize * 0.82f, iconBounds.Y + iconSize * 0.26f)
+                        });
+                    }
+                    else if (signature.VerificationStatus == SignatureVerificationStatus.Indeterminate)
+                    {
+                        graphics.DrawLine(iconPen, iconBounds.X + iconSize * 0.50f, iconBounds.Y + iconSize * 0.22f, iconBounds.X + iconSize * 0.50f, iconBounds.Y + iconSize * 0.60f);
+                        graphics.DrawEllipse(iconPen, iconBounds.X + iconSize * 0.47f, iconBounds.Y + iconSize * 0.76f, Math.Max(1f, iconSize * 0.06f), Math.Max(1f, iconSize * 0.06f));
+                    }
+                    else
+                    {
+                        graphics.DrawLine(iconPen, iconBounds.X + iconSize * 0.24f, iconBounds.Y + iconSize * 0.24f, iconBounds.X + iconSize * 0.76f, iconBounds.Y + iconSize * 0.76f);
+                        graphics.DrawLine(iconPen, iconBounds.X + iconSize * 0.76f, iconBounds.Y + iconSize * 0.24f, iconBounds.X + iconSize * 0.24f, iconBounds.Y + iconSize * 0.76f);
+                    }
+                }
+
+                float baseFontSize = Math.Max(5.5f, Math.Min(9f, normalizedHeight / 6.2f));
+                float fontSize = baseFontSize * renderScale;
+                float minimumFontSize = 5.5f * renderScale;
+                float fontSizeStep = 0.5f * renderScale;
+                string statusText = GetSignatureVerificationText(signature.VerificationStatus);
+                float statusX = iconBounds.Right + Math.Max(2f, padding);
+                float statusWidth = Math.Max(8f, bounds.Right - padding - statusX);
+                while (fontSize > minimumFontSize)
+                {
+                    using (var testFont = new Font(Font.FontFamily, fontSize, FontStyle.Bold, GraphicsUnit.Pixel))
+                    {
+                        if (graphics.MeasureString(statusText, testFont).Width <= statusWidth)
+                        {
+                            break;
+                        }
+                    }
+                    fontSize -= fontSizeStep;
+                }
+
+                float lineHeight;
+                using (var statusFont = new Font(Font.FontFamily, fontSize, FontStyle.Bold, GraphicsUnit.Pixel))
+                using (var detailFont = new Font(Font.FontFamily, fontSize, FontStyle.Regular, GraphicsUnit.Pixel))
+                using (var statusBrush = new SolidBrush(borderColor))
+                using (var detailBrush = new SolidBrush(System.Drawing.Color.FromArgb(35, 35, 35)))
+                using (var noWrap = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter })
+                {
+                    lineHeight = Math.Max(statusFont.GetHeight(graphics), detailFont.GetHeight(graphics));
+                    RectangleF statusBounds = new RectangleF(statusX, bounds.Y + padding, statusWidth, lineHeight + 1f);
+                    graphics.DrawString(statusText, statusFont, statusBrush, statusBounds, noWrap);
+
+                    float currentY = Math.Max(statusBounds.Bottom, iconBounds.Bottom) + Math.Max(0.5f, padding * 0.15f);
+                    var details = new List<string>();
+                    if (signature.IsReadable && !string.IsNullOrWhiteSpace(signature.SignerName))
+                    {
+                        details.Add(signature.SignerName);
+                    }
+                    if (signature.IsReadable && signature.SignDate != default(DateTime))
+                    {
+                        details.Add(signature.SignDate.ToString("g", CultureInfo.CurrentCulture));
+                    }
+                    details.Add(LocalizedText("Signatures_SourceDocumentSignature"));
+
+                    foreach (string detail in details)
+                    {
+                        if (currentY + lineHeight > bounds.Bottom - padding + 1f)
+                        {
+                            break;
+                        }
+                        RectangleF detailBounds = new RectangleF(bounds.X + padding, currentY, Math.Max(8f, bounds.Width - (2f * padding)), lineHeight + 1f);
+                        graphics.DrawString(detail, detailFont, detailBrush, detailBounds, noWrap);
+                        currentY += lineHeight;
+                    }
+                }
+            }
+            finally
+            {
+                graphics.Restore(state);
+            }
+        }
+
         private void OnPaint(object sender, PaintEventArgs e)
         {
             Dictionary<string, int> previewBasisNumberMap = BuildLegalBasisFootnoteNumberMap(
@@ -42121,6 +42493,7 @@ namespace AnonPDF
                     string activeLayerIdJson = projectData.ActiveLayerId;
                     List<string> signaturesToRemoveJson = projectData.SignaturesToRemove;
                     string signaturesMode = projectData.SignaturesMode;
+                    string signatureAppearance = projectData.SignatureAppearance;
                     autoFootnotesEnabled = projectData.AutoFootnotesEnabled ?? Properties.Settings.Default.AutoFootnotesEnabled;
                     if (!string.IsNullOrWhiteSpace(projectData.ExclusionAuthority))
                     {
@@ -42221,6 +42594,7 @@ namespace AnonPDF
                     UpdateSignatureSelectionMenuState();
 
                     ApplySignatureModeFromProject(signaturesMode);
+                    ApplySignatureAppearanceFromProject(signatureAppearance);
 
                     // Restore pending alt text edits
                     {
@@ -42766,6 +43140,11 @@ namespace AnonPDF
                     mergedProject.SignaturesMode = project.SignaturesMode;
                 }
 
+                if (string.IsNullOrWhiteSpace(mergedProject.SignatureAppearance) && !string.IsNullOrWhiteSpace(project.SignatureAppearance))
+                {
+                    mergedProject.SignatureAppearance = project.SignatureAppearance;
+                }
+
                 if (!mergedProject.AutoFootnotesEnabled.HasValue && project.AutoFootnotesEnabled.HasValue)
                 {
                     mergedProject.AutoFootnotesEnabled = project.AutoFootnotesEnabled;
@@ -42775,6 +43154,11 @@ namespace AnonPDF
                 {
                     mergedProject.ExclusionAuthority = project.ExclusionAuthority;
                 }
+            }
+
+            if (string.IsNullOrWhiteSpace(mergedProject.SignatureAppearance))
+            {
+                mergedProject.SignatureAppearance = SignatureAppearanceOriginal;
             }
 
             string tempProjectPath = Path.Combine(Path.GetTempPath(), $"anonpdf-import-{Guid.NewGuid():N}.app");
@@ -53055,17 +53439,128 @@ namespace AnonPDF
             }
         }
 
-        private void SignaturesRemoveRadioButton_CheckedChanged(object sender, EventArgs e)
+        private void InitializeSignatureAppearanceComboBox()
         {
-            Properties.Settings.Default.LastSignaturesRemoveRadioButton = signaturesRemoveRadioButton.Checked;
-            Properties.Settings.Default.Save();
-            UpdateSignatureSelectionMenuState();
-            if (!suppressSignatureModeChange && signaturesRemoveRadioButton.Checked)
+            suppressSignatureAppearanceChange = true;
+            try
             {
-                projectWasChangedAfterLastSave = true;
-                saveProjectButton.Enabled = true;
-                saveProjectMenuItem.Enabled = true;
+                UpdateSignatureAppearanceComboItems();
+                ApplySignatureAppearance(Properties.Settings.Default.LastSignatureAppearance);
             }
+            finally
+            {
+                suppressSignatureAppearanceChange = false;
+            }
+
+            signatureAppearanceComboBox.SelectedIndexChanged += SignatureAppearanceComboBox_SelectedIndexChanged;
+        }
+
+        private void UpdateSignatureAppearanceComboItems()
+        {
+            if (signatureAppearanceComboBox == null)
+            {
+                return;
+            }
+
+            string appearance = GetSelectedSignatureAppearance();
+            bool previousSuppression = suppressSignatureAppearanceChange;
+            suppressSignatureAppearanceChange = true;
+            try
+            {
+                signatureAppearanceComboBox.BeginUpdate();
+                signatureAppearanceComboBox.Items.Clear();
+                signatureAppearanceComboBox.Items.Add(LocalizedText("UI_SignatureAppearance_Original"));
+                signatureAppearanceComboBox.Items.Add(LocalizedText("UI_SignatureAppearance_AnonPDFPro"));
+                signatureAppearanceComboBox.SelectedIndex = appearance == SignatureAppearanceAnonPdfPro ? 1 : 0;
+            }
+            finally
+            {
+                signatureAppearanceComboBox.EndUpdate();
+                suppressSignatureAppearanceChange = previousSuppression;
+            }
+        }
+
+        private string GetSelectedSignatureAppearance()
+        {
+            return signatureAppearanceComboBox != null && signatureAppearanceComboBox.SelectedIndex == 1
+                ? SignatureAppearanceAnonPdfPro
+                : SignatureAppearanceOriginal;
+        }
+
+        private void ApplySignatureAppearance(string appearance)
+        {
+            if (signatureAppearanceComboBox == null)
+            {
+                return;
+            }
+
+            signatureAppearanceComboBox.SelectedIndex = string.Equals(
+                appearance,
+                SignatureAppearanceAnonPdfPro,
+                StringComparison.OrdinalIgnoreCase)
+                ? 1
+                : 0;
+        }
+
+        private void ApplySignatureAppearanceFromProject(string appearance)
+        {
+            bool previousSuppression = suppressSignatureAppearanceChange;
+            suppressSignatureAppearanceChange = true;
+            try
+            {
+                ApplySignatureAppearance(string.IsNullOrWhiteSpace(appearance)
+                    ? SignatureAppearanceOriginal
+                    : appearance);
+            }
+            finally
+            {
+                suppressSignatureAppearanceChange = previousSuppression;
+            }
+        }
+
+        private bool UseAnonPdfProSignatureAppearance()
+        {
+            return signaturesOriginalRadioButton.Checked &&
+                   GetSelectedSignatureAppearance() == SignatureAppearanceAnonPdfPro;
+        }
+
+        private bool IsSignatureSelectedForRemoval(string fieldName)
+        {
+            return !string.IsNullOrWhiteSpace(fieldName) &&
+                   signaturesToRemove.Any(name => string.Equals(name, fieldName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool HasRetainedSignatures()
+        {
+            return signaturesOriginalRadioButton.Checked &&
+                   signatures.Any(signature => signature != null && !IsSignatureSelectedForRemoval(signature.FieldName));
+        }
+
+        private void RefreshCurrentSignatureVisualization()
+        {
+            if (pdf != null && currentPage >= 1 && currentPage <= numPages)
+            {
+                DisplayPdfPage(currentPage);
+            }
+            else
+            {
+                pdfViewer?.Invalidate();
+            }
+        }
+
+        private void SignatureAppearanceComboBox_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (suppressSignatureAppearanceChange || signatureAppearanceComboBox.SelectedIndex < 0)
+            {
+                return;
+            }
+
+            Properties.Settings.Default.LastSignatureAppearance = GetSelectedSignatureAppearance();
+            Properties.Settings.Default.Save();
+            projectWasChangedAfterLastSave = true;
+            saveProjectButton.Enabled = true;
+            saveProjectMenuItem.Enabled = true;
+            RefreshCurrentSignatureVisualization();
         }
 
         private void SignaturesOriginalRadioButton_CheckedChanged(object sender, EventArgs e)
@@ -53078,6 +53573,7 @@ namespace AnonPDF
                 projectWasChangedAfterLastSave = true;
                 saveProjectButton.Enabled = true;
                 saveProjectMenuItem.Enabled = true;
+                RefreshCurrentSignatureVisualization();
             }
         }
 
@@ -53091,6 +53587,7 @@ namespace AnonPDF
                 projectWasChangedAfterLastSave = true;
                 saveProjectButton.Enabled = true;
                 saveProjectMenuItem.Enabled = true;
+                RefreshCurrentSignatureVisualization();
             }
         }
 
@@ -53101,17 +53598,22 @@ namespace AnonPDF
                 return;
             }
 
-            selectSignaturesToRemoveMenuItem.Enabled = signaturesRemoveRadioButton.Checked && signatures.Count > 0;
+            selectSignaturesToRemoveMenuItem.Enabled = signatures.Count > 0;
+            bool appearanceEnabled = HasRetainedSignatures();
+            signatureAppearanceLabel.Enabled = appearanceEnabled;
+            signatureAppearanceComboBox.Enabled = appearanceEnabled;
         }
 
         private void SelectSignaturesToRemoveMenuItem_Click(object sender, EventArgs e)
         {
-            if (!signaturesRemoveRadioButton.Checked || signatures.Count == 0)
+            if (signatures.Count == 0)
             {
                 return;
             }
 
-            IEnumerable<string> preselected = hasCustomSignatureSelection ? signaturesToRemove : null;
+            IEnumerable<string> preselected = hasCustomSignatureSelection
+                ? signaturesToRemove
+                : Enumerable.Empty<string>();
             using (SelectSignaturesDialog dlg = new SelectSignaturesDialog(signatures, preselected))
             {
                 ApplyThemeToDialog(dlg);
@@ -53122,6 +53624,8 @@ namespace AnonPDF
                     projectWasChangedAfterLastSave = true;
                     saveProjectButton.Enabled = true;
                     saveProjectMenuItem.Enabled = true;
+                    UpdateSignatureSelectionMenuState();
+                    RefreshCurrentSignatureVisualization();
                 }
             }
         }
@@ -53145,10 +53649,6 @@ namespace AnonPDF
 
         private string GetSignatureModeForProject()
         {
-            if (signaturesRemoveRadioButton.Checked)
-            {
-                return SignatureModeRemove;
-            }
             if (signaturesReportRadioButton.Checked)
             {
                 return SignatureModeReport;
@@ -53169,7 +53669,16 @@ namespace AnonPDF
                 switch (mode.Trim().ToLowerInvariant())
                 {
                     case SignatureModeRemove:
-                        signaturesRemoveRadioButton.Checked = true;
+                        signaturesOriginalRadioButton.Checked = true;
+                        if (!hasCustomSignatureSelection)
+                        {
+                            signaturesToRemove = signatures
+                                .Where(signature => signature != null && !string.IsNullOrWhiteSpace(signature.FieldName))
+                                .Select(signature => signature.FieldName)
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToList();
+                            hasCustomSignatureSelection = true;
+                        }
                         break;
                     case SignatureModeReport:
                         signaturesReportRadioButton.Checked = true;
@@ -53183,6 +53692,8 @@ namespace AnonPDF
             {
                 suppressSignatureModeChange = false;
             }
+
+            UpdateSignatureSelectionMenuState();
         }
 
         private void ColorCheckBox_CheckedChanged(object sender, EventArgs e)
@@ -54933,6 +55444,254 @@ namespace AnonPDF
             return null;
         }
 
+        private static string GetSignatureVerificationText(SignatureVerificationStatus status)
+        {
+            switch (status)
+            {
+                case SignatureVerificationStatus.Valid:
+                    return Resources.Signatures_Verification_Valid;
+                case SignatureVerificationStatus.Invalid:
+                    return Resources.Signatures_Verification_Invalid;
+                case SignatureVerificationStatus.Unreadable:
+                    return Resources.Signatures_Unreadable;
+                default:
+                    return Resources.Signatures_Verification_Indeterminate;
+            }
+        }
+
+        private bool SignatureCoversSignedRevision(SignatureUtil signatureUtil, string signatureName)
+        {
+            if (signatureUtil.SignatureCoversWholeDocument(signatureName))
+            {
+                return true;
+            }
+
+            using (Stream revisionStream = signatureUtil.ExtractRevision(signatureName))
+            {
+                if (revisionStream == null)
+                {
+                    return false;
+                }
+
+                var properties = new ReaderProperties();
+                if (!string.IsNullOrEmpty(userPassword))
+                {
+                    properties.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
+                }
+
+                using (PdfReader revisionReader = new PdfReader(revisionStream, properties)
+                    .SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+                using (iText.Kernel.Pdf.PdfDocument revisionDocument = new iText.Kernel.Pdf.PdfDocument(revisionReader))
+                {
+                    return new SignatureUtil(revisionDocument).SignatureCoversWholeDocument(signatureName);
+                }
+            }
+        }
+
+        private static SignatureVerificationStatus VerifyCertificateChain(
+            IX509Certificate signingCertificate,
+            IEnumerable<IX509Certificate> includedCertificates,
+            DateTime verificationTime,
+            out string details)
+        {
+            details = string.Empty;
+            if (signingCertificate == null)
+            {
+                details = "missing signing certificate";
+                return SignatureVerificationStatus.Invalid;
+            }
+
+            var extraCertificates = new List<X509Certificate2>();
+            try
+            {
+                using (var certificate = new X509Certificate2(signingCertificate.GetEncoded()))
+                using (var chain = new X509Chain())
+                {
+                    chain.ChainPolicy.RevocationMode = X509RevocationMode.Online;
+                    chain.ChainPolicy.RevocationFlag = X509RevocationFlag.ExcludeRoot;
+                    chain.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
+                    chain.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(3);
+                    chain.ChainPolicy.VerificationTime = verificationTime == default(DateTime) || verificationTime == DateTime.MaxValue
+                        ? DateTime.Now
+                        : verificationTime.ToLocalTime();
+
+                    foreach (IX509Certificate includedCertificate in includedCertificates ?? Enumerable.Empty<IX509Certificate>())
+                    {
+                        var extraCertificate = new X509Certificate2(includedCertificate.GetEncoded());
+                        if (string.Equals(extraCertificate.Thumbprint, certificate.Thumbprint, StringComparison.OrdinalIgnoreCase))
+                        {
+                            extraCertificate.Dispose();
+                            continue;
+                        }
+
+                        extraCertificates.Add(extraCertificate);
+                        chain.ChainPolicy.ExtraStore.Add(extraCertificate);
+                    }
+
+                    bool trusted = chain.Build(certificate);
+                    details = string.Join(", ", chain.ChainStatus.Select(status => status.Status.ToString()));
+                    if (trusted)
+                    {
+                        return SignatureVerificationStatus.Valid;
+                    }
+
+                    X509ChainStatusFlags invalidFlags =
+                        X509ChainStatusFlags.Revoked |
+                        X509ChainStatusFlags.NotTimeValid |
+                        X509ChainStatusFlags.NotSignatureValid |
+                        X509ChainStatusFlags.InvalidBasicConstraints |
+                        X509ChainStatusFlags.ExplicitDistrust;
+
+                    return chain.ChainStatus.Any(status => (status.Status & invalidFlags) != 0)
+                        ? SignatureVerificationStatus.Invalid
+                        : SignatureVerificationStatus.Indeterminate;
+                }
+            }
+            catch (Exception ex)
+            {
+                details = ex.Message;
+                return SignatureVerificationStatus.Indeterminate;
+            }
+            finally
+            {
+                foreach (X509Certificate2 certificate in extraCertificates)
+                {
+                    certificate.Dispose();
+                }
+            }
+        }
+
+        private SignatureVerificationStatus VerifySignature(
+            SignatureUtil signatureUtil,
+            string signatureName,
+            PdfPKCS7 signatureData)
+        {
+            try
+            {
+                if (!signatureData.VerifySignatureIntegrityAndAuthenticity())
+                {
+                    LogDebug($"Signature verification invalid integrity field={signatureName}");
+                    return SignatureVerificationStatus.Invalid;
+                }
+
+                if (!SignatureCoversSignedRevision(signatureUtil, signatureName))
+                {
+                    LogDebug($"Signature verification incomplete revision field={signatureName}");
+                    return SignatureVerificationStatus.Invalid;
+                }
+
+                bool hasTrustedTimestamp = false;
+                DateTime verificationTime = DateTime.Now;
+                if (signatureData.GetTimeStampTokenInfo() != null)
+                {
+                    if (!signatureData.VerifyTimestampImprint())
+                    {
+                        LogDebug($"Signature verification invalid timestamp imprint field={signatureName}");
+                        return SignatureVerificationStatus.Invalid;
+                    }
+
+                    DateTime timestampDate = signatureData.GetTimeStampDate();
+                    if (timestampDate != default(DateTime) && timestampDate != DateTime.MaxValue)
+                    {
+                        verificationTime = timestampDate;
+                        hasTrustedTimestamp = true;
+                    }
+
+                    PdfPKCS7 timestampSignature = signatureData.GetTimestampSignatureContainer();
+                    if (timestampSignature != null)
+                    {
+                        if (!timestampSignature.VerifySignatureIntegrityAndAuthenticity())
+                        {
+                            LogDebug($"Signature verification invalid timestamp signature field={signatureName}");
+                            return SignatureVerificationStatus.Invalid;
+                        }
+
+                        SignatureVerificationStatus timestampChainStatus = VerifyCertificateChain(
+                            timestampSignature.GetSigningCertificate(),
+                            timestampSignature.GetCertificates(),
+                            verificationTime,
+                            out string timestampChainDetails);
+                        if (timestampChainStatus != SignatureVerificationStatus.Valid)
+                        {
+                            LogDebug($"Signature verification timestamp chain field={signatureName} status={timestampChainStatus} details={timestampChainDetails}");
+                            return timestampChainStatus;
+                        }
+                    }
+                }
+
+                SignatureVerificationStatus certificateStatus = VerifyCertificateChain(
+                    signatureData.GetSigningCertificate(),
+                    signatureData.GetCertificates(),
+                    verificationTime,
+                    out string certificateDetails);
+
+                if (!hasTrustedTimestamp && certificateStatus == SignatureVerificationStatus.Invalid)
+                {
+                    DateTime claimedSignDate = signatureData.GetSignDate();
+                    SignatureVerificationStatus historicalStatus = VerifyCertificateChain(
+                        signatureData.GetSigningCertificate(),
+                        signatureData.GetCertificates(),
+                        claimedSignDate,
+                        out string historicalDetails);
+                    if (historicalStatus != SignatureVerificationStatus.Invalid)
+                    {
+                        LogDebug($"Signature verification field={signatureName} status=Indeterminate reason=certificate-not-currently-valid details={historicalDetails}");
+                        return SignatureVerificationStatus.Indeterminate;
+                    }
+                }
+
+                LogDebug($"Signature verification field={signatureName} status={certificateStatus} details={certificateDetails}");
+                return certificateStatus;
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"Signature verification failed field={signatureName}: {ex}");
+                return SignatureVerificationStatus.Indeterminate;
+            }
+        }
+
+        private static List<SignatureWidgetInfo> GetSignatureWidgets(
+            iText.Kernel.Pdf.PdfDocument pdfDocument,
+            string signatureName)
+        {
+            var widgets = new List<SignatureWidgetInfo>();
+            if (pdfDocument == null || string.IsNullOrWhiteSpace(signatureName))
+            {
+                return widgets;
+            }
+
+            PdfAcroForm form = PdfAcroForm.GetAcroForm(pdfDocument, false);
+            if (form == null ||
+                !form.GetAllFormFields().TryGetValue(signatureName, out PdfFormField rawField) ||
+                !(rawField is PdfSignatureFormField signatureField))
+            {
+                return widgets;
+            }
+
+            foreach (var widget in signatureField.GetWidgets())
+            {
+                KernelGeom.Rectangle rectangle = widget.GetRectangle()?.ToRectangle();
+                iText.Kernel.Pdf.PdfPage page = widget.GetPage();
+                int pageNumber = page != null ? pdfDocument.GetPageNumber(page) : 0;
+                if (rectangle == null || pageNumber <= 0)
+                {
+                    continue;
+                }
+
+                widgets.Add(new SignatureWidgetInfo
+                {
+                    PageNumber = pageNumber,
+                    Bounds = new RectangleF(
+                        rectangle.GetX(),
+                        rectangle.GetY(),
+                        rectangle.GetWidth(),
+                        rectangle.GetHeight())
+                });
+            }
+
+            return widgets;
+        }
+
         public void ExtractSignatures()
         {
             signatures.Clear();
@@ -54986,7 +55745,9 @@ namespace AnonPDF
                                 SignerName = certCn,
                                 SignerTitle = certT,
                                 SignerOrganization = certO,
-                                SignDate = signDate
+                                SignDate = signDate,
+                                VerificationStatus = VerifySignature(signUtil, name, pkcs7),
+                                Widgets = GetSignatureWidgets(pdfDoc, name)
                             });
                         }
                         catch (Exception ex)
@@ -54999,7 +55760,9 @@ namespace AnonPDF
                                 SignerTitle = string.Empty,
                                 SignerOrganization = string.Empty,
                                 SignDate = default(DateTime),
-                                IsReadable = false
+                                IsReadable = false,
+                                VerificationStatus = SignatureVerificationStatus.Unreadable,
+                                Widgets = GetSignatureWidgets(pdfDoc, name)
                             });
                         }
                     }
@@ -55018,6 +55781,14 @@ namespace AnonPDF
             }
             SyncSignatureSelectionWithAvailableSignatures();
             UpdateSignatureSelectionMenuState();
+            if (pdf != null && currentPage >= 1 && currentPage <= numPages)
+            {
+                DisplayPdfPage(currentPage);
+            }
+            else
+            {
+                pdfViewer?.Invalidate();
+            }
         }
 
         private void RemovePage()

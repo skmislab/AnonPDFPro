@@ -349,6 +349,18 @@ namespace AnonPDF.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("original")]
+        public string LastSignatureAppearance {
+            get {
+                return ((string)(this["LastSignatureAppearance"]));
+            }
+            set {
+                this["LastSignatureAppearance"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool LastScannedPdfSaveAsPdfA {
             get {

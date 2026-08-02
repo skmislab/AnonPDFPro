@@ -112,8 +112,9 @@ namespace AnonPDF
             this.removePageRangeButton = new System.Windows.Forms.Button();
             this.groupBoxSignatures = new AnonPDF.ThemedGroupBox();
             this.signaturesReportRadioButton = new AnonPDF.ThemedRadioButton();
+            this.signatureAppearanceComboBox = new System.Windows.Forms.ComboBox();
+            this.signatureAppearanceLabel = new System.Windows.Forms.Label();
             this.signaturesOriginalRadioButton = new AnonPDF.ThemedRadioButton();
-            this.signaturesRemoveRadioButton = new AnonPDF.ThemedRadioButton();
             this.groupBoxPages = new AnonPDF.ThemedGroupBox();
             this.pageNumberTextBox = new System.Windows.Forms.TextBox();
             this.numPagesLabel = new System.Windows.Forms.Label();
@@ -849,7 +850,7 @@ namespace AnonPDF
             this.groupBoxOptions.Controls.Add(this.outlineCheckBox);
             this.groupBoxOptions.Controls.Add(this.colorCheckBox);
             this.groupBoxOptions.DisabledForeColor = System.Drawing.SystemColors.GrayText;
-            this.groupBoxOptions.Location = new System.Drawing.Point(12, 794);
+            this.groupBoxOptions.Location = new System.Drawing.Point(12, 814);
             this.groupBoxOptions.Name = "groupBoxOptions";
             this.groupBoxOptions.Size = new System.Drawing.Size(184, 134);
             this.groupBoxOptions.TabIndex = 8;
@@ -980,13 +981,14 @@ namespace AnonPDF
             // groupBoxSignatures
             //
             this.groupBoxSignatures.Controls.Add(this.signaturesReportRadioButton);
+            this.groupBoxSignatures.Controls.Add(this.signatureAppearanceComboBox);
+            this.groupBoxSignatures.Controls.Add(this.signatureAppearanceLabel);
             this.groupBoxSignatures.Controls.Add(this.signaturesOriginalRadioButton);
-            this.groupBoxSignatures.Controls.Add(this.signaturesRemoveRadioButton);
             this.groupBoxSignatures.DisabledForeColor = System.Drawing.SystemColors.GrayText;
             this.groupBoxSignatures.Enabled = false;
             this.groupBoxSignatures.Location = new System.Drawing.Point(12, 687);
             this.groupBoxSignatures.Name = "groupBoxSignatures";
-            this.groupBoxSignatures.Size = new System.Drawing.Size(184, 99);
+            this.groupBoxSignatures.Size = new System.Drawing.Size(184, 119);
             this.groupBoxSignatures.TabIndex = 7;
             this.groupBoxSignatures.TabStop = false;
             this.groupBoxSignatures.Text = "UI_Group_Signatures";
@@ -998,14 +1000,32 @@ namespace AnonPDF
             this.signaturesReportRadioButton.BorderColor = System.Drawing.SystemColors.ControlDark;
             this.signaturesReportRadioButton.DisabledForeColor = System.Drawing.SystemColors.GrayText;
             this.signaturesReportRadioButton.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Bold);
-            this.signaturesReportRadioButton.Location = new System.Drawing.Point(15, 65);
+            this.signaturesReportRadioButton.Location = new System.Drawing.Point(15, 94);
             this.signaturesReportRadioButton.Name = "signaturesReportRadioButton";
             this.signaturesReportRadioButton.Size = new System.Drawing.Size(190, 17);
-            this.signaturesReportRadioButton.TabIndex = 39;
+            this.signaturesReportRadioButton.TabIndex = 40;
             this.signaturesReportRadioButton.TabStop = true;
             this.signaturesReportRadioButton.Text = "UI_Radio_Signatures_Report";
             this.toolTip1.SetToolTip(this.signaturesReportRadioButton, "Tooltip_Signatures_Report");
             this.signaturesReportRadioButton.UseVisualStyleBackColor = true;
+            //
+            // signatureAppearanceComboBox
+            //
+            this.signatureAppearanceComboBox.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.signatureAppearanceComboBox.FormattingEnabled = true;
+            this.signatureAppearanceComboBox.Location = new System.Drawing.Point(15, 65);
+            this.signatureAppearanceComboBox.Name = "signatureAppearanceComboBox";
+            this.signatureAppearanceComboBox.Size = new System.Drawing.Size(154, 21);
+            this.signatureAppearanceComboBox.TabIndex = 39;
+            //
+            // signatureAppearanceLabel
+            //
+            this.signatureAppearanceLabel.AutoSize = true;
+            this.signatureAppearanceLabel.Location = new System.Drawing.Point(12, 46);
+            this.signatureAppearanceLabel.Name = "signatureAppearanceLabel";
+            this.signatureAppearanceLabel.Size = new System.Drawing.Size(127, 13);
+            this.signatureAppearanceLabel.TabIndex = 38;
+            this.signatureAppearanceLabel.Text = "UI_Label_SignatureAppearance";
             //
             // signaturesOriginalRadioButton
             //
@@ -1014,31 +1034,15 @@ namespace AnonPDF
             this.signaturesOriginalRadioButton.BorderColor = System.Drawing.SystemColors.ControlDark;
             this.signaturesOriginalRadioButton.DisabledForeColor = System.Drawing.SystemColors.GrayText;
             this.signaturesOriginalRadioButton.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Bold);
-            this.signaturesOriginalRadioButton.Location = new System.Drawing.Point(15, 42);
+            this.signaturesOriginalRadioButton.Checked = true;
+            this.signaturesOriginalRadioButton.Location = new System.Drawing.Point(15, 20);
             this.signaturesOriginalRadioButton.Name = "signaturesOriginalRadioButton";
             this.signaturesOriginalRadioButton.Size = new System.Drawing.Size(195, 17);
-            this.signaturesOriginalRadioButton.TabIndex = 38;
+            this.signaturesOriginalRadioButton.TabIndex = 37;
             this.signaturesOriginalRadioButton.TabStop = true;
-            this.signaturesOriginalRadioButton.Text = "UI_Radio_Signatures_Original";
-            this.toolTip1.SetToolTip(this.signaturesOriginalRadioButton, "Tooltip_Signatures_Original");
+            this.signaturesOriginalRadioButton.Text = "UI_Radio_Signatures_Kept";
+            this.toolTip1.SetToolTip(this.signaturesOriginalRadioButton, "Tooltip_Signatures_Kept");
             this.signaturesOriginalRadioButton.UseVisualStyleBackColor = true;
-            //
-            // signaturesRemoveRadioButton
-            //
-            this.signaturesRemoveRadioButton.AccentColor = System.Drawing.SystemColors.Highlight;
-            this.signaturesRemoveRadioButton.AutoSize = true;
-            this.signaturesRemoveRadioButton.BorderColor = System.Drawing.SystemColors.ControlDark;
-            this.signaturesRemoveRadioButton.Checked = true;
-            this.signaturesRemoveRadioButton.DisabledForeColor = System.Drawing.SystemColors.GrayText;
-            this.signaturesRemoveRadioButton.Font = new System.Drawing.Font("Microsoft Sans Serif", 8.25F, System.Drawing.FontStyle.Bold);
-            this.signaturesRemoveRadioButton.Location = new System.Drawing.Point(15, 19);
-            this.signaturesRemoveRadioButton.Name = "signaturesRemoveRadioButton";
-            this.signaturesRemoveRadioButton.Size = new System.Drawing.Size(198, 17);
-            this.signaturesRemoveRadioButton.TabIndex = 37;
-            this.signaturesRemoveRadioButton.TabStop = true;
-            this.signaturesRemoveRadioButton.Text = "UI_Radio_Signatures_Remove";
-            this.toolTip1.SetToolTip(this.signaturesRemoveRadioButton, "Tooltip_Signatures_Remove");
-            this.signaturesRemoveRadioButton.UseVisualStyleBackColor = true;
             //
             // groupBoxPages
             //
@@ -1693,9 +1697,10 @@ namespace AnonPDF
         private ThemedCheckBox openSavedPDFCheckBox;
         private System.Windows.Forms.ToolStripMenuItem openLastPdfProjectToolStripMenuItem;
         private ThemedGroupBox groupBoxSignatures;
-        private ThemedRadioButton signaturesRemoveRadioButton;
         private ThemedRadioButton signaturesReportRadioButton;
         private ThemedRadioButton signaturesOriginalRadioButton;
+        private System.Windows.Forms.Label signatureAppearanceLabel;
+        private System.Windows.Forms.ComboBox signatureAppearanceComboBox;
         private System.Windows.Forms.Button removePageButton;
         private System.Windows.Forms.Button removePageRangeButton;
         private ThemedGroupBox groupBoxSearch;

@@ -1086,6 +1086,18 @@ und dritten Punkt setzen.</value>
   <data name="UI_Radio_Signatures_Original" xml:space="preserve">
     <value>Original</value>
   </data>
+  <data name="UI_Radio_Signatures_Kept" xml:space="preserve">
+    <value>Beibehalten</value>
+  </data>
+  <data name="UI_Label_SignatureAppearance" xml:space="preserve">
+    <value>Darstellung</value>
+  </data>
+  <data name="UI_SignatureAppearance_Original" xml:space="preserve">
+    <value>Original</value>
+  </data>
+  <data name="UI_SignatureAppearance_AnonPDFPro" xml:space="preserve">
+    <value>AnonPDFPro</value>
+  </data>
   <data name="UI_Radio_Signatures_Report" xml:space="preserve">
     <value>Bericht</value>
   </data>
@@ -1127,6 +1139,12 @@ und dritten Punkt setzen.</value>
   </data>
   <data name="Tooltip_Signatures_Original" xml:space="preserve">
     <value>Signaturen anonymisieren und ihre ursprüngliche visuelle Darstellung beibehalten.</value>
+  </data>
+  <data name="Tooltip_Signatures_Kept" xml:space="preserve">
+    <value>Signaturen beibehalten, die nicht zum Entfernen ausgewählt wurden.</value>
+  </data>
+  <data name="Tooltip_SignatureAppearance" xml:space="preserve">
+    <value>Darstellung der im Dokument beibehaltenen Signaturen auswählen.</value>
   </data>
   <data name="Tooltip_Signatures_Remove" xml:space="preserve">
     <value>Qualifizierte Signaturen vor dem Speichern entfernen.</value>
@@ -1773,6 +1791,18 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   </data>
   <data name="Signatures_Unreadable" xml:space="preserve">
     <value>Unvollständige oder beschädigte Signatur</value>
+  </data>
+  <data name="Signatures_Verification_Valid" xml:space="preserve">
+    <value>Gültige Signatur</value>
+  </data>
+  <data name="Signatures_Verification_Invalid" xml:space="preserve">
+    <value>Ungültige Signatur</value>
+  </data>
+  <data name="Signatures_Verification_Indeterminate" xml:space="preserve">
+    <value>Signatur konnte nicht verifiziert werden</value>
+  </data>
+  <data name="Signatures_Report_Field_Status" xml:space="preserve">
+    <value>Status</value>
   </data>
   <data name="Signatures_Report_Field_SignerName" xml:space="preserve">
     <value>Name des Unterzeichners</value>

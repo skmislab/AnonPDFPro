@@ -29,6 +29,9 @@
     <Setting Name="LastSignaturesRaportRadioButton" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
     </Setting>
+    <Setting Name="LastSignatureAppearance" Type="System.String" Scope="User">
+      <Value Profile="(Default)">original</Value>
+    </Setting>
     <Setting Name="LastSafeModeCheckBoxState" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
     </Setting>
