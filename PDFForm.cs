@@ -26020,6 +26020,7 @@ namespace AnonPDF
             string previewPassword = (!string.IsNullOrWhiteSpace(userNewPassword) && setSavePassword.Checked)
                 ? userNewPassword
                 : userPassword;
+            int previewStartPage = GetPreviewStartPage();
 
             try
             {
@@ -26027,6 +26028,7 @@ namespace AnonPDF
                     previewTempPath,
                     previewPassword,
                     Path.GetFileName(inputPdfPath),
+                    previewStartPage,
                     this,
                     RenderPageBitmapForPrint,
                     CreateDialogTheme()))
@@ -26044,6 +26046,20 @@ namespace AnonPDF
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
+        }
+
+        private int GetPreviewStartPage()
+        {
+            int sourcePage = Math.Max(1, Math.Min(numPages, currentPage));
+            int removedBefore = pagesToRemove.Count(page => page >= 1 && page < sourcePage && page <= numPages);
+            int removedPageCount = pagesToRemove.Count(page => page >= 1 && page <= numPages);
+            int retainedPageCount = Math.Max(0, numPages - removedPageCount);
+            if (retainedPageCount == 0)
+            {
+                return 1;
+            }
+
+            return Math.Max(1, Math.Min(retainedPageCount, sourcePage - removedBefore));
         }
 
         private static void TryDeleteFile(string path)
@@ -26093,6 +26109,7 @@ namespace AnonPDF
                 string previewPdfPath,
                 string password,
                 string sourceName,
+                int initialPage,
                 PDFForm ownerForm,
                 Func<PDFiumSharp.PdfDocument, int, Size, int, Bitmap> renderPage,
                 DialogTheme theme)
@@ -26105,6 +26122,7 @@ namespace AnonPDF
                 previewPdf = string.IsNullOrWhiteSpace(password)
                     ? new PDFiumSharp.PdfDocument(previewPdfPath)
                     : new PDFiumSharp.PdfDocument(previewPdfPath, password);
+                currentPreviewPage = Math.Max(1, Math.Min(Math.Max(1, previewPdf.Pages.Count), initialPage));
 
                 Text = string.Format(CultureInfo.CurrentCulture, LocalizedText("Dialog_PreviewPdf_Title"), sourceName);
                 StartPosition = FormStartPosition.CenterParent;
@@ -26144,7 +26162,7 @@ namespace AnonPDF
                 pageNumberInput = new TextBox
                 {
                     AutoSize = true,
-                    Text = "1",
+                    Text = currentPreviewPage.ToString(CultureInfo.CurrentCulture),
                     Font = new Font(Font.FontFamily, Font.Size + 2f, FontStyle.Regular),
                     TextAlign = HorizontalAlignment.Center,
                     BorderStyle = BorderStyle.None
@@ -26177,7 +26195,7 @@ namespace AnonPDF
                     Maximum = Math.Max(1, previewPdf.Pages.Count),
                     LargeChange = 1,
                     SmallChange = 1,
-                    Value = 1
+                    Value = currentPreviewPage
                 };
 
                 pagePanel = new Panel
