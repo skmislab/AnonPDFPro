@@ -44825,6 +44825,8 @@ namespace AnonPDF
                 textBox.Size = ScaleSizeForCurrentDpi(448, 210);
                 textBox.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
                 textBox.Text = aboutMessage;
+                textBox.SelectionStart = 0;
+                textBox.SelectionLength = 0;
 
                 okButton.Text = LocalizedText("Dialog_Licenses_Close");
                 okButton.Size = ScaleSizeForCurrentDpi(100, 32);
@@ -44840,6 +44842,7 @@ namespace AnonPDF
                 dialog.Controls.Add(okButton);
 
                 ApplyThemeToDialog(dialog);
+                dialog.Shown += (_, __) => okButton.Focus();
 
                 dialog.ShowDialog(this);
             }
