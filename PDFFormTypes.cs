@@ -4279,9 +4279,217 @@ namespace AnonPDF
         public bool? AutoFootnotesEnabled { get; set; }
         public string ExclusionAuthority { get; set; }
         public bool ExportVisibleLayersOnly { get; set; }
+        public DocumentMarginSettings DocumentMargins { get; set; }
         public String FilePath { get; set; }
         // Pending ALT text edits: posKey ("{page}:{x}:{y}") → new text
         public Dictionary<string, string> AltTextEdits { get; set; }
+    }
+
+    public class DocumentMarginSettings
+    {
+        public float TopMillimeters { get; set; }
+        public float BottomMillimeters { get; set; }
+        public float LeftMillimeters { get; set; }
+        public float RightMillimeters { get; set; }
+
+        [JsonIgnore]
+        public bool HasMargins =>
+            TopMillimeters > 0.001f ||
+            BottomMillimeters > 0.001f ||
+            LeftMillimeters > 0.001f ||
+            RightMillimeters > 0.001f;
+
+        public DocumentMarginSettings Clone()
+        {
+            return new DocumentMarginSettings
+            {
+                TopMillimeters = TopMillimeters,
+                BottomMillimeters = BottomMillimeters,
+                LeftMillimeters = LeftMillimeters,
+                RightMillimeters = RightMillimeters
+            };
+        }
+    }
+
+    public sealed class DocumentSettingsDialog : Form
+    {
+        private readonly NumericUpDown topInput;
+        private readonly NumericUpDown bottomInput;
+        private readonly NumericUpDown leftInput;
+        private readonly NumericUpDown rightInput;
+
+        public DocumentMarginSettings Margins { get; private set; }
+
+        public DocumentSettingsDialog(
+            DocumentMarginSettings margins,
+            string title,
+            string marginsCaption,
+            string topLabel,
+            string bottomLabel,
+            string leftLabel,
+            string rightLabel,
+            string millimetersLabel,
+            string resetLabel,
+            string okLabel,
+            string cancelLabel)
+        {
+            Margins = (margins ?? new DocumentMarginSettings()).Clone();
+
+            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoSize = true;
+            AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.CenterParent;
+            Text = title;
+            Padding = new Padding(12);
+
+            var root = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 1,
+                RowCount = 2,
+                Dock = DockStyle.Fill,
+                Margin = Padding.Empty
+            };
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            var group = new GroupBox
+            {
+                Text = marginsCaption,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Top,
+                Padding = new Padding(10)
+            };
+
+            var grid = new TableLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount = 3,
+                RowCount = 4,
+                Dock = DockStyle.Top,
+                Margin = Padding.Empty
+            };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            topInput = CreateMarginInput(Margins.TopMillimeters);
+            bottomInput = CreateMarginInput(Margins.BottomMillimeters);
+            leftInput = CreateMarginInput(Margins.LeftMillimeters);
+            rightInput = CreateMarginInput(Margins.RightMillimeters);
+
+            AddMarginRow(grid, 0, topLabel, topInput, millimetersLabel);
+            AddMarginRow(grid, 1, bottomLabel, bottomInput, millimetersLabel);
+            AddMarginRow(grid, 2, leftLabel, leftInput, millimetersLabel);
+            AddMarginRow(grid, 3, rightLabel, rightInput, millimetersLabel);
+            group.Controls.Add(grid);
+
+            var buttons = new FlowLayoutPanel
+            {
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Dock = DockStyle.Top,
+                FlowDirection = FlowDirection.RightToLeft,
+                WrapContents = false,
+                Margin = new Padding(0, 10, 0, 0)
+            };
+
+            var cancelButton = new Button
+            {
+                Text = cancelLabel,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(90, 28),
+                DialogResult = DialogResult.Cancel,
+                Margin = new Padding(6, 0, 0, 0)
+            };
+            var okButton = new Button
+            {
+                Text = okLabel,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(90, 28),
+                DialogResult = DialogResult.OK,
+                Margin = new Padding(6, 0, 0, 0)
+            };
+            var resetButton = new Button
+            {
+                Text = resetLabel,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                MinimumSize = new Size(90, 28),
+                Margin = Padding.Empty
+            };
+            resetButton.Click += (_, __) =>
+            {
+                topInput.Value = 0;
+                bottomInput.Value = 0;
+                leftInput.Value = 0;
+                rightInput.Value = 0;
+            };
+            okButton.Click += (_, __) =>
+            {
+                Margins = new DocumentMarginSettings
+                {
+                    TopMillimeters = (float)topInput.Value,
+                    BottomMillimeters = (float)bottomInput.Value,
+                    LeftMillimeters = (float)leftInput.Value,
+                    RightMillimeters = (float)rightInput.Value
+                };
+            };
+
+            buttons.Controls.Add(cancelButton);
+            buttons.Controls.Add(okButton);
+            buttons.Controls.Add(resetButton);
+            root.Controls.Add(group, 0, 0);
+            root.Controls.Add(buttons, 0, 1);
+            Controls.Add(root);
+
+            AcceptButton = okButton;
+            CancelButton = cancelButton;
+        }
+
+        private static NumericUpDown CreateMarginInput(float value)
+        {
+            return new NumericUpDown
+            {
+                DecimalPlaces = 1,
+                Increment = 0.1m,
+                Minimum = 0,
+                Maximum = 1000,
+                Value = Math.Max(0m, Math.Min(1000m, (decimal)value)),
+                Width = 92,
+                Anchor = AnchorStyles.Left
+            };
+        }
+
+        private static void AddMarginRow(TableLayoutPanel grid, int row, string label, Control input, string unit)
+        {
+            grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            grid.Controls.Add(new Label
+            {
+                Text = label,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 4, 10, 4)
+            }, 0, row);
+            input.Margin = new Padding(0, 2, 6, 2);
+            grid.Controls.Add(input, 1, row);
+            grid.Controls.Add(new Label
+            {
+                Text = unit,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 4, 0, 4)
+            }, 2, row);
+        }
     }
 
     public class RasterObject

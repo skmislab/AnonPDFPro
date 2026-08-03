@@ -98,6 +98,7 @@ namespace AnonPDF
         private string inputPdfPath = "";
         private string inputProjectPath = "";
         private string lastRedactedPdfOutputPath = "";
+        private DocumentMarginSettings documentMargins = new DocumentMarginSettings();
         private int currentPage = 1;
         private int numPages = 0;
         private const int RecentFilesLimit = 10;
@@ -10120,6 +10121,10 @@ namespace AnonPDF
             if (saveJpegPageRangeMenuItem != null)
             {
                 saveJpegPageRangeMenuItem.Text = LocalizedText("Menu_SaveJpegPageRange");
+            }
+            if (documentSettingsMenuItem != null)
+            {
+                documentSettingsMenuItem.Text = LocalizedText("Menu_DocumentSettings");
             }
             if (previewPdfMenuItem != null)
             {
@@ -22474,6 +22479,7 @@ namespace AnonPDF
                 EnsureITextMetadataCompliance(pdfDoc, "full-export");
 
                 ApplyDemoWatermarkIfNeeded(pdfDoc);
+                ApplyDocumentMarginsToPdf(pdfDoc);
             }
 
             if (combineObjectsWithScanPagesEnabled && flattenPages.Count > 0)
@@ -22484,6 +22490,173 @@ namespace AnonPDF
             if (showSuccessMessage)
             {
                 MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        private bool HasDocumentMargins()
+        {
+            return documentMargins?.HasMargins == true;
+        }
+
+        private void ApplyDocumentMarginsToPdf(iText.Kernel.Pdf.PdfDocument pdfDoc)
+        {
+            if (pdfDoc == null || !HasDocumentMargins())
+            {
+                return;
+            }
+
+            const float pointsPerMillimeter = 72f / 25.4f;
+            float top = documentMargins.TopMillimeters * pointsPerMillimeter;
+            float bottom = documentMargins.BottomMillimeters * pointsPerMillimeter;
+            float left = documentMargins.LeftMillimeters * pointsPerMillimeter;
+            float right = documentMargins.RightMillimeters * pointsPerMillimeter;
+
+            for (int pageNumber = 1; pageNumber <= pdfDoc.GetNumberOfPages(); pageNumber++)
+            {
+                iText.Kernel.Pdf.PdfPage page = pdfDoc.GetPage(pageNumber);
+                KernelGeom.Rectangle pageSize = page.GetPageSize();
+                float pageWidth = pageSize.GetWidth();
+                float pageHeight = pageSize.GetHeight();
+                int rotation = NormalizeRotation(page.GetRotation());
+                bool isQuarterTurn = rotation == 90 || rotation == 270;
+                float visualWidth = isQuarterTurn ? pageHeight : pageWidth;
+                float visualHeight = isQuarterTurn ? pageWidth : pageHeight;
+                float availableWidth = visualWidth - left - right;
+                float availableHeight = visualHeight - top - bottom;
+
+                if (availableWidth <= 1f || availableHeight <= 1f)
+                {
+                    throw new InvalidOperationException(LocalizedText("Err_DocumentMarginsTooLarge"));
+                }
+
+                float scale = Math.Min(availableWidth / visualWidth, availableHeight / visualHeight);
+                float visualOffsetX = left + ((availableWidth - (visualWidth * scale)) / 2f);
+                float visualOffsetY = bottom + ((availableHeight - (visualHeight * scale)) / 2f);
+                GetDocumentMarginTransformation(
+                    rotation,
+                    pageWidth,
+                    pageHeight,
+                    scale,
+                    visualOffsetX,
+                    visualOffsetY,
+                    out float translateX,
+                    out float translateY);
+                translateX += pageSize.GetX() * (1f - scale);
+                translateY += pageSize.GetY() * (1f - scale);
+
+                var beforeCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(
+                    page.NewContentStreamBefore(),
+                    page.GetResources(),
+                    pdfDoc);
+                beforeCanvas.WriteLiteral(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "q\n{0:0.######} 0 0 {0:0.######} {1:0.######} {2:0.######} cm\n",
+                    scale,
+                    translateX,
+                    translateY));
+
+                var afterCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(
+                    page.NewContentStreamAfter(),
+                    page.GetResources(),
+                    pdfDoc);
+                afterCanvas.WriteLiteral("\nQ\n");
+
+                TransformPageAnnotationBounds(page, scale, translateX, translateY);
+            }
+        }
+
+        private static void GetDocumentMarginTransformation(
+            int rotation,
+            float pageWidth,
+            float pageHeight,
+            float scale,
+            float visualOffsetX,
+            float visualOffsetY,
+            out float translateX,
+            out float translateY)
+        {
+            switch (NormalizeRotation(rotation))
+            {
+                case 90:
+                    translateX = (pageWidth * (1f - scale)) - visualOffsetY;
+                    translateY = visualOffsetX;
+                    return;
+                case 180:
+                    translateX = (pageWidth * (1f - scale)) - visualOffsetX;
+                    translateY = (pageHeight * (1f - scale)) - visualOffsetY;
+                    return;
+                case 270:
+                    translateX = visualOffsetY;
+                    translateY = (pageHeight * (1f - scale)) - visualOffsetX;
+                    return;
+                default:
+                    translateX = visualOffsetX;
+                    translateY = visualOffsetY;
+                    return;
+            }
+        }
+
+        private static void TransformPageAnnotationBounds(
+            iText.Kernel.Pdf.PdfPage page,
+            float scale,
+            float translateX,
+            float translateY)
+        {
+            PdfArray annotations = page?.GetPdfObject()?.GetAsArray(PdfName.Annots);
+            if (annotations == null)
+            {
+                return;
+            }
+
+            for (int index = 0; index < annotations.Size(); index++)
+            {
+                PdfDictionary annotation = annotations.GetAsDictionary(index);
+                if (annotation == null)
+                {
+                    continue;
+                }
+
+                TransformPdfRectangle(annotation.GetAsArray(PdfName.Rect), scale, translateX, translateY);
+                TransformPdfPointArray(annotation.GetAsArray(PdfName.QuadPoints), scale, translateX, translateY);
+                TransformPdfPointArray(annotation.GetAsArray(PdfName.L), scale, translateX, translateY);
+            }
+        }
+
+        private static void TransformPdfRectangle(PdfArray rectangle, float scale, float translateX, float translateY)
+        {
+            if (rectangle == null || rectangle.Size() < 4)
+            {
+                return;
+            }
+
+            float x1 = rectangle.GetAsNumber(0)?.FloatValue() ?? 0f;
+            float y1 = rectangle.GetAsNumber(1)?.FloatValue() ?? 0f;
+            float x2 = rectangle.GetAsNumber(2)?.FloatValue() ?? 0f;
+            float y2 = rectangle.GetAsNumber(3)?.FloatValue() ?? 0f;
+            rectangle.Set(0, new PdfNumber((x1 * scale) + translateX));
+            rectangle.Set(1, new PdfNumber((y1 * scale) + translateY));
+            rectangle.Set(2, new PdfNumber((x2 * scale) + translateX));
+            rectangle.Set(3, new PdfNumber((y2 * scale) + translateY));
+        }
+
+        private static void TransformPdfPointArray(PdfArray points, float scale, float translateX, float translateY)
+        {
+            if (points == null)
+            {
+                return;
+            }
+
+            for (int index = 0; index + 1 < points.Size(); index += 2)
+            {
+                PdfNumber x = points.GetAsNumber(index);
+                PdfNumber y = points.GetAsNumber(index + 1);
+                if (x == null || y == null)
+                {
+                    continue;
+                }
+
+                points.Set(index, new PdfNumber((x.FloatValue() * scale) + translateX));
+                points.Set(index + 1, new PdfNumber((y.FloatValue() * scale) + translateY));
             }
         }
 
@@ -22958,6 +23131,7 @@ namespace AnonPDF
             maxScaleButton = false;
 
             pageRotationOffsets.Clear();
+            documentMargins = new DocumentMarginSettings();
 
             CalculateMinScaleFactor(currentPage);
             CalculateMaxScaleFactor();
@@ -23065,6 +23239,10 @@ namespace AnonPDF
             if (saveJpegPageRangeMenuItem != null)
             {
                 saveJpegPageRangeMenuItem.Enabled = true;
+            }
+            if (documentSettingsMenuItem != null)
+            {
+                documentSettingsMenuItem.Enabled = true;
             }
             if (previewPdfMenuItem != null)
             {
@@ -23309,6 +23487,7 @@ namespace AnonPDF
                 || vectorShapes.Count > 0
                 || pagesToRemove.Count > 0
                 || pageRotationOffsets.Count > 0
+                || HasDocumentMargins()
                 || HasSignatureProjectContent()
                 || HasLayerProjectContent();
         }
@@ -23651,6 +23830,7 @@ namespace AnonPDF
             pendingScaleFactor = 0;
 
             pageRotationOffsets.Clear();
+            documentMargins = new DocumentMarginSettings();
             ClearRedactionBlocks();
             ClearPagesToRemove();
             ClearTextAnnotations();
@@ -23712,6 +23892,10 @@ namespace AnonPDF
             if (saveJpegPageRangeMenuItem != null)
             {
                 saveJpegPageRangeMenuItem.Enabled = false;
+            }
+            if (documentSettingsMenuItem != null)
+            {
+                documentSettingsMenuItem.Enabled = false;
             }
             if (previewPdfMenuItem != null)
             {
@@ -24756,8 +24940,9 @@ namespace AnonPDF
                 return;
             }
 
-            bool noContentChanges = IsNoContentChangeExport(additionalPagesToRemove, includeSupplementaryPages);
-            bool structuralOnlyChanges = IsStructuralOnlyExport(additionalPagesToRemove, includeSupplementaryPages);
+            bool hasDocumentMargins = HasDocumentMargins();
+            bool noContentChanges = !hasDocumentMargins && IsNoContentChangeExport(additionalPagesToRemove, includeSupplementaryPages);
+            bool structuralOnlyChanges = !hasDocumentMargins && IsStructuralOnlyExport(additionalPagesToRemove, includeSupplementaryPages);
 
             if (noContentChanges && !reducePdfFileSizeEnabled)
             {
@@ -25795,6 +25980,49 @@ namespace AnonPDF
             }
 
             return true;
+        }
+
+        private void DocumentSettingsMenuItem_Click(object sender, EventArgs e)
+        {
+            if (pdf == null || numPages <= 0)
+            {
+                return;
+            }
+
+            using (var dialog = new DocumentSettingsDialog(
+                documentMargins,
+                LocalizedText("Dialog_DocumentSettings_Title"),
+                LocalizedText("Dialog_DocumentSettings_Margins"),
+                LocalizedText("Dialog_DocumentSettings_Top"),
+                LocalizedText("Dialog_DocumentSettings_Bottom"),
+                LocalizedText("Dialog_DocumentSettings_Left"),
+                LocalizedText("Dialog_DocumentSettings_Right"),
+                LocalizedText("Dialog_DocumentSettings_Millimeters"),
+                LocalizedText("Dialog_DocumentSettings_Reset"),
+                Resources.Merge_OK,
+                Resources.Merge_Cancel))
+            {
+                ApplyThemeToDialog(dialog);
+                if (dialog.ShowDialog(this) != DialogResult.OK || AreDocumentMarginsEqual(documentMargins, dialog.Margins))
+                {
+                    return;
+                }
+
+                BeginUndoCapture(LocalizedText("Undo_DocumentSettings"));
+                documentMargins = dialog.Margins.Clone();
+                CommitUndoCapture();
+            }
+        }
+
+        private static bool AreDocumentMarginsEqual(DocumentMarginSettings first, DocumentMarginSettings second)
+        {
+            first ??= new DocumentMarginSettings();
+            second ??= new DocumentMarginSettings();
+            const float tolerance = 0.001f;
+            return Math.Abs(first.TopMillimeters - second.TopMillimeters) < tolerance &&
+                   Math.Abs(first.BottomMillimeters - second.BottomMillimeters) < tolerance &&
+                   Math.Abs(first.LeftMillimeters - second.LeftMillimeters) < tolerance &&
+                   Math.Abs(first.RightMillimeters - second.RightMillimeters) < tolerance;
         }
 
         private void PrintPdfMenuItem_Click(object sender, EventArgs e)
@@ -28138,6 +28366,7 @@ namespace AnonPDF
                 AutoFootnotesEnabled = autoFootnotesEnabled,
                 ExclusionAuthority = exclusionAuthorityName,
                 ExportVisibleLayersOnly = exportVisibleLayersOnly,
+                DocumentMargins = documentMargins?.Clone() ?? new DocumentMarginSettings(),
                 AltTextEdits = PdfTextSearcher._pendingAltTextEdits
                     .Where(kv => kv.Key.pdfPath == inputPdfPath)
                     .ToDictionary(kv => kv.Key.posKey, kv => kv.Value)
@@ -28541,6 +28770,8 @@ namespace AnonPDF
                 .Select(kvp => new KeyValuePair<int, int>(kvp.Key, NormalizeRotation(kvp.Value)))
                 .Where(kvp => kvp.Value != 0)
                 .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+
+            documentMargins = (projectData.DocumentMargins ?? new DocumentMarginSettings()).Clone();
 
             hasCustomSignatureSelection = projectData.SignaturesToRemove != null;
             signaturesToRemove = projectData.SignaturesToRemove ?? new List<string>();
@@ -42935,6 +43166,7 @@ namespace AnonPDF
                         .Select(kvp => new KeyValuePair<int, int>(kvp.Key, NormalizeRotation(kvp.Value)))
                         .Where(kvp => kvp.Value != 0)
                         .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+                    documentMargins = (projectData.DocumentMargins ?? new DocumentMarginSettings()).Clone();
 
                     hasCustomSignatureSelection = signaturesToRemoveJson != null;
                     signaturesToRemove = signaturesToRemoveJson ?? new List<string>();

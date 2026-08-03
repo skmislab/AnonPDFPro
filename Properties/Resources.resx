@@ -2313,4 +2313,37 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="QuickStart_Step1_Line3" xml:space="preserve">
     <value>Box służy do zaznaczania prostokątnych obszarów</value>
   </data>
+  <data name="Menu_DocumentSettings" xml:space="preserve">
+    <value>Ustawienia dokumentu</value>
+  </data>
+  <data name="Dialog_DocumentSettings_Title" xml:space="preserve">
+    <value>Ustawienia dokumentu</value>
+  </data>
+  <data name="Dialog_DocumentSettings_Margins" xml:space="preserve">
+    <value>Marginesy</value>
+  </data>
+  <data name="Dialog_DocumentSettings_Top" xml:space="preserve">
+    <value>G&#243;rny:</value>
+  </data>
+  <data name="Dialog_DocumentSettings_Bottom" xml:space="preserve">
+    <value>Dolny:</value>
+  </data>
+  <data name="Dialog_DocumentSettings_Left" xml:space="preserve">
+    <value>Lewy:</value>
+  </data>
+  <data name="Dialog_DocumentSettings_Right" xml:space="preserve">
+    <value>Prawy:</value>
+  </data>
+  <data name="Dialog_DocumentSettings_Millimeters" xml:space="preserve">
+    <value>mm</value>
+  </data>
+  <data name="Dialog_DocumentSettings_Reset" xml:space="preserve">
+    <value>Resetuj</value>
+  </data>
+  <data name="Undo_DocumentSettings" xml:space="preserve">
+    <value>Ustawienia dokumentu</value>
+  </data>
+  <data name="Err_DocumentMarginsTooLarge" xml:space="preserve">
+    <value>Ustawione marginesy pozostawiaj&#261; zbyt ma&#322;o miejsca na zawarto&#347;&#263; strony.</value>
+  </data>
 </root>
