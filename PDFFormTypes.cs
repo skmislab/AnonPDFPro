@@ -3981,6 +3981,7 @@ namespace AnonPDF
     {
         public int PageNumber { get; set; }
         public RectangleF Bounds { get; set; }
+        public byte[] NeutralAppearancePdfBytes { get; set; }
     }
 
     public class SignatureInfo

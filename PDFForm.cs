@@ -21206,6 +21206,151 @@ namespace AnonPDF
             return null;
         }
 
+        private static bool HasLegacySignatureStatusMarker(PdfStream stream)
+        {
+            if (stream == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                string content = System.Text.Encoding.ASCII.GetString(stream.GetBytes());
+                return content.IndexOf("DSUnknown", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       content.IndexOf("DSValid", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                       content.IndexOf("DSInvalid", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool TryGetLegacySignatureAppearanceLayers(
+            PdfDictionary widgetObject,
+            PdfDictionary widgetAp,
+            out PdfStream backgroundLayer,
+            out PdfStream signatureLayer)
+        {
+            backgroundLayer = null;
+            signatureLayer = null;
+
+            PdfStream appearanceStream = ResolveNormalAppearanceStream(widgetAp, widgetObject);
+            if (appearanceStream == null)
+            {
+                return false;
+            }
+
+            var containers = new List<PdfStream> { appearanceStream };
+            PdfDictionary appearanceXObjects = appearanceStream
+                .GetAsDictionary(PdfName.Resources)?
+                .GetAsDictionary(PdfName.XObject);
+            if (appearanceXObjects != null)
+            {
+                foreach (PdfName name in appearanceXObjects.KeySet())
+                {
+                    PdfStream candidate = appearanceXObjects.GetAsStream(name);
+                    if (candidate != null && PdfName.Form.Equals(candidate.GetAsName(PdfName.Subtype)))
+                    {
+                        containers.Add(candidate);
+                    }
+                }
+            }
+
+            PdfName n0Name = new PdfName("n0");
+            PdfName n1Name = new PdfName("n1");
+            PdfName n2Name = new PdfName("n2");
+            PdfName n3Name = new PdfName("n3");
+            PdfName n4Name = new PdfName("n4");
+
+            foreach (PdfStream container in containers)
+            {
+                PdfDictionary layers = container
+                    .GetAsDictionary(PdfName.Resources)?
+                    .GetAsDictionary(PdfName.XObject);
+                if (layers == null)
+                {
+                    continue;
+                }
+
+                PdfStream n0 = layers.GetAsStream(n0Name);
+                PdfStream n1 = layers.GetAsStream(n1Name);
+                PdfStream n2 = layers.GetAsStream(n2Name);
+                PdfStream n3 = layers.GetAsStream(n3Name);
+                PdfStream n4 = layers.GetAsStream(n4Name);
+                if (n0 == null || n1 == null || n2 == null || n3 == null || n4 == null)
+                {
+                    continue;
+                }
+
+                if (!HasLegacySignatureStatusMarker(n1) && !HasLegacySignatureStatusMarker(n3))
+                {
+                    continue;
+                }
+
+                backgroundLayer = n0;
+                signatureLayer = n2;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static void DrawLegacySignatureContentLayers(
+            iText.Kernel.Pdf.Canvas.PdfCanvas canvas,
+            PdfStream backgroundLayer,
+            PdfStream signatureLayer)
+        {
+            if (backgroundLayer != null)
+            {
+                canvas.AddXObjectAt(new PdfFormXObject(backgroundLayer), 0, 0);
+            }
+            if (signatureLayer != null)
+            {
+                canvas.AddXObjectAt(new PdfFormXObject(signatureLayer), 0, 0);
+            }
+        }
+
+        private static byte[] CreateNeutralLegacySignatureAppearancePdf(
+            PdfStream backgroundLayer,
+            PdfStream signatureLayer,
+            float width,
+            float height,
+            int rotation)
+        {
+            if (backgroundLayer == null || signatureLayer == null || width <= 0f || height <= 0f)
+            {
+                return null;
+            }
+
+            try
+            {
+                using (var output = new MemoryStream())
+                {
+                    using (var targetDocument = new iText.Kernel.Pdf.PdfDocument(new PdfWriter(output)))
+                    {
+                        var page = targetDocument.AddNewPage(new KernelGeom.PageSize(width, height));
+                        int normalizedRotation = NormalizeRotation(rotation);
+                        if (normalizedRotation != 0)
+                        {
+                            page.SetRotation(normalizedRotation);
+                        }
+
+                        PdfStream copiedBackground = (PdfStream)backgroundLayer.CopyTo(targetDocument);
+                        PdfStream copiedSignature = (PdfStream)signatureLayer.CopyTo(targetDocument);
+                        var canvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page);
+                        DrawLegacySignatureContentLayers(canvas, copiedBackground, copiedSignature);
+                    }
+
+                    return output.ToArray();
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static bool DrawSignatureVerificationAppearance(
             SignatureInfo signatureInfo,
             iText.Kernel.Pdf.Canvas.PdfCanvas canvas,
@@ -21357,6 +21502,17 @@ namespace AnonPDF
             if (widgetObject == null || widgetAp == null || canvas == null || width <= 0f || height <= 0f)
             {
                 return false;
+            }
+
+            if (TryGetLegacySignatureAppearanceLayers(
+                widgetObject,
+                widgetAp,
+                out PdfStream backgroundLayer,
+                out PdfStream signatureLayer))
+            {
+                DrawLegacySignatureContentLayers(canvas, backgroundLayer, signatureLayer);
+                sourceInfo = "legacy:n0+n2";
+                return true;
             }
 
             PdfStream apStream = ResolveNormalAppearanceStream(widgetAp, widgetObject);
@@ -25556,7 +25712,8 @@ namespace AnonPDF
             if (signatures.Count > 0 &&
                 (!signaturesOriginalRadioButton.Checked ||
                  signaturesToRemove.Count > 0 ||
-                 UseAnonPdfProSignatureAppearance()))
+                 UseAnonPdfProSignatureAppearance() ||
+                 HasNeutralizableRetainedSignatureAppearances()))
             {
                 return false;
             }
@@ -25623,7 +25780,8 @@ namespace AnonPDF
             if (signatures.Count > 0 &&
                 (!signaturesOriginalRadioButton.Checked ||
                  signaturesToRemove.Count > 0 ||
-                 UseAnonPdfProSignatureAppearance()))
+                 UseAnonPdfProSignatureAppearance() ||
+                 HasNeutralizableRetainedSignatureAppearances()))
             {
                 return false;
             }
@@ -39679,9 +39837,144 @@ namespace AnonPDF
                 return;
             }
 
-            using (Graphics graphics = Graphics.FromImage(image))
+            bool useAnonPdfProAppearance = UseAnonPdfProSignatureAppearance();
+            ApplySignatureSourceAppearanceAdjustmentsToImage(
+                image,
+                pageNumber,
+                renderScale,
+                rotation,
+                includeNeutralRetainedAppearances: !useAnonPdfProAppearance);
+
+            if (useAnonPdfProAppearance)
             {
-                DrawSignatureVerificationOverlays(graphics, pageNumber, renderScale, rotation);
+                using (Graphics graphics = Graphics.FromImage(image))
+                {
+                    DrawSignatureVerificationOverlays(graphics, pageNumber, renderScale, rotation);
+                }
+            }
+        }
+
+        private void ApplySignatureSourceAppearanceAdjustmentsToImage(
+            DrawingImage image,
+            int pageNumber,
+            float renderScale,
+            int rotation,
+            bool includeNeutralRetainedAppearances)
+        {
+            if (image == null ||
+                pdf == null ||
+                signatures == null ||
+                pageNumber < 1 ||
+                pageNumber > pdf.Pages.Count ||
+                renderScale <= 0f)
+            {
+                return;
+            }
+
+            var widgets = signatures
+                .Where(signature => signature != null)
+                .SelectMany(signature =>
+                {
+                    bool remove = IsSignatureSelectedForRemoval(signature.FieldName);
+                    return (signature.Widgets ?? new List<SignatureWidgetInfo>())
+                        .Where(widget => widget != null && widget.PageNumber == pageNumber)
+                        .Where(widget => remove ||
+                            (includeNeutralRetainedAppearances &&
+                             widget.NeutralAppearancePdfBytes != null &&
+                             widget.NeutralAppearancePdfBytes.Length > 0))
+                        .Select(widget => new
+                        {
+                            Widget = widget,
+                            Remove = remove
+                        });
+                })
+                .ToList();
+            if (widgets.Count == 0)
+            {
+                return;
+            }
+
+            var page = pdf.Pages[pageNumber - 1];
+            using (var baseBitmap = new PDFiumBitmap(image.Width, image.Height, true))
+            {
+                baseBitmap.FillRectangle(0, 0, image.Width, image.Height, 0xFFFFFFFF);
+                page.Render(renderTarget: baseBitmap, flags: (RenderingFlags)0);
+
+                using (var baseStream = new MemoryStream())
+                {
+                    baseBitmap.Save(baseStream);
+                    baseStream.Position = 0;
+                    using (var baseImage = new Bitmap(DrawingImage.FromStream(baseStream)))
+                    using (Graphics graphics = Graphics.FromImage(image))
+                    {
+                        graphics.CompositingMode = CompositingMode.SourceOver;
+                        graphics.CompositingQuality = CompositingQuality.HighQuality;
+                        graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                        foreach (var item in widgets)
+                        {
+                            SignatureWidgetInfo widget = item.Widget;
+                            RectangleF viewBounds = ConvertPdfToViewCoordinates(widget.Bounds, pageNumber, rotation);
+                            var bounds = new Rectangle(
+                                (int)Math.Floor(viewBounds.X * renderScale),
+                                (int)Math.Floor(viewBounds.Y * renderScale),
+                                Math.Max(1, (int)Math.Ceiling(viewBounds.Width * renderScale)),
+                                Math.Max(1, (int)Math.Ceiling(viewBounds.Height * renderScale)));
+                            Rectangle clippedBounds = Rectangle.Intersect(
+                                bounds,
+                                new Rectangle(0, 0, image.Width, image.Height));
+                            if (clippedBounds.Width <= 0 || clippedBounds.Height <= 0)
+                            {
+                                continue;
+                            }
+
+                            graphics.DrawImage(
+                                baseImage,
+                                clippedBounds,
+                                clippedBounds,
+                                GraphicsUnit.Pixel);
+
+                            if (item.Remove)
+                            {
+                                continue;
+                            }
+
+                            using (Bitmap blackBitmap = RenderPdfBytesToOpaqueBitmap(
+                                widget.NeutralAppearancePdfBytes,
+                                bounds.Width,
+                                bounds.Height,
+                                0xFF000000))
+                            using (Bitmap whiteBitmap = RenderPdfBytesToOpaqueBitmap(
+                                widget.NeutralAppearancePdfBytes,
+                                bounds.Width,
+                                bounds.Height,
+                                0xFFFFFFFF))
+                            using (Bitmap neutralAppearance = BuildTransparentBitmapFromOpaquePair(
+                                blackBitmap,
+                                whiteBitmap,
+                                new Rectangle(0, 0, bounds.Width, bounds.Height),
+                                System.Drawing.Color.Transparent))
+                            {
+                                if (neutralAppearance == null)
+                                {
+                                    continue;
+                                }
+
+                                Rectangle sourceBounds = new Rectangle(
+                                    clippedBounds.X - bounds.X,
+                                    clippedBounds.Y - bounds.Y,
+                                    clippedBounds.Width,
+                                    clippedBounds.Height);
+                                graphics.DrawImage(
+                                    neutralAppearance,
+                                    clippedBounds,
+                                    sourceBounds,
+                                    GraphicsUnit.Pixel);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -53536,6 +53829,17 @@ namespace AnonPDF
                    signatures.Any(signature => signature != null && !IsSignatureSelectedForRemoval(signature.FieldName));
         }
 
+        private bool HasNeutralizableRetainedSignatureAppearances()
+        {
+            return signaturesOriginalRadioButton.Checked &&
+                   signatures.Any(signature =>
+                       signature != null &&
+                       !IsSignatureSelectedForRemoval(signature.FieldName) &&
+                       (signature.Widgets ?? new List<SignatureWidgetInfo>()).Any(widget =>
+                           widget?.NeutralAppearancePdfBytes != null &&
+                           widget.NeutralAppearancePdfBytes.Length > 0));
+        }
+
         private void RefreshCurrentSignatureVisualization()
         {
             if (pdf != null && currentPage >= 1 && currentPage <= numPages)
@@ -55678,6 +55982,21 @@ namespace AnonPDF
                     continue;
                 }
 
+                byte[] neutralAppearancePdfBytes = null;
+                if (TryGetLegacySignatureAppearanceLayers(
+                    widget.GetPdfObject(),
+                    widget.GetAppearanceDictionary(),
+                    out PdfStream backgroundLayer,
+                    out PdfStream signatureLayer))
+                {
+                    neutralAppearancePdfBytes = CreateNeutralLegacySignatureAppearancePdf(
+                        backgroundLayer,
+                        signatureLayer,
+                        rectangle.GetWidth(),
+                        rectangle.GetHeight(),
+                        page.GetRotation());
+                }
+
                 widgets.Add(new SignatureWidgetInfo
                 {
                     PageNumber = pageNumber,
@@ -55685,7 +56004,8 @@ namespace AnonPDF
                         rectangle.GetX(),
                         rectangle.GetY(),
                         rectangle.GetWidth(),
-                        rectangle.GetHeight())
+                        rectangle.GetHeight()),
+                    NeutralAppearancePdfBytes = neutralAppearancePdfBytes
                 });
             }
 
