@@ -21975,6 +21975,60 @@ namespace AnonPDF
                     flattenPages = DetermineFlattenPagesForScanMerge(pdfDoc, effectivePagesToRemove);
                 }
 
+                PdfCleanUpTool cleanUpTool = new PdfCleanUpTool(pdfDoc);
+                bool useGraphicRedactionMode = IsGraphicRedactionModeEnabled();
+                var redactionVisualPdfBoundsByBlock = new Dictionary<RedactionBlock, RectangleF>();
+                var blocksByPage = exportRedactionBlocks.GroupBy(block => block.PageNumber);
+
+                foreach (var pageGroup in blocksByPage)
+                {
+                    int pageNum = pageGroup.Key;
+                    var pageWithSelections = pdfDoc.GetPage(pageNum);
+                    bool baseRotationBaked = pagesWithBakedRotation != null && pagesWithBakedRotation.Contains(pageNum);
+                    var rotation = baseRotationBaked ? GetRotationOffset(pageNum) : GetEffectiveRotationDegrees(pageNum);
+                    foreach (var block in pageGroup)
+                    {
+                        var pdfCoordinates = ConvertToPdfCoordinates(block.Bounds, pageNum, rotation, includeBaseRotation: !baseRotationBaked);
+                        var cleanupRectangle = new KernelGeom.Rectangle(
+                            pdfCoordinates.X,
+                            pdfCoordinates.Y,
+                            pdfCoordinates.Width,
+                            pdfCoordinates.Height);
+
+                        KernelGeom.Rectangle visualRectangle = useGraphicRedactionMode
+                            ? cleanupRectangle
+                            : block.IsMarkerSelection
+                                ? ExpandMarkerCleanupRectangleToTextBounds(
+                                    pageWithSelections,
+                                    cleanupRectangle,
+                                    pageNum,
+                                    rotation,
+                                    "export-visual")
+                                : ExpandMarkerCleanupRectangleToTextBounds(
+                                    pageWithSelections,
+                                    cleanupRectangle,
+                                    pageNum,
+                                    rotation,
+                                    "export-visual-box");
+                        redactionVisualPdfBoundsByBlock[block] = ConvertToItTextRectangleF(visualRectangle);
+                        cleanUpTool.AddCleanupLocation(new PdfCleanUpLocation(pageNum, cleanupRectangle, cleanUpColorWhite));
+                    }
+                }
+
+                try
+                {
+                    cleanUpTool.CleanUp();
+                }
+                catch (Exception)
+                {
+                    MessageBox.Show(this, Resources.Err_CannotAnonymizePdf, Resources.Title_Error,
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+
+                // Always key by inputPdfPath, not by a temporary re-encoded copy.
+                ApplyPendingAltTextEdits(pdfDoc, inputPdfPath);
+
                 if (signatures.Count > 0)
                 {
                     if (includeSupplementaryPages && signaturesReportRadioButton.Checked)
@@ -22048,7 +22102,7 @@ namespace AnonPDF
                         }
                     }
 
-                    if (signaturesReportRadioButton.Checked || signaturesToRemove.Count > 0)
+                    if (signaturesReportRadioButton.Checked || signaturesToRemove.Count > 0 || exportRedactionBlocks.Count > 0)
                     {
                         PdfAcroForm form = PdfAcroForm.GetAcroForm(pdfDoc, false);
                         if (form != null)
@@ -22071,6 +22125,20 @@ namespace AnonPDF
                                     .Where(key => selected.Contains(key))
                                     .ToList();
                             }
+
+                            var signaturesIntersectingRedactions = signatureFieldKeys
+                                .Where(key => fields.TryGetValue(key, out PdfFormField rawField) &&
+                                              rawField is PdfSignatureFormField signatureField &&
+                                              SignatureIntersectsRedaction(
+                                                  signatureField,
+                                                  pdfDoc,
+                                                  exportRedactionBlocks,
+                                                  pagesWithBakedRotation))
+                                .ToList();
+                            signatureKeysToRemove = signatureKeysToRemove
+                                .Concat(signaturesIntersectingRedactions)
+                                .Distinct(StringComparer.OrdinalIgnoreCase)
+                                .ToList();
 
                             // Remove signature fields
                             foreach (var key in signatureKeysToRemove)
@@ -22276,67 +22344,6 @@ namespace AnonPDF
                 }
 
 
-                PdfCleanUpTool cleanUpTool = new PdfCleanUpTool(pdfDoc);
-                bool useGraphicRedactionMode = IsGraphicRedactionModeEnabled();
-                var redactionVisualPdfBoundsByBlock = new Dictionary<RedactionBlock, RectangleF>();
-                // Group redaction blocks by pages
-                var blocksByPage = exportRedactionBlocks.GroupBy(b => b.PageNumber);
-                var visitedPages = new HashSet<int>();
-
-                foreach (var pageGroup in blocksByPage)
-                {
-                    int pageNum = pageGroup.Key;
-                    var pageWithSelections = pdfDoc.GetPage(pageNum);
-                    bool baseRotationBaked = pagesWithBakedRotation != null && pagesWithBakedRotation.Contains(pageNum);
-                    var rotation = baseRotationBaked ? GetRotationOffset(pageNum) : GetEffectiveRotationDegrees(pageNum);
-                    foreach (var block in pageGroup)
-                    {
-                        var pdfCoordinates = ConvertToPdfCoordinates(block.Bounds, pageNum, rotation, includeBaseRotation: !baseRotationBaked);
-                        iText.Kernel.Geom.Rectangle cleanupRectangle = new iText.Kernel.Geom.Rectangle(
-                            pdfCoordinates.X,
-                            pdfCoordinates.Y,
-                            pdfCoordinates.Width,
-                            pdfCoordinates.Height
-                        );
-
-                        iText.Kernel.Geom.Rectangle visualRectangle = useGraphicRedactionMode
-                            ? cleanupRectangle
-                            : block.IsMarkerSelection
-                                ? ExpandMarkerCleanupRectangleToTextBounds(
-                                    pageWithSelections,
-                                    cleanupRectangle,
-                                    pageNum,
-                                    rotation,
-                                    "export-visual")
-                                : ExpandMarkerCleanupRectangleToTextBounds(
-                                    pageWithSelections,
-                                    cleanupRectangle,
-                                    pageNum,
-                                    rotation,
-                                    "export-visual-box");
-                        redactionVisualPdfBoundsByBlock[block] = ConvertToItTextRectangleF(visualRectangle);
-
-                        PdfCleanUpLocation cleanUpLocation = new PdfCleanUpLocation(pageNum, cleanupRectangle, cleanUpColorWhite);
-                        cleanUpTool.AddCleanupLocation(cleanUpLocation);
-                    }
-                }
-
-                try
-                {
-                    // Call cleanup
-                    cleanUpTool.CleanUp();
-                }
-                catch (Exception)
-                {
-                    MessageBox.Show(this, Resources.Err_CannotAnonymizePdf, Resources.Title_Error,
-                        MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-
-                // Apply pending alt text edits to the output PDF structure tree
-                // Always key by inputPdfPath (not inputFile, which may be a temp re-encoded copy)
-                ApplyPendingAltTextEdits(pdfDoc, inputPdfPath);
-
                 if (redactionVisualPdfBoundsByBlock.Count > 0)
                 {
                     foreach (var pageGroup in redactionVisualPdfBoundsByBlock
@@ -22464,6 +22471,54 @@ namespace AnonPDF
             {
                 MessageBox.Show(this, Resources.Msg_PreviewSavedPdf, Resources.Title_Success, MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+        }
+
+        private bool SignatureIntersectsRedaction(
+            PdfSignatureFormField signatureField,
+            iText.Kernel.Pdf.PdfDocument pdfDoc,
+            IEnumerable<RedactionBlock> exportRedactionBlocks,
+            ISet<int> pagesWithBakedRotation)
+        {
+            if (signatureField == null || pdfDoc == null || exportRedactionBlocks == null)
+            {
+                return false;
+            }
+
+            foreach (var widget in signatureField.GetWidgets())
+            {
+                var signatureRect = widget.GetRectangle()?.ToRectangle();
+                var page = widget.GetPage();
+                int pageNumber = page != null ? pdfDoc.GetPageNumber(page) : 0;
+                if (signatureRect == null || pageNumber < 1)
+                {
+                    continue;
+                }
+
+                bool baseRotationBaked = pagesWithBakedRotation != null && pagesWithBakedRotation.Contains(pageNumber);
+                int rotation = baseRotationBaked ? GetRotationOffset(pageNumber) : GetEffectiveRotationDegrees(pageNumber);
+                foreach (RedactionBlock block in exportRedactionBlocks.Where(block => block?.PageNumber == pageNumber))
+                {
+                    RectangleF blockRect = ConvertToPdfCoordinates(
+                        block.Bounds,
+                        pageNumber,
+                        rotation,
+                        includeBaseRotation: !baseRotationBaked);
+                    if (blockRect.Width <= 0f || blockRect.Height <= 0f)
+                    {
+                        continue;
+                    }
+
+                    if (signatureRect.GetX() < blockRect.Right &&
+                        signatureRect.GetX() + signatureRect.GetWidth() > blockRect.Left &&
+                        signatureRect.GetY() < blockRect.Bottom &&
+                        signatureRect.GetY() + signatureRect.GetHeight() > blockRect.Top)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         internal void SuspendTopMostForExternalLaunch()
