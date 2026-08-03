@@ -376,7 +376,8 @@ namespace AnonPDF
             string lastProject = Properties.Settings.Default.LastPapPath;
             bool canResume =
                 (!string.IsNullOrWhiteSpace(lastPdf) && File.Exists(lastPdf)) ||
-                (!string.IsNullOrWhiteSpace(lastProject) && File.Exists(lastProject));
+                (!string.IsNullOrWhiteSpace(lastProject) && File.Exists(lastProject)) ||
+                PDFForm.HasResumeStateAvailable();
             resumeWorkButton.Enabled = canResume;
         }
 

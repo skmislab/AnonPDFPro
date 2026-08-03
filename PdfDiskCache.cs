@@ -24,7 +24,7 @@ namespace AnonPDF
 
     internal static class PdfDiskCache
     {
-        private const int FormatVersion = 3;
+        private const int FormatVersion = 4;
 
         private static string CacheDir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -73,6 +73,11 @@ namespace AnonPDF
                     DbgLog($"TryLoad miss (file changed): {Path.GetFileName(pdfPath)}");
                     return false;
                 }
+                if (!string.Equals(loaded.NerCacheIdentity, PdfTextSearcher.GetNerCacheIdentity(), StringComparison.Ordinal))
+                {
+                    DbgLog($"TryLoad miss (NER plugin changed): {Path.GetFileName(pdfPath)}");
+                    return false;
+                }
 
                 DbgLog($"TryLoad HIT: {Path.GetFileName(pdfPath)} lines={loaded.Lines?.Count} ner={loaded.PersonalData?.Count}");
                 cache = loaded;
@@ -111,6 +116,7 @@ namespace AnonPDF
                     AltTexts              = ToDto(altTexts),
                     AllFigures            = ToDto(allFigures),
                     PersonalData          = personalData != null ? ToDto(personalData) : null,
+                    NerCacheIdentity      = PdfTextSearcher.GetNerCacheIdentity(),
                 };
 
                 Directory.CreateDirectory(CacheDir);
@@ -393,6 +399,7 @@ namespace AnonPDF
         [Key(4)] public List<AltEntryDto>   AltTexts  { get; set; }
         [Key(5)] public List<AltEntryDto>   AllFigures{ get; set; }
         [Key(6)] public List<TextLocDto>    PersonalData { get; set; }
+        [Key(7)] public string NerCacheIdentity { get; set; }
     }
 
     [MessagePackObject]

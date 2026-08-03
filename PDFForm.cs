@@ -110,7 +110,7 @@ namespace AnonPDF
         private float initialDpiY;
         private bool dpiChangeRestartPromptShown;
         private bool dpiChangeRestartRequested;
-        private Action<string> searchCacheStatusHandler;
+        private Action<string, string> searchCacheStatusHandler;
 
         private const string SignatureModeOriginal = "original";
         private const string SignatureModeRemove = "remove";
@@ -187,6 +187,9 @@ namespace AnonPDF
 
         private System.Threading.CancellationTokenSource backgroundIndexingCts;
         private System.Threading.CancellationTokenSource _personalDataCts;
+        private long documentProcessingSession;
+        private readonly object nerPreWarmSync = new object();
+        private Task<bool> nerPreWarmTask;
         private float scaleFactor = 0;
         private readonly float percentScaleFactor = 0.5f;
         private float minScaleFactor = 1.2f;
@@ -1810,7 +1813,7 @@ namespace AnonPDF
 
         }
 
-        private void UpdateSearchCacheStatusLabel(string status)
+        private void UpdateSearchCacheStatusLabel(string status, string pdfPath)
         {
             if (isApplicationClosing || IsDisposed || Disposing || !IsHandleCreated)
                 return;
@@ -1819,6 +1822,16 @@ namespace AnonPDF
             {
                 if (isApplicationClosing || IsDisposed || Disposing || !IsHandleCreated)
                     return;
+
+                if (!string.IsNullOrEmpty(pdfPath) &&
+                    !string.Equals(pdfPath, inputPdfPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+                if (string.IsNullOrEmpty(pdfPath) && !string.IsNullOrEmpty(inputPdfPath))
+                {
+                    return;
+                }
 
                 if (!string.IsNullOrEmpty(status))
                 {
@@ -18245,7 +18258,7 @@ namespace AnonPDF
                 Task.Run(() => CheckForNewVersion(UpdateCheckSource.Startup));
             }
             Task.Run(() => RefreshLicenseStatusFromServer());
-            PreWarmNerDaemon();
+            EnsureNerPreWarmStarted();
         }
 
         private void NotifyUpdatesOutOfRangeIfNeeded()
@@ -18960,6 +18973,7 @@ namespace AnonPDF
                     suppressCloseConfirmation = true;
                 }
 
+                PersistCurrentSessionForResume();
                 Application.Restart();
             }
             catch (Exception ex)
@@ -22860,6 +22874,7 @@ namespace AnonPDF
         private void LoadPdf()
         {
             BeginBusyCursor();
+            long processingSession = BeginDocumentProcessingSession();
             try
             {
             CancelPreviewRender();
@@ -23027,80 +23042,7 @@ namespace AnonPDF
             // Start background indexing and OCR so search and cursor mode are ready immediately
             cursorRadioButton.Enabled = false;
             ShowIndexingStatus(LocalizedText("Msg_CursorModeUnavailable"));
-            backgroundIndexingCts?.Cancel();
-            backgroundIndexingCts?.Dispose();
-            _personalDataCts?.Cancel();
-            _personalDataCts?.Dispose();
-            _personalDataCts = null;
-            Task.Run(() => PdfTextSearcher.StopNerDaemon());
-            backgroundIndexingCts = new System.Threading.CancellationTokenSource();
-            var cts = backgroundIndexingCts;
-            var pdfPath = inputPdfPath;
-            var password = userPassword;
-            Task.Run(() => PdfTextSearcher.CachePdfText(pdfPath, password, cts.Token), cts.Token)
-                .ContinueWith(_ =>
-                {
-                    if (cts.IsCancellationRequested || isApplicationClosing)
-                        return;
-
-                    bool nerAvailable = PdfTextSearcher.IsLocalNerAvailable();
-                    bool piiAlreadyCached = PdfTextSearcher.GetPersonalDataCache(pdfPath) != null;
-
-                    BeginInvoke((Action)(() =>
-                    {
-                        if (!cts.IsCancellationRequested &&
-                            !isApplicationClosing && !IsDisposed && !Disposing)
-                        {
-                            HideIndexingStatus();
-                            cursorRadioButton.Enabled = true;
-                            groupBoxSearch.Enabled = true;
-
-                            if (pdfPath == inputPdfPath)
-                            {
-                                var altLocs = PdfTextSearcher.GetAltTextLocations(pdfPath);
-                                if (altLocs.Count > 0)
-                                {
-                                    searchLocations = altLocs;
-                                    PopulateFoundTab();
-                                }
-
-                                // PII already loaded from disk cache — enable button immediately
-                                if (nerAvailable && piiAlreadyCached)
-                                    personalDataButton.Enabled = true;
-                            }
-                        }
-                    }));
-
-                    if (cts.IsCancellationRequested || isApplicationClosing)
-                        return;
-
-                    if (nerAvailable && !piiAlreadyCached)
-                    {
-                        try
-                        {
-                            var nerResults = PdfTextSearcher.FindTextLocations(pdfPath, "", true, password, cancellationToken: cts.Token);
-                            PdfTextSearcher.SetPersonalDataCache(pdfPath, nerResults);
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine("Background NER failed: " + ex.Message);
-                            // NER failed — save what we have (text/OCR/alt) so next open skips re-extraction
-                            PdfTextSearcher.SavePartialCache(pdfPath);
-                        }
-
-                        PdfTextSearcher.ClearStatusOverlay();
-
-                        BeginInvoke((Action)(() =>
-                        {
-                            if (!cts.IsCancellationRequested && pdfPath == inputPdfPath &&
-                                !isApplicationClosing && !IsDisposed && !Disposing)
-                            {
-                                personalDataButton.Enabled = true;
-                            }
-                        }));
-                    }
-                });
-
+            StartDocumentBackgroundProcessing(processingSession, inputPdfPath, userPassword);
             groupBoxSelections.Enabled = true;
             groupBoxPagesToRemove.Enabled = true;
             groupBoxSearch.Enabled = false;   // enabled after CachePdfText completes
@@ -23693,7 +23635,7 @@ namespace AnonPDF
             pagingTimer.Stop();
             zoomTimer.Stop();
             CancelPreviewRender();
-            backgroundIndexingCts?.Cancel();
+            BeginDocumentProcessingSession();
             PdfTextSearcher.StopNerDaemon();
             HideIndexingStatus();
 
@@ -29004,7 +28946,7 @@ namespace AnonPDF
             pendingViewScrollY = null;
         }
 
-        private void PersistResumeState()
+        private void PersistResumeState(string projectPathOverride = null)
         {
             if (pdf == null || numPages <= 0 || string.IsNullOrWhiteSpace(inputPdfPath))
             {
@@ -29017,7 +28959,9 @@ namespace AnonPDF
                 var state = new ResumeState
                 {
                     PdfPath = inputPdfPath,
-                    ProjectPath = GetCurrentProjectPath(),
+                    ProjectPath = !string.IsNullOrWhiteSpace(projectPathOverride)
+                        ? projectPathOverride
+                        : GetCurrentProjectPath(),
                     CurrentPage = Math.Max(1, Math.Min(currentPage, numPages)),
                     ZoomFactor = zoomFactor > 0 ? zoomFactor : (float?)null,
                     ScrollX = scrollX,
@@ -35414,6 +35358,44 @@ namespace AnonPDF
             {
                 QueueRedactionPreviewRectsForPage(block.PageNumber);
             }
+        }
+
+        internal static bool HasResumeStateAvailable()
+        {
+            ResumeState state = LoadResumeState();
+            return state != null &&
+                   ((!string.IsNullOrWhiteSpace(state.PdfPath) && File.Exists(state.PdfPath)) ||
+                    (!string.IsNullOrWhiteSpace(state.ProjectPath) && File.Exists(state.ProjectPath)));
+        }
+
+        private void PersistCurrentSessionForResume()
+        {
+            PersistCurrentPageToProjectFile();
+
+            string autoResumeProjectPath = string.Empty;
+            TrySaveAutoResumeProjectSnapshot(out autoResumeProjectPath);
+            PersistResumeState(autoResumeProjectPath);
+
+            if (!string.IsNullOrWhiteSpace(inputPdfPath))
+            {
+                Properties.Settings.Default.LastPdfPath = inputPdfPath;
+                Properties.Settings.Default.LastPapPath = string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(lastSavedProjectName))
+            {
+                Properties.Settings.Default.LastPapPath = lastSavedProjectName;
+            }
+            else if (!string.IsNullOrWhiteSpace(inputProjectPath))
+            {
+                Properties.Settings.Default.LastPapPath = inputProjectPath;
+            }
+            else if (!string.IsNullOrWhiteSpace(autoResumeProjectPath))
+            {
+                Properties.Settings.Default.LastPapPath = autoResumeProjectPath;
+            }
+
+            Properties.Settings.Default.Save();
         }
 
         private bool TryAlignCursorBlockBoundsWithPreviewText(RedactionBlock block)
@@ -42967,7 +42949,7 @@ namespace AnonPDF
                         var oldKeys = PdfTextSearcher._pendingAltTextEdits.Keys
                             .Where(k => k.pdfPath == inputPdfPath).ToList();
                         foreach (var k in oldKeys)
-                            PdfTextSearcher._pendingAltTextEdits.Remove(k);
+                            PdfTextSearcher._pendingAltTextEdits.TryRemove(k, out _);
 
                         if (projectData.AltTextEdits != null)
                         {
@@ -44312,36 +44294,7 @@ namespace AnonPDF
             isApplicationClosing = true;
             StopBackgroundUiWorkForShutdown();
 
-            if (!e.Cancel)
-            {
-                PersistCurrentPageToProjectFile();
-                PersistResumeState();
-            }
-
-            string autoResumeProjectPath = string.Empty;
-            if (!e.Cancel)
-            {
-                TrySaveAutoResumeProjectSnapshot(out autoResumeProjectPath);
-            }
-
-            if (inputPdfPath != "")
-            {
-                Properties.Settings.Default.LastPdfPath = inputPdfPath;
-                Properties.Settings.Default.LastPapPath = "";
-            }
-            if (lastSavedProjectName != "")
-            {
-                Properties.Settings.Default.LastPapPath = lastSavedProjectName;
-            }
-            else if (inputProjectPath != "")
-            {
-                Properties.Settings.Default.LastPapPath = inputProjectPath;
-            }
-            else if (!string.IsNullOrWhiteSpace(autoResumeProjectPath))
-            {
-                Properties.Settings.Default.LastPapPath = autoResumeProjectPath;
-            }
-            Properties.Settings.Default.Save();
+            PersistCurrentSessionForResume();
         }
 
         private void StopBackgroundUiWorkForShutdown()
@@ -53599,9 +53552,19 @@ namespace AnonPDF
             // Get saved paths from Properties.Settings
             string lastPdf = Properties.Settings.Default.LastPdfPath;
             string lastPap = Properties.Settings.Default.LastPapPath;
+            ResumeState resumeState = LoadResumeState();
+            if (resumeState != null &&
+                !string.IsNullOrWhiteSpace(resumeState.PdfPath) &&
+                File.Exists(resumeState.PdfPath))
+            {
+                lastPdf = resumeState.PdfPath;
+                lastPap = !string.IsNullOrWhiteSpace(resumeState.ProjectPath) && File.Exists(resumeState.ProjectPath)
+                    ? resumeState.ProjectPath
+                    : string.Empty;
+            }
+
             bool hasPdf = !string.IsNullOrWhiteSpace(lastPdf) && File.Exists(lastPdf);
             bool hasProject = !string.IsNullOrWhiteSpace(lastPap) && File.Exists(lastPap);
-            ResumeState resumeState = LoadResumeState();
 
             try
             {
@@ -57596,22 +57559,196 @@ namespace AnonPDF
             return null;
         }
 
-        private void PreWarmNerDaemon()
+        private long BeginDocumentProcessingSession()
         {
-            // IsLocalNerAvailable → EnsurePluginCachedLocally may copy files from a network share.
-            // Run everything on a background thread so the UI is never blocked at startup.
-            string country = GetEffectiveCountry();
-            System.Threading.Tasks.Task.Run(() =>
+            long session = System.Threading.Interlocked.Increment(ref documentProcessingSession);
+
+            backgroundIndexingCts?.Cancel();
+            backgroundIndexingCts?.Dispose();
+            backgroundIndexingCts = null;
+
+            _personalDataCts?.Cancel();
+            _personalDataCts?.Dispose();
+            _personalDataCts = null;
+
+            return session;
+        }
+
+        private bool IsCurrentDocumentProcessing(
+            long session,
+            string pdfPath,
+            System.Threading.CancellationTokenSource cancellationSource)
+        {
+            return session == System.Threading.Interlocked.Read(ref documentProcessingSession) &&
+                   cancellationSource != null &&
+                   !cancellationSource.IsCancellationRequested &&
+                   string.Equals(pdfPath, inputPdfPath, StringComparison.OrdinalIgnoreCase) &&
+                   !isApplicationClosing && !IsDisposed && !Disposing;
+        }
+
+        private bool IsCurrentPersonalDataOperation(
+            long session,
+            string pdfPath,
+            System.Threading.CancellationTokenSource cancellationSource)
+        {
+            return IsCurrentDocumentProcessing(session, pdfPath, cancellationSource) &&
+                   ReferenceEquals(_personalDataCts, cancellationSource);
+        }
+
+        private Task<bool> EnsureNerPreWarmStarted()
+        {
+            lock (nerPreWarmSync)
+            {
+                if (nerPreWarmTask != null)
+                {
+                    return nerPreWarmTask;
+                }
+
+                long preWarmSession = System.Threading.Interlocked.Read(ref documentProcessingSession);
+                string country = GetEffectiveCountry();
+                nerPreWarmTask = Task.Run(() =>
+                {
+                    try
+                    {
+                        if (!PdfTextSearcher.IsLocalNerAvailable())
+                        {
+                            return false;
+                        }
+
+                        TryBeginInvokeOnUi(() =>
+                        {
+                            if (preWarmSession == System.Threading.Interlocked.Read(ref documentProcessingSession) &&
+                                string.IsNullOrEmpty(inputPdfPath))
+                            {
+                                ShowIndexingStatus(LocalizedText("CacheStatus_NerPreWarm"));
+                            }
+                        });
+
+                        return PdfTextSearcher.WarmUpNerDaemon(country);
+                    }
+                    catch
+                    {
+                        return false;
+                    }
+                    finally
+                    {
+                        TryBeginInvokeOnUi(() =>
+                        {
+                            if (preWarmSession == System.Threading.Interlocked.Read(ref documentProcessingSession) &&
+                                string.IsNullOrEmpty(inputPdfPath))
+                            {
+                                HideIndexingStatus();
+                            }
+                        });
+                    }
+                });
+                return nerPreWarmTask;
+            }
+        }
+
+        private void StartDocumentBackgroundProcessing(long session, string pdfPath, string password)
+        {
+            backgroundIndexingCts = new System.Threading.CancellationTokenSource();
+            var cts = backgroundIndexingCts;
+
+            Task.Run(async () =>
             {
                 try
                 {
-                    if (!PdfTextSearcher.IsLocalNerAvailable()) return;
-                    TryBeginInvokeOnUi(() => ShowIndexingStatus(LocalizedText("CacheStatus_NerPreWarm")));
-                    PdfTextSearcher.WarmUpNerDaemon(country);
+                    PdfTextSearcher.CachePdfText(pdfPath, password, cts.Token);
+                    if (!IsCurrentDocumentProcessing(session, pdfPath, cts))
+                    {
+                        return;
+                    }
+
+                    bool piiAlreadyCached = PdfTextSearcher.GetPersonalDataCache(pdfPath) != null;
+                    TryBeginInvokeOnUi(() =>
+                    {
+                        if (!IsCurrentDocumentProcessing(session, pdfPath, cts))
+                        {
+                            return;
+                        }
+
+                        HideIndexingStatus();
+                        cursorRadioButton.Enabled = true;
+                        groupBoxSearch.Enabled = true;
+
+                        var altLocs = PdfTextSearcher.GetAltTextLocations(pdfPath);
+                        if (altLocs.Count > 0)
+                        {
+                            searchLocations = altLocs;
+                            PopulateFoundTab();
+                        }
+
+                        if (piiAlreadyCached)
+                        {
+                            personalDataButton.Enabled = true;
+                        }
+                    });
+
+                    if (piiAlreadyCached)
+                    {
+                        return;
+                    }
+
+                    bool nerReady = await EnsureNerPreWarmStarted().ConfigureAwait(false);
+                    if (!nerReady || !IsCurrentDocumentProcessing(session, pdfPath, cts))
+                    {
+                        return;
+                    }
+
+                    bool nerCompleted = PdfTextSearcher.TryFindPersonalDataLocations(
+                        pdfPath,
+                        password,
+                        cts.Token,
+                        out List<TextLocation> nerResults);
+                    if (!IsCurrentDocumentProcessing(session, pdfPath, cts))
+                    {
+                        return;
+                    }
+
+                    if (nerCompleted)
+                    {
+                        PdfTextSearcher.SetPersonalDataCache(pdfPath, nerResults);
+                    }
+                    else
+                    {
+                        PdfTextSearcher.SavePartialCache(pdfPath);
+                    }
+
+                    PdfTextSearcher.ClearStatusOverlay(pdfPath);
+                    TryBeginInvokeOnUi(() =>
+                    {
+                        if (IsCurrentDocumentProcessing(session, pdfPath, cts))
+                        {
+                            personalDataButton.Enabled = nerCompleted;
+                        }
+                    });
                 }
-                catch { }
-                finally { TryBeginInvokeOnUi(HideIndexingStatus); }
-            });
+                catch (OperationCanceledException)
+                {
+                    // The user opened another document. The newer session owns the UI.
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("Background indexing/NER failed: " + ex.Message);
+                    if (IsCurrentDocumentProcessing(session, pdfPath, cts))
+                    {
+                        PdfTextSearcher.SavePartialCache(pdfPath);
+                        PdfTextSearcher.ClearStatusOverlay(pdfPath);
+                        TryBeginInvokeOnUi(() =>
+                        {
+                            if (IsCurrentDocumentProcessing(session, pdfPath, cts))
+                            {
+                                HideIndexingStatus();
+                                cursorRadioButton.Enabled = true;
+                                groupBoxSearch.Enabled = true;
+                                personalDataButton.Enabled = false;
+                            }
+                        });
+                    }
+                }
+            }, cts.Token);
         }
 
         private void InitializeCountryMenu()
@@ -59011,11 +59148,15 @@ namespace AnonPDF
             _personalDataCts?.Cancel();
             _personalDataCts?.Dispose();
             _personalDataCts = new System.Threading.CancellationTokenSource();
-            var pdToken = _personalDataCts.Token;
+            var personalDataCts = _personalDataCts;
+            var pdToken = personalDataCts.Token;
+            long processingSession = System.Threading.Interlocked.Read(ref documentProcessingSession);
+            string pdfPath = inputPdfPath;
+            string password = userPassword;
 
             try
             {
-            var cached = PdfTextSearcher.GetPersonalDataCache(inputPdfPath);
+            var cached = PdfTextSearcher.GetPersonalDataCache(pdfPath);
             if (cached != null)
             {
                 searchLocations = new List<TextLocation>(cached);
@@ -59023,14 +59164,35 @@ namespace AnonPDF
             else
             {
                 groupBoxSearch.Enabled = false;
-                searchLocations = await Task.Run(() => PdfTextSearcher.FindTextLocations(inputPdfPath, "", true, userPassword, cancellationToken: pdToken), pdToken);
+                var searchResult = await Task.Run(() =>
+                {
+                    bool completed = PdfTextSearcher.TryFindPersonalDataLocations(pdfPath, password, pdToken, out List<TextLocation> results);
+                    return Tuple.Create(completed, results);
+                }, pdToken);
+                if (!IsCurrentPersonalDataOperation(processingSession, pdfPath, personalDataCts))
+                {
+                    return;
+                }
+
                 groupBoxSearch.Enabled = true;
+                if (!searchResult.Item1)
+                {
+                    return;
+                }
+
+                searchLocations = searchResult.Item2;
+                PdfTextSearcher.SetPersonalDataCache(pdfPath, searchLocations);
             }
 
             // Run PII detection on ALT texts (may use NER daemon → must stay off UI thread)
             pdToken.ThrowIfCancellationRequested();
             groupBoxSearch.Enabled = false;
-            var altLocsWithPii = await Task.Run(() => PdfTextSearcher.GetAltTextLocationsForPersonalData(inputPdfPath, pdToken), pdToken);
+            var altLocsWithPii = await Task.Run(() => PdfTextSearcher.GetAltTextLocationsForPersonalData(pdfPath, pdToken), pdToken);
+            if (!IsCurrentPersonalDataOperation(processingSession, pdfPath, personalDataCts))
+            {
+                return;
+            }
+
             groupBoxSearch.Enabled = true;
             if (altLocsWithPii.Count > 0)
                 searchLocations.AddRange(altLocsWithPii);
@@ -59086,9 +59248,11 @@ namespace AnonPDF
             } // end try
             catch (OperationCanceledException)
             {
-                // Cancelled because a new file was opened — quietly restore UI state
-                groupBoxSearch.Enabled = true;
-                personalDataButton.Enabled = true;
+                if (IsCurrentPersonalDataOperation(processingSession, pdfPath, personalDataCts))
+                {
+                    groupBoxSearch.Enabled = true;
+                    personalDataButton.Enabled = true;
+                }
             }
             finally
             {

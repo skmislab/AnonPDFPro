@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Data;
 using System.Drawing;
@@ -4551,15 +4552,15 @@ namespace AnonPDF
         private const float OcrSearchMinimumRightPadding = 1.5f;
         private const float OcrSearchMinimumVerticalPadding = 1.0f;
         // Cache for processed lines by file path
-        private static readonly Dictionary<string, List<CachedLine>> _lineCache = new Dictionary<string, List<CachedLine>>();
+        private static readonly ConcurrentDictionary<string, List<CachedLine>> _lineCache = new ConcurrentDictionary<string, List<CachedLine>>();
         // Eagerly-computed personal data NER results, keyed by file path
-        private static readonly Dictionary<string, List<TextLocation>> _personalDataCache = new Dictionary<string, List<TextLocation>>();
+        private static readonly ConcurrentDictionary<string, List<TextLocation>> _personalDataCache = new ConcurrentDictionary<string, List<TextLocation>>();
         // Alt text entries extracted from PDF structure tree, keyed by file path
-        internal static readonly Dictionary<string, List<AltTextEntry>> _altTextCache = new Dictionary<string, List<AltTextEntry>>();
+        internal static readonly ConcurrentDictionary<string, List<AltTextEntry>> _altTextCache = new ConcurrentDictionary<string, List<AltTextEntry>>();
         // ALL tagged Figure entries (with or without Alt), used for hit-testing, keyed by file path
-        internal static readonly Dictionary<string, List<AltTextEntry>> _allFiguresCache = new Dictionary<string, List<AltTextEntry>>();
+        internal static readonly ConcurrentDictionary<string, List<AltTextEntry>> _allFiguresCache = new ConcurrentDictionary<string, List<AltTextEntry>>();
         // Pending alt text edits: (pdfPath, posKey) → new text. posKey = "{page}:{x}:{y}"
-        internal static readonly Dictionary<(string pdfPath, string posKey), string> _pendingAltTextEdits = new Dictionary<(string, string), string>();
+        internal static readonly ConcurrentDictionary<(string pdfPath, string posKey), string> _pendingAltTextEdits = new ConcurrentDictionary<(string, string), string>();
 
         /// <summary>ISO language code detected from the most recently processed document ("pl", "de", or null if unknown).</summary>
         public static string LastDetectedLanguage { get; private set; }
@@ -4702,7 +4703,10 @@ namespace AnonPDF
             }
         }
 
-        public static event Action<string> OnCacheStatusChanged;
+        public static event Action<string, string> OnCacheStatusChanged;
+
+        private static void ReportCacheStatus(string status, string pdfPath = null) =>
+            OnCacheStatusChanged?.Invoke(status, pdfPath);
 
         private sealed class LocalNerOptions
         {
@@ -4835,7 +4839,27 @@ namespace AnonPDF
             cancellationToken.ThrowIfCancellationRequested();
 
             // Perform search based on cache
-            return SearchInCachedLines(pdfPath, searchText, searchPersonalData, owner, cancellationToken);
+            return SearchInCachedLines(pdfPath, searchText, searchPersonalData, owner, cancellationToken, out _);
+        }
+
+        /// <summary>
+        /// Runs personal-data detection and reports whether the local NER service actually
+        /// produced a response. An empty result is valid only when this returns true.
+        /// </summary>
+        internal static bool TryFindPersonalDataLocations(
+            string pdfPath,
+            string userPassword,
+            System.Threading.CancellationToken cancellationToken,
+            out List<TextLocation> locations)
+        {
+            if (!_lineCache.ContainsKey(pdfPath))
+            {
+                CacheLines(pdfPath, userPassword, cancellationToken);
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            locations = SearchInCachedLines(pdfPath, string.Empty, true, null, cancellationToken, out bool nerCompleted);
+            return nerCompleted;
         }
 
         public static List<TextLocation> GetOcrDebugLocations(string pdfPath, int pageNumber)
@@ -4893,7 +4917,7 @@ namespace AnonPDF
                 _allFiguresCache[pdfPath] = PdfDiskCache.AltFromDto(cached.AllFigures);
                 if (cached.PersonalData != null)
                     _personalDataCache[pdfPath] = PdfDiskCache.TextLocFromDto(cached.PersonalData);
-                OnCacheStatusChanged?.Invoke(string.Empty);
+                ReportCacheStatus(string.Empty, pdfPath);
                 return;
             }
 
@@ -4930,14 +4954,14 @@ namespace AnonPDF
                         l.PageHeight = ph;
                     }
                     lines.AddRange(strategy.ExtractedLines);
-                    OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_IndexPage", page));
+                    ReportCacheStatus(LocalizedFormat("CacheStatus_IndexPage", page), pdfPath);
                 }
 
                 AppendOcrLinesForPagesWithoutNativeText(pdfPath, userPassword, pdfDoc, lines, cancellationToken);
                 _altTextCache[pdfPath] = ExtractAltTexts(pdfDoc);
                 _allFiguresCache[pdfPath] = ExtractAllFigures(pdfDoc);
             }
-            OnCacheStatusChanged?.Invoke(string.Empty);
+            ReportCacheStatus(string.Empty, pdfPath);
             _lineCache[pdfPath] = lines;
 
             // Save now only when NER won't run (no plugin) — otherwise SetPersonalDataCache saves once after NER.
@@ -5002,7 +5026,7 @@ namespace AnonPDF
                             continue;
                         }
 
-                        OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_OcrPage", pageNumber));
+                        ReportCacheStatus(LocalizedFormat("CacheStatus_OcrPage", pageNumber), pdfPath);
 
                         using (Bitmap pageBitmap = RenderPdfPageForOcr(pdfiumDoc.Pages[pageNumber - 1]))
                         {
@@ -6425,12 +6449,19 @@ namespace AnonPDF
         }
 
         // Funkcja do odczytu text na podstawie line_number
-        private static List<TextLocation> SearchInCachedLines(string pdfPath, string searchText, bool searchPersonalData, IWin32Window owner, System.Threading.CancellationToken cancellationToken = default)
+        private static List<TextLocation> SearchInCachedLines(
+            string pdfPath,
+            string searchText,
+            bool searchPersonalData,
+            IWin32Window owner,
+            System.Threading.CancellationToken cancellationToken,
+            out bool nerCompleted)
         {
 
             var locations = new List<TextLocation> { };
             var cachedLines = _lineCache[pdfPath];
             string searchTextLower = searchText.ToLowerInvariant();
+            nerCompleted = !searchPersonalData;
 
             int cnt = 0;
             int lastReportedPage = -1;
@@ -6442,7 +6473,7 @@ namespace AnonPDF
                 if (line.PageNumber != lastReportedPage)
                 {
                     lastReportedPage = line.PageNumber;
-                    OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_SearchPage", line.PageNumber));
+                    ReportCacheStatus(LocalizedFormat("CacheStatus_SearchPage", line.PageNumber), pdfPath);
                 }
                 if (!searchPersonalData && textLower.Contains(searchTextLower))
                 {
@@ -6499,7 +6530,7 @@ namespace AnonPDF
                     {
                         var pageLines = pageGroup.ToList();
 
-                        OnCacheStatusChanged?.Invoke(LocalizedFormat("CacheStatus_SearchPage", pageGroup.Key));
+                        ReportCacheStatus(LocalizedFormat("CacheStatus_SearchPage", pageGroup.Key), pdfPath);
 
                         var reqlines = pageLines.Select(x => new
                         {
@@ -6628,13 +6659,13 @@ namespace AnonPDF
             }
             if (searchPersonalData)
             {
-                SearchLocalMlNamedEntities(cachedLines, locations, cancellationToken);
+                nerCompleted = SearchLocalMlNamedEntities(pdfPath, cachedLines, locations, cancellationToken);
             }
             if (searchPersonalData)
             {
                 locations = DeduplicateTextLocations(locations);
             }
-            OnCacheStatusChanged?.Invoke(string.Empty);
+            ReportCacheStatus(string.Empty, pdfPath);
 
             // Remove OCR hits that duplicate a native-text hit at the same position.
             // Scanned PDFs with an embedded OCR text layer (from the scanner) produce both
@@ -6711,14 +6742,14 @@ namespace AnonPDF
             return minArea > 0f ? intersection / minArea : 0f;
         }
 
-        private static void SearchLocalMlNamedEntities(List<CachedLine> cachedLines, List<TextLocation> locations, System.Threading.CancellationToken cancellationToken = default)
+        private static bool SearchLocalMlNamedEntities(string pdfPath, List<CachedLine> cachedLines, List<TextLocation> locations, System.Threading.CancellationToken cancellationToken = default)
         {
             if (cachedLines == null || cachedLines.Count == 0 || locations == null)
-                return;
+                return false;
 
             LocalNerOptions options = LocalNerOptions.Load();
             if (!options.Enabled)
-                return;
+                return false;
 
             string language = DetectLanguageFromLines(cachedLines);
             if (language != null)
@@ -6729,18 +6760,20 @@ namespace AnonPDF
                     options = options.WithPlugin(manifest);
             }
 
-            OnCacheStatusChanged?.Invoke(LocalizedText("CacheStatus_LocalNer"));
+            ReportCacheStatus(LocalizedText("CacheStatus_LocalNer"), pdfPath);
             try
             {
-                string responseJson = RunLocalNerDaemon(cachedLines, options, cancellationToken);
+                string responseJson = RunLocalNerDaemon(cachedLines, options, cancellationToken, pdfPath);
                 if (string.IsNullOrWhiteSpace(responseJson))
-                    return;
+                    return false;
 
                 AddLocalMlEntityLocations(cachedLines, responseJson, locations, options);
+                return true;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("Local NER unavailable: " + ex.Message);
+                return false;
             }
         }
 
@@ -6939,10 +6972,10 @@ namespace AnonPDF
         /// Blocks until the daemon reports ready or fails. Safe to call from a background thread.
         /// country: ISO-2 country code ("pl", "de") used to select the right plugin; empty = base model only.
         /// </summary>
-        public static void WarmUpNerDaemon(string country)
+        public static bool WarmUpNerDaemon(string country)
         {
             LocalNerOptions options = LocalNerOptions.Load();
-            if (!options.Enabled) return;
+            if (!options.Enabled) return false;
 
             if (!string.IsNullOrEmpty(country))
             {
@@ -6953,13 +6986,17 @@ namespace AnonPDF
 
             lock (_nerDaemonLock)
             {
-                EnsureNerDaemonLocked(options);
+                return EnsureNerDaemonLocked(options);
             }
         }
 
         private const int NerDaemonBatchSize = 20;
 
-        private static string RunLocalNerDaemon(List<CachedLine> cachedLines, LocalNerOptions options, System.Threading.CancellationToken cancellationToken = default)
+        private static string RunLocalNerDaemon(
+            List<CachedLine> cachedLines,
+            LocalNerOptions options,
+            System.Threading.CancellationToken cancellationToken = default,
+            string statusPdfPath = null)
         {
             lock (_nerDaemonLock)
             {
@@ -7033,8 +7070,9 @@ namespace AnonPDF
                         return RunLocalNerProcess(cachedLines, options);
                     }
 
-                    OnCacheStatusChanged?.Invoke(
-                        LocalizedText("CacheStatus_LocalNer") + $": {batchEnd}/{total}");
+                    ReportCacheStatus(
+                        LocalizedText("CacheStatus_LocalNer") + $": {batchEnd}/{total}",
+                        statusPdfPath);
                 }
 
                 return new JObject { ["resplines"] = combinedRespLines }.ToString(Formatting.None);
@@ -7454,7 +7492,7 @@ namespace AnonPDF
 
                     if (sourceVersion != localVersion)
                     {
-                        OnCacheStatusChanged?.Invoke("instalacja pluginu NER...");
+                        ReportCacheStatus("instalacja pluginu NER...");
                         CopyPluginDirectory(pluginSourceDir, localDir);
                         Debug.WriteLine($"Plugin '{pluginName}' cached locally: {localDir} (v{sourceVersion})");
                     }
@@ -7787,12 +7825,12 @@ namespace AnonPDF
             }
             else
             {
-                _lineCache.Remove(pdfPath);
-                _personalDataCache.Remove(pdfPath);
-                _altTextCache.Remove(pdfPath);
-                _allFiguresCache.Remove(pdfPath);
+                _lineCache.TryRemove(pdfPath, out _);
+                _personalDataCache.TryRemove(pdfPath, out _);
+                _altTextCache.TryRemove(pdfPath, out _);
+                _allFiguresCache.TryRemove(pdfPath, out _);
                 var toRemove = _pendingAltTextEdits.Keys.Where(k => k.pdfPath == pdfPath).ToList();
-                foreach (var k in toRemove) _pendingAltTextEdits.Remove(k);
+                foreach (var k in toRemove) _pendingAltTextEdits.TryRemove(k, out _);
             }
         }
 
@@ -7841,8 +7879,8 @@ namespace AnonPDF
             }
         }
 
-        internal static void ClearStatusOverlay() =>
-            OnCacheStatusChanged?.Invoke(string.Empty);
+        internal static void ClearStatusOverlay(string pdfPath = null) =>
+            ReportCacheStatus(string.Empty, pdfPath);
 
         public static bool IsLocalNerAvailable()
         {
@@ -8585,7 +8623,7 @@ namespace AnonPDF
 
                     try
                     {
-                        string responseJson = RunLocalNerDaemon(fakeLines, options, cancellationToken);
+                        string responseJson = RunLocalNerDaemon(fakeLines, options, cancellationToken, pdfPath);
                         if (!string.IsNullOrWhiteSpace(responseJson))
                         {
                             JObject obj = JObject.Parse(responseJson);
@@ -8631,7 +8669,7 @@ namespace AnonPDF
                 }
             }
 
-            OnCacheStatusChanged?.Invoke(string.Empty);
+            ReportCacheStatus(string.Empty, pdfPath);
             return allAltLocs;
         }
 
@@ -8784,6 +8822,34 @@ namespace AnonPDF
                     Math.Max(0.1f, maxX - minX),
                     Math.Max(0.1f, maxY - minY));
             }
+        }
+
+        internal static string GetNerCacheIdentity()
+        {
+            LocalNerOptions options = LocalNerOptions.Load();
+            if (options == null || !options.Enabled)
+            {
+                return "disabled";
+            }
+
+            string executablePath = ResolveLocalNerPath(options.ExecutablePath);
+            string pluginVersion = string.Empty;
+            try
+            {
+                string configPath = Path.Combine(Path.GetDirectoryName(executablePath) ?? string.Empty, "config.json");
+                if (File.Exists(configPath))
+                {
+                    pluginVersion = ReadPluginVersion(configPath);
+                }
+            }
+            catch
+            {
+            }
+
+            string labels = options.Labels == null
+                ? string.Empty
+                : string.Join(",", options.Labels.OrderBy(label => label, StringComparer.OrdinalIgnoreCase));
+            return string.Join("|", executablePath ?? string.Empty, pluginVersion, options.ModelName ?? string.Empty, labels);
         }
 
         private static void SearchPersonalData_PendingRemoval(CachedLine line, List<TextLocation> locations)
