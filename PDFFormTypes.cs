@@ -4460,11 +4460,11 @@ namespace AnonPDF
         {
             return new NumericUpDown
             {
-                DecimalPlaces = 1,
-                Increment = 0.1m,
+                DecimalPlaces = 0,
+                Increment = 1m,
                 Minimum = 0,
                 Maximum = 1000,
-                Value = Math.Max(0m, Math.Min(1000m, (decimal)value)),
+                Value = decimal.Round(Math.Max(0m, Math.Min(1000m, (decimal)value)), 0, MidpointRounding.AwayFromZero),
                 Width = 92,
                 Anchor = AnchorStyles.Left
             };
