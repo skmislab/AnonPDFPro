@@ -2346,4 +2346,66 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="Err_DocumentMarginsTooLarge" xml:space="preserve">
     <value>Ustawione marginesy pozostawiaj&#261; zbyt ma&#322;o miejsca na zawarto&#347;&#263; strony.</value>
   </data>
+  <data name="CommandLine_Help" xml:space="preserve">
+    <value>AnonPDFPro - opcje uruchamiania
+
+Tryb interaktywny:
+  AnonPDFPro.exe [dokument.pdf|projekt.app|projekt.pap] [opcje]
+
+Wsadowe przetwarzanie szablonowe:
+  AnonPDFPro.exe dokument.pdf --headless --template szablon.app --pdfout wynik.pdf [opcje]
+
+Opcje og&#243;lne:
+  dokument.pdf             Otwiera dokument PDF.
+  projekt.app, projekt.pap Otwiera zapisany projekt AnonPDFPro.
+  --page &lt;numer&gt;           Otwiera wskazan&#261; stron&#281; (numeracja od 1).
+  --rotate &lt;0|90|180|270&gt;  Obraca aktualnie otwart&#261; stron&#281; zgodnie z ruchem wskaz&#243;wek zegara.
+  --pdfout &lt;plik.pdf&gt;      Integracja eDOK: po zatwierdzeniu anonimizacji zapisuje PDF pod wskazan&#261; nazw&#261;.
+  --pngout &lt;plik.png&gt;      Zapisuje bie&#380;&#261;cy widok strony jako PNG, a nast&#281;pnie zamyka aplikacj&#281;.
+  --lang &lt;pl|en|de&gt;        J&#281;zyk komunikat&#243;w; domy&#347;lnie angielski.
+  --help, -h, /?            Wy&#347;wietla t&#281; pomoc.
+
+Opcje wsadowe (wymagaj&#261; --headless):
+  --template &lt;plik.app&gt;  Szablon projektu z zaznaczeniami; jego &#347;cie&#380;ka PDF jest ignorowana.
+  --pdfout &lt;plik.pdf&gt;    Docelowy plik PDF.
+  --overwrite              Zezwala na nadpisanie istniej&#261;cego pliku wynikowego.
+  --headless               Uruchamia bez interfejsu i bez wtyczki PII.
+  --text                   Indeksuje tekst natywny dokumentu.
+  --ocr                    Uruchamia indeksowanie oraz OCR stron bez tekstu.
+  --format pdf|pdfa        Format wyniku; pdf jest domy&#347;lny, pdfa wymaga OCR.
+
+Kody zako&#324;czenia: 0 sukces, 2 b&#322;&#281;dne parametry, 3 niezgodny szablon, 4 istniej&#261;cy plik wynikowy, 5 b&#322;&#261;d przetwarzania.</value>
+  </data>
+  <data name="CommandLine_MissingLanguage" xml:space="preserve"><value>Brak warto&#347;ci po parametrze --lang.</value></data>
+  <data name="CommandLine_MissingTemplate" xml:space="preserve"><value>Brak &#347;cie&#380;ki po parametrze --template.</value></data>
+  <data name="CommandLine_MissingFormat" xml:space="preserve"><value>Brak warto&#347;ci po parametrze --format.</value></data>
+  <data name="CommandLine_InvalidFormat" xml:space="preserve"><value>Nieprawid&#322;owa warto&#347;&#263; parametru --format. Dozwolone warto&#347;ci: pdf, pdfa.</value></data>
+  <data name="CommandLine_UnknownOption" xml:space="preserve"><value>Nieznany parametr: {0}</value></data>
+  <data name="CommandLine_InvalidLanguage" xml:space="preserve"><value>Nieprawid&#322;owa warto&#347;&#263; parametru --lang: {0}. Dozwolone warto&#347;ci: pl, en, de.</value></data>
+  <data name="CommandLine_TemplateRequiresHeadless" xml:space="preserve"><value>Parametr --template wymaga u&#380;ycia parametru --headless.</value></data>
+  <data name="CommandLine_HeadlessRequirements" xml:space="preserve"><value>Tryb --headless wymaga dokumentu PDF, parametr&#243;w --template oraz --pdfout.</value></data>
+  <data name="CommandLine_InputMustBePdf" xml:space="preserve"><value>Dokument wej&#347;ciowy trybu --headless musi by&#263; plikiem PDF.</value></data>
+  <data name="CommandLine_InputNotFound" xml:space="preserve"><value>Nie znaleziono dokumentu wej&#347;ciowego: {0}</value></data>
+  <data name="CommandLine_TemplateNotFound" xml:space="preserve"><value>Nie znaleziono szablonu projektu: {0}</value></data>
+  <data name="CommandLine_OutputExists" xml:space="preserve"><value>Plik wynikowy ju&#380; istnieje. U&#380;yj --overwrite, aby go nadpisa&#263;: {0}</value></data>
+  <data name="CommandLine_OutputSameAsInput" xml:space="preserve"><value>Plik wynikowy musi by&#263; inny ni&#380; dokument wej&#347;ciowy.</value></data>
+  <data name="CommandLine_PasswordUnsupported" xml:space="preserve"><value>Dokument wej&#347;ciowy jest zabezpieczony has&#322;em; tryb --headless nie mo&#380;e wy&#347;wietli&#263; okna has&#322;a.</value></data>
+  <data name="CommandLine_CannotOpenInput" xml:space="preserve"><value>Nie mo&#380;na otworzy&#263; dokumentu wej&#347;ciowego: {0}</value></data>
+  <data name="CommandLine_InvalidPdf" xml:space="preserve"><value>Dokument wej&#347;ciowy nie jest prawid&#322;owym plikiem PDF.</value></data>
+  <data name="CommandLine_MissingBatchOptions" xml:space="preserve"><value>Brak parametr&#243;w trybu wsadowego.</value></data>
+  <data name="CommandLine_OpeningInput" xml:space="preserve"><value>Otwieranie dokumentu wej&#347;ciowego...</value></data>
+  <data name="CommandLine_CannotOpenInputGeneric" xml:space="preserve"><value>Nie mo&#380;na otworzy&#263; dokumentu wej&#347;ciowego.</value></data>
+  <data name="CommandLine_CannotReadTemplate" xml:space="preserve"><value>Nie mo&#380;na odczyta&#263; szablonu projektu: {0}</value></data>
+  <data name="CommandLine_InvalidTemplate" xml:space="preserve"><value>Szablon projektu jest pusty lub ma nieprawid&#322;owy format.</value></data>
+  <data name="CommandLine_TemplateSourceUnavailable" xml:space="preserve"><value>Szablon nie zawiera geometrii dokumentu, a jego dokument &#378;r&#243;d&#322;owy nie jest dost&#281;pny: {0}</value></data>
+  <data name="CommandLine_CannotReadGeometry" xml:space="preserve"><value>Nie mo&#380;na odczyta&#263; geometrii dokumentu wej&#347;ciowego: {0}</value></data>
+  <data name="CommandLine_TemplateMismatch" xml:space="preserve"><value>Szablon nie jest zgodny z dokumentem wej&#347;ciowym (liczba, rozmiar lub obr&#243;t stron).</value></data>
+  <data name="CommandLine_Indexing" xml:space="preserve"><value>Indeksowanie tekstu...</value></data>
+  <data name="CommandLine_IndexingOcr" xml:space="preserve"><value>Indeksowanie tekstu i OCR...</value></data>
+  <data name="CommandLine_ApplyingTemplate" xml:space="preserve"><value>Stosowanie szablonu...</value></data>
+  <data name="CommandLine_SavingPdf" xml:space="preserve"><value>Zapisywanie dokumentu PDF...</value></data>
+  <data name="CommandLine_SavingPdfA" xml:space="preserve"><value>Zapisywanie dokumentu PDF/A...</value></data>
+  <data name="CommandLine_OutputNotCreated" xml:space="preserve"><value>Nie utworzono pliku wynikowego.</value></data>
+  <data name="CommandLine_Saved" xml:space="preserve"><value>Zapisano dokument: {0}</value></data>
+  <data name="CommandLine_ProcessingError" xml:space="preserve"><value>B&#322;&#261;d przetwarzania: {0}</value></data>
 </root>

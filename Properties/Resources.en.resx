@@ -2346,4 +2346,66 @@ Close the application and run the installer now?</value>
   <data name="Err_DocumentMarginsTooLarge" xml:space="preserve">
     <value>The selected margins leave too little space for the page content.</value>
   </data>
+  <data name="CommandLine_Help" xml:space="preserve">
+    <value>AnonPDFPro - command-line options
+
+Interactive use:
+  AnonPDFPro.exe [document.pdf|project.app|project.pap] [options]
+
+Template batch processing:
+  AnonPDFPro.exe document.pdf --headless --template template.app --pdfout output.pdf [options]
+
+General options:
+  document.pdf             Opens a PDF document.
+  project.app, project.pap Opens a saved AnonPDFPro project.
+  --page &lt;number&gt;          Opens the specified page (numbering starts at 1).
+  --rotate &lt;0|90|180|270&gt;  Rotates the currently opened page clockwise.
+  --pdfout &lt;file.pdf&gt;      eDOK integration: saves the anonymized PDF to this file when anonymization is confirmed.
+  --pngout &lt;file.png&gt;      Saves the currently displayed page view as PNG, then closes the application.
+  --lang &lt;pl|en|de&gt;        Output language; English is the default.
+  --help, -h, /?            Shows this help.
+
+Batch options (require --headless):
+  --template &lt;file.app&gt;  Project template with selections; its PDF path is ignored.
+  --pdfout &lt;file.pdf&gt;    Output PDF file.
+  --overwrite              Allows replacing an existing output file.
+  --headless               Runs without the user interface and PII plugin.
+  --text                   Indexes native document text.
+  --ocr                    Runs indexing and OCR for pages without text.
+  --format pdf|pdfa        Output format; pdf is default, pdfa requires OCR.
+
+Exit codes: 0 success, 2 invalid arguments, 3 incompatible template, 4 output exists, 5 processing error.</value>
+  </data>
+  <data name="CommandLine_MissingLanguage" xml:space="preserve"><value>Missing value after --lang.</value></data>
+  <data name="CommandLine_MissingTemplate" xml:space="preserve"><value>Missing path after --template.</value></data>
+  <data name="CommandLine_MissingFormat" xml:space="preserve"><value>Missing value after --format.</value></data>
+  <data name="CommandLine_InvalidFormat" xml:space="preserve"><value>Invalid value for --format. Allowed values: pdf, pdfa.</value></data>
+  <data name="CommandLine_UnknownOption" xml:space="preserve"><value>Unknown option: {0}</value></data>
+  <data name="CommandLine_InvalidLanguage" xml:space="preserve"><value>Invalid value for --lang: {0}. Allowed values: pl, en, de.</value></data>
+  <data name="CommandLine_TemplateRequiresHeadless" xml:space="preserve"><value>The --template option requires --headless.</value></data>
+  <data name="CommandLine_HeadlessRequirements" xml:space="preserve"><value>--headless requires an input PDF, --template, and --pdfout.</value></data>
+  <data name="CommandLine_InputMustBePdf" xml:space="preserve"><value>The --headless input document must be a PDF file.</value></data>
+  <data name="CommandLine_InputNotFound" xml:space="preserve"><value>Input document was not found: {0}</value></data>
+  <data name="CommandLine_TemplateNotFound" xml:space="preserve"><value>Project template was not found: {0}</value></data>
+  <data name="CommandLine_OutputExists" xml:space="preserve"><value>Output file already exists. Use --overwrite to replace it: {0}</value></data>
+  <data name="CommandLine_OutputSameAsInput" xml:space="preserve"><value>The output file must be different from the input document.</value></data>
+  <data name="CommandLine_PasswordUnsupported" xml:space="preserve"><value>The input document is password-protected; --headless cannot display a password prompt.</value></data>
+  <data name="CommandLine_CannotOpenInput" xml:space="preserve"><value>Cannot open the input document: {0}</value></data>
+  <data name="CommandLine_InvalidPdf" xml:space="preserve"><value>The input document is not a valid PDF file.</value></data>
+  <data name="CommandLine_MissingBatchOptions" xml:space="preserve"><value>Missing batch-processing options.</value></data>
+  <data name="CommandLine_OpeningInput" xml:space="preserve"><value>Opening input document...</value></data>
+  <data name="CommandLine_CannotOpenInputGeneric" xml:space="preserve"><value>Cannot open the input document.</value></data>
+  <data name="CommandLine_CannotReadTemplate" xml:space="preserve"><value>Cannot read the project template: {0}</value></data>
+  <data name="CommandLine_InvalidTemplate" xml:space="preserve"><value>The project template is empty or has an invalid format.</value></data>
+  <data name="CommandLine_TemplateSourceUnavailable" xml:space="preserve"><value>The template does not contain document geometry and its source PDF is unavailable: {0}</value></data>
+  <data name="CommandLine_CannotReadGeometry" xml:space="preserve"><value>Cannot read the input document geometry: {0}</value></data>
+  <data name="CommandLine_TemplateMismatch" xml:space="preserve"><value>The template is incompatible with the input document (page count, size, or rotation).</value></data>
+  <data name="CommandLine_Indexing" xml:space="preserve"><value>Indexing text...</value></data>
+  <data name="CommandLine_IndexingOcr" xml:space="preserve"><value>Indexing text and running OCR...</value></data>
+  <data name="CommandLine_ApplyingTemplate" xml:space="preserve"><value>Applying template...</value></data>
+  <data name="CommandLine_SavingPdf" xml:space="preserve"><value>Saving PDF document...</value></data>
+  <data name="CommandLine_SavingPdfA" xml:space="preserve"><value>Saving PDF/A document...</value></data>
+  <data name="CommandLine_OutputNotCreated" xml:space="preserve"><value>The output file was not created.</value></data>
+  <data name="CommandLine_Saved" xml:space="preserve"><value>Document saved: {0}</value></data>
+  <data name="CommandLine_ProcessingError" xml:space="preserve"><value>Processing error: {0}</value></data>
 </root>

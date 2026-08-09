@@ -2299,4 +2299,66 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="Err_DocumentMarginsTooLarge" xml:space="preserve">
     <value>Die gew&#228;hlten R&#228;nder lassen zu wenig Platz f&#252;r den Seiteninhalt.</value>
   </data>
+  <data name="CommandLine_Help" xml:space="preserve">
+    <value>AnonPDFPro - Befehlszeilenoptionen
+
+Interaktive Verwendung:
+  AnonPDFPro.exe [dokument.pdf|projekt.app|projekt.pap] [Optionen]
+
+Vorlagenbasierte Stapelverarbeitung:
+  AnonPDFPro.exe dokument.pdf --headless --template vorlage.app --pdfout ergebnis.pdf [Optionen]
+
+Allgemeine Optionen:
+  dokument.pdf             &#214;ffnet ein PDF-Dokument.
+  projekt.app, projekt.pap &#214;ffnet ein gespeichertes AnonPDFPro-Projekt.
+  --page &lt;nummer&gt;          &#214;ffnet die angegebene Seite (Nummerierung beginnt bei 1).
+  --rotate &lt;0|90|180|270&gt;  Dreht die aktuell ge&#246;ffnete Seite im Uhrzeigersinn.
+  --pdfout &lt;datei.pdf&gt;      eDOK-Integration: speichert das anonymisierte PDF nach der Best&#228;tigung unter diesem Namen.
+  --pngout &lt;datei.png&gt;      Speichert die aktuelle Seitenansicht als PNG und schlie&#223;t anschlie&#223;end die Anwendung.
+  --lang &lt;pl|en|de&gt;        Sprache der Meldungen; Englisch ist Standard.
+  --help, -h, /?            Zeigt diese Hilfe an.
+
+Stapeloptionen (erfordern --headless):
+  --template &lt;datei.app&gt;  Projektvorlage mit Markierungen; ihr PDF-Pfad wird ignoriert.
+  --pdfout &lt;datei.pdf&gt;    Ausgabedatei im PDF-Format.
+  --overwrite              Erlaubt das Ersetzen einer vorhandenen Ausgabedatei.
+  --headless               Startet ohne Benutzeroberfl&#228;che und PII-Plugin.
+  --text                   Indiziert nativen Dokumenttext.
+  --ocr                    F&#252;hrt Indizierung und OCR f&#252;r Seiten ohne Text aus.
+  --format pdf|pdfa        Ausgabeformat; pdf ist Standard, pdfa erfordert OCR.
+
+Exit-Codes: 0 Erfolg, 2 ung&#252;ltige Argumente, 3 inkompatible Vorlage, 4 Ausgabe existiert, 5 Verarbeitungsfehler.</value>
+  </data>
+  <data name="CommandLine_MissingLanguage" xml:space="preserve"><value>Fehlender Wert nach --lang.</value></data>
+  <data name="CommandLine_MissingTemplate" xml:space="preserve"><value>Fehlender Pfad nach --template.</value></data>
+  <data name="CommandLine_MissingFormat" xml:space="preserve"><value>Fehlender Wert nach --format.</value></data>
+  <data name="CommandLine_InvalidFormat" xml:space="preserve"><value>Ung&#252;ltiger Wert f&#252;r --format. Zul&#228;ssige Werte: pdf, pdfa.</value></data>
+  <data name="CommandLine_UnknownOption" xml:space="preserve"><value>Unbekannte Option: {0}</value></data>
+  <data name="CommandLine_InvalidLanguage" xml:space="preserve"><value>Ung&#252;ltiger Wert f&#252;r --lang: {0}. Zul&#228;ssige Werte: pl, en, de.</value></data>
+  <data name="CommandLine_TemplateRequiresHeadless" xml:space="preserve"><value>Die Option --template erfordert --headless.</value></data>
+  <data name="CommandLine_HeadlessRequirements" xml:space="preserve"><value>--headless erfordert ein Eingabe-PDF, --template und --pdfout.</value></data>
+  <data name="CommandLine_InputMustBePdf" xml:space="preserve"><value>Das Eingabedokument f&#252;r --headless muss eine PDF-Datei sein.</value></data>
+  <data name="CommandLine_InputNotFound" xml:space="preserve"><value>Eingabedokument wurde nicht gefunden: {0}</value></data>
+  <data name="CommandLine_TemplateNotFound" xml:space="preserve"><value>Projektvorlage wurde nicht gefunden: {0}</value></data>
+  <data name="CommandLine_OutputExists" xml:space="preserve"><value>Ausgabedatei existiert bereits. Verwenden Sie --overwrite zum Ersetzen: {0}</value></data>
+  <data name="CommandLine_OutputSameAsInput" xml:space="preserve"><value>Die Ausgabedatei muss sich vom Eingabedokument unterscheiden.</value></data>
+  <data name="CommandLine_PasswordUnsupported" xml:space="preserve"><value>Das Eingabedokument ist kennwortgesch&#252;tzt; --headless kann keine Kennwortabfrage anzeigen.</value></data>
+  <data name="CommandLine_CannotOpenInput" xml:space="preserve"><value>Eingabedokument kann nicht ge&#246;ffnet werden: {0}</value></data>
+  <data name="CommandLine_InvalidPdf" xml:space="preserve"><value>Das Eingabedokument ist keine g&#252;ltige PDF-Datei.</value></data>
+  <data name="CommandLine_MissingBatchOptions" xml:space="preserve"><value>Fehlende Optionen f&#252;r die Stapelverarbeitung.</value></data>
+  <data name="CommandLine_OpeningInput" xml:space="preserve"><value>Eingabedokument wird ge&#246;ffnet...</value></data>
+  <data name="CommandLine_CannotOpenInputGeneric" xml:space="preserve"><value>Eingabedokument kann nicht ge&#246;ffnet werden.</value></data>
+  <data name="CommandLine_CannotReadTemplate" xml:space="preserve"><value>Projektvorlage kann nicht gelesen werden: {0}</value></data>
+  <data name="CommandLine_InvalidTemplate" xml:space="preserve"><value>Die Projektvorlage ist leer oder hat ein ung&#252;ltiges Format.</value></data>
+  <data name="CommandLine_TemplateSourceUnavailable" xml:space="preserve"><value>Die Vorlage enth&#228;lt keine Dokumentgeometrie und ihr Quell-PDF ist nicht verf&#252;gbar: {0}</value></data>
+  <data name="CommandLine_CannotReadGeometry" xml:space="preserve"><value>Geometrie des Eingabedokuments kann nicht gelesen werden: {0}</value></data>
+  <data name="CommandLine_TemplateMismatch" xml:space="preserve"><value>Die Vorlage ist nicht mit dem Eingabedokument kompatibel (Seitenzahl, Gr&#246;&#223;e oder Drehung).</value></data>
+  <data name="CommandLine_Indexing" xml:space="preserve"><value>Text wird indiziert...</value></data>
+  <data name="CommandLine_IndexingOcr" xml:space="preserve"><value>Text wird indiziert, OCR wird ausgef&#252;hrt...</value></data>
+  <data name="CommandLine_ApplyingTemplate" xml:space="preserve"><value>Vorlage wird angewendet...</value></data>
+  <data name="CommandLine_SavingPdf" xml:space="preserve"><value>PDF-Dokument wird gespeichert...</value></data>
+  <data name="CommandLine_SavingPdfA" xml:space="preserve"><value>PDF/A-Dokument wird gespeichert...</value></data>
+  <data name="CommandLine_OutputNotCreated" xml:space="preserve"><value>Die Ausgabedatei wurde nicht erstellt.</value></data>
+  <data name="CommandLine_Saved" xml:space="preserve"><value>Dokument gespeichert: {0}</value></data>
+  <data name="CommandLine_ProcessingError" xml:space="preserve"><value>Verarbeitungsfehler: {0}</value></data>
 </root>

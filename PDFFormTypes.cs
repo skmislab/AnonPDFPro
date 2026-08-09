@@ -4281,8 +4281,49 @@ namespace AnonPDF
         public bool ExportVisibleLayersOnly { get; set; }
         public DocumentMarginSettings DocumentMargins { get; set; }
         public String FilePath { get; set; }
+        public ProjectDocumentGeometry DocumentGeometry { get; set; }
         // Pending ALT text edits: posKey ("{page}:{x}:{y}") → new text
         public Dictionary<string, string> AltTextEdits { get; set; }
+    }
+
+    public class ProjectDocumentGeometry
+    {
+        public List<ProjectPageGeometry> Pages { get; set; } = new List<ProjectPageGeometry>();
+    }
+
+    public class ProjectPageGeometry
+    {
+        public float WidthPoints { get; set; }
+        public float HeightPoints { get; set; }
+        public int Rotation { get; set; }
+    }
+
+    internal sealed class BatchRunOptions
+    {
+        public string InputPdfPath { get; set; }
+        public string TemplatePath { get; set; }
+        public string OutputPdfPath { get; set; }
+        public bool OverwriteOutput { get; set; }
+        public bool IndexText { get; set; }
+        public bool RunOcr { get; set; }
+        public bool PdfAOutput { get; set; }
+        public Action<string> Progress { get; set; }
+    }
+
+    internal sealed class BatchRunResult
+    {
+        public int ExitCode { get; private set; }
+        public string Message { get; private set; }
+
+        public static BatchRunResult Success(string message)
+        {
+            return new BatchRunResult { ExitCode = 0, Message = message };
+        }
+
+        public static BatchRunResult Failure(int exitCode, string message)
+        {
+            return new BatchRunResult { ExitCode = exitCode, Message = message };
+        }
     }
 
     public class DocumentMarginSettings
@@ -4774,12 +4815,14 @@ namespace AnonPDF
         public static string LastDetectedLanguage { get; private set; }
 
         /// <summary>Returns true when <paramref name="rect"/> lies (even partially) outside the page boundaries.</summary>
-        public static bool IsOutOfPageBounds(iText.Kernel.Geom.Rectangle rect, float pageWidth, float pageHeight)
+        public static bool IsOutOfPageBounds(iText.Kernel.Geom.Rectangle rect, float pageLeft, float pageBottom, float pageWidth, float pageHeight)
         {
             if (pageWidth <= 0 || pageHeight <= 0) return false;
-            return rect.GetX() < 0 || rect.GetY() < 0 ||
-                   rect.GetX() + rect.GetWidth() > pageWidth + 1f ||
-                   rect.GetY() + rect.GetHeight() > pageHeight + 1f;
+            float pageRight = pageLeft + pageWidth;
+            float pageTop = pageBottom + pageHeight;
+            return rect.GetX() < pageLeft - 1f || rect.GetY() < pageBottom - 1f ||
+                   rect.GetX() + rect.GetWidth() > pageRight + 1f ||
+                   rect.GetY() + rect.GetHeight() > pageTop + 1f;
         }
 
         // Structure storing line data
@@ -4791,6 +4834,8 @@ namespace AnonPDF
             public float YPosition { get; set; }
             public List<CharacterInfo> Characters { get; set; } = new List<CharacterInfo>();
             public bool IsOcr { get; set; }
+            public float PageLeft { get; set; }
+            public float PageBottom { get; set; }
             public float PageWidth { get; set; }
             public float PageHeight { get; set; }
             public List<KernelGeom.Rectangle> OcrWordBounds { get; set; } = new List<KernelGeom.Rectangle>();
@@ -5114,10 +5159,10 @@ namespace AnonPDF
             return locations;
         }
 
-        private static void CacheLines(string pdfPath, string userPassword, System.Threading.CancellationToken cancellationToken = default)
+        private static void CacheLines(string pdfPath, string userPassword, System.Threading.CancellationToken cancellationToken = default, bool includeOcr = true)
         {
             // ── Disk cache hit? ───────────────────────────────────────────────────
-            if (PdfDiskCache.TryLoad(pdfPath, out var cached))
+            if (includeOcr && PdfDiskCache.TryLoad(pdfPath, out var cached))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 _lineCache[pdfPath]       = PdfDiskCache.FromDto(cached.Lines);
@@ -5153,11 +5198,15 @@ namespace AnonPDF
                     // Out-of-bounds text (Y < 0 or Y > PageHeight) is hidden in any viewer
                     // but can contain PII — we detect it and display it in the Found tab
                     // under a dedicated "Poza stroną" sub-node so users can anonymize it.
-                    var pageSize = pageObj.GetPageSize();
-                    float pw = pageSize.GetWidth();
-                    float ph = pageSize.GetHeight();
+                    var visiblePageBounds = pageObj.GetCropBox();
+                    float px = visiblePageBounds.GetX();
+                    float py = visiblePageBounds.GetY();
+                    float pw = visiblePageBounds.GetWidth();
+                    float ph = visiblePageBounds.GetHeight();
                     foreach (var l in strategy.ExtractedLines)
                     {
+                        l.PageLeft = px;
+                        l.PageBottom = py;
                         l.PageWidth = pw;
                         l.PageHeight = ph;
                     }
@@ -5165,7 +5214,10 @@ namespace AnonPDF
                     ReportCacheStatus(LocalizedFormat("CacheStatus_IndexPage", page), pdfPath);
                 }
 
-                AppendOcrLinesForPagesWithoutNativeText(pdfPath, userPassword, pdfDoc, lines, cancellationToken);
+                if (includeOcr)
+                {
+                    AppendOcrLinesForPagesWithoutNativeText(pdfPath, userPassword, pdfDoc, lines, cancellationToken);
+                }
                 _altTextCache[pdfPath] = ExtractAltTexts(pdfDoc);
                 _allFiguresCache[pdfPath] = ExtractAllFigures(pdfDoc);
             }
@@ -5173,7 +5225,7 @@ namespace AnonPDF
             _lineCache[pdfPath] = lines;
 
             // Save now only when NER won't run (no plugin) — otherwise SetPersonalDataCache saves once after NER.
-            if (!IsLocalNerAvailable())
+            if (includeOcr && !IsLocalNerAvailable())
                 PdfDiskCache.Save(pdfPath, lines, _altTextCache[pdfPath], _allFiguresCache[pdfPath]);
         }
 
@@ -6702,7 +6754,7 @@ namespace AnonPDF
                             locations.Add(new TextLocation(line.PageNumber, line.PageRotation, textRect, line.IsOcr)
                             {
                                 Text = searchText,
-                                Source = PdfTextSearcher.IsOutOfPageBounds(textRect, line.PageWidth, line.PageHeight)
+                                Source = PdfTextSearcher.IsOutOfPageBounds(textRect, line.PageLeft, line.PageBottom, line.PageWidth, line.PageHeight)
                                     ? LocationSource.OutOfBounds
                                     : LocationSource.Normal
                             });
@@ -6799,7 +6851,7 @@ namespace AnonPDF
                                         locations.Add(new TextLocation(cachedLine.PageNumber, cachedLine.PageRotation, textRect, cachedLine.IsOcr)
                                         {
                                             Text = entityText,
-                                            Source = PdfTextSearcher.IsOutOfPageBounds(textRect, cachedLine.PageWidth, cachedLine.PageHeight)
+                                            Source = PdfTextSearcher.IsOutOfPageBounds(textRect, cachedLine.PageLeft, cachedLine.PageBottom, cachedLine.PageWidth, cachedLine.PageHeight)
                                                 ? LocationSource.OutOfBounds
                                                 : LocationSource.Normal
                                         });
@@ -8044,14 +8096,19 @@ namespace AnonPDF
 
         public static void CachePdfText(string pdfPath, string userPassword)
         {
-            CachePdfText(pdfPath, userPassword, System.Threading.CancellationToken.None);
+            CachePdfText(pdfPath, userPassword, System.Threading.CancellationToken.None, includeOcr: true);
         }
 
         public static void CachePdfText(string pdfPath, string userPassword, System.Threading.CancellationToken cancellationToken)
         {
+            CachePdfText(pdfPath, userPassword, cancellationToken, includeOcr: true);
+        }
+
+        public static void CachePdfText(string pdfPath, string userPassword, System.Threading.CancellationToken cancellationToken, bool includeOcr)
+        {
             if (!_lineCache.ContainsKey(pdfPath))
             {
-                CacheLines(pdfPath, userPassword, cancellationToken);
+                CacheLines(pdfPath, userPassword, cancellationToken, includeOcr);
             }
         }
 
@@ -9372,7 +9429,7 @@ namespace AnonPDF
                 locations.Add(new TextLocation(line.PageNumber, line.PageRotation, textRect, line.IsOcr)
                 {
                     HighlightRects = textRects != null && textRects.Count > 1 ? textRects : null,
-                    Source = IsOutOfPageBounds(textRect, line.PageWidth, line.PageHeight)
+                    Source = IsOutOfPageBounds(textRect, line.PageLeft, line.PageBottom, line.PageWidth, line.PageHeight)
                         ? LocationSource.OutOfBounds
                         : LocationSource.Normal
                 });

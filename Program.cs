@@ -6,6 +6,8 @@ using System.Linq;
 using Microsoft.Win32;
 using Newtonsoft.Json.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Globalization;
 
 // Suppress spell-check warning for project name 'AnonPDF'
 #pragma warning disable SPELL
@@ -17,9 +19,25 @@ namespace AnonPDF
         private const string AppProjectProgId = "AnonPDFPro.Project";
         private const int ShcneAssocChanged = 0x08000000;
         private const uint ShcnfIdList = 0x0000;
+        private const uint AttachParentProcess = 0xFFFFFFFF;
+        private const int StandardErrorHandle = -12;
+        private static bool commandLineConsoleInitialized;
+        private static CultureInfo commandLineCulture = CultureInfo.GetCultureInfo("en");
 
         [DllImport("shell32.dll")]
         private static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool AttachConsole(uint dwProcessId);
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetStdHandle(int nStdHandle);
+
+        [DllImport("kernel32.dll")]
+        private static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetConsoleOutputCP();
 
         /// <summary>
         /// The main entry point for the application.
@@ -48,11 +66,36 @@ namespace AnonPDF
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            EnsureContextMenuRegistration();
             StartupOptions startupOptions = ParseStartupOptions(args);
+            ConfigureCommandLineCulture(ref startupOptions);
+            if (!string.IsNullOrWhiteSpace(startupOptions.ParseError))
+            {
+                WriteCommandLineMessage(startupOptions.ParseError + Environment.NewLine + GetCommandLineHelp());
+                Environment.ExitCode = 2;
+                return;
+            }
+            if (startupOptions.ShowHelp)
+            {
+                WriteCommandLineMessage(GetCommandLineHelp());
+                return;
+            }
+            if (!ValidateHeadlessOptions(startupOptions, out string startupError, out int startupExitCode))
+            {
+                WriteCommandLineMessage(startupError);
+                Environment.ExitCode = startupExitCode;
+                return;
+            }
+
+            EnsureContextMenuRegistration();
             LicenseManager.Initialize(AppDomain.CurrentDomain.BaseDirectory);
             if (!ValidateRequiredLicenseFiles(out string licenseError))
             {
+                if (startupOptions.Headless)
+                {
+                    WriteCommandLineMessage(licenseError);
+                    Environment.ExitCode = 5;
+                    return;
+                }
                 MessageBox.Show(
                     licenseError,
                     Properties.Resources.Title_Error,
@@ -60,6 +103,13 @@ namespace AnonPDF
                     MessageBoxIcon.Error);
                 return;
             }
+
+            if (startupOptions.Headless)
+            {
+                RunHeadlessTemplateBatch(startupOptions);
+                return;
+            }
+
             bool hasStartupInputPath = !string.IsNullOrWhiteSpace(startupOptions.InputPath);
             // Normal startup keeps SplashForm alive while PDFForm runs its first Load/Shown layout.
             // Keep the same DPI bootstrap for command-line startup without showing the splash window.
@@ -156,6 +206,15 @@ namespace AnonPDF
             public string PngOutputPath;  // --pngout
             public int RotateDegrees;     // --rotate <0|90|180|270>
             public int PageNumber;        // --page <1-based page number>
+            public string TemplatePath;   // --template <project.app>
+            public bool OverwriteOutput;  // --overwrite
+            public bool Headless;         // --headless
+            public bool IndexText;        // --text
+            public bool RunOcr;           // --ocr
+            public bool PdfAOutput;       // --format pdfa
+            public bool ShowHelp;         // --help
+            public string Language;       // --lang <pl|en|de>
+            public string ParseError;
         }
 
         private static StartupOptions ParseStartupOptions(string[] args)
@@ -168,9 +227,83 @@ namespace AnonPDF
                 string arg = args[i]?.Trim();
                 if (string.IsNullOrWhiteSpace(arg)) continue;
 
+                if (string.Equals(arg, "--help", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(arg, "-h", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(arg, "/?", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.ShowHelp = true;
+                    continue;
+                }
+                if (string.Equals(arg, "--headless", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.Headless = true;
+                    continue;
+                }
+                if (string.Equals(arg, "--overwrite", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.OverwriteOutput = true;
+                    continue;
+                }
+                if (string.Equals(arg, "--text", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.IndexText = true;
+                    continue;
+                }
+                if (string.Equals(arg, "--ocr", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.IndexText = true;
+                    options.RunOcr = true;
+                    continue;
+                }
+                if (string.Equals(arg, "--lang", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        options.ParseError = CommandLineText("CommandLine_MissingLanguage");
+                        break;
+                    }
+                    options.Language = args[++i]?.Trim();
+                    continue;
+                }
+                if (string.Equals(arg, "--template", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        options.ParseError = CommandLineText("CommandLine_MissingTemplate");
+                        break;
+                    }
+                    options.TemplatePath = GetFullPathOrOriginal(args[++i]);
+                    continue;
+                }
+                if (string.Equals(arg, "--format", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        options.ParseError = CommandLineText("CommandLine_MissingFormat");
+                        break;
+                    }
+
+                    string format = args[++i]?.Trim();
+                    if (string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase))
+                    {
+                        options.PdfAOutput = false;
+                    }
+                    else if (string.Equals(format, "pdfa", StringComparison.OrdinalIgnoreCase))
+                    {
+                        options.PdfAOutput = true;
+                        options.IndexText = true;
+                        options.RunOcr = true;
+                    }
+                    else
+                    {
+                        options.ParseError = CommandLineText("CommandLine_InvalidFormat");
+                        break;
+                    }
+                    continue;
+                }
                 if (string.Equals(arg, "--pdfout", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
                 {
-                    options.PdfOutputPath = args[++i]?.Trim();
+                    options.PdfOutputPath = GetFullPathOrOriginal(args[++i]);
                     continue;
                 }
                 if (string.Equals(arg, "--pngout", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
@@ -190,7 +323,11 @@ namespace AnonPDF
                         options.PageNumber = pg;
                     continue;
                 }
-                if (arg.StartsWith("--", StringComparison.Ordinal)) continue;
+                if (arg.StartsWith("--", StringComparison.Ordinal))
+                {
+                    options.ParseError = string.Format(CommandLineText("CommandLine_UnknownOption"), arg);
+                    break;
+                }
 
                 string ext = Path.GetExtension(arg);
                 if (string.IsNullOrEmpty(options.InputPath) &&
@@ -198,10 +335,157 @@ namespace AnonPDF
                      string.Equals(ext, ".app", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(ext, ".pap", StringComparison.OrdinalIgnoreCase)))
                 {
-                    try { options.InputPath = Path.GetFullPath(arg); } catch { options.InputPath = arg; }
+                    options.InputPath = GetFullPathOrOriginal(arg);
                 }
             }
             return options;
+        }
+
+        private static string GetFullPathOrOriginal(string path)
+        {
+            string value = path?.Trim();
+            if (string.IsNullOrWhiteSpace(value)) return value;
+            try { return Path.GetFullPath(value); } catch { return value; }
+        }
+
+        private static void ConfigureCommandLineCulture(ref StartupOptions options)
+        {
+            string language = options.Language?.Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(language))
+            {
+                commandLineCulture = CultureInfo.GetCultureInfo("en");
+                Properties.Resources.Culture = commandLineCulture;
+                return;
+            }
+
+            if (language != "pl" && language != "en" && language != "de")
+            {
+                commandLineCulture = CultureInfo.GetCultureInfo("en");
+                options.ParseError = string.Format(CommandLineText("CommandLine_InvalidLanguage"), language);
+                return;
+            }
+
+            commandLineCulture = CultureInfo.GetCultureInfo(language);
+            Properties.Resources.Culture = commandLineCulture;
+        }
+
+        private static bool ValidateHeadlessOptions(StartupOptions options, out string error, out int exitCode)
+        {
+            error = null;
+            exitCode = 2;
+            if (!options.Headless)
+            {
+                if (!string.IsNullOrWhiteSpace(options.TemplatePath))
+                {
+                    error = CommandLineText("CommandLine_TemplateRequiresHeadless");
+                    return false;
+                }
+                return true;
+            }
+
+            if (string.IsNullOrWhiteSpace(options.TemplatePath) || string.IsNullOrWhiteSpace(options.InputPath) || string.IsNullOrWhiteSpace(options.PdfOutputPath))
+            {
+                error = CommandLineText("CommandLine_HeadlessRequirements");
+                return false;
+            }
+            if (!string.Equals(Path.GetExtension(options.InputPath), ".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                error = CommandLineText("CommandLine_InputMustBePdf");
+                return false;
+            }
+            if (!File.Exists(options.InputPath))
+            {
+                error = string.Format(CommandLineText("CommandLine_InputNotFound"), options.InputPath);
+                return false;
+            }
+            if (!File.Exists(options.TemplatePath))
+            {
+                error = string.Format(CommandLineText("CommandLine_TemplateNotFound"), options.TemplatePath);
+                return false;
+            }
+            if (File.Exists(options.PdfOutputPath) && !options.OverwriteOutput)
+            {
+                error = string.Format(CommandLineText("CommandLine_OutputExists"), options.PdfOutputPath);
+                exitCode = 4;
+                return false;
+            }
+            if (string.Equals(options.InputPath, options.PdfOutputPath, StringComparison.OrdinalIgnoreCase))
+            {
+                error = CommandLineText("CommandLine_OutputSameAsInput");
+                return false;
+            }
+            return true;
+        }
+
+        private static void RunHeadlessTemplateBatch(StartupOptions options)
+        {
+            using (var form = new PDFForm(null))
+            {
+                BatchRunResult result = form.RunHeadlessTemplateBatch(new BatchRunOptions
+                {
+                    InputPdfPath = options.InputPath,
+                    TemplatePath = options.TemplatePath,
+                    OutputPdfPath = options.PdfOutputPath,
+                    OverwriteOutput = options.OverwriteOutput,
+                    IndexText = options.IndexText,
+                    RunOcr = options.RunOcr,
+                    PdfAOutput = options.PdfAOutput,
+                    Progress = WriteCommandLineMessage
+                });
+                WriteCommandLineMessage(result.Message);
+                Environment.ExitCode = result.ExitCode;
+            }
+        }
+
+        private static void WriteCommandLineMessage(string message)
+        {
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                EnsureCommandLineConsole();
+                Console.Error.WriteLine(message);
+            }
+        }
+
+        private static void EnsureCommandLineConsole()
+        {
+            if (commandLineConsoleInitialized)
+            {
+                return;
+            }
+
+            commandLineConsoleInitialized = true;
+            if (!AttachConsole(AttachParentProcess))
+            {
+                return;
+            }
+
+            IntPtr standardError = GetStdHandle(StandardErrorHandle);
+            Encoding encoding = Encoding.UTF8;
+            if (standardError != IntPtr.Zero && standardError != new IntPtr(-1) && GetConsoleMode(standardError, out _))
+            {
+                uint codePage = GetConsoleOutputCP();
+                if (codePage != 0)
+                {
+                    encoding = Encoding.GetEncoding((int)codePage);
+                }
+            }
+            var errorWriter = new StreamWriter(Console.OpenStandardError(), encoding) { AutoFlush = true };
+            Console.SetError(errorWriter);
+        }
+
+        private static string CommandLineText(string key)
+        {
+            string value = Properties.Resources.ResourceManager.GetString(key, commandLineCulture);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                value = Properties.Resources.ResourceManager.GetString(key, CultureInfo.GetCultureInfo("en"));
+            }
+            return string.IsNullOrWhiteSpace(value) ? key : value;
+        }
+
+        private static string GetCommandLineHelp()
+        {
+            return CommandLineText("CommandLine_Help");
         }
 
         private static void EnsureContextMenuRegistration()

@@ -98,6 +98,7 @@ namespace AnonPDF
         private string inputPdfPath = "";
         private string inputProjectPath = "";
         private string lastRedactedPdfOutputPath = "";
+        private ProjectDocumentGeometry currentDocumentGeometry;
         private DocumentMarginSettings documentMargins = new DocumentMarginSettings();
         private int currentPage = 1;
         private int numPages = 0;
@@ -345,6 +346,9 @@ namespace AnonPDF
         private bool syncPageSelectionFromThumbnail;
         private bool syncThumbnailSelectionFromPage;
         private bool isLoadingPdf;
+        private bool suppressDocumentBackgroundProcessing;
+        private bool headlessBatchExecution;
+        private string headlessBatchError;
         private string integrationPdfOutputPath;
         private string autoSavePngOutputPath;
         private readonly Timer thumbnailViewportTimer;
@@ -22040,6 +22044,11 @@ namespace AnonPDF
                 }
                 catch (Exception)
                 {
+                    if (headlessBatchExecution)
+                    {
+                        headlessBatchError = Resources.Err_CannotAnonymizePdf;
+                        return;
+                    }
                     MessageBox.Show(this, Resources.Err_CannotAnonymizePdf, Resources.Title_Error,
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
@@ -23053,6 +23062,7 @@ namespace AnonPDF
             CancelPreviewRender();
             userPassword = "";
             lastRedactedPdfOutputPath = "";
+            currentDocumentGeometry = null;
             PdfReader reader = null;
             iText.Kernel.Pdf.PdfDocument pdfDoc = null;
 
@@ -23068,6 +23078,11 @@ namespace AnonPDF
                 }
                 catch (BadPasswordException)
                 {
+                    if (headlessBatchExecution)
+                    {
+                        headlessBatchError = LocalizedText("CommandLine_PasswordUnsupported");
+                        return;
+                    }
                     // 2) Ask user for password
                     string pwd = PromptForPassword();
                     if (string.IsNullOrEmpty(pwd))
@@ -23096,6 +23111,11 @@ namespace AnonPDF
                 }
                 catch (Exception ex)
                 {
+                    if (headlessBatchExecution)
+                    {
+                        headlessBatchError = string.Format(LocalizedText("CommandLine_CannotOpenInput"), ex.Message);
+                        return;
+                    }
                     MessageBox.Show(this, string.Format(Resources.Msg_OpenPdfError, ex.Message),
                                     Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return;
@@ -23111,11 +23131,18 @@ namespace AnonPDF
         }
         catch (Exception)
         {
+            if (headlessBatchExecution)
+            {
+                headlessBatchError = LocalizedText("CommandLine_InvalidPdf");
+                return;
+            }
             MessageBox.Show(this, Resources.Err_InvalidPdfFile, Resources.Title_Error, MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
         pdfViewer.SizeMode = PictureBoxSizeMode.AutoSize;
+
+        currentDocumentGeometry = ReadDocumentGeometry(inputPdfPath, userPassword, out _);
 
         LogDebug($"LoadPdf path={inputPdfPath} password={(string.IsNullOrEmpty(userPassword) ? "no" : "yes")}");
 
@@ -23213,13 +23240,21 @@ namespace AnonPDF
             // Do not rely only on ListView selection events when loading a new file.
             ReloadRefreshCurrentPage();
 
-            // Start background indexing and OCR so search and cursor mode are ready immediately
-            cursorRadioButton.Enabled = false;
-            ShowIndexingStatus(LocalizedText("Msg_CursorModeUnavailable"));
-            StartDocumentBackgroundProcessing(processingSession, inputPdfPath, userPassword);
+            // Start background indexing and OCR so search and cursor mode are ready immediately.
+            // Headless template export invokes only the explicitly requested text processing.
+            cursorRadioButton.Enabled = !suppressDocumentBackgroundProcessing;
+            if (suppressDocumentBackgroundProcessing)
+            {
+                ShowIndexingStatus(string.Empty);
+            }
+            else
+            {
+                ShowIndexingStatus(LocalizedText("Msg_CursorModeUnavailable"));
+                StartDocumentBackgroundProcessing(processingSession, inputPdfPath, userPassword);
+            }
             groupBoxSelections.Enabled = true;
             groupBoxPagesToRemove.Enabled = true;
-            groupBoxSearch.Enabled = false;   // enabled after CachePdfText completes
+            groupBoxSearch.Enabled = suppressDocumentBackgroundProcessing;
             personalDataButton.Enabled = false;
 
             saveProjectAsButton.Enabled = true;
@@ -24923,6 +24958,139 @@ namespace AnonPDF
                         // best effort cleanup
                     }
                 }
+            }
+        }
+
+        internal BatchRunResult RunHeadlessTemplateBatch(BatchRunOptions options)
+        {
+            if (options == null)
+            {
+                return BatchRunResult.Failure(2, LocalizedText("CommandLine_MissingBatchOptions"));
+            }
+
+            string temporaryOutputPath = null;
+            suppressDocumentBackgroundProcessing = true;
+            headlessBatchExecution = true;
+            headlessBatchError = null;
+            isApplicationClosing = true;
+
+            try
+            {
+                options.Progress?.Invoke(LocalizedText("CommandLine_OpeningInput"));
+                inputPdfPath = options.InputPdfPath;
+                LoadPdf();
+                if (pdf == null || !string.IsNullOrWhiteSpace(headlessBatchError))
+                {
+                    return BatchRunResult.Failure(5, headlessBatchError ?? LocalizedText("CommandLine_CannotOpenInputGeneric"));
+                }
+
+                ProjectData template;
+                try
+                {
+                    template = JsonConvert.DeserializeObject<ProjectData>(File.ReadAllText(options.TemplatePath));
+                }
+                catch (Exception ex)
+                {
+                    return BatchRunResult.Failure(3, string.Format(LocalizedText("CommandLine_CannotReadTemplate"), ex.Message));
+                }
+                if (template == null)
+                {
+                    return BatchRunResult.Failure(3, LocalizedText("CommandLine_InvalidTemplate"));
+                }
+
+                ProjectDocumentGeometry templateGeometry = template.DocumentGeometry;
+                if (templateGeometry == null || templateGeometry.Pages == null || templateGeometry.Pages.Count == 0)
+                {
+                    string templateSourcePdf = ResolveProjectPdfPath(template.FilePath ?? string.Empty, options.TemplatePath);
+                    templateGeometry = ReadDocumentGeometry(templateSourcePdf, string.Empty, out string templateGeometryError);
+                    if (templateGeometry == null)
+                    {
+                        return BatchRunResult.Failure(3,
+                            string.Format(LocalizedText("CommandLine_TemplateSourceUnavailable"), templateGeometryError));
+                    }
+                }
+
+                ProjectDocumentGeometry targetGeometry = ReadDocumentGeometry(inputPdfPath, userPassword, out string targetGeometryError);
+                if (targetGeometry == null)
+                {
+                    return BatchRunResult.Failure(5, string.Format(LocalizedText("CommandLine_CannotReadGeometry"), targetGeometryError));
+                }
+                if (!HasMatchingDocumentGeometry(templateGeometry, targetGeometry))
+                {
+                    return BatchRunResult.Failure(3, LocalizedText("CommandLine_TemplateMismatch"));
+                }
+
+                if (options.IndexText)
+                {
+                    options.Progress?.Invoke(LocalizedText(options.RunOcr ? "CommandLine_IndexingOcr" : "CommandLine_Indexing"));
+                    PdfTextSearcher.CachePdfText(inputPdfPath, userPassword, System.Threading.CancellationToken.None, options.RunOcr);
+                }
+
+                options.Progress?.Invoke(LocalizedText("CommandLine_ApplyingTemplate"));
+                ApplyProjectSnapshotToCurrentDocument(template);
+                setSavePassword.Checked = false;
+                openSavedPDFCheckBox.Checked = false;
+
+                string outputDirectory = Path.GetDirectoryName(options.OutputPdfPath);
+                if (string.IsNullOrWhiteSpace(outputDirectory))
+                {
+                    outputDirectory = Environment.CurrentDirectory;
+                }
+                Directory.CreateDirectory(outputDirectory);
+                temporaryOutputPath = Path.Combine(outputDirectory,
+                    Path.GetFileNameWithoutExtension(options.OutputPdfPath) + ".anonpdfpro-" + Guid.NewGuid().ToString("N") + ".tmp.pdf");
+
+                if (File.Exists(options.OutputPdfPath) && !options.OverwriteOutput)
+                {
+                    return BatchRunResult.Failure(4, string.Format(LocalizedText("CommandLine_OutputExists"), options.OutputPdfPath));
+                }
+
+                options.Progress?.Invoke(LocalizedText(options.PdfAOutput ? "CommandLine_SavingPdfA" : "CommandLine_SavingPdf"));
+                BuildRedactedPdfForOutput(
+                    temporaryOutputPath,
+                    additionalPagesToRemove: null,
+                    includeSupplementaryPages: true,
+                    showSuccessMessage: false,
+                    outputFormat: options.PdfAOutput ? RedactedPdfOutputFormat.PdfA : RedactedPdfOutputFormat.Pdf,
+                    disableOutputEncryption: true);
+
+                if (!string.IsNullOrWhiteSpace(headlessBatchError))
+                {
+                    return BatchRunResult.Failure(5, headlessBatchError);
+                }
+                if (!File.Exists(temporaryOutputPath) || new FileInfo(temporaryOutputPath).Length == 0)
+                {
+                    return BatchRunResult.Failure(5, LocalizedText("CommandLine_OutputNotCreated"));
+                }
+
+                if (File.Exists(options.OutputPdfPath))
+                {
+                    if (!options.OverwriteOutput)
+                    {
+                        return BatchRunResult.Failure(4, string.Format(LocalizedText("CommandLine_OutputExists"), options.OutputPdfPath));
+                    }
+                    File.Replace(temporaryOutputPath, options.OutputPdfPath, null);
+                }
+                else
+                {
+                    File.Move(temporaryOutputPath, options.OutputPdfPath);
+                }
+                temporaryOutputPath = null;
+                return BatchRunResult.Success(string.Format(LocalizedText("CommandLine_Saved"), options.OutputPdfPath));
+            }
+            catch (Exception ex)
+            {
+                LogDebug("Headless template batch failed: " + ex);
+                return BatchRunResult.Failure(5, string.Format(LocalizedText("CommandLine_ProcessingError"), ex.Message));
+            }
+            finally
+            {
+                if (!string.IsNullOrWhiteSpace(temporaryOutputPath) && File.Exists(temporaryOutputPath))
+                {
+                    try { File.Delete(temporaryOutputPath); } catch { }
+                }
+                suppressDocumentBackgroundProcessing = false;
+                headlessBatchExecution = false;
             }
         }
 
@@ -28354,6 +28522,7 @@ namespace AnonPDF
                     ? new Dictionary<int, int>()
                     : new Dictionary<int, int>(pageRotationOffsets),
                 FilePath = inputPdfPath,
+                DocumentGeometry = currentDocumentGeometry,
                 CurrentPage = Math.Max(1, Math.Min(currentPage, Math.Max(1, numPages))),
                 ZoomFactor = zoomFactor,
                 ScrollX = scrollX,
@@ -28371,6 +28540,72 @@ namespace AnonPDF
                     .Where(kv => kv.Key.pdfPath == inputPdfPath)
                     .ToDictionary(kv => kv.Key.posKey, kv => kv.Value)
             };
+        }
+
+        private static ProjectDocumentGeometry ReadDocumentGeometry(string pdfPath, string password, out string error)
+        {
+            error = null;
+            if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+            {
+                error = "Nie znaleziono dokumentu PDF.";
+                return null;
+            }
+
+            try
+            {
+                var readerProperties = new ReaderProperties();
+                if (!string.IsNullOrWhiteSpace(password))
+                {
+                    readerProperties.SetPassword(System.Text.Encoding.UTF8.GetBytes(password));
+                }
+
+                using (var reader = new PdfReader(pdfPath, readerProperties).SetUnethicalReading(Properties.Settings.Default.IgnorePdfRestrictions))
+                using (var pdfDocument = new iText.Kernel.Pdf.PdfDocument(reader))
+                {
+                    var geometry = new ProjectDocumentGeometry();
+                    for (int pageNumber = 1; pageNumber <= pdfDocument.GetNumberOfPages(); pageNumber++)
+                    {
+                        KernelGeom.Rectangle pageSize = pdfDocument.GetPage(pageNumber).GetPageSize();
+                        geometry.Pages.Add(new ProjectPageGeometry
+                        {
+                            WidthPoints = pageSize.GetWidth(),
+                            HeightPoints = pageSize.GetHeight(),
+                            Rotation = NormalizeRotation(pdfDocument.GetPage(pageNumber).GetRotation())
+                        });
+                    }
+                    return geometry;
+                }
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return null;
+            }
+        }
+
+        private static bool HasMatchingDocumentGeometry(ProjectDocumentGeometry templateGeometry, ProjectDocumentGeometry targetGeometry)
+        {
+            const float tolerance = 0.5f;
+            if (templateGeometry?.Pages == null || targetGeometry?.Pages == null ||
+                templateGeometry.Pages.Count == 0 || templateGeometry.Pages.Count != targetGeometry.Pages.Count)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < templateGeometry.Pages.Count; index++)
+            {
+                ProjectPageGeometry expected = templateGeometry.Pages[index];
+                ProjectPageGeometry actual = targetGeometry.Pages[index];
+                if (expected == null || actual == null ||
+                    Math.Abs(expected.WidthPoints - actual.WidthPoints) > tolerance ||
+                    Math.Abs(expected.HeightPoints - actual.HeightPoints) > tolerance ||
+                    NormalizeRotation(expected.Rotation) != NormalizeRotation(actual.Rotation))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private string BuildProjectStateSignature()
@@ -58142,6 +58377,8 @@ namespace AnonPDF
 
             foundTreeView = new NoHScrollTreeView
             {
+                Name = "foundTreeView",
+                AccessibleName = "Lista wyników wyszukiwania",
                 Dock = DockStyle.Fill,
                 CheckBoxes = false,   // Checkboxy rysowane ręcznie przez DrawNode
                 HideSelection = false,

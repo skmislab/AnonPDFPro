@@ -164,6 +164,8 @@ namespace AnonPDF
                     Text        = l.Text,
                     YPosition   = l.YPosition,
                     IsOcr       = l.IsOcr,
+                    PageLeft    = l.PageLeft,
+                    PageBottom  = l.PageBottom,
                     PageWidth   = l.PageWidth,
                     PageHeight  = l.PageHeight,
                 };
@@ -279,6 +281,8 @@ namespace AnonPDF
                     Text         = dto.Text ?? "",
                     YPosition    = dto.YPosition,
                     IsOcr        = dto.IsOcr,
+                    PageLeft     = dto.PageLeft,
+                    PageBottom   = dto.PageBottom,
                     PageWidth    = dto.PageWidth,
                     PageHeight   = dto.PageHeight,
                 };
@@ -416,6 +420,8 @@ namespace AnonPDF
         [Key(8)]  public List<OcrWordDto>   OcrWords         { get; set; }
         [Key(9)]  public float[]            OcrWordBoundsFlat    { get; set; }
         [Key(10)] public float[]            RawOcrWordBoundsFlat { get; set; }
+        [Key(11)] public float  PageLeft     { get; set; }
+        [Key(12)] public float  PageBottom   { get; set; }
     }
 
     [MessagePackObject]
