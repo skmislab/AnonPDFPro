@@ -11087,7 +11087,9 @@ namespace AnonPDF
 
         private void InitializeComponents(string currentAltText)
         {
+            this.Name = "altTextEditDialog";
             this.Text = R("AltEdit_Title");
+            this.AccessibleName = this.Text;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
@@ -11101,6 +11103,7 @@ namespace AnonPDF
 
             lblAltText = new Label
             {
+                Name = "altTextLabel",
                 Text = R("AltEdit_Label"),
                 AutoSize = true,
                 Location = new Point(PDFForm.ScaleForDpiStatic(10), PDFForm.ScaleForDpiStatic(12))
@@ -11108,6 +11111,7 @@ namespace AnonPDF
 
             txtAltText = new TextBox
             {
+                Name = "altTextTextBox",
                 Multiline = true,
                 ScrollBars = ScrollBars.Vertical,
                 Text = currentAltText,
@@ -11116,32 +11120,39 @@ namespace AnonPDF
                 AcceptsReturn = true,
                 WordWrap = true
             };
+            txtAltText.AccessibleName = lblAltText.Text;
 
             btnOK = new Button
             {
+                Name = "altTextOkButton",
                 Text = Resources.Merge_OK,
                 DialogResult = DialogResult.OK,
                 Location = new Point(PDFForm.ScaleForDpiStatic(135), PDFForm.ScaleForDpiStatic(165)),
                 Width = PDFForm.ScaleForDpiStatic(80),
                 Height = PDFForm.ScaleForDpiStatic(28)
             };
+            btnOK.AccessibleName = btnOK.Text;
 
             btnCancel = new Button
             {
+                Name = "altTextCancelButton",
                 Text = Resources.Merge_Cancel,
                 DialogResult = DialogResult.Cancel,
                 Location = new Point(PDFForm.ScaleForDpiStatic(225), PDFForm.ScaleForDpiStatic(165)),
                 Width = PDFForm.ScaleForDpiStatic(80),
                 Height = PDFForm.ScaleForDpiStatic(28)
             };
+            btnCancel.AccessibleName = btnCancel.Text;
 
             btnClear = new Button
             {
+                Name = "altTextClearButton",
                 Text = R("AltEdit_Clear"),
                 Location = new Point(PDFForm.ScaleForDpiStatic(325), PDFForm.ScaleForDpiStatic(165)),
                 Width = PDFForm.ScaleForDpiStatic(80),
                 Height = PDFForm.ScaleForDpiStatic(28)
             };
+            btnClear.AccessibleName = btnClear.Text;
             btnClear.Click += (s, ev) => { txtAltText.Clear(); txtAltText.Focus(); };
 
             this.Controls.Add(lblAltText);

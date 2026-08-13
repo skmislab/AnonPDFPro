@@ -58,6 +58,8 @@ namespace AnonPDF
             localExclusionScopes = new BindingList<ExclusionScopeDefinition>(CloneScopeList(localScopes, ExclusionScopeSource.Local));
 
             Text = Tr("Słownik podstaw prawnych", "Legal bases dictionary", "Rechtsgrundlagen");
+            Name = "legalBasesDictionaryDialog";
+            AccessibleName = Text;
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
@@ -68,18 +70,28 @@ namespace AnonPDF
 
             tabControl = new TabControl
             {
+                Name = "legalBasesTabControl",
+                AccessibleName = Text,
                 Dock = DockStyle.Fill
             };
             tabControl.SelectedIndexChanged += (_, __) => UpdateActionButtonsState();
 
-            globalTabPage = new TabPage(Tr("Globalne", "Global", "Global"));
-            localTabPage = new TabPage(Tr("Użytkownika", "User", "Benutzer"));
+            globalTabPage = new TabPage(Tr("Globalne", "Global", "Global"))
+            {
+                Name = "legalBasesGlobalTabPage",
+                AccessibleName = Tr("Globalne", "Global", "Global")
+            };
+            localTabPage = new TabPage(Tr("Użytkownika", "User", "Benutzer"))
+            {
+                Name = "legalBasesLocalTabPage",
+                AccessibleName = Tr("Użytkownika", "User", "Benutzer")
+            };
 
-            globalGridView = CreateGrid(globalLegalBases);
-            localGridView = CreateGrid(localLegalBases);
+            globalGridView = CreateGrid(globalLegalBases, "legalBasesGlobalGridView", Tr("Globalne podstawy prawne", "Global legal bases", "Globale Rechtsgrundlagen"));
+            localGridView = CreateGrid(localLegalBases, "legalBasesLocalGridView", Tr("Podstawy prawne użytkownika", "User legal bases", "Rechtsgrundlagen des Benutzers"));
 
-            globalStatusLabel = CreateStatusLabel();
-            localStatusLabel = CreateStatusLabel();
+            globalStatusLabel = CreateStatusLabel("legalBasesGlobalStatusLabel");
+            localStatusLabel = CreateStatusLabel("legalBasesLocalStatusLabel");
 
             PopulateTab(globalTabPage, globalStatusLabel, globalGridView);
             PopulateTab(localTabPage, localStatusLabel, localGridView);
@@ -91,43 +103,53 @@ namespace AnonPDF
 
             addButton = new Button
             {
+                Name = "legalBasesAddButton",
                 Text = Tr("Dodaj", "Add", "Hinzufuegen"),
                 Width = PDFForm.ScaleForDpiStatic(120),
                 Height = PDFForm.ScaleForDpiStatic(28)
             };
+            addButton.AccessibleName = addButton.Text;
             addButton.Click += AddButton_Click;
 
             editButton = new Button
             {
+                Name = "legalBasesEditButton",
                 Text = Tr("Edytuj", "Edit", "Bearbeiten"),
                 Width = PDFForm.ScaleForDpiStatic(120),
                 Height = PDFForm.ScaleForDpiStatic(28)
             };
+            editButton.AccessibleName = editButton.Text;
             editButton.Click += EditButton_Click;
 
             deleteButton = new Button
             {
+                Name = "legalBasesDeleteButton",
                 Text = Tr("Usuń", "Delete", "Loeschen"),
                 Width = PDFForm.ScaleForDpiStatic(120),
                 Height = PDFForm.ScaleForDpiStatic(28)
             };
+            deleteButton.AccessibleName = deleteButton.Text;
             deleteButton.Click += DeleteButton_Click;
 
             saveButton = new Button
             {
+                Name = "legalBasesSaveButton",
                 Text = Tr("Zapisz", "Save", "Speichern"),
                 Width = PDFForm.ScaleForDpiStatic(120),
                 Height = PDFForm.ScaleForDpiStatic(28)
             };
+            saveButton.AccessibleName = saveButton.Text;
             saveButton.Click += SaveButton_Click;
 
             cancelButton = new Button
             {
+                Name = "legalBasesCancelButton",
                 Text = Tr("Anuluj", "Cancel", "Abbrechen"),
                 Width = PDFForm.ScaleForDpiStatic(120),
                 Height = PDFForm.ScaleForDpiStatic(28),
                 DialogResult = DialogResult.Cancel
             };
+            cancelButton.AccessibleName = cancelButton.Text;
 
             var leftButtonsPanel = new FlowLayoutPanel
             {
@@ -236,10 +258,11 @@ namespace AnonPDF
                 .ToList();
         }
 
-        private static Label CreateStatusLabel()
+        private static Label CreateStatusLabel(string name)
         {
             return new Label
             {
+                Name = name,
                 AutoSize = true,
                 AutoEllipsis = true,
                 TextAlign = ContentAlignment.MiddleLeft,
@@ -262,10 +285,12 @@ namespace AnonPDF
             tabPage.Controls.Add(tabLayout);
         }
 
-        private DataGridView CreateGrid(BindingList<LegalBasisDefinition> source)
+        private DataGridView CreateGrid(BindingList<LegalBasisDefinition> source, string name, string accessibleName)
         {
             var grid = new DataGridView
             {
+                Name = name,
+                AccessibleName = accessibleName,
                 Dock = DockStyle.Fill,
                 AutoGenerateColumns = false,
                 AllowUserToAddRows = false,
@@ -891,9 +916,11 @@ namespace AnonPDF
             DialogTheme dialogTheme = null)
         {
             canEditScopeAssignments = canEditScopes;
+            Name = "legalBasisEditDialog";
             Text = source == null
                 ? Tr("Dodaj podstawę prawną", "Add legal basis", "Rechtsgrundlage hinzufuegen")
                 : Tr("Edytuj podstawę prawną", "Edit legal basis", "Rechtsgrundlage bearbeiten");
+            AccessibleName = Text;
 
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -944,10 +971,12 @@ namespace AnonPDF
             }, 0, 1);
             idTextBox = new TextBox
             {
+                Name = "legalBasisIdTextBox",
                 Dock = DockStyle.Fill,
                 ReadOnly = true,
                 TabStop = false
             };
+            idTextBox.AccessibleName = Tr("ID", "ID", "ID");
             layout.Controls.Add(idTextBox, 1, 1);
 
             layout.Controls.Add(new Label
@@ -957,7 +986,12 @@ namespace AnonPDF
                 TextAlign = ContentAlignment.MiddleLeft,
                 Dock = DockStyle.Fill
             }, 0, 2);
-            titleTextBox = new TextBox { Dock = DockStyle.Fill };
+            titleTextBox = new TextBox
+            {
+                Name = "legalBasisTitleTextBox",
+                AccessibleName = Tr("Nazwa skrócona", "Short title", "Kurztitel"),
+                Dock = DockStyle.Fill
+            };
             layout.Controls.Add(titleTextBox, 1, 2);
 
             layout.Controls.Add(new Label
@@ -969,6 +1003,8 @@ namespace AnonPDF
             }, 0, 3);
             fullCitationTextBox = new TextBox
             {
+                Name = "legalBasisFullCitationTextBox",
+                AccessibleName = Tr("Podstawa szczegółowa", "Full citation", "Vollzitat"),
                 Dock = DockStyle.Fill,
                 Multiline = true,
                 ScrollBars = ScrollBars.Vertical
@@ -985,6 +1021,8 @@ namespace AnonPDF
 
             scopesCheckedListBox = new CheckedListBox
             {
+                Name = "legalBasisScopesCheckedListBox",
+                AccessibleName = Tr("Zakresy", "Scopes", "Bereiche"),
                 Dock = DockStyle.Fill,
                 CheckOnClick = true,
                 HorizontalScrollbar = true,
@@ -1019,11 +1057,17 @@ namespace AnonPDF
                 TextAlign = ContentAlignment.MiddleLeft,
                 Dock = DockStyle.Fill
             }, 0, 5);
-            descriptionHintTextBox = new TextBox { Dock = DockStyle.Fill };
+            descriptionHintTextBox = new TextBox
+            {
+                Name = "legalBasisDescriptionHintTextBox",
+                AccessibleName = Tr("Nazwa pomocnicza", "Hint", "Hinweis"),
+                Dock = DockStyle.Fill
+            };
             layout.Controls.Add(descriptionHintTextBox, 1, 5);
 
             requiresInterestSubjectCheckBox = new CheckBox
             {
+                Name = "legalBasisRequiresInterestSubjectCheckBox",
                 Text = Tr(
                     "Wymaga podmiotu, w interesie którego dokonano wyłączenia",
                     "Requires interest subject",
@@ -1031,6 +1075,7 @@ namespace AnonPDF
                 Dock = DockStyle.Fill,
                 AutoSize = true
             };
+            requiresInterestSubjectCheckBox.AccessibleName = requiresInterestSubjectCheckBox.Text;
             layout.Controls.Add(requiresInterestSubjectCheckBox, 0, 6);
             layout.SetColumnSpan(requiresInterestSubjectCheckBox, 2);
 
@@ -1047,20 +1092,24 @@ namespace AnonPDF
 
             okButton = new Button
             {
+                Name = "legalBasisOkButton",
                 Text = Tr("OK", "OK", "OK"),
                 DialogResult = DialogResult.None,
                 Width = PDFForm.ScaleForDpiStatic(110),
                 Height = PDFForm.ScaleForDpiStatic(28)
             };
+            okButton.AccessibleName = okButton.Text;
             okButton.Click += OkButton_Click;
 
             cancelButton = new Button
             {
+                Name = "legalBasisCancelButton",
                 Text = Tr("Anuluj", "Cancel", "Abbrechen"),
                 DialogResult = DialogResult.Cancel,
                 Width = PDFForm.ScaleForDpiStatic(110),
                 Height = PDFForm.ScaleForDpiStatic(28)
             };
+            cancelButton.AccessibleName = cancelButton.Text;
 
             var buttonsPanel = new FlowLayoutPanel
             {

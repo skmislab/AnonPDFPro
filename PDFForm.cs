@@ -2189,6 +2189,8 @@ namespace AnonPDF
             legalBasesDictionaryToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "legalBasesDictionaryToolStripMenuItem",
+                AccessibleRole = AccessibleRole.MenuItem,
+                ShortcutKeys = Keys.Control | Keys.Shift | Keys.P,
                 Enabled = true
             };
             legalBasesDictionaryToolStripMenuItem.Click += LegalBasesDictionaryToolStripMenuItem_Click;
@@ -2196,6 +2198,8 @@ namespace AnonPDF
             exclusionAuthorityToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "exclusionAuthorityToolStripMenuItem",
+                AccessibleRole = AccessibleRole.MenuItem,
+                ShortcutKeys = Keys.Control | Keys.Shift | Keys.O,
                 Enabled = true
             };
             exclusionAuthorityToolStripMenuItem.Click += ExclusionAuthorityToolStripMenuItem_Click;
@@ -2203,6 +2207,7 @@ namespace AnonPDF
             automaticFootnotesToolStripMenuItem = new ToolStripMenuItem
             {
                 Name = "automaticFootnotesToolStripMenuItem",
+                AccessibleRole = AccessibleRole.MenuItem,
                 CheckOnClick = true,
                 Checked = autoFootnotesEnabled,
                 Enabled = false
@@ -2416,16 +2421,22 @@ namespace AnonPDF
             if (legalBasesDictionaryToolStripMenuItem != null)
             {
                 legalBasesDictionaryToolStripMenuItem.Text = LocalizedText("Menu_AddLegalBasesDictionary");
+                legalBasesDictionaryToolStripMenuItem.AccessibleName = legalBasesDictionaryToolStripMenuItem.Text;
+                legalBasesDictionaryToolStripMenuItem.AccessibleDescription = legalBasesDictionaryToolStripMenuItem.Text;
             }
 
             if (exclusionAuthorityToolStripMenuItem != null)
             {
                 exclusionAuthorityToolStripMenuItem.Text = GetExclusionAuthorityMenuText();
+                exclusionAuthorityToolStripMenuItem.AccessibleName = exclusionAuthorityToolStripMenuItem.Text;
+                exclusionAuthorityToolStripMenuItem.AccessibleDescription = exclusionAuthorityToolStripMenuItem.Text;
             }
 
             if (automaticFootnotesToolStripMenuItem != null)
             {
                 automaticFootnotesToolStripMenuItem.Text = LocalizedText("Menu_AddAutomaticFootnotes");
+                automaticFootnotesToolStripMenuItem.AccessibleName = automaticFootnotesToolStripMenuItem.Text;
+                automaticFootnotesToolStripMenuItem.AccessibleDescription = automaticFootnotesToolStripMenuItem.Text;
             }
         }
 
@@ -4650,15 +4661,18 @@ namespace AnonPDF
             {
                 using (Form prompt = new Form())
                 {
+                    prompt.Name = "exclusionAuthorityDialog";
                     prompt.Width = ScaleForCurrentDpi(620);
                     prompt.Height = ScaleForCurrentDpi(180);
                     prompt.StartPosition = FormStartPosition.CenterParent;
                 prompt.FormBorderStyle = FormBorderStyle.FixedDialog;
-                prompt.MinimizeBox = false;
+                    prompt.MinimizeBox = false;
                     prompt.Text = GetExclusionAuthorityDialogTitleText();
+                    prompt.AccessibleName = prompt.Text;
 
                     Label textLabel = new Label
                     {
+                        Name = "exclusionAuthorityLabel",
                         Left = ScaleForCurrentDpi(10),
                         Top = ScaleForCurrentDpi(16),
                         AutoSize = true,
@@ -4667,14 +4681,17 @@ namespace AnonPDF
 
                     TextBox inputBox = new TextBox
                     {
+                        Name = "exclusionAuthorityTextBox",
                         Left = ScaleForCurrentDpi(10),
                         Top = ScaleForCurrentDpi(44),
                         Width = ScaleForCurrentDpi(582),
                         Text = currentValue
                     };
+                    inputBox.AccessibleName = textLabel.Text;
 
                     Button confirmation = new Button
                     {
+                        Name = "exclusionAuthorityOkButton",
                         Text = "OK",
                         Left = ScaleForCurrentDpi(432),
                         Width = ScaleForCurrentDpi(78),
@@ -4682,9 +4699,11 @@ namespace AnonPDF
                         Height = ScaleForCurrentDpi(28),
                         DialogResult = DialogResult.OK
                     };
+                    confirmation.AccessibleName = confirmation.Text;
 
                     Button cancel = new Button
                     {
+                        Name = "exclusionAuthorityCancelButton",
                         Text = GetCancelButtonText(),
                         Left = ScaleForCurrentDpi(514),
                         Width = ScaleForCurrentDpi(78),
@@ -4692,6 +4711,7 @@ namespace AnonPDF
                         Height = ScaleForCurrentDpi(28),
                         DialogResult = DialogResult.Cancel
                     };
+                    cancel.AccessibleName = cancel.Text;
 
                     prompt.Controls.Add(textLabel);
                     prompt.Controls.Add(inputBox);
@@ -22042,8 +22062,9 @@ namespace AnonPDF
                 {
                     cleanUpTool.CleanUp();
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    LogDebug("PdfCleanUpTool.CleanUp failed: " + ex);
                     if (headlessBatchExecution)
                     {
                         headlessBatchError = Resources.Err_CannotAnonymizePdf;
@@ -23129,10 +23150,11 @@ namespace AnonPDF
             {
             pdf = new PDFiumSharp.PdfDocument(inputPdfPath, userPassword);
         }
-        catch (Exception)
-        {
-            if (headlessBatchExecution)
-            {
+                catch (Exception ex)
+                {
+                    LogDebug("PDFium open failed: " + ex);
+                    if (headlessBatchExecution)
+                    {
                 headlessBatchError = LocalizedText("CommandLine_InvalidPdf");
                 return;
             }
@@ -57332,8 +57354,9 @@ namespace AnonPDF
                     {
                         previewImage = RenderCurrentPageWithPdfCleanUpSnapshot(pageNumber, renderScale, blocksForPage, sourcePdfPath, password);
                     }
-                    catch
+                    catch (Exception ex)
                     {
+                        LogDebug($"PdfCleanUp preview failed page={pageNumber}: {ex}");
                         cleanupFailed = true;
                         previewImage = RenderCurrentPageWithSelectionsSnapshot(pageNumber, renderScale, blocksForPage);
                     }
@@ -58281,7 +58304,11 @@ namespace AnonPDF
 
         private void InitializeFoundTab()
         {
-            foundTabPage = new TabPage(LocalizedText("UI_Tab_Found"));
+            foundTabPage = new TabPage(LocalizedText("UI_Tab_Found"))
+            {
+                Name = "foundTabPage",
+                AccessibleName = LocalizedText("UI_Tab_Found")
+            };
 
             foundButtonsPanel = new FlowLayoutPanel
             {
@@ -58293,21 +58320,25 @@ namespace AnonPDF
 
             foundToggleAllButton = new Button
             {
+                Name = "foundToggleAllButton",
                 Text = LocalizedText("Found_SelectAll"),
                 AutoSize = true,
                 FlatStyle = FlatStyle.Flat,
             };
+            foundToggleAllButton.AccessibleName = foundToggleAllButton.Text;
             foundToggleAllButton.Click += FoundToggleAll_Click;
             foundButtonsPanel.Controls.Add(foundToggleAllButton);
 
             foundFilterDropButton = new Button
             {
+                Name = "foundFilterDropButton",
                 Text = LocalizedText("Found_FilterBtn") + " ▾",
                 AutoSize = true,
                 FlatStyle = FlatStyle.Flat,
                 Visible = false,
                 Margin = new Padding(4, 1, 2, 1),
             };
+            foundFilterDropButton.AccessibleName = LocalizedText("Found_FilterBtn");
             foundFilterDropButton.Click += FoundFilterDropButton_Click;
             foundButtonsPanel.Controls.Add(foundFilterDropButton);
 
@@ -58318,6 +58349,8 @@ namespace AnonPDF
 
             foundFilterMasterPanel = new Panel
             {
+                Name = "foundFilterMasterPanel",
+                AccessibleName = LocalizedText("Found_FilterBtn"),
                 Dock = DockStyle.Top,
                 Height = itemRowH + 2,
                 Cursor = Cursors.Hand,
@@ -58325,7 +58358,11 @@ namespace AnonPDF
             foundFilterMasterPanel.Paint     += FoundFilterMasterPanel_Paint;
             foundFilterMasterPanel.MouseDown += (s, me) => { if (me.Button == MouseButtons.Left) FoundFilterMaster_Click(s, me); };
 
-            _foundFilterInvertItem = new ToolStripMenuItem(LocalizedText("Found_Filter_Invert"));
+            _foundFilterInvertItem = new ToolStripMenuItem(LocalizedText("Found_Filter_Invert"))
+            {
+                Name = "foundFilterInvertItem",
+                AccessibleName = LocalizedText("Found_Filter_Invert")
+            };
             _foundFilterInvertItem.Click += (s, ev) => InvertFoundFilter();
             var masterCtxMenu = new ContextMenuStrip();
             masterCtxMenu.Items.Add(_foundFilterInvertItem);
@@ -58333,6 +58370,8 @@ namespace AnonPDF
 
             foundFilterListBox = new ListBox
             {
+                Name = "foundFilterListBox",
+                AccessibleName = LocalizedText("Found_FilterBtn"),
                 DrawMode = DrawMode.OwnerDrawFixed,
                 SelectionMode = SelectionMode.None,
                 HorizontalScrollbar = false,
@@ -58349,7 +58388,12 @@ namespace AnonPDF
 
             foundFilterMasterPanel.Font = this.Font;
 
-            _foundFilterPopupPanel = new Panel { Padding = new Padding(2) };
+            _foundFilterPopupPanel = new Panel
+            {
+                Name = "foundFilterPopupPanel",
+                AccessibleName = LocalizedText("Found_FilterBtn"),
+                Padding = new Padding(2)
+            };
             // Fill first, then Top so master renders on top
             _foundFilterPopupPanel.Controls.Add(foundFilterListBox);
             _foundFilterPopupPanel.Controls.Add(foundFilterMasterPanel);
@@ -58399,8 +58443,16 @@ namespace AnonPDF
             foundTreeView.HandleCreated += (s, ev) => SyncFilterRowHeightToTree();
 
             var foundContextMenu = new ContextMenuStrip();
-            foundContextMenuEdit = new ToolStripMenuItem(LocalizedText("AltEdit_MenuEdit"));
-            foundContextMenuClear = new ToolStripMenuItem(LocalizedText("AltEdit_MenuClear"));
+            foundContextMenuEdit = new ToolStripMenuItem(LocalizedText("AltEdit_MenuEdit"))
+            {
+                Name = "foundContextMenuEdit",
+                AccessibleName = LocalizedText("AltEdit_MenuEdit")
+            };
+            foundContextMenuClear = new ToolStripMenuItem(LocalizedText("AltEdit_MenuClear"))
+            {
+                Name = "foundContextMenuClear",
+                AccessibleName = LocalizedText("AltEdit_MenuClear")
+            };
             foundContextMenuEdit.Click += FoundContextMenu_Edit_Click;
             foundContextMenuClear.Click += FoundContextMenu_Clear_Click;
             foundContextMenu.Items.Add(foundContextMenuEdit);
@@ -58850,7 +58902,8 @@ namespace AnonPDF
             if (theme == null) { e.DrawDefault = true; return; }
 
             TreeView tree = foundTreeView;
-            bool isSelected = (e.State & TreeNodeStates.Selected) != 0;
+            bool isSelected = ReferenceEquals(e.Node, tree.SelectedNode) ||
+                              (e.State & TreeNodeStates.Selected) != 0;
             bool isPageNode = e.Node.Tag is int;
             bool isGroupNode = e.Node.Tag is LocationSource;
 
@@ -58953,7 +59006,12 @@ namespace AnonPDF
                 if (e.Node.Tag is TextLocation loc)
                 {
                     int idx = searchLocations.IndexOf(loc);
-                    if (idx >= 0) GoToLocation(idx);
+                    if (idx >= 0)
+                    {
+                        GoToLocation(idx);
+                        foundTreeView.SelectedNode = e.Node;
+                        foundTreeView.Invalidate();
+                    }
                 }
             }
             finally
