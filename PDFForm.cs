@@ -8189,6 +8189,46 @@ namespace AnonPDF
             return block.Bounds.Height > block.Bounds.Width;
         }
 
+        private static iText.Kernel.Geom.Rectangle GetCursorTextHitRectangle(
+            RedactionBlock block,
+            iText.Kernel.Geom.Rectangle rectangle)
+        {
+            if (block == null ||
+                !block.IsCursorSelection ||
+                rectangle == null ||
+                rectangle.GetWidth() <= 0f ||
+                rectangle.GetHeight() <= 0f)
+            {
+                return rectangle;
+            }
+
+            return GetTextHitInteriorRectangle(rectangle);
+        }
+
+        private static iText.Kernel.Geom.Rectangle GetTextHitInteriorRectangle(
+            iText.Kernel.Geom.Rectangle rectangle)
+        {
+            if (rectangle == null || rectangle.GetWidth() <= 0f || rectangle.GetHeight() <= 0f)
+            {
+                return rectangle;
+            }
+
+            // Some PDFs use line spacing slightly smaller than the font's
+            // ascent/descent box. Keep the visible box at full glyph height,
+            // but use its interior to avoid touching the neighbouring line.
+            float inset = Math.Min(2f, Math.Max(0.35f, rectangle.GetHeight() * 0.15f));
+            if (rectangle.GetHeight() <= inset * 2f)
+            {
+                return rectangle;
+            }
+
+            return new iText.Kernel.Geom.Rectangle(
+                rectangle.GetX(),
+                rectangle.GetY() + inset,
+                rectangle.GetWidth(),
+                rectangle.GetHeight() - (inset * 2f));
+        }
+
         private bool TryGetWordBoundsAtPoint(Point location, out RectangleF wordBounds)
         {
             wordBounds = RectangleF.Empty;
@@ -8219,6 +8259,8 @@ namespace AnonPDF
 
             // For OCR lines: search ALL OcrWords across all lines by bounding box.
             // Lines can overlap in Y, so we must match X too.
+            PdfTextSearcher.OcrWordInfo bestOcrWord = null;
+            float bestOcrDistance = float.MaxValue;
             foreach (var line in lines)
             {
                 if (!line.IsOcr || line.PageNumber != currentPage || line.OcrWords == null) continue;
@@ -8233,17 +8275,30 @@ namespace AnonPDF
                     float oT = oy + owH;
                     if (pdfX >= ox - 2f && pdfX <= oR + 2f && pdfY >= oy - 2f && pdfY <= oT + 2f)
                     {
-                        LogDebug($"TryGetWordBoundsAtPoint: OCR word hit text={ow.Text} bounds=({ox:F1},{oy:F1},{owW:F1},{owH:F1})");
-                        var pdfRect = new RectangleF(ox, oy, owW, owH);
-                        wordBounds = ConvertPdfToViewCoordinates(pdfRect, currentPage, rotation);
-                        return true;
+                        float centerDistance = Math.Abs(pdfY - (oy + owH / 2f));
+                        if (centerDistance < bestOcrDistance)
+                        {
+                            bestOcrDistance = centerDistance;
+                            bestOcrWord = ow;
+                        }
                     }
                 }
+            }
+            if (bestOcrWord?.BoundingBox != null)
+            {
+                float ox = (float)bestOcrWord.BoundingBox.GetX();
+                float oy = (float)bestOcrWord.BoundingBox.GetY();
+                float owW = (float)bestOcrWord.BoundingBox.GetWidth();
+                float owH = (float)bestOcrWord.BoundingBox.GetHeight();
+                LogDebug($"TryGetWordBoundsAtPoint: OCR word hit text={bestOcrWord.Text} bounds=({ox:F1},{oy:F1},{owW:F1},{owH:F1})");
+                wordBounds = ConvertPdfToViewCoordinates(new RectangleF(ox, oy, owW, owH), currentPage, rotation);
+                return true;
             }
 
             // Native text: find line by Y, then character by X
             float yTol = 6f / scaleFactor;
             int bestLi = -1;
+            int bestCi = -1;
             float bestD = float.MaxValue;
             for (int li = 0; li < lines.Count; li++)
             {
@@ -8253,8 +8308,27 @@ namespace AnonPDF
                 if (lb == null) continue;
                 float bot = (float)lb.GetY(), top = bot + (float)lb.GetHeight();
                 if (pdfY < bot - yTol || pdfY > top + yTol) continue;
-                float d = pdfY < bot ? bot - pdfY : pdfY > top ? pdfY - top : 0f;
-                if (d < bestD) { bestD = d; bestLi = li; }
+
+                int candidateCi = -1;
+                for (int i = 0; i < l.Characters.Count; i++)
+                {
+                    var ch = l.Characters[i];
+                    float left = (float)ch.BoundingBox.GetX();
+                    if (pdfX >= left && pdfX <= left + (float)ch.BoundingBox.GetWidth())
+                    {
+                        candidateCi = i;
+                        break;
+                    }
+                }
+                if (candidateCi < 0) continue;
+
+                float d = Math.Abs(pdfY - ((bot + top) / 2f));
+                if (d < bestD)
+                {
+                    bestD = d;
+                    bestLi = li;
+                    bestCi = candidateCi;
+                }
             }
             if (bestLi < 0)
             {
@@ -8264,13 +8338,7 @@ namespace AnonPDF
             var best = lines[bestLi];
             LogDebug($"TryGetWordBoundsAtPoint: nativeLine[{bestLi}] text={best.Text.Substring(0, Math.Min(40, best.Text.Length))} chars={best.Characters.Count}");
 
-            int ci = -1;
-            for (int i = 0; i < best.Characters.Count; i++)
-            {
-                var ch = best.Characters[i];
-                float l = (float)ch.BoundingBox.GetX();
-                if (pdfX >= l && pdfX <= l + (float)ch.BoundingBox.GetWidth()) { ci = i; break; }
-            }
+            int ci = bestCi;
             if (ci < 0)
             {
                 LogDebug("TryGetWordBoundsAtPoint: no character hit at click X");
@@ -8337,7 +8405,8 @@ namespace AnonPDF
                     if (pdfCoords.Width <= 0 || pdfCoords.Height <= 0)
                         return false;
 
-                    var sourceRect = new iText.Kernel.Geom.Rectangle(pdfCoords.X, pdfCoords.Y, pdfCoords.Width, pdfCoords.Height);
+                    var sourceRect = GetTextHitInteriorRectangle(
+                        new iText.Kernel.Geom.Rectangle(pdfCoords.X, pdfCoords.Y, pdfCoords.Width, pdfCoords.Height));
 
                     // Extract glyphs with text so we can filter out whitespace-only entries.
                     // iText advance-width boxes for spaces would otherwise inflate the union.
@@ -20421,6 +20490,7 @@ namespace AnonPDF
                                     (int)Math.Round(pdfCoordinates.Y),
                                     (int)Math.Round(pdfCoordinates.Width),
                                     (int)Math.Round(pdfCoordinates.Height));
+                                rectangle = GetCursorTextHitRectangle(block, rectangle);
                                 PdfCleanUpLocation cleanUpLocation = new PdfCleanUpLocation(1, rectangle, new iText.Kernel.Colors.DeviceRgb(255, 255, 255));
                                 cleanUpTool.AddCleanupLocation(cleanUpLocation);
                             }
@@ -22037,24 +22107,28 @@ namespace AnonPDF
                             pdfCoordinates.Y,
                             pdfCoordinates.Width,
                             pdfCoordinates.Height);
+                        iText.Kernel.Geom.Rectangle textHitRectangle = GetCursorTextHitRectangle(block, cleanupRectangle);
+                        iText.Kernel.Geom.Rectangle visualSourceRectangle = block.IsCursorSelection
+                            ? textHitRectangle
+                            : cleanupRectangle;
 
                         KernelGeom.Rectangle visualRectangle = useGraphicRedactionMode
                             ? cleanupRectangle
                             : block.IsMarkerSelection
                                 ? ExpandMarkerCleanupRectangleToTextBounds(
                                     pageWithSelections,
-                                    cleanupRectangle,
+                                    visualSourceRectangle,
                                     pageNum,
                                     rotation,
                                     "export-visual")
                                 : ExpandMarkerCleanupRectangleToTextBounds(
                                     pageWithSelections,
-                                    cleanupRectangle,
+                                    visualSourceRectangle,
                                     pageNum,
                                     rotation,
                                     "export-visual-box");
                         redactionVisualPdfBoundsByBlock[block] = ConvertToItTextRectangleF(visualRectangle);
-                        cleanUpTool.AddCleanupLocation(new PdfCleanUpLocation(pageNum, cleanupRectangle, cleanUpColorWhite));
+                        cleanUpTool.AddCleanupLocation(new PdfCleanUpLocation(pageNum, textHitRectangle, cleanUpColorWhite));
                     }
                 }
 
@@ -32227,7 +32301,7 @@ namespace AnonPDF
                             pagesListView.Invalidate(item.Bounds);
                         }
                         else ApplyFilter((string)filterComboBox.SelectedItem);
-                        clearPageButton.Enabled = true;
+                        UpdateSelectionNavigationButtons();
                         projectWasChangedAfterLastSave = true;
                         saveProjectButton.Enabled = true;
                         saveProjectMenuItem.Enabled = true;
@@ -35381,7 +35455,9 @@ namespace AnonPDF
                 return new List<RectangleF> { pdfCoords };
             }
 
-            iText.Kernel.Geom.Rectangle sourceRect = ConvertToItTextRectangle(pdfCoords);
+            iText.Kernel.Geom.Rectangle sourceRect = GetCursorTextHitRectangle(
+                block,
+                ConvertToItTextRectangle(pdfCoords));
             // Grey preview must keep membership from the same glyph qualification path as pdfSweep.
             // PDFium refinement provides tighter glyph bounds that properly cover diacritics.
             List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetPdfCleanUpPreviewRectsForBlock(page, block, sourceRect);
@@ -57517,6 +57593,7 @@ namespace AnonPDF
                             (int)Math.Round(pdfCoordinates.Y),
                             (int)Math.Round(pdfCoordinates.Width),
                             (int)Math.Round(pdfCoordinates.Height));
+                        rectangle = GetCursorTextHitRectangle(block, rectangle);
                         cleanUpTool.AddCleanupLocation(new PdfCleanUpLocation(1, rectangle, new iText.Kernel.Colors.DeviceRgb(255, 255, 255)));
                     }
 
