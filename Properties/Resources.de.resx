@@ -1935,6 +1935,9 @@ Die Anwendung wechselt in den DEMO-Modus.</value>
   <data name="Footnotes_Context_DeleteDuplicatedObjects" xml:space="preserve">
     <value>Duplizierte Objekte löschen</value>
   </data>
+  <data name="Footnotes_Context_WholeWords" xml:space="preserve">
+    <value>Ganze Wörter</value>
+  </data>
   <data name="Footnotes_Context_DeleteObject" xml:space="preserve">
     <value>Objekt löschen</value>
   </data>

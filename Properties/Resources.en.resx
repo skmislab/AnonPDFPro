@@ -1982,6 +1982,9 @@ Close the application and run the installer now?</value>
   <data name="Footnotes_Context_DeleteDuplicatedObjects" xml:space="preserve">
     <value>Delete duplicated objects</value>
   </data>
+  <data name="Footnotes_Context_WholeWords" xml:space="preserve">
+    <value>Whole words</value>
+  </data>
   <data name="Footnotes_Context_DeleteObject" xml:space="preserve">
     <value>Delete object</value>
   </data>

@@ -1982,6 +1982,9 @@ Czy zamknąć aplikację i uruchomić instalator teraz?</value>
   <data name="Footnotes_Context_DeleteDuplicatedObjects" xml:space="preserve">
     <value>Usuń powielone obiekty</value>
   </data>
+  <data name="Footnotes_Context_WholeWords" xml:space="preserve">
+    <value>Całe słowa</value>
+  </data>
   <data name="Footnotes_Context_DeleteObject" xml:space="preserve">
     <value>Usuń obiekt</value>
   </data>

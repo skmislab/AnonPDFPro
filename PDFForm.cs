@@ -206,6 +206,7 @@ namespace AnonPDF
         private bool suppressNextLeftMouseUpAfterEscape;
         private bool suppressUndoRedoCapture;
         private bool isMarkerCtrlBoxMode;
+        private bool boxIncludeWholeWordsDefault = true;
         private bool suppressRedactionModeTracking;
         private enum RedactionMode { Cursor, Marker, Box }
         private enum RedactedPdfOutputFormat { Pdf, PdfA }
@@ -8187,6 +8188,14 @@ namespace AnonPDF
             }
 
             return block.Bounds.Height > block.Bounds.Width;
+        }
+
+        private static bool IsExactAreaBox(RedactionBlock block)
+        {
+            return block != null &&
+                   !block.IsCursorSelection &&
+                   !block.IsMarkerSelection &&
+                   !block.IncludeWholeWords;
         }
 
         private static iText.Kernel.Geom.Rectangle GetCursorTextHitRectangle(
@@ -22128,21 +22137,20 @@ namespace AnonPDF
                             ? textHitRectangle
                             : cleanupRectangle;
 
-                        KernelGeom.Rectangle visualRectangle = useGraphicRedactionMode
-                            ? cleanupRectangle
-                            : block.IsMarkerSelection
-                                ? ExpandMarkerCleanupRectangleToTextBounds(
-                                    pageWithSelections,
-                                    visualSourceRectangle,
-                                    pageNum,
-                                    rotation,
-                                    "export-visual")
-                                : ExpandMarkerCleanupRectangleToTextBounds(
-                                    pageWithSelections,
-                                    visualSourceRectangle,
-                                    pageNum,
-                                    rotation,
-                                    "export-visual-box");
+                        KernelGeom.Rectangle visualRectangle;
+                        if (useGraphicRedactionMode || IsExactAreaBox(block))
+                        {
+                            visualRectangle = cleanupRectangle;
+                        }
+                        else
+                        {
+                            visualRectangle = ExpandMarkerCleanupRectangleToTextBounds(
+                                pageWithSelections,
+                                visualSourceRectangle,
+                                pageNum,
+                                rotation,
+                                block.IsMarkerSelection ? "export-visual" : "export-visual-box");
+                        }
                         redactionVisualPdfBoundsByBlock[block] = ConvertToItTextRectangleF(visualRectangle);
                         cleanUpTool.AddCleanupLocation(new PdfCleanUpLocation(pageNum, textHitRectangle, cleanUpColorWhite));
                     }
@@ -23271,6 +23279,7 @@ namespace AnonPDF
 
             pageRotationOffsets.Clear();
             documentMargins = new DocumentMarginSettings();
+            boxIncludeWholeWordsDefault = true;
 
             CalculateMinScaleFactor(currentPage);
             CalculateMaxScaleFactor();
@@ -23978,6 +23987,7 @@ namespace AnonPDF
 
             pageRotationOffsets.Clear();
             documentMargins = new DocumentMarginSettings();
+            boxIncludeWholeWordsDefault = true;
             ClearRedactionBlocks();
             ClearPagesToRemove();
             ClearTextAnnotations();
@@ -28648,6 +28658,7 @@ namespace AnonPDF
                 ExclusionAuthority = exclusionAuthorityName,
                 ExportVisibleLayersOnly = exportVisibleLayersOnly,
                 DocumentMargins = documentMargins?.Clone() ?? new DocumentMarginSettings(),
+                BoxIncludeWholeWordsDefault = boxIncludeWholeWordsDefault,
                 AltTextEdits = PdfTextSearcher._pendingAltTextEdits
                     .Where(kv => kv.Key.pdfPath == inputPdfPath)
                     .ToDictionary(kv => kv.Key.posKey, kv => kv.Value)
@@ -29119,6 +29130,7 @@ namespace AnonPDF
                 .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
             documentMargins = (projectData.DocumentMargins ?? new DocumentMarginSettings()).Clone();
+            boxIncludeWholeWordsDefault = projectData.BoxIncludeWholeWordsDefault ?? true;
 
             hasCustomSignatureSelection = projectData.SignaturesToRemove != null;
             signaturesToRemove = projectData.SignaturesToRemove ?? new List<string>();
@@ -34950,6 +34962,16 @@ namespace AnonPDF
             };
             deleteDuplicatedSelectionsItem.Click += (_, __) => DeleteDuplicatedObjectsByGroupId(block.DuplicateGroupId, block.PageNumber);
             menu.Items.Add(deleteDuplicatedSelectionsItem);
+            if (!block.IsCursorSelection && !block.IsMarkerSelection)
+            {
+                var wholeWordsItem = new ToolStripMenuItem(GetWholeWordsContextMenuText())
+                {
+                    Checked = block.IncludeWholeWords,
+                    CheckOnClick = false
+                };
+                wholeWordsItem.Click += (_, __) => ToggleRedactionBlockWholeWords(block);
+                menu.Items.Add(wholeWordsItem);
+            }
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(BuildMoveToLayerMenuItem(block.LayerId, targetLayerId => MoveObjectToLayerFromContext(block, targetLayerId)));
             menu.Items.Add(new ToolStripSeparator());
@@ -35048,6 +35070,28 @@ namespace AnonPDF
 
             menu.Show(pdfViewer, location);
             return true;
+        }
+
+        private void ToggleRedactionBlockWholeWords(RedactionBlock block)
+        {
+            if (block == null || block.IsCursorSelection || block.IsMarkerSelection)
+            {
+                return;
+            }
+
+            BeginUndoCapture("Toggle whole words");
+            block.IncludeWholeWords = !block.IncludeWholeWords;
+            boxIncludeWholeWordsDefault = block.IncludeWholeWords;
+            TouchRedactionBlock(block);
+            InvalidateThumbnailRedactionOverlay(block.PageNumber);
+            InvalidateThumbnailPage(block.PageNumber, invalidateStaticOverlays: false);
+            TryComputeRedactionPreviewRects(block);
+            CommitUndoCapture();
+
+            projectWasChangedAfterLastSave = true;
+            saveProjectButton.Enabled = true;
+            saveProjectMenuItem.Enabled = true;
+            pdfViewer.Invalidate();
         }
 
         private async Task RunCopyRedactionBlockToClipboardAsync(RedactionBlock block)
@@ -35278,6 +35322,11 @@ namespace AnonPDF
             return LocalizedText("Footnotes_Context_DeleteDuplicatedObjects");
         }
 
+        private string GetWholeWordsContextMenuText()
+        {
+            return LocalizedText("Footnotes_Context_WholeWords");
+        }
+
         private string GetCutObjectContextMenuText()
         {
             return LocalizedText("Footnotes_Context_CutObject");
@@ -35438,6 +35487,10 @@ namespace AnonPDF
             var block = new RedactionBlock(bounds, pageNumber);
             block.LayerId = GetResolvedActiveLayerId();
             block.IsMarkerSelection = isMarkerSelection;
+            if (!isMarkerSelection)
+            {
+                block.IncludeWholeWords = boxIncludeWholeWordsDefault;
+            }
             StampRedactionBlockCreated(block);
             NormalizeRedactionBlockMetadata(block);
             TryApplyAutomaticFootnoteClassification(block);
@@ -35475,20 +35528,29 @@ namespace AnonPDF
                 return new List<RectangleF> { pdfCoords };
             }
 
+            if (IsExactAreaBox(block))
+            {
+                return new List<RectangleF> { pdfCoords };
+            }
+
+            // A scanned page can also contain an invisible OCR text layer whose glyph
+            // boxes overlap adjacent lines. Prefer the OCR geometry tied to the visible
+            // image so cursor alignment and marker feedback match what the user sees.
+            List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetOcrPreviewRectsForBlock(block, pdfCoords);
+            if (pdfLineRects.Count > 0)
+            {
+                return pdfLineRects
+                    .Where(r => r != null && r.GetWidth() > 0f && r.GetHeight() > 0f)
+                    .Select(ConvertToItTextRectangleF)
+                    .ToList();
+            }
+
             iText.Kernel.Geom.Rectangle sourceRect = GetCursorTextHitRectangle(
                 block,
                 ConvertToItTextRectangle(pdfCoords));
             // Grey preview must keep membership from the same glyph qualification path as pdfSweep.
             // PDFium refinement provides tighter glyph bounds that properly cover diacritics.
-            List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetPdfCleanUpPreviewRectsForBlock(page, block, sourceRect);
-
-            // Pure scans have no native glyph layer, so the pdfSweep extraction above returns
-            // nothing. Fall back to the cached OCR word boxes so the touched text still greys
-            // out, consistent with what GetCachedTextInRect copies to the clipboard.
-            if (pdfLineRects.Count == 0)
-            {
-                pdfLineRects = GetOcrPreviewRectsForBlock(block, pdfCoords);
-            }
+            pdfLineRects = GetPdfCleanUpPreviewRectsForBlock(page, block, sourceRect);
 
             return pdfLineRects
                 .Where(r => r != null && r.GetWidth() > 0f && r.GetHeight() > 0f)
@@ -35533,9 +35595,9 @@ namespace AnonPDF
             return new List<iText.Kernel.Geom.Rectangle>();
         }
 
-        // Touched-text grey preview for pure scans (no native text layer): collect the cached
-        // OCR word boxes that overlap the selection. Bounds are already in PDF user space, matching
-        // the intersection test used by GetCachedTextInRect so the greyed words match the copied text.
+        // Touched-text preview for scans, including scans with an invisible text layer: collect
+        // cached OCR word boxes that overlap the selection. Bounds are already in PDF user space,
+        // matching the intersection test used by GetCachedTextInRect.
         private List<iText.Kernel.Geom.Rectangle> GetOcrPreviewRectsForBlock(RedactionBlock block, RectangleF pdfRect)
         {
             var result = new List<iText.Kernel.Geom.Rectangle>();
@@ -35579,9 +35641,23 @@ namespace AnonPDF
                     float wx1 = (float)wb.GetX(), wy1 = (float)wb.GetY();
                     float wx2 = wx1 + (float)wb.GetWidth();
                     float wy2 = wy1 + (float)wb.GetHeight();
-                    if (wx2 < rx1 || wx1 > rx2 || wy2 < ry1 || wy1 > ry2)
+                    float overlapWidth = Math.Min(wx2, rx2) - Math.Max(wx1, rx1);
+                    float overlapHeight = Math.Min(wy2, ry2) - Math.Max(wy1, ry1);
+                    if (overlapWidth <= 0f || overlapHeight <= 0f)
                     {
                         continue;
+                    }
+
+                    if (block.IsCursorSelection)
+                    {
+                        float overlapArea = overlapWidth * overlapHeight;
+                        float smallerArea = Math.Min(
+                            Math.Max(0.01f, (wx2 - wx1) * (wy2 - wy1)),
+                            Math.Max(0.01f, (rx2 - rx1) * (ry2 - ry1)));
+                        if (overlapArea / smallerArea < 0.25f)
+                        {
+                            continue;
+                        }
                     }
 
                     result.Add(wb);
@@ -43427,6 +43503,7 @@ namespace AnonPDF
                     string signaturesMode = projectData.SignaturesMode;
                     string signatureAppearance = projectData.SignatureAppearance;
                     autoFootnotesEnabled = projectData.AutoFootnotesEnabled ?? Properties.Settings.Default.AutoFootnotesEnabled;
+                    boxIncludeWholeWordsDefault = projectData.BoxIncludeWholeWordsDefault ?? true;
                     if (!string.IsNullOrWhiteSpace(projectData.ExclusionAuthority))
                     {
                         exclusionAuthorityName = projectData.ExclusionAuthority.Trim();
@@ -44083,6 +44160,11 @@ namespace AnonPDF
                     mergedProject.AutoFootnotesEnabled = project.AutoFootnotesEnabled;
                 }
 
+                if (!mergedProject.BoxIncludeWholeWordsDefault.HasValue && project.BoxIncludeWholeWordsDefault.HasValue)
+                {
+                    mergedProject.BoxIncludeWholeWordsDefault = project.BoxIncludeWholeWordsDefault;
+                }
+
                 if (string.IsNullOrWhiteSpace(mergedProject.ExclusionAuthority) && !string.IsNullOrWhiteSpace(project.ExclusionAuthority))
                 {
                     mergedProject.ExclusionAuthority = project.ExclusionAuthority;
@@ -44356,7 +44438,8 @@ namespace AnonPDF
                 !string.Equals(left.ClassificationSource?.Trim(), right.ClassificationSource?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(left.MatchedTag?.Trim(), right.MatchedTag?.Trim(), StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(left.InterestSubject?.Trim(), right.InterestSubject?.Trim(), StringComparison.OrdinalIgnoreCase) ||
-                left.IsMarkerSelection != right.IsMarkerSelection)
+                left.IsMarkerSelection != right.IsMarkerSelection ||
+                left.IncludeWholeWords != right.IncludeWholeWords)
             {
                 return false;
             }
@@ -49165,6 +49248,7 @@ namespace AnonPDF
                 IsMarkerSelection = source.IsMarkerSelection,
                 IsCursorSelection = source.IsCursorSelection,
                 CursorTextVerticalInPdf = source.CursorTextVerticalInPdf,
+                IncludeWholeWords = source.IncludeWholeWords,
                 DuplicateGroupId = string.IsNullOrWhiteSpace(duplicateGroupId) ? null : duplicateGroupId.Trim()
             };
 

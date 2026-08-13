@@ -3915,6 +3915,7 @@ namespace AnonPDF
 
         public bool IsCursorSelection { get; set; }
         public bool CursorTextVerticalInPdf { get; set; }
+        public bool IncludeWholeWords { get; set; }
 
         public RedactionBlock()
         {
@@ -3928,6 +3929,7 @@ namespace AnonPDF
             IsMarkerSelection = false;
             IsCursorSelection = false;
             CursorTextVerticalInPdf = false;
+            IncludeWholeWords = true;
             DuplicateGroupId = null;
             CreatedAtUtc = DateTime.MinValue;
             UpdatedAtUtc = DateTime.MinValue;
@@ -4279,6 +4281,7 @@ namespace AnonPDF
         public string SignaturesMode { get; set; }
         public string SignatureAppearance { get; set; }
         public bool? AutoFootnotesEnabled { get; set; }
+        public bool? BoxIncludeWholeWordsDefault { get; set; }
         public string ExclusionAuthority { get; set; }
         public bool ExportVisibleLayersOnly { get; set; }
         public DocumentMarginSettings DocumentMargins { get; set; }
