@@ -321,6 +321,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Visible>False</Visible>
     </Content>
+    <!-- Native lossless JBIG2 codec used by the custom pdfSweep build (x64). -->
+    <Content Include="packages\itext.pdfsweep.5.0.6\lib\net461\jbig2bridge.dll">
+      <Link>jbig2bridge.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Visible>False</Visible>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <BootstrapperPackage Include=".NETFramework,Version=v4.8">

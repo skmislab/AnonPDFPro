@@ -15,13 +15,16 @@ to upstream sources.
 License: GNU Affero General Public License v3.0 (AGPL-3.0)
 
 Note: `packages/itext.pdfsweep.5.0.6/lib/net461/` contains a custom build of
-itext.pdfsweep that bundles the OpenJPEG library (`openjp2.dll`) to enable
-redaction of JPEG 2000 (JP2/JPX) images. See the OpenJPEG section below.
+itext.pdfsweep that bundles the OpenJPEG library (`openjp2.dll`) and the JBIG2
+bridge (`jbig2bridge.dll`) to enable redaction of JPEG 2000 (JP2/JPX) and JBIG2
+images. See the codec sections below.
 
 ## Apache-2.0 components
 - TesseractOCR 5.5.1 (.NET wrapper)
 - Material Design Icons Webfont (`materialdesignicons-subset.ttf`)
   - Used for vector shape picker icons in the UI.
+- jbig2enc arithmetic encoder, used in lossless generic-region mode by
+  `jbig2bridge.dll`.
 License: Apache License 2.0
 
 ## OpenJPEG (bundled with itext.pdfsweep)
@@ -29,6 +32,15 @@ License: Apache License 2.0
   `packages/itext.pdfsweep.5.0.6/lib/net461/`, used by the custom itext.pdfsweep
   build to support redaction of JPEG 2000 (JP2/JPX) images.
 License: BSD 2-Clause "Simplified" License.
+
+## jbig2dec / JBIG2 bridge (bundled with itext.pdfsweep)
+- jbig2dec and the AnonPDFPro bridge (`jbig2bridge.dll`) are bundled in
+  `packages/itext.pdfsweep.5.0.6/lib/net461/` and used by the custom
+  itext.pdfsweep build to decode and losslessly re-encode JBIG2 images.
+- The encoder uses a generic region rather than symbol substitution to preserve
+  exact glyph shapes during redaction.
+License: GNU Affero General Public License v3.0 (AGPL-3.0). The included
+jbig2enc arithmetic encoder sources retain their Apache-2.0 license.
 
 ## PDFium / PDFiumSharp
 - PDFium.WindowsV2 1.1.4 (native binaries)
