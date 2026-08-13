@@ -8202,11 +8202,12 @@ namespace AnonPDF
                 return rectangle;
             }
 
-            return GetTextHitInteriorRectangle(rectangle);
+            return GetTextHitInteriorRectangle(rectangle, block.CursorTextVerticalInPdf);
         }
 
         private static iText.Kernel.Geom.Rectangle GetTextHitInteriorRectangle(
-            iText.Kernel.Geom.Rectangle rectangle)
+            iText.Kernel.Geom.Rectangle rectangle,
+            bool verticalTextInPdf = false)
         {
             if (rectangle == null || rectangle.GetWidth() <= 0f || rectangle.GetHeight() <= 0f)
             {
@@ -8216,10 +8217,20 @@ namespace AnonPDF
             // Some PDFs use line spacing slightly smaller than the font's
             // ascent/descent box. Keep the visible box at full glyph height,
             // but use its interior to avoid touching the neighbouring line.
-            float inset = Math.Min(2f, Math.Max(0.35f, rectangle.GetHeight() * 0.15f));
-            if (rectangle.GetHeight() <= inset * 2f)
+            float crossAxisSize = verticalTextInPdf ? rectangle.GetWidth() : rectangle.GetHeight();
+            float inset = Math.Min(2f, Math.Max(0.35f, crossAxisSize * 0.15f));
+            if (crossAxisSize <= inset * 2f)
             {
                 return rectangle;
+            }
+
+            if (verticalTextInPdf)
+            {
+                return new iText.Kernel.Geom.Rectangle(
+                    rectangle.GetX() + inset,
+                    rectangle.GetY(),
+                    rectangle.GetWidth() - (inset * 2f),
+                    rectangle.GetHeight());
             }
 
             return new iText.Kernel.Geom.Rectangle(
@@ -8229,9 +8240,13 @@ namespace AnonPDF
                 rectangle.GetHeight() - (inset * 2f));
         }
 
-        private bool TryGetWordBoundsAtPoint(Point location, out RectangleF wordBounds)
+        private bool TryGetWordBoundsAtPoint(
+            Point location,
+            out RectangleF wordBounds,
+            out bool textVerticalInPdf)
         {
             wordBounds = RectangleF.Empty;
+            textVerticalInPdf = false;
             if (string.IsNullOrWhiteSpace(inputPdfPath) || currentPage < 1 || pdf == null || currentPage > pdf.Pages.Count)
             {
                 LogDebug($"TryGetWordBoundsAtPoint: early exit inputPdfPath={!string.IsNullOrWhiteSpace(inputPdfPath)} currentPage={currentPage} pdf={pdf != null}");
@@ -8295,8 +8310,9 @@ namespace AnonPDF
                 return true;
             }
 
-            // Native text: find line by Y, then character by X
-            float yTol = 6f / scaleFactor;
+            // Native text: inspect full character rectangles. This also handles
+            // text rotated inside the PDF content stream.
+            const float hitTolerance = 2.5f;
             int bestLi = -1;
             int bestCi = -1;
             float bestD = float.MaxValue;
@@ -8304,35 +8320,34 @@ namespace AnonPDF
             {
                 var l = lines[li];
                 if (l.PageNumber != currentPage || l.IsOcr || string.IsNullOrWhiteSpace(l.Text)) continue;
-                var lb = PdfTextSearcher.GetCachedLineBounds(l);
-                if (lb == null) continue;
-                float bot = (float)lb.GetY(), top = bot + (float)lb.GetHeight();
-                if (pdfY < bot - yTol || pdfY > top + yTol) continue;
-
-                int candidateCi = -1;
                 for (int i = 0; i < l.Characters.Count; i++)
                 {
                     var ch = l.Characters[i];
+                    if (ch?.BoundingBox == null) continue;
                     float left = (float)ch.BoundingBox.GetX();
-                    if (pdfX >= left && pdfX <= left + (float)ch.BoundingBox.GetWidth())
+                    float bottom = (float)ch.BoundingBox.GetY();
+                    float width = (float)ch.BoundingBox.GetWidth();
+                    float height = (float)ch.BoundingBox.GetHeight();
+                    if (pdfX < left - hitTolerance || pdfX > left + width + hitTolerance ||
+                        pdfY < bottom - hitTolerance || pdfY > bottom + height + hitTolerance)
                     {
-                        candidateCi = i;
-                        break;
+                        continue;
                     }
-                }
-                if (candidateCi < 0) continue;
 
-                float d = Math.Abs(pdfY - ((bot + top) / 2f));
-                if (d < bestD)
-                {
-                    bestD = d;
-                    bestLi = li;
-                    bestCi = candidateCi;
+                    float dx = pdfX - (left + width / 2f);
+                    float dy = pdfY - (bottom + height / 2f);
+                    float d = dx * dx + dy * dy;
+                    if (d < bestD)
+                    {
+                        bestD = d;
+                        bestLi = li;
+                        bestCi = i;
+                    }
                 }
             }
             if (bestLi < 0)
             {
-                LogDebug("TryGetWordBoundsAtPoint: no native line found at click Y");
+                LogDebug("TryGetWordBoundsAtPoint: no native character found at click point");
                 return false;
             }
             var best = lines[bestLi];
@@ -8372,6 +8387,7 @@ namespace AnonPDF
 
             var pdfRect2 = new RectangleF(mnX, mnY, mxX - mnX, mxY - mnY);
             wordBounds = ConvertPdfToViewCoordinates(pdfRect2, currentPage, rotation);
+            textVerticalInPdf = best.IsVerticalText;
             LogDebug($"TryGetWordBoundsAtPoint: native word bounds=({wordBounds})");
             return true;
         }
@@ -32267,11 +32283,15 @@ namespace AnonPDF
                     if (TryHandleSearchLocationCursorClick(e.Location))
                         return;
 
-                    if (TryGetWordBoundsAtPoint(e.Location, out RectangleF wordBounds))
+                    if (TryGetWordBoundsAtPoint(
+                        e.Location,
+                        out RectangleF wordBounds,
+                        out bool cursorTextVerticalInPdf))
                     {
                         var block = new RedactionBlock(wordBounds, currentPage)
                         {
                             IsCursorSelection = true,
+                            CursorTextVerticalInPdf = cursorTextVerticalInPdf,
                             LayerId = GetResolvedActiveLayerId()
                         };
                         StampRedactionBlockCreated(block);
@@ -49143,6 +49163,8 @@ namespace AnonPDF
                 MatchedTag = string.IsNullOrWhiteSpace(source.MatchedTag) ? null : source.MatchedTag.Trim(),
                 InterestSubject = string.IsNullOrWhiteSpace(source.InterestSubject) ? null : source.InterestSubject.Trim(),
                 IsMarkerSelection = source.IsMarkerSelection,
+                IsCursorSelection = source.IsCursorSelection,
+                CursorTextVerticalInPdf = source.CursorTextVerticalInPdf,
                 DuplicateGroupId = string.IsNullOrWhiteSpace(duplicateGroupId) ? null : duplicateGroupId.Trim()
             };
 

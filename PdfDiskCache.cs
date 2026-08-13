@@ -24,7 +24,7 @@ namespace AnonPDF
 
     internal static class PdfDiskCache
     {
-        private const int FormatVersion = 4;
+        private const int FormatVersion = 5;
 
         private static string CacheDir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -168,6 +168,7 @@ namespace AnonPDF
                     PageBottom  = l.PageBottom,
                     PageWidth   = l.PageWidth,
                     PageHeight  = l.PageHeight,
+                    IsVerticalText = l.IsVerticalText,
                 };
                 if (l.Characters != null && l.Characters.Count > 0)
                 {
@@ -285,6 +286,7 @@ namespace AnonPDF
                     PageBottom   = dto.PageBottom,
                     PageWidth    = dto.PageWidth,
                     PageHeight   = dto.PageHeight,
+                    IsVerticalText = dto.IsVerticalText,
                 };
                 if (dto.Characters != null)
                     foreach (var c in dto.Characters)
@@ -422,6 +424,7 @@ namespace AnonPDF
         [Key(10)] public float[]            RawOcrWordBoundsFlat { get; set; }
         [Key(11)] public float  PageLeft     { get; set; }
         [Key(12)] public float  PageBottom   { get; set; }
+        [Key(13)] public bool   IsVerticalText { get; set; }
     }
 
     [MessagePackObject]

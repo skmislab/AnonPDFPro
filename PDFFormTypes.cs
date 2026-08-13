@@ -3914,6 +3914,7 @@ namespace AnonPDF
         public List<System.Drawing.RectangleF> PreviewTextRectsPdf { get; set; }
 
         public bool IsCursorSelection { get; set; }
+        public bool CursorTextVerticalInPdf { get; set; }
 
         public RedactionBlock()
         {
@@ -3926,6 +3927,7 @@ namespace AnonPDF
             InterestSubject = null;
             IsMarkerSelection = false;
             IsCursorSelection = false;
+            CursorTextVerticalInPdf = false;
             DuplicateGroupId = null;
             CreatedAtUtc = DateTime.MinValue;
             UpdatedAtUtc = DateTime.MinValue;
@@ -4841,8 +4843,10 @@ namespace AnonPDF
             public List<KernelGeom.Rectangle> OcrWordBounds { get; set; } = new List<KernelGeom.Rectangle>();
             public List<KernelGeom.Rectangle> RawOcrWordBounds { get; set; } = new List<KernelGeom.Rectangle>();
             public List<OcrWordInfo> OcrWords { get; set; } = new List<OcrWordInfo>();
-            // X coordinate where the last iText render chunk ended; used to detect inter-cell gaps.
-            public float LastChunkEndX { get; set; } = float.MinValue;
+            public bool IsVerticalText { get; set; }
+            // Position along the text baseline where the last render chunk ended.
+            public float LastChunkEndPosition { get; set; } = float.MinValue;
+            public float TextAdvanceDirection { get; set; } = 1f;
         }
 
         internal class CharacterInfo
@@ -8944,7 +8948,7 @@ namespace AnonPDF
             private readonly int _pageNum;
             private readonly int _pageRotation;
             public List<CachedLine> ExtractedLines { get; } = new List<CachedLine>();
-            private const float Y_TOLERANCE = 2.0f;
+            private const float LINE_POSITION_TOLERANCE = 2.0f;
 
             public LineExtractionStrategy(int pageNum, int pageRotation)
             {
@@ -8957,33 +8961,49 @@ namespace AnonPDF
                 if (type == EventType.RENDER_TEXT && data is TextRenderInfo renderInfo)
                 {
                     var baseline = renderInfo.GetBaseline();
-                    float yPos = baseline.GetStartPoint().Get(KernelGeom.Vector.I2);
+                    float startX = baseline.GetStartPoint().Get(KernelGeom.Vector.I1);
+                    float startY = baseline.GetStartPoint().Get(KernelGeom.Vector.I2);
+                    float endX = baseline.GetEndPoint().Get(KernelGeom.Vector.I1);
+                    float endY = baseline.GetEndPoint().Get(KernelGeom.Vector.I2);
+                    bool isVerticalText = Math.Abs(endY - startY) > Math.Abs(endX - startX);
+                    float linePosition = isVerticalText ? startX : startY;
+                    float chunkStartPosition = isVerticalText ? startY : startX;
+                    float chunkEndPosition = isVerticalText ? endY : endX;
+                    float advanceDirection = chunkEndPosition >= chunkStartPosition ? 1f : -1f;
 
-                    CachedLine line = ExtractedLines.Find(l => Math.Abs(l.YPosition - yPos) < Y_TOLERANCE);
+                    CachedLine line = ExtractedLines.Find(l =>
+                        l.IsVerticalText == isVerticalText &&
+                        Math.Abs(l.YPosition - linePosition) < LINE_POSITION_TOLERANCE);
                     if (line == null)
                     {
-                        line = new CachedLine { PageNumber = _pageNum, PageRotation = _pageRotation, YPosition = yPos };
+                        line = new CachedLine
+                        {
+                            PageNumber = _pageNum,
+                            PageRotation = _pageRotation,
+                            YPosition = linePosition,
+                            IsVerticalText = isVerticalText,
+                            TextAdvanceDirection = advanceDirection
+                        };
                         ExtractedLines.Add(line);
                     }
 
                     string text = renderInfo.GetText();
 
-                    // Insert a space when there is a significant horizontal gap between this render
+                    // Insert a space when there is a significant gap along the text baseline
                     // chunk and the previous one (e.g. adjacent table cells in separate content
                     // streams — iText does not synthesise spaces across stream boundaries).
-                    // We measure the gap via LastChunkEndX (chunk baseline endpoint) rather than
+                    // We measure the gap via the previous chunk baseline endpoint rather than
                     // per-character bounding boxes because the latter can have zero width for some
                     // fonts.  Threshold 3 pt catches cell padding (≥ 5–8 pt) while avoiding
                     // false positives from normal kerning (< 1 pt) or word tracking (< 3 pt).
                     // We also add a synthetic CharacterInfo for the space so that NER start/end
                     // indices (which are based on line.Text) stay in sync with line.Characters.
                     if (line.Text.Length > 0 && text.Length > 0
-                        && line.LastChunkEndX > float.MinValue
+                        && line.LastChunkEndPosition > float.MinValue
                         && !char.IsWhiteSpace(line.Text[line.Text.Length - 1])
                         && !char.IsWhiteSpace(text[0]))
                     {
-                        float chunkStartX = baseline.GetStartPoint().Get(KernelGeom.Vector.I1);
-                        float gap = chunkStartX - line.LastChunkEndX;
+                        float gap = (chunkStartPosition - line.LastChunkEndPosition) * line.TextAdvanceDirection;
                         if (gap > 3.0f)
                         {
                             // Large gaps (> 15 pt) indicate table-column boundaries; use '|'
@@ -8991,24 +9011,39 @@ namespace AnonPDF
                             // Small gaps (3–15 pt) are treated as normal word spaces.
                             char sepChar = gap > 15.0f ? '|' : ' ';
                             line.Text += sepChar;
-                            float spaceY, spaceH;
+                            KernelGeom.Rectangle spaceBounds;
                             if (line.Characters.Count > 0)
                             {
                                 var prev = line.Characters[line.Characters.Count - 1];
-                                spaceY = prev.BoundingBox.GetY();
-                                spaceH = prev.BoundingBox.GetHeight();
+                                if (isVerticalText)
+                                {
+                                    float y1 = line.LastChunkEndPosition;
+                                    float y2 = chunkStartPosition;
+                                    spaceBounds = new KernelGeom.Rectangle(
+                                        prev.BoundingBox.GetX(),
+                                        Math.Min(y1, y2),
+                                        prev.BoundingBox.GetWidth(),
+                                        Math.Max(0.1f, Math.Abs(y2 - y1)));
+                                }
+                                else
+                                {
+                                    float x1 = line.LastChunkEndPosition;
+                                    float x2 = chunkStartPosition;
+                                    spaceBounds = new KernelGeom.Rectangle(
+                                        Math.Min(x1, x2),
+                                        prev.BoundingBox.GetY(),
+                                        Math.Max(0.1f, Math.Abs(x2 - x1)),
+                                        prev.BoundingBox.GetHeight());
+                                }
                             }
                             else
                             {
-                                float chkAscY    = renderInfo.GetAscentLine().GetEndPoint().Get(KernelGeom.Vector.I2);
-                                float chkDesY    = renderInfo.GetDescentLine().GetStartPoint().Get(KernelGeom.Vector.I2);
-                                spaceY = chkDesY;
-                                spaceH = Math.Max(0.1f, chkAscY - chkDesY);
+                                spaceBounds = GetTextRenderInfoBounds(renderInfo);
                             }
                             line.Characters.Add(new CharacterInfo
                             {
                                 Char = sepChar,
-                                BoundingBox = new KernelGeom.Rectangle(line.LastChunkEndX, spaceY, gap, spaceH)
+                                BoundingBox = spaceBounds
                             });
                         }
                     }
@@ -9039,25 +9074,37 @@ namespace AnonPDF
                     {
                         // Use the same Y/height formula as the real charInfos loop so that
                         // synthetic boxes don't inflate the highlight rectangle.
-                        float cStartX  = baseline.GetStartPoint().Get(KernelGeom.Vector.I1);
-                        float cEndX    = baseline.GetEndPoint().Get(KernelGeom.Vector.I1);
-                        float charW    = Math.Max(0.1f, (cEndX - cStartX) / text.Length);
-                        float cAscY    = renderInfo.GetAscentLine().GetEndPoint().Get(KernelGeom.Vector.I2);
-                        float cDesY    = renderInfo.GetDescentLine().GetStartPoint().Get(KernelGeom.Vector.I2);
-                        float cH       = Math.Max(0.1f, cAscY - cDesY);  // descent → ascent
+                        KernelGeom.Rectangle chunkBounds = GetTextRenderInfoBounds(renderInfo);
+                        float charAdvance = Math.Max(
+                            0.1f,
+                            (isVerticalText ? chunkBounds.GetHeight() : chunkBounds.GetWidth()) / text.Length);
                         // ci starts from the number of chars already covered by real charInfos
                         int firstMissing = text.Length - deficit;
                         for (int ci = firstMissing; ci < text.Length; ci++)
                         {
+                            float offset = advanceDirection > 0f
+                                ? ci * charAdvance
+                                : (text.Length - ci - 1) * charAdvance;
+                            KernelGeom.Rectangle charBounds = isVerticalText
+                                ? new KernelGeom.Rectangle(
+                                    chunkBounds.GetX(),
+                                    chunkBounds.GetY() + offset,
+                                    chunkBounds.GetWidth(),
+                                    charAdvance)
+                                : new KernelGeom.Rectangle(
+                                    chunkBounds.GetX() + offset,
+                                    chunkBounds.GetY(),
+                                    charAdvance,
+                                    chunkBounds.GetHeight());
                             line.Characters.Add(new CharacterInfo
                             {
                                 Char = text[ci],
-                                BoundingBox = new KernelGeom.Rectangle(cStartX + ci * charW, cDesY, charW, cH)
+                                BoundingBox = charBounds
                             });
                         }
                     }
 
-                    line.LastChunkEndX = baseline.GetEndPoint().Get(KernelGeom.Vector.I1);
+                    line.LastChunkEndPosition = chunkEndPosition;
                 }
 
                 base.EventOccurred(data, type);
