@@ -7817,6 +7817,18 @@ namespace AnonPDF
             return "\"" + value.Replace("\"", "\\\"") + "\"";
         }
 
+        // Strict-format identifiers (regex + checksum). An overlapping free-text NER
+        // span (PERSON/LOCATION) is a different finding, not a duplicate — without this
+        // guard a garbled cross-column span like "Józefa Łódź" (whose character boxes
+        // stretch over the whole table row) swallows the KW/PESEL box it happens to cover.
+        private static readonly HashSet<string> _hardIdentifierLabels =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "KW", "PESEL", "NIP", "REGON", "KRS", "IDENTITY_CARD", "BANK_ACCOUNT",
+            "LOAN_NUMBER", "VIN", "ADE", "EMAIL", "PHONE", "URL",
+            "STEUER_ID", "UST_ID", "HRB"
+        };
+
         private static List<TextLocation> DeduplicateTextLocations(List<TextLocation> locations)
         {
             if (locations == null || locations.Count <= 1)
@@ -7834,6 +7846,12 @@ namespace AnonPDF
                 {
                     var existing = deduplicatedLocations[i];
                     if (loc.PageNumber != existing.PageNumber)
+                        continue;
+
+                    // A validated identifier and a free-text NER span are never duplicates
+                    // of each other, no matter how much their rectangles overlap.
+                    if (_hardIdentifierLabels.Contains(loc.Label ?? string.Empty) !=
+                        _hardIdentifierLabels.Contains(existing.Label ?? string.Empty))
                         continue;
 
                     float x1 = loc.Rect.GetX();
