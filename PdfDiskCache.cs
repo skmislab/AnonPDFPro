@@ -24,7 +24,11 @@ namespace AnonPDF
 
     internal static class PdfDiskCache
     {
-        private const int FormatVersion = 5;
+        // v7: line extraction inserts '|' on column boundaries (gap > 15 pt or
+        // negative gap = column interleave) even when the adjacent chunk ends
+        // with a space — cached lines from v5/v6 lack those separators, so old
+        // entries must be recomputed.
+        private const int FormatVersion = 7;
 
         private static string CacheDir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

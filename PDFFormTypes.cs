@@ -9002,17 +9002,30 @@ namespace AnonPDF
                     // We also add a synthetic CharacterInfo for the space so that NER start/end
                     // indices (which are based on line.Text) stay in sync with line.Characters.
                     if (line.Text.Length > 0 && text.Length > 0
-                        && line.LastChunkEndPosition > float.MinValue
-                        && !char.IsWhiteSpace(line.Text[line.Text.Length - 1])
-                        && !char.IsWhiteSpace(text[0]))
+                        && line.LastChunkEndPosition > float.MinValue)
                     {
                         float gap = (chunkStartPosition - line.LastChunkEndPosition) * line.TextAdvanceDirection;
-                        if (gap > 3.0f)
+                        // A column boundary ('|') must be inserted even when the previous
+                        // chunk already ends with a space — "im. Marszałka Józefa " followed
+                        // by the left-column chunk "Łódź, ul. Gdańska" used to skip the whole
+                        // separator logic because of the trailing space, gluing two table
+                        // columns into one NER phrase.
+                        bool whitespaceBoundary =
+                            char.IsWhiteSpace(line.Text[line.Text.Length - 1]) ||
+                            char.IsWhiteSpace(text[0]);
+                        bool columnBoundary = gap > 15.0f || gap < -2.0f;
+                        if (columnBoundary || (!whitespaceBoundary && gap > 3.0f))
                         {
                             // Large gaps (> 15 pt) indicate table-column boundaries; use '|'
                             // so NER regex patterns cannot span across field boundaries.
                             // Small gaps (3–15 pt) are treated as normal word spaces.
-                            char sepChar = gap > 15.0f ? '|' : ' ';
+                            // A NEGATIVE gap (< -2 pt) means the next chunk starts left of
+                            // where the previous one ended — reading order jumped back to an
+                            // earlier column ("im. Marszałka Józefa" + "Łódź, ul. Gdańska"
+                            // interleaved in one baseline). That is also a column boundary;
+                            // without '|' NER sees fake phrases like "Józefa Łódź" whose
+                            // character boxes span the whole table row.
+                            char sepChar = columnBoundary ? '|' : ' ';
                             line.Text += sepChar;
                             KernelGeom.Rectangle spaceBounds;
                             if (line.Characters.Count > 0)
