@@ -28,7 +28,9 @@ namespace AnonPDF
         // negative gap = column interleave) even when the adjacent chunk ends
         // with a space — cached lines from v5/v6 lack those separators, so old
         // entries must be recomputed.
-        private const int FormatVersion = 7;
+        // v8: IsLikelyPersonEntity accepts single-word person fragments (names
+        // split across a line break) — cached NER results from v7 lack them.
+        private const int FormatVersion = 8;
 
         private static string CacheDir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

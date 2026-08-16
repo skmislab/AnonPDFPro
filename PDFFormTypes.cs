@@ -9376,14 +9376,18 @@ namespace AnonPDF
                 return false;
             }
 
-            // Single hyphenated compound surname: "Kubicka-Formela", "Hoffmann-Müller"
-            if (parts.Length == 1)
+            // Single hyphenated compound surname: "Kubicka-Formela", "Hoffmann-Müller".
+            // A plain single word falls through to the per-part validation below —
+            // the NER plugin legitimately reports one-word person fragments when a
+            // name is split across a line break ("pani Katarzynie" / "Nowickiej").
+            if (parts.Length == 1 && parts[0].IndexOf('-') >= 0)
             {
                 string[] segs = parts[0].Split('-');
                 return segs.Length >= 2
                     && segs.All(s => s.Length >= 2 && char.IsUpper(s[0]) && s.Skip(1).Any(char.IsLower));
             }
 
+            bool hasNamePart = false;
             foreach (string part in parts)
             {
                 string clean = part.Trim('-', '\'', '.', ',', ';', ':');
@@ -9407,6 +9411,14 @@ namespace AnonPDF
                 {
                     return false;
                 }
+
+                hasNamePart = true;
+            }
+
+            // Reject values made of titles/initials only ("Dr", "J. P.").
+            if (!hasNamePart)
+            {
+                return false;
             }
 
             string normalized = NormalizeTextForNer(value);
