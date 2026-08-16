@@ -969,6 +969,9 @@ namespace AnonPDF
         private HashSet<string> _foundActiveCategories = new HashSet<string>(StringComparer.Ordinal);
         private bool _suppressFilterChange;
         private bool _foundFilterDirty;
+        // Applies filter changes shortly after the last checkbox toggle, so a rapid
+        // series of clicks collapses into a single tree rebuild + page repaint.
+        private Timer _foundFilterApplyTimer;
         private ToolStripMenuItem foundContextMenuEdit;
         private ToolStripMenuItem foundContextMenuClear;
         private bool _suppressFoundCheck;
@@ -58595,6 +58598,9 @@ namespace AnonPDF
             // several categories no longer rebuilds the tree once per click.
             foundFilterDropDown.Closed += (s, e) =>
             {
+                // Changes apply as they are made; this only flushes a toggle whose
+                // debounce interval had not elapsed when the list closed.
+                _foundFilterApplyTimer?.Stop();
                 if (_foundFilterDirty && !_suppressFilterChange)
                 {
                     _foundFilterDirty = false;
@@ -59581,6 +59587,29 @@ namespace AnonPDF
             foundFilterListBox?.Focus();
         }
 
+        /// <summary>
+        /// Schedules <see cref="ApplyFoundFilter"/> a moment after the last toggle, so
+        /// results and page highlights follow every click without rebuilding the tree
+        /// once per click while the user is still picking categories.
+        /// </summary>
+        private void ScheduleFoundFilterApply()
+        {
+            _foundFilterDirty = true;
+            if (_foundFilterApplyTimer == null)
+            {
+                _foundFilterApplyTimer = new Timer { Interval = 150 };
+                _foundFilterApplyTimer.Tick += (s, e) =>
+                {
+                    _foundFilterApplyTimer.Stop();
+                    if (!_foundFilterDirty || _suppressFilterChange) return;
+                    _foundFilterDirty = false;
+                    ApplyFoundFilter();
+                };
+            }
+            _foundFilterApplyTimer.Stop();
+            _foundFilterApplyTimer.Start();
+        }
+
         private void FoundFilterListBox_MouseDown(object sender, MouseEventArgs e)
         {
             if (_suppressFilterChange || foundFilterListBox == null) return;
@@ -59594,7 +59623,7 @@ namespace AnonPDF
             foundFilterListBox.Invalidate(foundFilterListBox.GetItemRectangle(idx));
             UpdateFoundFilterMasterState();
             UpdateFoundFilterButtonText();
-            _foundFilterDirty = true;
+            ScheduleFoundFilterApply();
         }
 
         private void FoundFilterMasterPanel_Paint(object sender, PaintEventArgs e)
@@ -59664,7 +59693,7 @@ namespace AnonPDF
             foundFilterMasterPanel?.Invalidate();
             foundFilterListBox.Invalidate();
             UpdateFoundFilterButtonText();
-            _foundFilterDirty = true;
+            ScheduleFoundFilterApply();
         }
 
         private void InvertFoundFilter()
@@ -59678,7 +59707,7 @@ namespace AnonPDF
             foundFilterListBox.Invalidate();
             UpdateFoundFilterMasterState();
             UpdateFoundFilterButtonText();
-            _foundFilterDirty = true;
+            ScheduleFoundFilterApply();
         }
 
         private sealed class FoundFilterItem
