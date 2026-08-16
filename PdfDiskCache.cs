@@ -30,7 +30,9 @@ namespace AnonPDF
         // entries must be recomputed.
         // v8: IsLikelyPersonEntity accepts single-word person fragments (names
         // split across a line break) — cached NER results from v7 lack them.
-        private const int FormatVersion = 8;
+        // v9: "pl."-prefixed street addresses no longer rejected by the
+        // language-code stop-word check — v8 results lack them.
+        private const int FormatVersion = 9;
 
         private static string CacheDir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

@@ -7615,9 +7615,19 @@ namespace AnonPDF
                 return false;
             }
 
+            // Street addresses start with a prefix — abbreviated ("pl. Wolności 14")
+            // or written out ("Plac Armii Krajowej 1"); "pl" also happens to be a
+            // language code in NerEntityStopWords, which used to reject every
+            // "pl." address.
+            bool isStreetAddress = Regex.IsMatch(
+                entityText,
+                @"^\s*(?:ul\.|ulica\b|al\.|aleja\b|pl\.|plac\b|os\.|osiedle\b|rondo\b|skwer\b)",
+                RegexOptions.IgnoreCase);
+
             string[] parts = normalized.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length == 0 ||
-                parts.Any(part => NerInstructionStopWords.Contains(part) || NerUiLeadWords.Contains(part) || NerEntityStopWords.Contains(part)))
+                (!isStreetAddress &&
+                 parts.Any(part => NerInstructionStopWords.Contains(part) || NerUiLeadWords.Contains(part) || NerEntityStopWords.Contains(part))))
             {
                 return false;
             }
