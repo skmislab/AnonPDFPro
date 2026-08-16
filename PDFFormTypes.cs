@@ -9411,7 +9411,12 @@ namespace AnonPDF
                     continue;
                 }
 
-                if (clean.Length < 3 || !char.IsUpper(clean[0]) || !clean.Skip(1).Any(char.IsLower))
+                // Casing is not a criterion: the NER plugin also reports names
+                // written in lowercase ("jan kowalski"), ALL-CAPS ("JAN KOWALSKI")
+                // or mixed ("JAn KoWalski") — text typed into the document rather
+                // than produced by a typesetter. Only the shape is checked here;
+                // the plugin already validated that these are person names.
+                if (clean.Length < 3 || !clean.All(ch => char.IsLetter(ch) || ch == '-' || ch == '\''))
                 {
                     return false;
                 }

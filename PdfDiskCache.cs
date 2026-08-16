@@ -32,7 +32,9 @@ namespace AnonPDF
         // split across a line break) — cached NER results from v7 lack them.
         // v9: "pl."-prefixed street addresses no longer rejected by the
         // language-code stop-word check — v8 results lack them.
-        private const int FormatVersion = 9;
+        // v10: IsLikelyPersonEntity no longer requires capitalised name parts,
+        // so lowercase/ALL-CAPS names survive — v9 results lack them.
+        private const int FormatVersion = 10;
 
         private static string CacheDir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
