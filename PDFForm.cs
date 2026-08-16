@@ -127,6 +127,11 @@ namespace AnonPDF
         private const string RightPanelTabPagesKey = "pages";
         private const string RightPanelTabThumbnailsKey = "thumbnails";
         private const string RightPanelTabLayersKey = "layers";
+        private const string RightPanelTabFoundKey = "found";
+        // Set while the code (not the user) changes the right-panel tab, so that
+        // restoring the setting — or adding/removing the results tab — does not
+        // overwrite the tab the user actually chose.
+        private bool _suppressRightPanelTabSave;
         private const float FootnoteMarkerGapPx = 2f;
         private const int RichTextHorizontalRenderSafetyPx = 8;
         private const int RasterDownsampleTextThresholdDpi = 300;
@@ -41333,6 +41338,7 @@ namespace AnonPDF
                     return;
                 }
 
+                _suppressRightPanelTabSave = true;
                 string selectedTabKey = Properties.Settings.Default.RightPanelSelectedTabKey;
                 if (string.IsNullOrWhiteSpace(selectedTabKey))
                 {
@@ -41348,6 +41354,14 @@ namespace AnonPDF
                         break;
                     case RightPanelTabThumbnailsKey:
                         pagesTabControl.SelectedTab = thumbnailsTabPage;
+                        break;
+                    case RightPanelTabFoundKey:
+                        // The results tab only exists once a document has results; until
+                        // then show the pages list and let ShowFoundTab() switch over.
+                        if (foundTabPage != null && pagesTabControl.TabPages.Contains(foundTabPage))
+                            pagesTabControl.SelectedTab = foundTabPage;
+                        else
+                            pagesTabControl.SelectedTab = pagesListTabPage;
                         break;
                     default:
                         pagesTabControl.SelectedTab = pagesListTabPage;
@@ -41367,6 +41381,10 @@ namespace AnonPDF
             {
                 LogDebug("Apply right-panel tab selection failed: " + ex.Message);
             }
+            finally
+            {
+                _suppressRightPanelTabSave = false;
+            }
         }
 
         private string GetSelectedRightPanelTabKey()
@@ -41384,6 +41402,11 @@ namespace AnonPDF
             if (pagesTabControl.SelectedTab == layersTabPage)
             {
                 return RightPanelTabLayersKey;
+            }
+
+            if (foundTabPage != null && pagesTabControl.SelectedTab == foundTabPage)
+            {
+                return RightPanelTabFoundKey;
             }
 
             return RightPanelTabPagesKey;
@@ -41493,7 +41516,10 @@ namespace AnonPDF
                 return;
             }
 
-            SaveRightPanelTabSelectionUserSetting();
+            if (!_suppressRightPanelTabSave)
+            {
+                SaveRightPanelTabSelectionUserSetting();
+            }
             UpdateRightPanelTabContentVisibility();
 
             if (IsThumbnailsTabSelected())
@@ -43630,7 +43656,7 @@ namespace AnonPDF
                             if (altLocs.Count > 0)
                             {
                                 searchLocations = altLocs;
-                                PopulateFoundTab();
+                                PopulateFoundTab(selectFoundTab: false);
                             }
                         }
                     }
@@ -58353,7 +58379,8 @@ namespace AnonPDF
                         if (altLocs.Count > 0)
                         {
                             searchLocations = altLocs;
-                            PopulateFoundTab();
+                            // Alt texts alone must not pull the user onto the results tab.
+                            PopulateFoundTab(selectFoundTab: false);
                         }
 
                         if (piiAlreadyCached)
@@ -58676,12 +58703,45 @@ namespace AnonPDF
             ApplyThemeToFoundTab(CurrentTheme);
         }
 
-        private void ShowFoundTab()
+        /// <summary>
+        /// Adds the results tab to the right panel. <paramref name="selectTab"/> is false
+        /// when the tab appears on its own (a document that simply contains alt texts) —
+        /// the panel then keeps the tab the user is on, which right after loading is the
+        /// one restored from settings.
+        /// </summary>
+        private void ShowFoundTab(bool selectTab = true)
         {
-            if (!pagesTabControl.TabPages.Contains(foundTabPage))
-                pagesTabControl.TabPages.Insert(0, foundTabPage);
-            foundTabPage.Text = LocalizedText("UI_Tab_Found");
-            pagesTabControl.SelectedTab = foundTabPage;
+            bool remembersFoundTab = string.Equals(
+                Properties.Settings.Default.RightPanelSelectedTabKey,
+                RightPanelTabFoundKey,
+                StringComparison.Ordinal);
+            // A tab appearing on its own must not rewrite the user's remembered choice.
+            _suppressRightPanelTabSave = !selectTab;
+            try
+            {
+                TabPage previouslySelected = pagesTabControl.SelectedTab;
+                if (!pagesTabControl.TabPages.Contains(foundTabPage))
+                    pagesTabControl.TabPages.Insert(0, foundTabPage);
+                foundTabPage.Text = LocalizedText("UI_Tab_Found");
+
+                if (selectTab || remembersFoundTab)
+                {
+                    // Either the user asked for results, or this is the tab they were last
+                    // on — it could not be restored at load time because it did not exist yet.
+                    pagesTabControl.SelectedTab = foundTabPage;
+                }
+                else if (previouslySelected != null
+                         && pagesTabControl.TabPages.Contains(previouslySelected)
+                         && pagesTabControl.SelectedTab != previouslySelected)
+                {
+                    // Inserting a page at index 0 can move the selection with it.
+                    pagesTabControl.SelectedTab = previouslySelected;
+                }
+            }
+            finally
+            {
+                _suppressRightPanelTabSave = false;
+            }
             // The tab may have been detached while UseWaitCursor=true (during LoadPdf) and
             // missed the subsequent UseWaitCursor=false reset. Clear it explicitly now.
             foundTabPage.UseWaitCursor = false;
@@ -58689,12 +58749,22 @@ namespace AnonPDF
 
         private void HideFoundTab()
         {
-            if (foundTabPage != null && pagesTabControl.TabPages.Contains(foundTabPage))
-                pagesTabControl.TabPages.Remove(foundTabPage);
+            // Removing the tab moves the selection elsewhere — that is not a choice the
+            // user made, so it must not replace the remembered tab.
+            _suppressRightPanelTabSave = true;
+            try
+            {
+                if (foundTabPage != null && pagesTabControl.TabPages.Contains(foundTabPage))
+                    pagesTabControl.TabPages.Remove(foundTabPage);
+            }
+            finally
+            {
+                _suppressRightPanelTabSave = false;
+            }
             foundTreeView?.Nodes.Clear();
         }
 
-        private void PopulateFoundTab()
+        private void PopulateFoundTab(bool selectFoundTab = true)
         {
             if (foundTreeView == null) return;
 
@@ -58712,7 +58782,7 @@ namespace AnonPDF
             RebuildFoundTree(searchLocations);
 
             if (searchLocations.Count > 0)
-                ShowFoundTab();
+                ShowFoundTab(selectFoundTab);
             else
                 HideFoundTab();
         }
