@@ -59953,7 +59953,7 @@ namespace AnonPDF
             }
             else
             {
-                GoToLocation(0);
+                GoToFirstResultOnCurrentPage();
             }
             } // end try
             catch (OperationCanceledException)
@@ -59968,6 +59968,53 @@ namespace AnonPDF
             {
                 EndBusyCursor();
             }
+        }
+
+        /// <summary>
+        /// Selects the first search result on the page the user is currently viewing.
+        /// When that page has no result, the page is kept and the nearest earlier
+        /// result is made active so Next/Prev continue from the current position
+        /// (both handlers index searchLocations by currentLocationIndex, so it must
+        /// stay valid whenever results exist).
+        /// </summary>
+        private void GoToFirstResultOnCurrentPage()
+        {
+            if (searchLocations == null || searchLocations.Count == 0)
+                return;
+
+            int indexOnCurrentPage = searchLocations.FindIndex(loc => loc.PageNumber == currentPage);
+            if (indexOnCurrentPage >= 0)
+            {
+                GoToLocation(indexOnCurrentPage);
+                // GoToLocation only scrolls the results tree far enough to reveal the
+                // selected leaf; pull the whole page group to the top instead.
+                ScrollFoundTabToPage(currentPage);
+                return;
+            }
+
+            int nearestEarlier = searchLocations.FindLastIndex(loc => loc.PageNumber < currentPage);
+            currentLocationIndex = nearestEarlier >= 0 ? nearestEarlier : 0;
+            pdfViewer.Invalidate();
+            UpdateSearchNavigationButtons();
+            SyncFoundTabSelection();
+        }
+
+        /// <summary>
+        /// Scrolls the results tree so that the group of <paramref name="pageNumber"/>
+        /// sits at the very top of the visible area.
+        /// </summary>
+        private void ScrollFoundTabToPage(int pageNumber)
+        {
+            if (foundTreeView == null)
+                return;
+
+            TreeNode pageNode = foundTreeView.Nodes
+                .Cast<TreeNode>()
+                .FirstOrDefault(node => node.Tag is int page && page == pageNumber);
+            if (pageNode == null)
+                return;
+
+            foundTreeView.TopNode = pageNode;
         }
 
         private void ClearSearchResult()
