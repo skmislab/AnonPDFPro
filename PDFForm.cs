@@ -41120,7 +41120,7 @@ namespace AnonPDF
             // Drawing saved search results
             foreach (var location in searchLocations)
             {
-                if (location.PageNumber == currentPage)
+                if (location.PageNumber == currentPage && IsFoundLocationVisible(location))
                 {
                     List<RectangleF> preciseViewRects = GetSearchLocationViewRects(location);
                     if (preciseViewRects.Count > 1)
@@ -59532,6 +59532,20 @@ namespace AnonPDF
                 : $"{label} ({active}/{total}) ▾";
         }
 
+        /// <summary>
+        /// True when the result belongs to a category currently enabled in the Found-tab
+        /// filter. An empty filter list means the filter has not been built for this
+        /// result set (e.g. plain text search), so every result stays visible; an empty
+        /// selection with a built list means the user unchecked everything.
+        /// </summary>
+        private bool IsFoundLocationVisible(TextLocation location)
+        {
+            if (location == null) return false;
+            if (foundFilterListBox == null || foundFilterListBox.Items.Count == 0) return true;
+            return _foundActiveCategories != null
+                && _foundActiveCategories.Contains(GetFoundCategoryKey(location));
+        }
+
         private void ApplyFoundFilter()
         {
             if (_suppressFilterChange) return;
@@ -59541,6 +59555,8 @@ namespace AnonPDF
                 .ToList();
             RebuildFoundTree(filtered);
             UpdateFoundFilterButtonText();
+            // Highlights on the page follow the list — hidden categories disappear.
+            pdfViewer.Invalidate();
         }
 
         private void UpdateFoundFilterMasterState()
