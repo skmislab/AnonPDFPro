@@ -86,7 +86,10 @@ namespace AnonPDF
                 return;
             }
 
-            EnsureContextMenuRegistration();
+            if (!startupOptions.Headless)
+            {
+                EnsureContextMenuRegistration();
+            }
             LicenseManager.Initialize(AppDomain.CurrentDomain.BaseDirectory);
             if (!ValidateRequiredLicenseFiles(out string licenseError))
             {
@@ -208,6 +211,7 @@ namespace AnonPDF
             public int PageNumber;        // --page <1-based page number>
             public string TemplatePath;   // --template <project.app>
             public bool OverwriteOutput;  // --overwrite
+            public bool SkipTemplateValidation; // --skip-template-validation
             public bool Headless;         // --headless
             public bool IndexText;        // --text
             public bool RunOcr;           // --ocr
@@ -242,6 +246,11 @@ namespace AnonPDF
                 if (string.Equals(arg, "--overwrite", StringComparison.OrdinalIgnoreCase))
                 {
                     options.OverwriteOutput = true;
+                    continue;
+                }
+                if (string.Equals(arg, "--skip-template-validation", StringComparison.OrdinalIgnoreCase))
+                {
+                    options.SkipTemplateValidation = true;
                     continue;
                 }
                 if (string.Equals(arg, "--text", StringComparison.OrdinalIgnoreCase))
@@ -375,6 +384,11 @@ namespace AnonPDF
             exitCode = 2;
             if (!options.Headless)
             {
+                if (options.SkipTemplateValidation)
+                {
+                    error = CommandLineText("CommandLine_SkipValidationRequiresHeadless");
+                    return false;
+                }
                 if (!string.IsNullOrWhiteSpace(options.TemplatePath))
                 {
                     error = CommandLineText("CommandLine_TemplateRequiresHeadless");
@@ -427,6 +441,7 @@ namespace AnonPDF
                     TemplatePath = options.TemplatePath,
                     OutputPdfPath = options.PdfOutputPath,
                     OverwriteOutput = options.OverwriteOutput,
+                    SkipTemplateValidation = options.SkipTemplateValidation,
                     IndexText = options.IndexText,
                     RunOcr = options.RunOcr,
                     PdfAOutput = options.PdfAOutput,
@@ -490,6 +505,7 @@ namespace AnonPDF
 
         private static void EnsureContextMenuRegistration()
         {
+            bool changed = false;
             try
             {
                 string exePath = Application.ExecutablePath;
@@ -499,19 +515,44 @@ namespace AnonPDF
                 }
 
                 string commandValue = $"\"{exePath}\" \"%1\"";
-                RegisterContextMenuForExtension(".pdf", commandValue, exePath);
-                RegisterContextMenuForExtension(AppProjectExtension, commandValue, exePath);
-                RegisterContextMenuForExtension(".pap", commandValue, exePath);
-                RegisterAppProjectFileAssociation(commandValue, exePath);
-                NotifyShellAssociationChanged();
+                RegisterContextMenuForExtension(".pdf", commandValue, exePath, ref changed);
+                RegisterContextMenuForExtension(AppProjectExtension, commandValue, exePath, ref changed);
+                RegisterContextMenuForExtension(".pap", commandValue, exePath, ref changed);
+                RegisterAppProjectFileAssociation(commandValue, exePath, ref changed);
             }
             catch
             {
                 // Best effort only. Lack of registry access must not block app startup.
             }
+            finally
+            {
+                if (changed)
+                {
+                    NotifyShellAssociationChanged();
+                }
+            }
         }
 
-        private static void RegisterAppProjectFileAssociation(string commandValue, string exePath)
+        private static void SetRegistryStringIfChanged(RegistryKey key, string name, string value, ref bool changed)
+        {
+            if (key == null)
+            {
+                return;
+            }
+
+            object currentValue = key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+            if (currentValue is string text &&
+                string.Equals(text, value, StringComparison.Ordinal) &&
+                key.GetValueKind(name) == RegistryValueKind.String)
+            {
+                return;
+            }
+
+            key.SetValue(name, value, RegistryValueKind.String);
+            changed = true;
+        }
+
+        private static void RegisterAppProjectFileAssociation(string commandValue, string exePath, ref bool changed)
         {
             string description = GetAppProjectFileTypeDescriptionText();
             string iconValue = $"\"{exePath}\",0";
@@ -520,12 +561,12 @@ namespace AnonPDF
             {
                 if (extensionKey != null)
                 {
-                    extensionKey.SetValue(string.Empty, AppProjectProgId, RegistryValueKind.String);
-                    extensionKey.SetValue("PerceivedType", "document", RegistryValueKind.String);
+                    SetRegistryStringIfChanged(extensionKey, string.Empty, AppProjectProgId, ref changed);
+                    SetRegistryStringIfChanged(extensionKey, "PerceivedType", "document", ref changed);
 
                     using (RegistryKey openWithKey = extensionKey.CreateSubKey("OpenWithProgids"))
                     {
-                        openWithKey?.SetValue(AppProjectProgId, string.Empty, RegistryValueKind.String);
+                        SetRegistryStringIfChanged(openWithKey, AppProjectProgId, string.Empty, ref changed);
                     }
                 }
             }
@@ -537,27 +578,27 @@ namespace AnonPDF
                     return;
                 }
 
-                progIdKey.SetValue(string.Empty, description, RegistryValueKind.String);
-                progIdKey.SetValue("FriendlyTypeName", description, RegistryValueKind.String);
+                SetRegistryStringIfChanged(progIdKey, string.Empty, description, ref changed);
+                SetRegistryStringIfChanged(progIdKey, "FriendlyTypeName", description, ref changed);
 
                 using (RegistryKey defaultIconKey = progIdKey.CreateSubKey("DefaultIcon"))
                 {
-                    defaultIconKey?.SetValue(string.Empty, iconValue, RegistryValueKind.String);
+                    SetRegistryStringIfChanged(defaultIconKey, string.Empty, iconValue, ref changed);
                 }
 
                 using (RegistryKey shellKey = progIdKey.CreateSubKey("shell"))
                 {
-                    shellKey?.SetValue(string.Empty, "open", RegistryValueKind.String);
+                    SetRegistryStringIfChanged(shellKey, string.Empty, "open", ref changed);
                 }
 
                 using (RegistryKey openKey = progIdKey.CreateSubKey(@"shell\open"))
                 {
-                    openKey?.SetValue(string.Empty, GetContextMenuOpenText(), RegistryValueKind.String);
+                    SetRegistryStringIfChanged(openKey, string.Empty, GetContextMenuOpenText(), ref changed);
                 }
 
                 using (RegistryKey commandKey = progIdKey.CreateSubKey(@"shell\open\command"))
                 {
-                    commandKey?.SetValue(string.Empty, commandValue, RegistryValueKind.String);
+                    SetRegistryStringIfChanged(commandKey, string.Empty, commandValue, ref changed);
                 }
             }
         }
@@ -574,7 +615,7 @@ namespace AnonPDF
             }
         }
 
-        private static void RegisterContextMenuForExtension(string extension, string commandValue, string iconPath)
+        private static void RegisterContextMenuForExtension(string extension, string commandValue, string iconPath, ref bool changed)
         {
             string shellKeyPath = $@"Software\Classes\SystemFileAssociations\{extension}\shell\AnonPDFPro";
             using (RegistryKey shellKey = Registry.CurrentUser.CreateSubKey(shellKeyPath))
@@ -584,8 +625,8 @@ namespace AnonPDF
                     return;
                 }
 
-                shellKey.SetValue(string.Empty, GetContextMenuOpenText(), RegistryValueKind.String);
-                shellKey.SetValue("Icon", iconPath, RegistryValueKind.String);
+                SetRegistryStringIfChanged(shellKey, string.Empty, GetContextMenuOpenText(), ref changed);
+                SetRegistryStringIfChanged(shellKey, "Icon", iconPath, ref changed);
             }
 
             using (RegistryKey commandKey = Registry.CurrentUser.CreateSubKey(shellKeyPath + @"\command"))
@@ -595,7 +636,7 @@ namespace AnonPDF
                     return;
                 }
 
-                commandKey.SetValue(string.Empty, commandValue, RegistryValueKind.String);
+                SetRegistryStringIfChanged(commandKey, string.Empty, commandValue, ref changed);
             }
         }
 

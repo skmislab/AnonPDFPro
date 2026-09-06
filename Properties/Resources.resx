@@ -2373,6 +2373,7 @@ Opcje wsadowe (wymagaj&#261; --headless):
   --pdfout &lt;plik.pdf&gt;    Docelowy plik PDF.
   --overwrite              Zezwala na nadpisanie istniej&#261;cego pliku wynikowego.
   --headless               Uruchamia bez interfejsu i bez wtyczki PII.
+  --skip-template-validation Pomija zgodność liczby, rozmiarów i obrotów stron z szablonem; nie dopasowuje zaznaczeń.
   --text                   Indeksuje tekst natywny dokumentu.
   --ocr                    Uruchamia indeksowanie oraz OCR stron bez tekstu.
   --format pdf|pdfa        Format wyniku; pdf jest domy&#347;lny, pdfa wymaga OCR.
@@ -2411,4 +2412,5 @@ Kody zako&#324;czenia: 0 sukces, 2 b&#322;&#281;dne parametry, 3 niezgodny szabl
   <data name="CommandLine_OutputNotCreated" xml:space="preserve"><value>Nie utworzono pliku wynikowego.</value></data>
   <data name="CommandLine_Saved" xml:space="preserve"><value>Zapisano dokument: {0}</value></data>
   <data name="CommandLine_ProcessingError" xml:space="preserve"><value>B&#322;&#261;d przetwarzania: {0}</value></data>
+  <data name="CommandLine_SkipValidationRequiresHeadless" xml:space="preserve"><value>Parametr --skip-template-validation wymaga użycia parametru --headless.</value></data>
 </root>

@@ -2326,6 +2326,7 @@ Stapeloptionen (erfordern --headless):
   --pdfout &lt;datei.pdf&gt;    Ausgabedatei im PDF-Format.
   --overwrite              Erlaubt das Ersetzen einer vorhandenen Ausgabedatei.
   --headless               Startet ohne Benutzeroberfl&#228;che und PII-Plugin.
+  --skip-template-validation Überspringt den Vergleich von Seitenzahl, Seitengrößen und Drehungen; passt Markierungen nicht an.
   --text                   Indiziert nativen Dokumenttext.
   --ocr                    F&#252;hrt Indizierung und OCR f&#252;r Seiten ohne Text aus.
   --format pdf|pdfa        Ausgabeformat; pdf ist Standard, pdfa erfordert OCR.
@@ -2364,4 +2365,5 @@ Exit-Codes: 0 Erfolg, 2 ung&#252;ltige Argumente, 3 inkompatible Vorlage, 4 Ausg
   <data name="CommandLine_OutputNotCreated" xml:space="preserve"><value>Die Ausgabedatei wurde nicht erstellt.</value></data>
   <data name="CommandLine_Saved" xml:space="preserve"><value>Dokument gespeichert: {0}</value></data>
   <data name="CommandLine_ProcessingError" xml:space="preserve"><value>Verarbeitungsfehler: {0}</value></data>
+  <data name="CommandLine_SkipValidationRequiresHeadless" xml:space="preserve"><value>Die Option --skip-template-validation erfordert --headless.</value></data>
 </root>

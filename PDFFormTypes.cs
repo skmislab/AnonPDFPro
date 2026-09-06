@@ -4309,6 +4309,7 @@ namespace AnonPDF
         public string TemplatePath { get; set; }
         public string OutputPdfPath { get; set; }
         public bool OverwriteOutput { get; set; }
+        public bool SkipTemplateValidation { get; set; }
         public bool IndexText { get; set; }
         public bool RunOcr { get; set; }
         public bool PdfAOutput { get; set; }

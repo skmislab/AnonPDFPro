@@ -25128,26 +25128,29 @@ namespace AnonPDF
                     return BatchRunResult.Failure(3, LocalizedText("CommandLine_InvalidTemplate"));
                 }
 
-                ProjectDocumentGeometry templateGeometry = template.DocumentGeometry;
-                if (templateGeometry == null || templateGeometry.Pages == null || templateGeometry.Pages.Count == 0)
+                if (!options.SkipTemplateValidation)
                 {
-                    string templateSourcePdf = ResolveProjectPdfPath(template.FilePath ?? string.Empty, options.TemplatePath);
-                    templateGeometry = ReadDocumentGeometry(templateSourcePdf, string.Empty, out string templateGeometryError);
-                    if (templateGeometry == null)
+                    ProjectDocumentGeometry templateGeometry = template.DocumentGeometry;
+                    if (templateGeometry == null || templateGeometry.Pages == null || templateGeometry.Pages.Count == 0)
                     {
-                        return BatchRunResult.Failure(3,
-                            string.Format(LocalizedText("CommandLine_TemplateSourceUnavailable"), templateGeometryError));
+                        string templateSourcePdf = ResolveProjectPdfPath(template.FilePath ?? string.Empty, options.TemplatePath);
+                        templateGeometry = ReadDocumentGeometry(templateSourcePdf, string.Empty, out string templateGeometryError);
+                        if (templateGeometry == null)
+                        {
+                            return BatchRunResult.Failure(3,
+                                string.Format(LocalizedText("CommandLine_TemplateSourceUnavailable"), templateGeometryError));
+                        }
                     }
-                }
 
-                ProjectDocumentGeometry targetGeometry = ReadDocumentGeometry(inputPdfPath, userPassword, out string targetGeometryError);
-                if (targetGeometry == null)
-                {
-                    return BatchRunResult.Failure(5, string.Format(LocalizedText("CommandLine_CannotReadGeometry"), targetGeometryError));
-                }
-                if (!HasMatchingDocumentGeometry(templateGeometry, targetGeometry))
-                {
-                    return BatchRunResult.Failure(3, LocalizedText("CommandLine_TemplateMismatch"));
+                    ProjectDocumentGeometry targetGeometry = ReadDocumentGeometry(inputPdfPath, userPassword, out string targetGeometryError);
+                    if (targetGeometry == null)
+                    {
+                        return BatchRunResult.Failure(5, string.Format(LocalizedText("CommandLine_CannotReadGeometry"), targetGeometryError));
+                    }
+                    if (!HasMatchingDocumentGeometry(templateGeometry, targetGeometry))
+                    {
+                        return BatchRunResult.Failure(3, LocalizedText("CommandLine_TemplateMismatch"));
+                    }
                 }
 
                 if (options.IndexText)

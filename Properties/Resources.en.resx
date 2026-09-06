@@ -2373,6 +2373,7 @@ Batch options (require --headless):
   --pdfout &lt;file.pdf&gt;    Output PDF file.
   --overwrite              Allows replacing an existing output file.
   --headless               Runs without the user interface and PII plugin.
+  --skip-template-validation Skips matching page count, sizes and rotations to the template; does not adjust redactions.
   --text                   Indexes native document text.
   --ocr                    Runs indexing and OCR for pages without text.
   --format pdf|pdfa        Output format; pdf is default, pdfa requires OCR.
@@ -2411,4 +2412,5 @@ Exit codes: 0 success, 2 invalid arguments, 3 incompatible template, 4 output ex
   <data name="CommandLine_OutputNotCreated" xml:space="preserve"><value>The output file was not created.</value></data>
   <data name="CommandLine_Saved" xml:space="preserve"><value>Document saved: {0}</value></data>
   <data name="CommandLine_ProcessingError" xml:space="preserve"><value>Processing error: {0}</value></data>
+  <data name="CommandLine_SkipValidationRequiresHeadless" xml:space="preserve"><value>The --skip-template-validation option requires --headless.</value></data>
 </root>
