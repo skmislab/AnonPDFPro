@@ -5,12 +5,18 @@ VisualStudioVersion = 17.11.35327.3
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnonPDFPro", "AnonPDFPro.csproj", "{2595CA84-5335-40DC-BD91-E7B1BB9E5A69}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnonPDFPro.Tests", "tests\AnonPDFPro.Tests\AnonPDFPro.Tests.csproj", "{4C61B0DF-D147-49ED-B6B7-DA2A79A6929E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4C61B0DF-D147-49ED-B6B7-DA2A79A6929E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C61B0DF-D147-49ED-B6B7-DA2A79A6929E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C61B0DF-D147-49ED-B6B7-DA2A79A6929E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C61B0DF-D147-49ED-B6B7-DA2A79A6929E}.Release|Any CPU.Build.0 = Release|Any CPU
 		{2595CA84-5335-40DC-BD91-E7B1BB9E5A69}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{2595CA84-5335-40DC-BD91-E7B1BB9E5A69}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2595CA84-5335-40DC-BD91-E7B1BB9E5A69}.Release|Any CPU.ActiveCfg = Release|Any CPU

@@ -1,6 +1,7 @@
 # Build artifacts
 bin/
 obj/
+TestResults/
 
 # User-specific files
 *.user
@@ -11,6 +12,7 @@ obj/
 # Packages (NuGet)
 packages/
 *.nupkg
+nuget.exe
 
 # VS/IDE
 .vs/

@@ -6,21 +6,22 @@ restore (see `packages/<id>/*LICENSE*` or `packages/<id>/README*`), or linked
 to upstream sources.
 
 ## AGPL-3.0 components (iText)
-- iText 9.5.0 (itext) and related modules bundled with itext
+- iText 9.8.0 (itext) and related modules bundled with itext
   - itext.barcodes, itext.forms, itext.io, itext.kernel, itext.layout,
     itext.pdfa, itext.pdfua, itext.sign, itext.styledxmlparser, itext.svg
-- itext.commons 9.5.0
-- itext.bouncy-castle-adapter 9.5.0
-- itext.pdfsweep 5.0.6
+- itext.commons 9.8.0
+- itext.bouncy-castle-adapter 9.8.0
+- itext.pdfhtml 6.3.4
+- itext.pdfsweep 5.0.8 (custom build 5.0.8.1)
 License: GNU Affero General Public License v3.0 (AGPL-3.0)
 
-Note: `packages/itext.pdfsweep.5.0.6/lib/net461/` contains a custom build of
+Note: `packages/itext.pdfsweep.5.0.8/lib/net461/` contains a custom build of
 itext.pdfsweep that bundles the OpenJPEG library (`openjp2.dll`) and the JBIG2
 bridge (`jbig2bridge.dll`) to enable redaction of JPEG 2000 (JP2/JPX) and JBIG2
 images. See the codec sections below.
 
 ## Apache-2.0 components
-- TesseractOCR 5.5.1 (.NET wrapper)
+- TesseractOCR 5.5.2 (.NET wrapper; native Tesseract 5.5.1)
 - Material Design Icons Webfont (`materialdesignicons-subset.ttf`)
   - Used for vector shape picker icons in the UI.
 - jbig2enc arithmetic encoder, used in lossless generic-region mode by
@@ -29,13 +30,13 @@ License: Apache License 2.0
 
 ## OpenJPEG (bundled with itext.pdfsweep)
 - OpenJPEG (`openjp2.dll`) — bundled in
-  `packages/itext.pdfsweep.5.0.6/lib/net461/`, used by the custom itext.pdfsweep
+  `packages/itext.pdfsweep.5.0.8/lib/net461/`, used by the custom itext.pdfsweep
   build to support redaction of JPEG 2000 (JP2/JPX) images.
 License: BSD 2-Clause "Simplified" License.
 
 ## jbig2dec / JBIG2 bridge (bundled with itext.pdfsweep)
 - jbig2dec and the AnonPDFPro bridge (`jbig2bridge.dll`) are bundled in
-  `packages/itext.pdfsweep.5.0.6/lib/net461/` and used by the custom
+  `packages/itext.pdfsweep.5.0.8/lib/net461/` and used by the custom
   itext.pdfsweep build to decode and losslessly re-encode JBIG2 images.
 - The encoder uses a generic region rather than symbol substitution to preserve
   exact glyph shapes during redaction.
@@ -43,26 +44,32 @@ License: GNU Affero General Public License v3.0 (AGPL-3.0). The included
 jbig2enc arithmetic encoder sources retain their Apache-2.0 license.
 
 ## PDFium / PDFiumSharp
-- PDFium.WindowsV2 1.1.4 (native binaries)
+- bblanchon.PDFium.Win32 158.0.8125 (native binaries, without V8)
 - PDFiumSharpV2 1.1.4 (.NET wrapper)
-License: PDFium is BSD-3-Clause (Chromium); PDFiumSharp is MIT (verify version).
+License: PDFium is BSD-3-Clause (Chromium); PDFiumSharp is MIT.
+The bblanchon binary packaging/build tooling is Apache-2.0 licensed.
+The official PDFium binary archive's complete notices are distributed under
+`licenses/pdfium-158.0.8125/` alongside the application.
+PDFium binary distribution and dependency notices:
+https://github.com/bblanchon/pdfium-binaries/releases/tag/chromium%2F8125
 
 ## MIT licensed components
 - Newtonsoft.Json 13.0.4
-- BouncyCastle.Cryptography 2.6.2
-- Microsoft.Bcl.AsyncInterfaces 9.0.4
-- Microsoft.Bcl.Cryptography 9.0.4
-- Microsoft.Extensions.DependencyInjection 9.0.4
-- Microsoft.Extensions.DependencyInjection.Abstractions 9.0.4
-- Microsoft.Extensions.Logging 9.0.4
-- Microsoft.Extensions.Logging.Abstractions 9.0.4
-- Microsoft.Extensions.Options 9.0.4
-- Microsoft.Extensions.Primitives 9.0.4
+- BouncyCastle.Cryptography 2.7.0
+- MessagePack, MessagePack.Annotations, MessagePackAnalyzer 3.1.12
+- Microsoft.Bcl.AsyncInterfaces 10.0.14
+- Microsoft.Bcl.Cryptography 10.0.14
+- Microsoft.Extensions.DependencyInjection 10.0.14
+- Microsoft.Extensions.DependencyInjection.Abstractions 10.0.14
+- Microsoft.Extensions.Logging 10.0.14
+- Microsoft.Extensions.Logging.Abstractions 10.0.14
+- Microsoft.Extensions.Options 10.0.14
+- Microsoft.Extensions.Primitives 10.0.14
 - Microsoft.NETCore.Platforms 7.0.4
 - NETStandard.Library 2.0.3
 - System.Buffers 4.6.1
-- System.Diagnostics.DiagnosticSource 9.0.4
-- System.Formats.Asn1 9.0.4
+- System.Diagnostics.DiagnosticSource 10.0.14
+- System.Formats.Asn1 10.0.14
 - System.Memory 4.6.3
 - System.Numerics.Vectors 4.6.1
 - System.Reflection.Emit 4.7.0
@@ -70,10 +77,10 @@ License: PDFium is BSD-3-Clause (Chromium); PDFiumSharp is MIT (verify version).
 - System.Runtime.CompilerServices.Unsafe 6.1.2
 - System.Runtime.InteropServices.RuntimeInformation 4.3.0
 - System.Security.AccessControl 6.0.1
-- System.Security.Cryptography.Xml 9.0.4
+- System.Security.Cryptography.Xml 10.0.14
 - System.Security.Principal.Windows 5.0.0
 - System.Threading.Tasks.Extensions 4.6.3
-- System.ValueTuple 4.6.1
+- System.ValueTuple 4.6.2
 License text:
 
 The MIT License (MIT)

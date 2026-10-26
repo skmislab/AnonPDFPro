@@ -202,7 +202,7 @@ namespace AnonPDF
             }
         }
 
-        private struct StartupOptions
+        internal struct StartupOptions
         {
             public string InputPath;
             public string PdfOutputPath;  // --pdfout
@@ -221,7 +221,7 @@ namespace AnonPDF
             public string ParseError;
         }
 
-        private static StartupOptions ParseStartupOptions(string[] args)
+        internal static StartupOptions ParseStartupOptions(string[] args)
         {
             var options = new StartupOptions();
             if (args == null || args.Length == 0) return options;
@@ -378,7 +378,7 @@ namespace AnonPDF
             Properties.Resources.Culture = commandLineCulture;
         }
 
-        private static bool ValidateHeadlessOptions(StartupOptions options, out string error, out int exitCode)
+        internal static bool ValidateHeadlessOptions(StartupOptions options, out string error, out int exitCode)
         {
             error = null;
             exitCode = 2;

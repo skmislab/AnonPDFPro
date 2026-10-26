@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <AppOutput>$(MSBuildThisFileDirectory)..\..\bin\$(Configuration)\</AppOutput>
+    <OcrTestDataPath Condition="'$(OcrTestDataPath)' == ''">$(AppOutput)tessdata\pol.traineddata</OcrTestDataPath>
+    <AppConfig>$(MSBuildThisFileDirectory)..\..\App.config</AppConfig>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="NUnit" Version="4.4.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="System.Memory" Version="4.6.3" />
+    <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.6.3" />
+    <PackageReference Include="System.ValueTuple" Version="4.6.2" />
+    <ProjectReference Include="..\..\AnonPDFPro.csproj" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="itext.kernel"><HintPath>$(AppOutput)itext.kernel.dll</HintPath></Reference>
+    <Reference Include="itext.io"><HintPath>$(AppOutput)itext.io.dll</HintPath></Reference>
+    <Reference Include="itext.commons"><HintPath>$(AppOutput)itext.commons.dll</HintPath></Reference>
+    <Reference Include="itext.cleanup"><HintPath>$(AppOutput)itext.cleanup.dll</HintPath></Reference>
+    <Reference Include="itext.pdfa"><HintPath>$(AppOutput)itext.pdfa.dll</HintPath></Reference>
+    <Reference Include="itext.layout"><HintPath>$(AppOutput)itext.layout.dll</HintPath></Reference>
+    <Reference Include="itext.html2pdf"><HintPath>$(AppOutput)itext.html2pdf.dll</HintPath></Reference>
+    <Reference Include="System.Security" />
+    <Reference Include="BouncyCastle.Cryptography"><HintPath>$(AppOutput)BouncyCastle.Cryptography.dll</HintPath></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(AppOutput)Newtonsoft.Json.dll</HintPath></Reference>
+    <Reference Include="MessagePack"><HintPath>$(AppOutput)MessagePack.dll</HintPath></Reference>
+    <Reference Include="MessagePack.Annotations"><HintPath>$(AppOutput)MessagePack.Annotations.dll</HintPath></Reference>
+    <Reference Include="PDFiumSharp"><HintPath>$(AppOutput)PDFiumSharp.dll</HintPath></Reference>
+    <Reference Include="TesseractOCR"><HintPath>$(AppOutput)TesseractOCR.dll</HintPath></Reference>
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions"><HintPath>$(AppOutput)Microsoft.Extensions.Logging.Abstractions.dll</HintPath></Reference>
+  </ItemGroup>
+  <Target Name="CopyApplicationRuntime" AfterTargets="Build">
+    <ItemGroup>
+      <AppRuntime Include="$(AppOutput)*.dll" />
+      <AppNative64 Include="$(AppOutput)x64\*.dll" />
+      <AppNative32 Include="$(AppOutput)x86\*.dll" />
+      <OcrModel Include="$(OcrTestDataPath)" Condition="Exists('$(OcrTestDataPath)')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(AppRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(AppNative64)" DestinationFolder="$(TargetDir)x64" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(AppNative32)" DestinationFolder="$(TargetDir)x86" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(OcrModel)" DestinationFolder="$(TargetDir)tessdata" SkipUnchangedFiles="true" />
+  </Target>
+</Project>
