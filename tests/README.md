@@ -39,6 +39,22 @@ build with Visual Studio MSBuild first. Test results can be saved with
 - Native Polish OCR initialization and recognition.
 - HTML objects, PDF/A-2b output intent, embedded fonts and searchable Unicode text.
 - Certificate/XML signature verification, including tampering rejection.
+- Page insertion/reordering, object/ALT remapping, embedded project PDF data,
+  form-field name collisions, internal links and DPI-scaled thumbnail sizes.
+- Minimal drag-marker repaint regions and throttled page-list edge scrolling,
+  including marker geometry at 100-200% DPI, without displaying any UI.
+- Row-major thumbnail layout, precise hit testing, multi-selection and bounded
+  bitmap retention while scrolling through an 800-page document.
+- Lazy single-page previews with added content on a previously blank page,
+  including page 800 and all four rotations, without changing the source PDF.
+- Transactional page deletion marks, group restore, removal of newly inserted
+  pages, deletion-mark remapping and protection against an empty output PDF.
+
+The normal suite does not show windows. The attended desktop-controller test
+`PageOrganizationIntegrationTests` is marked `Explicit` and is excluded from
+automatic runs. Do not automate showing/reparenting the page dialog inside a
+test-host form: that strategy produced native ListView lifecycle exceptions.
+Actual dialog appearance, DPI layout and mouse interactions require manual QA.
 
 The initial 5.0.6.4 baseline passed 29 tests and failed the two new accessibility
 metadata tests. These failures demonstrated the issue fixed by pdfSweep 5.0.8.

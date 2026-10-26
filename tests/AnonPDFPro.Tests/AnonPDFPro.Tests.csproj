@@ -23,6 +23,7 @@
     <Reference Include="System.Windows.Forms" />
     <Reference Include="itext.kernel"><HintPath>$(AppOutput)itext.kernel.dll</HintPath></Reference>
     <Reference Include="itext.io"><HintPath>$(AppOutput)itext.io.dll</HintPath></Reference>
+    <Reference Include="itext.forms"><HintPath>$(AppOutput)itext.forms.dll</HintPath></Reference>
     <Reference Include="itext.commons"><HintPath>$(AppOutput)itext.commons.dll</HintPath></Reference>
     <Reference Include="itext.cleanup"><HintPath>$(AppOutput)itext.cleanup.dll</HintPath></Reference>
     <Reference Include="itext.pdfa"><HintPath>$(AppOutput)itext.pdfa.dll</HintPath></Reference>

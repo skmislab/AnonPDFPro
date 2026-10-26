@@ -358,6 +358,22 @@ Anonimizacja obejmuje teraz także obrazy zapisane w formacie JPEG 2000 (JP2/JPX
 
 Wyniki analizy dokumentu (w tym tekst rozpoznany przez OCR) są zapamiętywane w pamięci podręcznej na dysku. Dzięki temu ponowne otwarcie tego samego pliku jest szybsze i nie wymaga powtarzania całej analizy.
 
+## 6.21 Organizowanie stron
+
+Wybierz `Plik -> Organizuj strony`, aby zmienić układ otwartego dokumentu.
+
+Miniatury są ułożone od lewej do prawej, a następnie w kolejnych wierszach. Podczas przeciągania pionowa kreska wskazuje miejsce wstawienia. Miniatury pokazują również dodane obiekty, także na stronach, które początkowo były puste.
+
+- `Dodaj strony z PDF` pozwala wybrać strony z innego dokumentu i wstawić je przed lub po wybranej stronie.
+- `Dodaj pustą stronę` pozwala dobrać format, orientację lub własne wymiary w milimetrach. Domyślnie zachowuje format wybranej strony.
+- Kolejność stron można zmieniać przeciąganiem lub przyciskami przesuwania. Można zaznaczyć i przenosić kilka stron jednocześnie.
+- Ikonka kosza oznacza strony bieżącego dokumentu do usunięcia przy zapisie końcowego PDF, tak samo jak dotychczasowa funkcja usuwania stron. Oznaczone miniatury są przekreślone. Ponowne użycie przycisku na oznaczonych stronach cofa oznaczenie. Nowo dodane w tym oknie strony są od razu usuwane z układu.
+- Po wybraniu `Zastosuj` zaznaczenia anonimizacyjne, obiekty, obroty i opisy ALT pozostają przypisane do swoich stron. Zmiana jest widoczna także w podglądzie, na wydruku i w zapisanym PDF.
+
+Zmiany można cofnąć. Zapis projektu i wznowienie pracy zachowują zmieniony dokument wraz z dołączonymi stronami. Oryginalne pliki PDF nie są modyfikowane podczas organizowania stron.
+
+**Ważne:** projekt `.app` po reorganizacji zawiera również PDF sprzed anonimizacji. Nie należy go udostępniać zamiast końcowego, zanonimizowanego PDF. Zmiana układu stron unieważnia podpisy cyfrowe w zmienionym dokumencie, ale nie w oryginalnych plikach.
+
 # 7. Najczęstsze problemy i wskazówki
 
 ## 7.1 Nie można zapisać pliku PDF

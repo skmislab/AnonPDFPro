@@ -1597,6 +1597,7 @@ namespace AnonPDF
             }
             InitializeUpdateMenu();
             InitializeRasterMenu();
+            InitializePageOrganizationMenu();
             LoadFootnotesCatalog();
             ApplyAutomaticFootnotesMenuState();
 
@@ -6145,7 +6146,7 @@ namespace AnonPDF
                 .Reverse();
         }
 
-        private IEnumerable<object> GetOrderedGraphicObjectsForExport()
+        private IEnumerable<object> GetOrderedGraphicObjectsForExport(bool visibleObjects = false)
         {
             foreach (var entry in EnumerateObjectLayerEntriesInVisualOrder(entry =>
                 entry.Type == LayerObjectType.Text ||
@@ -6156,7 +6157,7 @@ namespace AnonPDF
                 if (entry.Type == LayerObjectType.Text)
                 {
                     var annotation = textAnnotations.FirstOrDefault(a => a != null && string.Equals(a.Id, entry.Id, StringComparison.Ordinal));
-                    if (annotation != null && ShouldExportLayer(annotation.LayerId))
+                    if (annotation != null && (visibleObjects ? IsLayerVisible(annotation.LayerId) : ShouldExportLayer(annotation.LayerId)))
                     {
                         yield return annotation;
                     }
@@ -6164,7 +6165,7 @@ namespace AnonPDF
                 else if (entry.Type == LayerObjectType.Raster)
                 {
                     var rasterObject = rasterObjects.FirstOrDefault(r => r != null && string.Equals(r.Id, entry.Id, StringComparison.Ordinal));
-                    if (rasterObject != null && ShouldExportLayer(rasterObject.LayerId))
+                    if (rasterObject != null && (visibleObjects ? IsLayerVisible(rasterObject.LayerId) : ShouldExportLayer(rasterObject.LayerId)))
                     {
                         yield return rasterObject;
                     }
@@ -6172,7 +6173,7 @@ namespace AnonPDF
                 else if (entry.Type == LayerObjectType.Arrow)
                 {
                     var arrowObject = arrowObjects.FirstOrDefault(a => a != null && string.Equals(a.Id, entry.Id, StringComparison.Ordinal));
-                    if (arrowObject != null && ShouldExportLayer(arrowObject.LayerId))
+                    if (arrowObject != null && (visibleObjects ? IsLayerVisible(arrowObject.LayerId) : ShouldExportLayer(arrowObject.LayerId)))
                     {
                         yield return arrowObject;
                     }
@@ -6180,7 +6181,7 @@ namespace AnonPDF
                 else if (entry.Type == LayerObjectType.VectorShape)
                 {
                     var vectorShape = vectorShapes.FirstOrDefault(v => v != null && string.Equals(v.Id, entry.Id, StringComparison.Ordinal));
-                    if (vectorShape != null && ShouldExportLayer(vectorShape.LayerId))
+                    if (vectorShape != null && (visibleObjects ? IsLayerVisible(vectorShape.LayerId) : ShouldExportLayer(vectorShape.LayerId)))
                     {
                         yield return vectorShape;
                     }
@@ -10202,6 +10203,7 @@ namespace AnonPDF
 
         private void ApplyLocalization()
         {
+            if (organizePagesMenuItem != null) organizePagesMenuItem.Text = PageOrganizationText.Get("Pages_Title");
             // Use already-set Resources.Culture (SetLanguage/startup decide it)
             var currentCulture = AnonPDF.Properties.Resources.Culture ?? CultureInfo.CurrentUICulture;
 
@@ -20757,10 +20759,10 @@ namespace AnonPDF
             }
 
             string baseName = !string.IsNullOrWhiteSpace(inputPdfPath)
-                ? Path.GetFileNameWithoutExtension(inputPdfPath)
+                ? Path.GetFileNameWithoutExtension(DocumentDisplayPath)
                 : LocalizedText("FileName_CurrentViewBase");
             string initialDirectory = !string.IsNullOrWhiteSpace(inputPdfPath) && File.Exists(inputPdfPath)
-                ? Path.GetDirectoryName(inputPdfPath)
+                ? Path.GetDirectoryName(DocumentDisplayPath)
                 : Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
             if (string.IsNullOrWhiteSpace(initialDirectory) || !Directory.Exists(initialDirectory))
             {
@@ -23180,14 +23182,15 @@ namespace AnonPDF
             }
         }
 
-        private void LoadPdf()
+        private void LoadPdf(string suppliedPassword = null)
         {
+            ResetOrganizationForNewDocument();
             BeginBusyCursor();
             long processingSession = BeginDocumentProcessingSession();
             try
             {
             CancelPreviewRender();
-            userPassword = "";
+            userPassword = suppliedPassword ?? "";
             lastRedactedPdfOutputPath = "";
             currentDocumentGeometry = null;
             PdfReader reader = null;
@@ -23198,7 +23201,9 @@ namespace AnonPDF
                 try
                 {
                     // 1) Try to open without password
-                    reader = new PdfReader(inputPdfPath);
+                    var initialReaderProperties = new ReaderProperties();
+                    if (!string.IsNullOrEmpty(userPassword)) initialReaderProperties.SetPassword(System.Text.Encoding.UTF8.GetBytes(userPassword));
+                    reader = new PdfReader(inputPdfPath, initialReaderProperties);
                     pdfDoc = new iText.Kernel.Pdf.PdfDocument(reader);      // first decryption attempt will happen here
                     int pages = pdfDoc.GetNumberOfPages();   // ensures password verification
                     break;
@@ -23467,7 +23472,7 @@ namespace AnonPDF
             UpdateNavigationButtons(currentPage);
             UpdateWindowTitle();
             ExtractSignatures();
-            AddRecentFile(inputPdfPath);
+            if (!organizationReload) AddRecentFile(inputPdfPath);
             CloseSplashIfVisible();
             if (CanQueueUiWork())
             {
@@ -23984,6 +23989,7 @@ namespace AnonPDF
 
             pdf = null;
             inputPdfPath = string.Empty;
+            ResetOrganizationForNewDocument();
             inputProjectPath = string.Empty;
             lastRedactedPdfOutputPath = string.Empty;
             userPassword = string.Empty;
@@ -24618,7 +24624,7 @@ namespace AnonPDF
                 }
                 else
                 {
-                    saveFileDialog.FileName = $"{System.IO.Path.GetFileNameWithoutExtension(inputPdfPath)}_anon.pdf";
+                    saveFileDialog.FileName = $"{System.IO.Path.GetFileNameWithoutExtension(DocumentDisplayPath)}_anon.pdf";
                 }
 
                 if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
@@ -24676,7 +24682,7 @@ namespace AnonPDF
             {
                 ConfigureRedactedPdfSaveDialog(saveFileDialog, additionalPagesToRemove);
                 saveFileDialog.Title = Resources.Dialog_Title_SavePdfAs;
-                saveFileDialog.FileName = $"{System.IO.Path.GetFileNameWithoutExtension(inputPdfPath)}_anon_p{fromPage}-{toPage}.pdf";
+                saveFileDialog.FileName = $"{System.IO.Path.GetFileNameWithoutExtension(DocumentDisplayPath)}_anon_p{fromPage}-{toPage}.pdf";
 
                 if (saveFileDialog.ShowDialog(this) == DialogResult.OK)
                 {
@@ -24743,7 +24749,7 @@ namespace AnonPDF
                     return;
                 }
 
-                string sourceBaseName = Path.GetFileNameWithoutExtension(inputPdfPath);
+                string sourceBaseName = Path.GetFileNameWithoutExtension(DocumentDisplayPath);
                 string outputDirectory = Path.Combine(folderDialog.SelectedPath, GetSafeDirectoryName(sourceBaseName));
                 await ExportPageRangeToJpegAsync(outputDirectory, additionalPagesToRemove, exportedSourcePages);
             }
@@ -24754,7 +24760,7 @@ namespace AnonPDF
             string sourceDirectory = null;
             if (!string.IsNullOrWhiteSpace(inputPdfPath))
             {
-                sourceDirectory = Path.GetDirectoryName(inputPdfPath);
+                sourceDirectory = Path.GetDirectoryName(DocumentDisplayPath);
             }
 
             if (!string.IsNullOrWhiteSpace(sourceDirectory) && Directory.Exists(sourceDirectory))
@@ -25675,11 +25681,6 @@ namespace AnonPDF
                                                              word.BoundingBox.GetHeight() > 0f))
                     .Select(line => line.PageNumber));
 
-            if (exportedPages.Any(pageNumber => !ocrPages.Contains(pageNumber)))
-            {
-                return false;
-            }
-
             try
             {
                 var readerProps = new ReaderProperties();
@@ -25699,6 +25700,8 @@ namespace AnonPDF
                         }
 
                         var page = pdfDoc.GetPage(pageNumber);
+                        if (PageOrganizationPlan.IsEmptyPage(page)) continue;
+                        if (!ocrPages.Contains(pageNumber)) return false;
                         string nativeText = PdfTextExtractor.GetTextFromPage(page);
                         if (!string.IsNullOrWhiteSpace(nativeText))
                         {
@@ -26335,7 +26338,7 @@ namespace AnonPDF
 
             using (var printDocument = new PrintDocument())
             {
-                printDocument.DocumentName = Path.GetFileName(inputPdfPath);
+                printDocument.DocumentName = Path.GetFileName(DocumentDisplayPath);
                 printDocument.OriginAtMargins = false;
                 printDocument.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
                 printDocument.PrinterSettings.MinimumPage = 1;
@@ -26553,7 +26556,7 @@ namespace AnonPDF
                 using (var dialog = new RedactedPdfPreviewDialog(
                     previewTempPath,
                     previewPassword,
-                    Path.GetFileName(inputPdfPath),
+                    Path.GetFileName(DocumentDisplayPath),
                     previewStartPage,
                     this,
                     RenderPageBitmapForPrint,
@@ -27271,7 +27274,7 @@ namespace AnonPDF
             {
                 saveFileDialog.Filter = Resources.Dialog_Filter_PDF;
                 saveFileDialog.Title = LocalizedText("Menu_Print");
-                saveFileDialog.FileName = $"{Path.GetFileNameWithoutExtension(inputPdfPath)}_print_p{fromPage}-{toPage}.pdf";
+                saveFileDialog.FileName = $"{Path.GetFileNameWithoutExtension(DocumentDisplayPath)}_print_p{fromPage}-{toPage}.pdf";
 
                 if (saveFileDialog.ShowDialog(this) != DialogResult.OK)
                 {
@@ -28079,7 +28082,9 @@ namespace AnonPDF
 
         private bool HasAnyProjectContent()
         {
-            return redactionBlocks.Count > 0
+            return organizedDocument != null
+                || (organizationRevisions.Count > 0 && projectWasChangedAfterLastSave)
+                || redactionBlocks.Count > 0
                 || commentAnnotations.Count > 0
                 || textAnnotations.Count > 0
                 || rasterObjects.Count > 0
@@ -28641,6 +28646,8 @@ namespace AnonPDF
 
             return new ProjectData
             {
+                EmbeddedDocument = organizedDocument,
+                DocumentRevisionId = organizedDocument?.Id,
                 RedactionBlocks = redactionBlocks ?? new List<RedactionBlock>(),
                 CommentAnnotations = commentAnnotations ?? new List<CommentAnnotation>(),
                 PagesToRemove = pagesToRemove ?? new HashSet<int>(),
@@ -28654,7 +28661,7 @@ namespace AnonPDF
                 PageRotationOffsets = pageRotationOffsets == null
                     ? new Dictionary<int, int>()
                     : new Dictionary<int, int>(pageRotationOffsets),
-                FilePath = inputPdfPath,
+                FilePath = DocumentDisplayPath,
                 DocumentGeometry = currentDocumentGeometry,
                 CurrentPage = Math.Max(1, Math.Min(currentPage, Math.Max(1, numPages))),
                 ZoomFactor = zoomFactor,
@@ -28752,6 +28759,7 @@ namespace AnonPDF
             snapshot.PagesListTopPage = null;
             snapshot.ThumbnailsTopPage = null;
             snapshot.FilePath = string.Empty;
+            snapshot.EmbeddedDocument = null;
             return JsonConvert.SerializeObject(snapshot, Formatting.None);
         }
 
@@ -28928,6 +28936,8 @@ namespace AnonPDF
             {
                 return false;
             }
+
+            if (!RestoreOrganizationForUndo(snapshot)) return false;
 
             GetThumbnailRefreshPlan(snapshot, out HashSet<int> thumbnailPagesToRefresh, out HashSet<int> thumbnailPagesToRegenerate);
 
@@ -29129,6 +29139,13 @@ namespace AnonPDF
             rasterObjects = rasters;
             arrowObjects = arrows;
             vectorShapes = vectors;
+            documentLayers = NormalizeLayerDefinitions(projectData.Layers ?? new List<LayerDefinition>());
+            activeLayerId = NormalizeLayerIdValue(projectData.ActiveLayerId);
+            exportVisibleLayersOnly = projectData.ExportVisibleLayersOnly;
+            EnsureObjectLayerAssignments();
+            RefreshLayersTab();
+            LoadProjectObjectLayerOrder(projectData.ObjectLayers);
+            RestoreProjectAltEdits(projectData);
 
             pagesToRemove = new HashSet<int>(
                 (projectData.PagesToRemove ?? new HashSet<int>())
@@ -29291,7 +29308,8 @@ namespace AnonPDF
                 return false;
             }
 
-            if (!string.IsNullOrWhiteSpace(lastSavedProjectName) || !string.IsNullOrWhiteSpace(inputProjectPath))
+            if ((!string.IsNullOrWhiteSpace(lastSavedProjectName) || !string.IsNullOrWhiteSpace(inputProjectPath)) &&
+                !(organizationRevisions.Count > 0 && projectWasChangedAfterLastSave))
             {
                 return false;
             }
@@ -29559,7 +29577,7 @@ namespace AnonPDF
                 CaptureCurrentViewState(out float zoomFactor, out int scrollX, out int scrollY);
                 var state = new ResumeState
                 {
-                    PdfPath = inputPdfPath,
+                    PdfPath = DocumentDisplayPath,
                     ProjectPath = !string.IsNullOrWhiteSpace(projectPathOverride)
                         ? projectPathOverride
                         : GetCurrentProjectPath(),
@@ -29640,7 +29658,7 @@ namespace AnonPDF
 
             string currentProjectPath = GetCurrentProjectPath();
             bool projectMatch = !string.IsNullOrWhiteSpace(currentProjectPath) && ArePathsEqual(state.ProjectPath, currentProjectPath);
-            bool pdfMatch = ArePathsEqual(state.PdfPath, inputPdfPath);
+            bool pdfMatch = ArePathsEqual(state.PdfPath, DocumentDisplayPath);
             if (!projectMatch && !pdfMatch)
             {
                 LogDebug($"Resume state skipped (path mismatch) statePdf={state.PdfPath} stateProject={state.ProjectPath} currentPdf={inputPdfPath} currentProject={currentProjectPath}");
@@ -36049,11 +36067,15 @@ namespace AnonPDF
 
             if (!string.IsNullOrWhiteSpace(inputPdfPath))
             {
-                Properties.Settings.Default.LastPdfPath = inputPdfPath;
+                Properties.Settings.Default.LastPdfPath = DocumentDisplayPath;
                 Properties.Settings.Default.LastPapPath = string.Empty;
             }
 
-            if (!string.IsNullOrWhiteSpace(lastSavedProjectName))
+            if (!string.IsNullOrWhiteSpace(autoResumeProjectPath))
+            {
+                Properties.Settings.Default.LastPapPath = autoResumeProjectPath;
+            }
+            else if (!string.IsNullOrWhiteSpace(lastSavedProjectName))
             {
                 Properties.Settings.Default.LastPapPath = lastSavedProjectName;
             }
@@ -36061,11 +36083,6 @@ namespace AnonPDF
             {
                 Properties.Settings.Default.LastPapPath = inputProjectPath;
             }
-            else if (!string.IsNullOrWhiteSpace(autoResumeProjectPath))
-            {
-                Properties.Settings.Default.LastPapPath = autoResumeProjectPath;
-            }
-
             Properties.Settings.Default.Save();
         }
 
@@ -36499,14 +36516,15 @@ namespace AnonPDF
         private void RenderTextAnnotationToPdf(
             iText.Kernel.Pdf.PdfDocument pdfDoc,
             ISet<int> pagesWithBakedRotation,
-            TextAnnotation annotation)
+            TextAnnotation annotation,
+            iText.Kernel.Pdf.PdfPage targetPage = null)
         {
             if (pdfDoc == null || annotation == null)
             {
                 return;
             }
 
-            if (annotation.PageNumber < 1 || annotation.PageNumber > pdfDoc.GetNumberOfPages())
+            if (annotation.PageNumber < 1 || (targetPage == null && annotation.PageNumber > pdfDoc.GetNumberOfPages()))
             {
                 return;
             }
@@ -36519,7 +36537,7 @@ namespace AnonPDF
 
             bool isRichAnnotation = IsRichTextMode(annotation);
 
-            iText.Kernel.Pdf.PdfPage page = pdfDoc.GetPage(annotation.PageNumber);
+            iText.Kernel.Pdf.PdfPage page = targetPage ?? pdfDoc.GetPage(annotation.PageNumber);
             var pdfCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page);
 
             string fontPath = GetFontFilePathFromRegistry(annotation.AnnotationFont.FontFamily.Name, annotation.AnnotationFont.Style);
@@ -37089,7 +37107,8 @@ namespace AnonPDF
         private void RenderVectorShapesToPdf(
             iText.Kernel.Pdf.PdfDocument pdfDoc,
             ISet<int> pagesWithBakedRotation,
-            IEnumerable<VectorShapeObject> shapes)
+            IEnumerable<VectorShapeObject> shapes,
+            iText.Kernel.Pdf.PdfPage targetPage = null)
         {
             if (pdfDoc == null || shapes == null)
             {
@@ -37104,7 +37123,7 @@ namespace AnonPDF
                 }
 
                 int pageNumber = vectorShape.PageNumber;
-                if (pageNumber < 1 || pageNumber > pdfDoc.GetNumberOfPages())
+                if (pageNumber < 1 || (targetPage == null && pageNumber > pdfDoc.GetNumberOfPages()))
                 {
                     continue;
                 }
@@ -37112,7 +37131,7 @@ namespace AnonPDF
                 bool baseRotationBaked = pagesWithBakedRotation != null && pagesWithBakedRotation.Contains(pageNumber);
                 int rotation = baseRotationBaked ? GetRotationOffset(pageNumber) : GetEffectiveRotationDegrees(pageNumber);
                 bool includeBaseRotation = !baseRotationBaked;
-                var page = pdfDoc.GetPage(pageNumber);
+                var page = targetPage ?? pdfDoc.GetPage(pageNumber);
                 var pdfCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page);
 
                 VectorShapeType shapeType = ParseVectorShapeType(vectorShape.ShapeType);
@@ -37494,7 +37513,8 @@ namespace AnonPDF
         private void RenderRasterObjectToPdf(
             iText.Kernel.Pdf.PdfDocument pdfDoc,
             ISet<int> pagesWithBakedRotation,
-            RasterObject rasterObject)
+            RasterObject rasterObject,
+            iText.Kernel.Pdf.PdfPage targetPage = null)
         {
             if (pdfDoc == null || rasterObject == null)
             {
@@ -37502,14 +37522,14 @@ namespace AnonPDF
             }
 
             int pageNumber = rasterObject.PageNumber;
-            if (pageNumber < 1 || pageNumber > pdfDoc.GetNumberOfPages())
+            if (pageNumber < 1 || (targetPage == null && pageNumber > pdfDoc.GetNumberOfPages()))
             {
                 return;
             }
 
             bool baseRotationBaked = pagesWithBakedRotation != null && pagesWithBakedRotation.Contains(pageNumber);
             int rotation = baseRotationBaked ? GetRotationOffset(pageNumber) : GetEffectiveRotationDegrees(pageNumber);
-            var page = pdfDoc.GetPage(pageNumber);
+            var page = targetPage ?? pdfDoc.GetPage(pageNumber);
             var pdfCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page);
             RectangleF viewBounds = rasterObject.Bounds;
             if (viewBounds.Width <= 0f || viewBounds.Height <= 0f)
@@ -37587,7 +37607,8 @@ namespace AnonPDF
         private void RenderArrowObjectToPdf(
             iText.Kernel.Pdf.PdfDocument pdfDoc,
             ISet<int> pagesWithBakedRotation,
-            ArrowObject arrowObject)
+            ArrowObject arrowObject,
+            iText.Kernel.Pdf.PdfPage targetPage = null)
         {
             if (pdfDoc == null || arrowObject == null)
             {
@@ -37595,14 +37616,14 @@ namespace AnonPDF
             }
 
             int pageNumber = arrowObject.PageNumber;
-            if (pageNumber < 1 || pageNumber > pdfDoc.GetNumberOfPages())
+            if (pageNumber < 1 || (targetPage == null && pageNumber > pdfDoc.GetNumberOfPages()))
             {
                 return;
             }
 
             bool baseRotationBaked = pagesWithBakedRotation != null && pagesWithBakedRotation.Contains(pageNumber);
             int rotation = baseRotationBaked ? GetRotationOffset(pageNumber) : GetEffectiveRotationDegrees(pageNumber);
-            var page = pdfDoc.GetPage(pageNumber);
+            var page = targetPage ?? pdfDoc.GetPage(pageNumber);
             var pdfCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(page);
             PointF startView = arrowObject.Start;
             PointF endView = arrowObject.End;
@@ -38159,7 +38180,9 @@ namespace AnonPDF
             iText.Kernel.Pdf.PdfDocument pdfDoc,
             ISet<int> pagesWithBakedRotation,
             ISet<int> removedPages,
-            ISet<int> excludedPages = null)
+            ISet<int> excludedPages = null,
+            iText.Kernel.Pdf.PdfPage targetPage = null,
+            int? sourcePageNumber = null)
         {
             if (pdfDoc == null || commentAnnotations == null || commentAnnotations.Count == 0)
             {
@@ -38167,8 +38190,9 @@ namespace AnonPDF
             }
 
             List<CommentAnnotation> exportComments = commentAnnotations
-                .Where(c => c != null && c.PageNumber >= 1 && c.PageNumber <= pdfDoc.GetNumberOfPages())
-                .Where(c => ShouldExportLayer(c.LayerId))
+                .Where(c => c != null && c.PageNumber >= 1 && (targetPage != null || c.PageNumber <= pdfDoc.GetNumberOfPages()))
+                .Where(c => !sourcePageNumber.HasValue || c.PageNumber == sourcePageNumber.Value)
+                .Where(c => targetPage != null ? IsLayerVisible(c.LayerId) : ShouldExportLayer(c.LayerId))
                 .Where(c => removedPages == null || !removedPages.Contains(c.PageNumber))
                 .Where(c => excludedPages == null || !excludedPages.Contains(c.PageNumber))
                 .OrderBy(c => c.PageNumber)
@@ -38190,7 +38214,7 @@ namespace AnonPDF
             foreach (var pageGroup in exportComments.GroupBy(c => c.PageNumber))
             {
                 int pageNumber = pageGroup.Key;
-                iText.Kernel.Pdf.PdfPage page = pdfDoc.GetPage(pageNumber);
+                iText.Kernel.Pdf.PdfPage page = targetPage ?? pdfDoc.GetPage(pageNumber);
                 if (page == null)
                 {
                     continue;
@@ -43495,12 +43519,14 @@ namespace AnonPDF
                 try
                 {
                     ProjectData projectData = JsonConvert.DeserializeObject<ProjectData>(json);
-                    var filePath = ResolveProjectPdfPath(projectData.FilePath ?? "", inputProjectPathTemp);
+                    var filePath = ResolveOrganizedProjectPdf(projectData, inputProjectPathTemp);
 
                     if (filePath !="" && filePath != inputPdfPath)
                     {
                         inputPdfPath = filePath;
-                        LoadPdf();
+                        organizationReload = projectData.EmbeddedDocument != null;
+                        try { LoadPdf(); }
+                        finally { organizationReload = false; }
                     }
 
                     if (filePath == "")
@@ -43869,7 +43895,7 @@ namespace AnonPDF
                 }
                 else
                 {
-                    filePapName = inputPdfPath;
+                    filePapName = DocumentDisplayPath;
                 }
 
                 saveFileDialog.Filter = Resources.Dialog_Filter_PAP;
@@ -44015,6 +44041,12 @@ namespace AnonPDF
                     return;
                 }
 
+                if (sourceProjects.Count > 0 && !string.Equals(sourceProjects[0].DocumentRevisionId, projectData.DocumentRevisionId, StringComparison.Ordinal))
+                {
+                    MessageBox.Show(this, PageOrganizationText.Get("Pages_ImportMismatch"), Resources.Title_Warning, MessageBoxButtons.OK, MessageBoxIcon.Exclamation);
+                    return;
+                }
+
                 sourceProjects.Add(projectData);
             }
 
@@ -44025,6 +44057,8 @@ namespace AnonPDF
 
             var mergedProject = new ProjectData
             {
+                EmbeddedDocument = sourceProjects[0].EmbeddedDocument,
+                DocumentRevisionId = sourceProjects[0].DocumentRevisionId,
                 FilePath = commonPdfPath,
                 RedactionBlocks = new List<RedactionBlock>(),
                 CommentAnnotations = new List<CommentAnnotation>(),
@@ -56297,7 +56331,7 @@ namespace AnonPDF
             }
             if (inputPdfPath != "")
             {
-                string pdfFileName = ShortenFileName(Path.GetFileName(inputPdfPath));
+                string pdfFileName = ShortenFileName(Path.GetFileName(DocumentDisplayPath));
                 titleText += LocalizedFormat("Window_Title_PdfPart", pdfFileName);
             }
             string papText = "";

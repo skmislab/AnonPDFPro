@@ -337,6 +337,22 @@ Die Anonymisierung umfasst nun auch Bilder im Format JPEG 2000 (JP2/JPX) - Inhal
 
 Die Analyseergebnisse des Dokuments (einschließlich OCR-Text) werden in einem Festplatten-Cache gespeichert. Dadurch ist das erneute Öffnen derselben Datei schneller und erfordert keine erneute vollständige Analyse.
 
+## 6.21 Seiten organisieren
+
+Mit `Datei -> Seiten organisieren` ändern Sie die Seitenanordnung des geöffneten Dokuments.
+
+Die Miniaturen sind von links nach rechts und danach in weiteren Zeilen angeordnet. Beim Ziehen zeigt eine senkrechte Linie die Einfügeposition an. Die Miniaturen zeigen auch hinzugefügte Objekte, selbst auf ursprünglich leeren Seiten.
+
+- `Seiten aus PDF hinzufügen` ermöglicht die Auswahl von Seiten aus einem anderen Dokument und das Einfügen vor oder nach der ausgewählten Seite.
+- `Leere Seite hinzufügen` bietet Format, Ausrichtung und eigene Abmessungen in Millimetern. Standardmäßig wird das Format der ausgewählten Seite verwendet.
+- Ändern Sie die Reihenfolge durch Ziehen oder mit den Schaltflächen zum Verschieben. Mehrere ausgewählte Seiten lassen sich gemeinsam verschieben.
+- Das Papierkorbsymbol markiert Seiten des aktuellen Dokuments zum Entfernen beim Speichern des fertigen PDFs, wie die bisherige Funktion zum Entfernen von Seiten. Markierte Miniaturen sind durchgestrichen. Ein erneuter Klick für markierte Seiten hebt die Markierung auf. In diesem Dialog neu hinzugefügte Seiten werden sofort aus der Anordnung entfernt.
+- Nach `Übernehmen` bleiben Markierungen, Objekte, Drehungen und ALT-Bearbeitungen ihren Seiten zugeordnet. Die Änderungen erscheinen auch in der Vorschau, beim Drucken und im gespeicherten PDF.
+
+Änderungen können rückgängig gemacht werden. Das Projekt und die Funktion zum Fortsetzen speichern das geänderte Dokument einschließlich der eingefügten Seiten. Die Original-PDF-Dateien werden beim Organisieren nicht geändert.
+
+**Wichtig:** nach einer Neuordnung enthält die `.app`-Projektdatei auch das PDF vor der Anonymisierung. Geben Sie sie nicht anstelle des fertigen anonymisierten PDFs weiter. Eine andere Seitenanordnung macht digitale Signaturen im geänderten Dokument ungültig, nicht in den Originaldateien.
+
 # 7. Häufige Probleme und Hinweise
 
 ## 7.1 Ausgabe-PDF kann nicht gespeichert werden

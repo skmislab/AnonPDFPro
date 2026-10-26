@@ -2413,4 +2413,34 @@ Exit codes: 0 success, 2 invalid arguments, 3 incompatible template, 4 output ex
   <data name="CommandLine_Saved" xml:space="preserve"><value>Document saved: {0}</value></data>
   <data name="CommandLine_ProcessingError" xml:space="preserve"><value>Processing error: {0}</value></data>
   <data name="CommandLine_SkipValidationRequiresHeadless" xml:space="preserve"><value>The --skip-template-validation option requires --headless.</value></data>
+  <data name="Pages_Title" xml:space="preserve"><value>Organize pages</value></data>
+  <data name="Pages_SelectPages" xml:space="preserve"><value>Select pages to insert</value></data>
+  <data name="Pages_AddPdf" xml:space="preserve"><value>Add pages from PDF</value></data>
+  <data name="Pages_Before" xml:space="preserve"><value>Before the selected page</value></data>
+  <data name="Pages_After" xml:space="preserve"><value>After the selected page</value></data>
+  <data name="Pages_MoveEarlier" xml:space="preserve"><value>Move earlier</value></data>
+  <data name="Pages_MoveLater" xml:space="preserve"><value>Move later</value></data>
+  <data name="Pages_Remove" xml:space="preserve"><value>Remove pages</value></data>
+  <data name="Pages_Restore" xml:space="preserve"><value>Undo deletion mark</value></data>
+  <data name="Pages_DeletionMarked" xml:space="preserve"><value>Marked for deletion</value></data>
+  <data name="Pages_SelectAll" xml:space="preserve"><value>Select all</value></data>
+  <data name="Pages_SelectNone" xml:space="preserve"><value>Clear selection</value></data>
+  <data name="Pages_Insert" xml:space="preserve"><value>Insert</value></data>
+  <data name="Pages_Apply" xml:space="preserve"><value>Apply</value></data>
+  <data name="Pages_Blank" xml:space="preserve"><value>Blank page</value></data>
+  <data name="Pages_Original" xml:space="preserve"><value>Document page</value></data>
+  <data name="Pages_Count" xml:space="preserve"><value>Pages: {0}. Selected: {1}.</value></data>
+  <data name="Pages_Applying" xml:space="preserve"><value>Preparing document…</value></data>
+  <data name="Pages_Error" xml:space="preserve"><value>Could not change the page arrangement.
+{0}</value></data>
+  <data name="Pages_CurrentFormat" xml:space="preserve"><value>Same as selected page</value></data>
+  <data name="Pages_CustomFormat" xml:space="preserve"><value>Custom size</value></data>
+  <data name="Pages_Portrait" xml:space="preserve"><value>Portrait</value></data>
+  <data name="Pages_Landscape" xml:space="preserve"><value>Landscape</value></data>
+  <data name="Pages_Format" xml:space="preserve"><value>Format</value></data>
+  <data name="Pages_Orientation" xml:space="preserve"><value>Orientation</value></data>
+  <data name="Pages_Width" xml:space="preserve"><value>Width [mm]</value></data>
+  <data name="Pages_Height" xml:space="preserve"><value>Height [mm]</value></data>
+  <data name="Pages_SignatureWarning" xml:space="preserve"><value>Changing the page arrangement will invalidate digital signatures in the modified document. The original files will remain unchanged. Continue?</value></data>
+  <data name="Pages_ImportMismatch" xml:space="preserve"><value>Projects with different page arrangements cannot be merged. Select projects saved after the same document reorganization.</value></data>
 </root>

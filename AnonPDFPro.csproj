@@ -261,6 +261,12 @@
     <Compile Include="TutorialBrowserForm.cs" />
     <Compile Include="PdfDiskCache.cs" />
     <Compile Include="PDFFormTypes.cs" />
+    <Compile Include="PageOrganization.cs" />
+    <Compile Include="PageOrganizationForm.cs" />
+    <Compile Include="PageThumbnailView.cs" />
+    <Compile Include="PDFForm.PageOrganization.cs">
+      <DependentUpon>PDFForm.cs</DependentUpon>
+    </Compile>
     <Compile Include="Branding.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

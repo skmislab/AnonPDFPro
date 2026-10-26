@@ -2366,4 +2366,34 @@ Exit-Codes: 0 Erfolg, 2 ung&#252;ltige Argumente, 3 inkompatible Vorlage, 4 Ausg
   <data name="CommandLine_Saved" xml:space="preserve"><value>Dokument gespeichert: {0}</value></data>
   <data name="CommandLine_ProcessingError" xml:space="preserve"><value>Verarbeitungsfehler: {0}</value></data>
   <data name="CommandLine_SkipValidationRequiresHeadless" xml:space="preserve"><value>Die Option --skip-template-validation erfordert --headless.</value></data>
+  <data name="Pages_Title" xml:space="preserve"><value>Seiten organisieren</value></data>
+  <data name="Pages_SelectPages" xml:space="preserve"><value>Seiten zum Einfügen auswählen</value></data>
+  <data name="Pages_AddPdf" xml:space="preserve"><value>Seiten aus PDF hinzufügen</value></data>
+  <data name="Pages_Before" xml:space="preserve"><value>Vor der ausgewählten Seite</value></data>
+  <data name="Pages_After" xml:space="preserve"><value>Nach der ausgewählten Seite</value></data>
+  <data name="Pages_MoveEarlier" xml:space="preserve"><value>Nach vorne verschieben</value></data>
+  <data name="Pages_MoveLater" xml:space="preserve"><value>Nach hinten verschieben</value></data>
+  <data name="Pages_Remove" xml:space="preserve"><value>Seiten entfernen</value></data>
+  <data name="Pages_Restore" xml:space="preserve"><value>Löschmarkierung aufheben</value></data>
+  <data name="Pages_DeletionMarked" xml:space="preserve"><value>Zum Löschen markiert</value></data>
+  <data name="Pages_SelectAll" xml:space="preserve"><value>Alle auswählen</value></data>
+  <data name="Pages_SelectNone" xml:space="preserve"><value>Auswahl aufheben</value></data>
+  <data name="Pages_Insert" xml:space="preserve"><value>Einfügen</value></data>
+  <data name="Pages_Apply" xml:space="preserve"><value>Übernehmen</value></data>
+  <data name="Pages_Blank" xml:space="preserve"><value>Leere Seite</value></data>
+  <data name="Pages_Original" xml:space="preserve"><value>Dokumentseite</value></data>
+  <data name="Pages_Count" xml:space="preserve"><value>Seiten: {0}. Ausgewählt: {1}.</value></data>
+  <data name="Pages_Applying" xml:space="preserve"><value>Dokument wird vorbereitet…</value></data>
+  <data name="Pages_Error" xml:space="preserve"><value>Die Seitenanordnung konnte nicht geändert werden.
+{0}</value></data>
+  <data name="Pages_CurrentFormat" xml:space="preserve"><value>Wie ausgewählte Seite</value></data>
+  <data name="Pages_CustomFormat" xml:space="preserve"><value>Benutzerdefinierte Größe</value></data>
+  <data name="Pages_Portrait" xml:space="preserve"><value>Hochformat</value></data>
+  <data name="Pages_Landscape" xml:space="preserve"><value>Querformat</value></data>
+  <data name="Pages_Format" xml:space="preserve"><value>Format</value></data>
+  <data name="Pages_Orientation" xml:space="preserve"><value>Ausrichtung</value></data>
+  <data name="Pages_Width" xml:space="preserve"><value>Breite [mm]</value></data>
+  <data name="Pages_Height" xml:space="preserve"><value>Höhe [mm]</value></data>
+  <data name="Pages_SignatureWarning" xml:space="preserve"><value>Eine Änderung der Seitenanordnung macht digitale Signaturen im geänderten Dokument ungültig. Die Originaldateien bleiben unverändert. Fortfahren?</value></data>
+  <data name="Pages_ImportMismatch" xml:space="preserve"><value>Projekte mit unterschiedlicher Seitenanordnung können nicht zusammengeführt werden. Wählen Sie Projekte aus, die nach derselben Neuordnung des Dokuments gespeichert wurden.</value></data>
 </root>

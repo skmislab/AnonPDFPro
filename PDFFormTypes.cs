@@ -4260,6 +4260,8 @@ namespace AnonPDF
 
     public class ProjectData
     {
+        public EmbeddedPdfDocument EmbeddedDocument { get; set; }
+        public string DocumentRevisionId { get; set; }
         public List<RedactionBlock> RedactionBlocks { get; set; }
         public List<CommentAnnotation> CommentAnnotations { get; set; }
         public HashSet<int> PagesToRemove { get; set; }

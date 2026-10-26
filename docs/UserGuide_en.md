@@ -358,6 +358,22 @@ Redaction now also covers images stored in the JPEG 2000 format (JP2/JPX) - cont
 
 Document analysis results (including OCR text) are stored in an on-disk cache. Reopening the same file is therefore faster and does not require repeating the whole analysis.
 
+## 6.21 Organizing pages
+
+Choose `File -> Organize pages` to change the arrangement of the open document.
+
+Thumbnails run from left to right and continue on the next row. A vertical line shows the insertion position while dragging. Thumbnails also show added objects, including on pages that were initially blank.
+
+- `Add pages from PDF` lets you select pages from another document and insert them before or after the selected page.
+- `Add blank page` lets you choose the format, orientation or custom dimensions in millimetres. The selected page's format is used by default.
+- Change the order by dragging pages or using the move buttons. Several selected pages can be moved together.
+- The trash icon marks pages of the current document for removal when saving the final PDF, just like the existing page removal feature. Marked thumbnails are crossed out. Using the button again on marked pages undoes the mark. Pages newly added in this dialog are removed from the arrangement immediately.
+- After `Apply`, redaction selections, objects, rotations and ALT edits stay with their pages. The changes also appear in preview, printing and the saved PDF.
+
+Changes can be undone. Saving the project and resuming work preserve the modified document, including inserted pages. Organizing pages does not modify the original PDF files.
+
+**Important:** after reorganization, the `.app` project also contains the PDF before redaction. Do not share it instead of the final redacted PDF. Changing page arrangement invalidates digital signatures in the modified document, not in the original files.
+
 # 7. Common Issues and Tips
 
 ## 7.1 Cannot save the output PDF
