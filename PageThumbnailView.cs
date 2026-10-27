@@ -6,6 +6,41 @@ using System.Windows.Forms;
 
 namespace AnonPDF
 {
+    internal readonly struct PageThumbnailLocation
+    {
+        internal int PageIndex { get; }
+        internal float RowOffset { get; }
+        internal PageThumbnailLocation(int pageIndex, float rowOffset)
+        {
+            PageIndex = Math.Max(0, pageIndex);
+            RowOffset = Math.Max(0, Math.Min(0.9999f, rowOffset));
+        }
+    }
+
+    internal sealed class PageMoveNavigation
+    {
+        private PageThumbnailLocation source;
+        private PageThumbnailLocation destination;
+        internal bool AtDestination { get; private set; }
+        internal bool CanToggle { get; private set; }
+
+        internal void Record(PageThumbnailLocation previous, PageThumbnailLocation current)
+        {
+            if (previous.PageIndex == current.PageIndex && Math.Abs(previous.RowOffset - current.RowOffset) <= 0.001f) return;
+            source = previous;
+            destination = current;
+            AtDestination = true;
+            CanToggle = true;
+        }
+
+        internal PageThumbnailLocation Toggle()
+        {
+            if (!CanToggle) throw new InvalidOperationException("No previous move location.");
+            AtDestination = !AtDestination;
+            return AtDestination ? destination : source;
+        }
+    }
+
     internal sealed class PageThumbnailCache : IDisposable
     {
         private readonly Dictionary<string, Bitmap> images = new Dictionary<string, Bitmap>();
@@ -60,6 +95,16 @@ namespace AnonPDF
             int lastRow = (scrollY + viewportHeight - 1) / ItemSize.Height + extraRows;
             int end = Math.Min(Count, (lastRow + 1) * Columns);
             for (int index = firstRow * Columns; index < end; index++) yield return index;
+        }
+
+        internal PageThumbnailLocation CaptureLocation(int scrollY) => new PageThumbnailLocation(
+            scrollY / ItemSize.Height * Columns, (scrollY % ItemSize.Height) / (float)ItemSize.Height);
+
+        internal int ScrollForLocation(PageThumbnailLocation location, int viewportHeight)
+        {
+            int index = Math.Max(0, Math.Min(Count - 1, location.PageIndex));
+            int scroll = (int)Math.Round((index / Columns + location.RowOffset) * ItemSize.Height);
+            return Math.Max(0, Math.Min(Math.Max(0, ContentHeight - viewportHeight), scroll));
         }
 
         internal int DropGap(Point point, int scrollY, out int itemIndex, out bool after)
@@ -175,6 +220,9 @@ namespace AnonPDF
         }
 
         internal void ScrollRows(int direction) => SetScrollPosition(scrollBar.Value + direction * layout.ItemSize.Height);
+        internal PageThumbnailLocation CaptureLocation() => layout.CaptureLocation(scrollBar.Value);
+        internal void RestoreLocation(PageThumbnailLocation location) => SetScrollPosition(layout.ScrollForLocation(location, ViewportRectangle.Height));
+        internal void ShowPageAtTop(int index) => RestoreLocation(new PageThumbnailLocation(index, 0));
 
         internal void EnsureVisible(int index)
         {

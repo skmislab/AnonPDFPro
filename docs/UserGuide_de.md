@@ -346,6 +346,7 @@ Die Miniaturen sind von links nach rechts und danach in weiteren Zeilen angeordn
 - `Seiten aus PDF hinzufügen` ermöglicht die Auswahl von Seiten aus einem anderen Dokument und das Einfügen vor oder nach der ausgewählten Seite.
 - `Leere Seite hinzufügen` bietet Format, Ausrichtung und eigene Abmessungen in Millimetern. Standardmäßig wird das Format der ausgewählten Seite verwendet.
 - Ändern Sie die Reihenfolge durch Ziehen oder mit den Schaltflächen zum Verschieben. Mehrere ausgewählte Seiten lassen sich gemeinsam verschieben.
+- In langen Dokumenten wählen Sie die Seiten aus und klicken auf `Verschieben`. Geben Sie die Zielseitennummer ein und wählen Sie vor oder nach dieser Seite. Die Nummer darf die aktuelle Seitenzahl einschließlich hinzugefügter Seiten nicht überschreiten. Anschließend werden die verschobenen Seiten angezeigt. `Vorherige Ansicht` neben `Verschieben` wechselt die Ansicht zwischen der letzten Ausgangs- und Zielposition, ohne Reihenfolge oder Auswahl der Seiten zu ändern.
 - Das Papierkorbsymbol markiert Seiten des aktuellen Dokuments zum Entfernen beim Speichern des fertigen PDFs, wie die bisherige Funktion zum Entfernen von Seiten. Markierte Miniaturen sind durchgestrichen. Ein erneuter Klick für markierte Seiten hebt die Markierung auf. In diesem Dialog neu hinzugefügte Seiten werden sofort aus der Anordnung entfernt.
 - Nach `Übernehmen` bleiben Markierungen, Objekte, Drehungen und ALT-Bearbeitungen ihren Seiten zugeordnet. Die Änderungen erscheinen auch in der Vorschau, beim Drucken und im gespeicherten PDF.
 

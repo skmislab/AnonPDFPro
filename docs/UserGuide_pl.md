@@ -367,6 +367,7 @@ Miniatury są ułożone od lewej do prawej, a następnie w kolejnych wierszach. 
 - `Dodaj strony z PDF` pozwala wybrać strony z innego dokumentu i wstawić je przed lub po wybranej stronie.
 - `Dodaj pustą stronę` pozwala dobrać format, orientację lub własne wymiary w milimetrach. Domyślnie zachowuje format wybranej strony.
 - Kolejność stron można zmieniać przeciąganiem lub przyciskami przesuwania. Można zaznaczyć i przenosić kilka stron jednocześnie.
+- W dużym dokumencie zaznacz strony i kliknij `Przenieś`. Wpisz numer strony docelowej i wybierz wstawienie przed nią lub za nią. Numer nie może przekroczyć aktualnej liczby stron, łącznie z dodanymi. Program pokaże przeniesione strony. Przycisk `Poprzedni widok` obok `Przenieś` pozwala przełączać widok między ostatnim miejscem źródłowym i docelowym, bez zmiany kolejności ani zaznaczenia stron.
 - Ikonka kosza oznacza strony bieżącego dokumentu do usunięcia przy zapisie końcowego PDF, tak samo jak dotychczasowa funkcja usuwania stron. Oznaczone miniatury są przekreślone. Ponowne użycie przycisku na oznaczonych stronach cofa oznaczenie. Nowo dodane w tym oknie strony są od razu usuwane z układu.
 - Po wybraniu `Zastosuj` zaznaczenia anonimizacyjne, obiekty, obroty i opisy ALT pozostają przypisane do swoich stron. Zmiana jest widoczna także w podglądzie, na wydruku i w zapisanym PDF.
 

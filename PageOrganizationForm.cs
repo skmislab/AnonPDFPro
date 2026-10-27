@@ -89,6 +89,9 @@ namespace AnonPDF
         private readonly Button up;
         private readonly Button down;
         private readonly Button remove;
+        private readonly Button move;
+        private readonly Button switchLocation;
+        private readonly PageMoveNavigation moveNavigation = new PageMoveNavigation();
         private readonly ComboBox insertion;
         private readonly ToolTip toolTip = new ToolTip();
         private readonly Timer thumbnails = new Timer { Interval = 60 };
@@ -102,6 +105,7 @@ namespace AnonPDF
         private Point? dragStart;
         private int hoverIndex = -1;
         private Point dragPoint;
+        private PageThumbnailLocation dragSourceLocation;
         public byte[] ComposedPdf { get; private set; }
         public int SelectedPageNumber => pages.SelectedIndices.Count == 0 ? 0 : pages.SelectedIndices.Cast<int>().Min() + 1;
         public int[] SelectedSourcePages => pages.SelectedIndices.Cast<int>().OrderBy(n => n).Select(n => plan.Pages[n].SourcePageNumber).ToArray();
@@ -137,6 +141,13 @@ namespace AnonPDF
             {
                 tools.Controls.Add(Command("Pages_AddPdf", (_, __) => AddPdf()));
                 tools.Controls.Add(Command("Menu_AddBlankPage", (_, __) => AddBlank()));
+                move = Command("Pages_Move", (_, __) => MoveToPage());
+                move.Name = "moveOrganizationPages";
+                tools.Controls.Add(move);
+                switchLocation = Command("Pages_PreviousView", (_, __) => SwitchMoveLocation());
+                switchLocation.Name = "switchPageMoveLocation";
+                switchLocation.Enabled = false;
+                tools.Controls.Add(switchLocation);
                 insertion = new ComboBox { Name = "pageInsertionPosition", DropDownStyle = ComboBoxStyle.DropDownList, Width = 210, Margin = new Padding(6) };
                 insertion.Items.AddRange(new[] { PageOrganizationText.Get("Pages_Before"), PageOrganizationText.Get("Pages_After") });
                 insertion.SelectedIndex = 1;
@@ -172,6 +183,7 @@ namespace AnonPDF
                 if (threshold.Contains(e.Location)) return;
                 dragStart = null;
                 dragging = pages.SelectedItems.Cast<OrganizationPage>().Select(p => p.Id).ToList();
+                dragSourceLocation = pages.CaptureLocation();
                 toolTip.Hide(pages);
                 hoverIndex = -1;
                 dragFeedback.ResetScroll();
@@ -191,11 +203,9 @@ namespace AnonPDF
             pages.DragLeave += (_, __) => { dragScroll.Stop(); SetDropGap(-1); };
             pages.DragDrop += (_, e) => {
                 if (dragging == null || dragFeedback.Gap < 0 || !e.Data.GetDataPresent("AnonPDF.PageOrganization")) return;
-                var ids = dragging.ToList();
                 int gap = dragFeedback.Gap;
                 SetDropGap(-1);
-                plan.Move(plan.Pages.Select((p, i) => ids.Contains(p.Id) ? i : -1).Where(i => i >= 0), gap);
-                Rebuild(ids);
+                MoveSelectedPages(indices => plan.Move(indices, gap), dragSourceLocation);
             };
             var footer = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 8, 0, 0) };
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -250,11 +260,15 @@ namespace AnonPDF
             return button;
         }
 
-        private void Rebuild(IEnumerable<string> selection)
+        private void Rebuild(IEnumerable<string> selection, bool showAtTop = false)
         {
             var selected = new HashSet<string>(selection);
             pages.SetItems(plan.Pages, Enumerable.Range(0, plan.Pages.Count).Where(i => selected.Contains(plan.Pages[i].Id)));
-            if (pages.SelectedIndices.Count > 0) pages.EnsureVisible(pages.SelectedIndices.First());
+            if (pages.SelectedIndices.Count > 0)
+            {
+                if (showAtTop) pages.ShowPageAtTop(pages.SelectedIndices.First());
+                else pages.EnsureVisible(pages.SelectedIndices.First());
+            }
             UpdateSelection();
         }
 
@@ -266,6 +280,7 @@ namespace AnonPDF
             accept.Enabled = selectOnly ? selected.Count > 0 : plan.IsChanged;
             if (up != null) up.Enabled = selected.Count > 0 && selected[0] > 0;
             if (down != null) down.Enabled = selected.Count > 0 && selected[selected.Count - 1] < plan.Pages.Count - 1;
+            if (move != null) move.Enabled = selected.Count > 0 && selected.Count < plan.Pages.Count;
             if (remove != null)
             {
                 remove.Enabled = selected.Count > 0;
@@ -274,6 +289,7 @@ namespace AnonPDF
                 remove.AccessibleName = PageOrganizationText.Get(restore ? "Pages_Restore" : "Pages_Remove");
                 toolTip.SetToolTip(remove, remove.AccessibleName);
             }
+            UpdateMoveNavigation();
         }
 
         private void SelectAll(bool selected)
@@ -350,12 +366,54 @@ namespace AnonPDF
 
         private void MoveStep(int direction)
         {
-            var selected = pages.SelectedIndices.Cast<int>().OrderBy(i => direction < 0 ? i : -i).ToList();
-            var ids = selected.Select(i => plan.Pages[i].Id).ToList();
-            foreach (int index in selected)
-                plan.Move(new[] { index }, direction < 0 ? index - 1 : index + 2);
-            Rebuild(ids);
-            if (pages.SelectedIndices.Count > 0) pages.EnsureVisible(pages.SelectedIndices.First());
+            MoveSelectedPages(indices => {
+                foreach (int index in indices.OrderBy(i => direction < 0 ? i : -i))
+                    plan.Move(new[] { index }, direction < 0 ? index - 1 : index + 2);
+            });
+        }
+
+        private void MoveToPage()
+        {
+            if (pages.SelectedIndices.Count == 0) return;
+            using (var dialog = new MovePagesForm(plan.Pages.Count, pages.SelectedIndices.First() + 1, theme))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                MoveSelectedPages(indices => plan.MoveToPage(indices, dialog.TargetPage, dialog.AfterTarget), showAtTop: true);
+            }
+        }
+
+        private void MoveSelectedPages(Action<int[]> movePages, PageThumbnailLocation? previousLocation = null, bool showAtTop = false)
+        {
+            var indices = pages.SelectedIndices.OrderBy(i => i).ToArray();
+            if (indices.Length == 0) return;
+            var selectedIds = indices.Select(i => plan.Pages[i].Id).ToArray();
+            var oldOrder = plan.Pages.Select(p => p.Id).ToArray();
+            var source = previousLocation ?? pages.CaptureLocation();
+            movePages(indices);
+            if (!oldOrder.SequenceEqual(plan.Pages.Select(p => p.Id))) Rebuild(selectedIds, showAtTop);
+            else if (showAtTop) pages.ShowPageAtTop(indices[0]);
+            else return;
+            moveNavigation.Record(source, pages.CaptureLocation());
+            UpdateMoveNavigation();
+            pages.Focus();
+        }
+
+        private void SwitchMoveLocation()
+        {
+            if (!moveNavigation.CanToggle) return;
+            pages.RestoreLocation(moveNavigation.Toggle());
+            UpdateMoveNavigation();
+            pages.Focus();
+        }
+
+        private void UpdateMoveNavigation()
+        {
+            if (switchLocation == null) return;
+            switchLocation.Enabled = moveNavigation.CanToggle;
+            switchLocation.Text = PageOrganizationText.Get("Pages_PreviousView");
+            switchLocation.AccessibleName = switchLocation.Text;
+            switchLocation.AccessibleDescription = PageOrganizationText.Get(moveNavigation.AtDestination ? "Pages_ShowSource" : "Pages_ShowDestination");
+            toolTip.SetToolTip(switchLocation, switchLocation.AccessibleDescription);
         }
 
         private void DragOverPages(object sender, DragEventArgs e)
@@ -554,6 +612,80 @@ namespace AnonPDF
             base.Dispose(disposing);
         }
 
+    }
+
+    internal sealed class MovePagesForm : Form
+    {
+        private readonly NumericUpDown pageNumber;
+        private readonly ComboBox position;
+        internal int TargetPage { get; private set; }
+        internal bool AfterTarget => position.SelectedIndex == 1;
+
+        internal MovePagesForm(int pageCount, int currentPage, DialogTheme theme)
+        {
+            Name = "movePagesForm";
+            Text = PageOrganizationText.Get("Pages_MoveTitle");
+            Font = new Font("Segoe UI", 9);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleDimensions = new SizeF(96, 96);
+            AutoSize = true;
+            AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = MinimizeBox = ShowIcon = ShowInTaskbar = false;
+            StartPosition = FormStartPosition.CenterParent;
+            Padding = new Padding(12);
+            var grid = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3 };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            pageNumber = new NumericUpDown { Name = "moveTargetPage", Minimum = 1, Maximum = pageCount,
+                Value = Math.Max(1, Math.Min(pageCount, currentPage)), DecimalPlaces = 0, Increment = 1, Width = 120 };
+            position = new ComboBox { Name = "moveTargetPosition", DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
+            position.Items.AddRange(new[] { PageOrganizationText.Get("Pages_MoveBefore"), PageOrganizationText.Get("Pages_MoveAfter") });
+            position.SelectedIndex = 0;
+            var controls = new Control[] { pageNumber, position };
+            var keys = new[] { "Pages_MoveTarget", "Pages_MovePosition" };
+            for (int row = 0; row < controls.Length; row++)
+            {
+                grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                grid.Controls.Add(new Label { Text = PageOrganizationText.Get(keys[row]), AutoSize = true,
+                    Anchor = AnchorStyles.Left, Margin = new Padding(3, 7, 12, 7) }, 0, row);
+                controls[row].Margin = new Padding(3, 5, 3, 5);
+                grid.Controls.Add(controls[row], 1, row);
+            }
+            grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Dock = DockStyle.Fill };
+            var cancel = new Button { Text = PageOrganizationText.Get("Dialog_Button_Cancel"), DialogResult = DialogResult.Cancel,
+                AutoSize = true, MinimumSize = new Size(85, 30), CausesValidation = false };
+            var accept = new Button { Text = PageOrganizationText.Get("Pages_Move"),
+                AutoSize = true, MinimumSize = new Size(85, 30) };
+            string acceptedText = pageNumber.Text;
+            bool restoringText = false;
+            pageNumber.TextChanged += (sender, args) => {
+                if (restoringText) return;
+                string candidate = pageNumber.Text;
+                if (candidate.Length == 0 || PageDestinationNumber.TryParse(candidate, pageCount, out _)) acceptedText = candidate;
+                else
+                {
+                    restoringText = true;
+                    try { pageNumber.Text = acceptedText; pageNumber.Select(acceptedText.Length, 0); }
+                    finally { restoringText = false; }
+                }
+                accept.Enabled = PageDestinationNumber.TryParse(pageNumber.Text, pageCount, out _);
+            };
+            accept.Click += (_, __) => {
+                if (!PageDestinationNumber.TryParse(pageNumber.Text, pageCount, out int target)) return;
+                TargetPage = target;
+                DialogResult = DialogResult.OK;
+            };
+            buttons.Controls.AddRange(new Control[] { cancel, accept });
+            grid.Controls.Add(buttons, 0, 2);
+            grid.SetColumnSpan(buttons, 2);
+            Controls.Add(grid);
+            AcceptButton = accept;
+            CancelButton = cancel;
+            DialogThemeApplier.ApplyTo(this, theme);
+            Shown += (_, __) => { pageNumber.Focus(); pageNumber.Select(0, pageNumber.Text.Length); };
+        }
     }
 
     internal sealed class BlankPageForm : Form

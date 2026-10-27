@@ -49,6 +49,10 @@ build with Visual Studio MSBuild first. Test results can be saved with
   including page 800 and all four rotations, without changing the source PDF.
 - Transactional page deletion marks, group restore, removal of newly inserted
   pages, deletion-mark remapping and protection against an empty output PDF.
+- Moving a selection before/after a specified page, including page 800, and
+  two-location navigation with scroll restoration after DPI/layout changes.
+- Strict destination-number validation using the current page count, including
+  inserted pages, oversized pasted values and page removal.
 
 The normal suite does not show windows. The attended desktop-controller test
 `PageOrganizationIntegrationTests` is marked `Explicit` and is excluded from

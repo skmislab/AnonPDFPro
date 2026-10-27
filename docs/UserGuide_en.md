@@ -367,6 +367,7 @@ Thumbnails run from left to right and continue on the next row. A vertical line 
 - `Add pages from PDF` lets you select pages from another document and insert them before or after the selected page.
 - `Add blank page` lets you choose the format, orientation or custom dimensions in millimetres. The selected page's format is used by default.
 - Change the order by dragging pages or using the move buttons. Several selected pages can be moved together.
+- In a long document, select pages and click `Move`. Enter the destination page number and choose before or after that page. The number cannot exceed the current page count, including added pages. The moved pages are then shown. `Previous view` beside `Move` switches the view between the last source and destination locations without changing the page order or selection.
 - The trash icon marks pages of the current document for removal when saving the final PDF, just like the existing page removal feature. Marked thumbnails are crossed out. Using the button again on marked pages undoes the mark. Pages newly added in this dialog are removed from the arrangement immediately.
 - After `Apply`, redaction selections, objects, rotations and ALT edits stay with their pages. The changes also appear in preview, printing and the saved PDF.
 

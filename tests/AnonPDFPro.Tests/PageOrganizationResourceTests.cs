@@ -33,6 +33,7 @@ public class PageOrganizationResourceTests
         {
             Resources.Culture = CultureInfo.GetCultureInfo(culture);
             foreach (string key in new[] { "Pages_Title", "Pages_SelectPages", "Pages_AddPdf", "Pages_Before", "Pages_After", "Pages_MoveEarlier",
+                "Pages_Move", "Pages_MoveTitle", "Pages_MoveTarget", "Pages_MovePosition", "Pages_MoveBefore", "Pages_MoveAfter", "Pages_PreviousView", "Pages_ShowSource", "Pages_ShowDestination",
                 "Pages_MoveLater", "Pages_Remove", "Pages_Restore", "Pages_DeletionMarked", "Pages_SelectAll", "Pages_SelectNone", "Pages_Insert", "Pages_Apply", "Pages_Blank",
                 "Pages_Original", "Pages_Count", "Pages_Applying", "Pages_Error", "Pages_CurrentFormat", "Pages_CustomFormat", "Pages_Portrait",
                 "Pages_Landscape", "Pages_Format", "Pages_Orientation", "Pages_Width", "Pages_Height", "Pages_ImportMismatch", "Pages_SignatureWarning" })

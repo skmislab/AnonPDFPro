@@ -172,6 +172,48 @@ public class PageOrganizationTests
         Assert.That(plan.Pages.Select(p => p.ExistingPageNumber), Is.EqualTo(expected));
     }
 
+    [TestCase(new[] { 0 }, 4, false, new[] { 2, 3, 1, 4, 5 })]
+    [TestCase(new[] { 0 }, 5, true, new[] { 2, 3, 4, 5, 1 })]
+    [TestCase(new[] { 3, 4 }, 1, false, new[] { 4, 5, 1, 2, 3 })]
+    [TestCase(new[] { 1, 3 }, 5, false, new[] { 1, 3, 2, 4, 5 })]
+    [TestCase(new[] { 1, 2 }, 2, false, new[] { 1, 2, 3, 4, 5 })]
+    [TestCase(new[] { 1, 2 }, 3, true, new[] { 1, 2, 3, 4, 5 })]
+    [TestCase(new[] { 3, 0 }, 3, true, new[] { 2, 3, 1, 4, 5 })]
+    public void MoveToPageUsesTheSpecifiedPageAsAnInsertionAnchor(int[] selected, int target, bool after, int[] expected)
+    {
+        var plan = PageOrganizationPlan.Open(Document("A", 5));
+        plan.MoveToPage(selected, target, after);
+        Assert.That(plan.Pages.Select(p => p.ExistingPageNumber), Is.EqualTo(expected));
+    }
+
+    [Test]
+    public void MoveToPage800KeepsTheSelectionOrderAndDeletionMarks()
+    {
+        var bytes = PdfRegressionTests.CreatePdf(document => {
+            for (int i = 0; i < 800; i++) document.AddNewPage();
+        });
+        var plan = PageOrganizationPlan.Open(bytes, removedPages: new[] { 2 });
+        plan.MoveToPage(new[] { 1, 0 }, 800, true);
+        Assert.That(plan.Pages.Skip(798).Select(p => p.ExistingPageNumber), Is.EqualTo(new[] { 1, 2 }));
+        Assert.That(plan.Pages[799].MarkedForDeletion, Is.True);
+        var project = plan.RemapProject(new ProjectData {
+            PagesToRemove = new HashSet<int> { 2 },
+            RedactionBlocks = new List<RedactionBlock> { new RedactionBlock { PageNumber = 1 } }
+        });
+        Assert.That(project.RedactionBlocks[0].PageNumber, Is.EqualTo(799));
+        Assert.That(project.PagesToRemove, Is.EquivalentTo(new[] { 800 }));
+    }
+
+    [TestCase(0)]
+    [TestCase(-1)]
+    [TestCase(6)]
+    public void InvalidMoveDestinationDoesNotChangeTheDocument(int destination)
+    {
+        var plan = PageOrganizationPlan.Open(Document("A", 5));
+        Assert.That(() => plan.MoveToPage(new[] { 0 }, destination, false), Throws.TypeOf<System.ArgumentOutOfRangeException>());
+        Assert.That(plan.IsChanged, Is.False);
+    }
+
     [Test]
     public void InsertAndMovePreserveContentDimensionsRotationAndSourceBytes()
     {

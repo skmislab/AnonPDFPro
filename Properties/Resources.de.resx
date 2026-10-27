@@ -2372,6 +2372,15 @@ Exit-Codes: 0 Erfolg, 2 ung&#252;ltige Argumente, 3 inkompatible Vorlage, 4 Ausg
   <data name="Pages_Before" xml:space="preserve"><value>Vor der ausgewählten Seite</value></data>
   <data name="Pages_After" xml:space="preserve"><value>Nach der ausgewählten Seite</value></data>
   <data name="Pages_MoveEarlier" xml:space="preserve"><value>Nach vorne verschieben</value></data>
+  <data name="Pages_Move" xml:space="preserve"><value>Verschieben</value></data>
+  <data name="Pages_MoveTitle" xml:space="preserve"><value>Seiten verschieben</value></data>
+  <data name="Pages_MoveTarget" xml:space="preserve"><value>Zielseitennummer</value></data>
+  <data name="Pages_MovePosition" xml:space="preserve"><value>Position</value></data>
+  <data name="Pages_MoveBefore" xml:space="preserve"><value>Vor der angegebenen Seite</value></data>
+  <data name="Pages_MoveAfter" xml:space="preserve"><value>Nach der angegebenen Seite</value></data>
+  <data name="Pages_ShowSource" xml:space="preserve"><value>Vorherige Position anzeigen</value></data>
+  <data name="Pages_PreviousView" xml:space="preserve"><value>Vorherige Ansicht</value></data>
+  <data name="Pages_ShowDestination" xml:space="preserve"><value>Zielposition anzeigen</value></data>
   <data name="Pages_MoveLater" xml:space="preserve"><value>Nach hinten verschieben</value></data>
   <data name="Pages_Remove" xml:space="preserve"><value>Seiten entfernen</value></data>
   <data name="Pages_Restore" xml:space="preserve"><value>Löschmarkierung aufheben</value></data>

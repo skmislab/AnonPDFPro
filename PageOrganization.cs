@@ -9,6 +9,15 @@ using Newtonsoft.Json;
 
 namespace AnonPDF
 {
+    internal static class PageDestinationNumber
+    {
+        internal static bool TryParse(string text, int pageCount, out int pageNumber)
+        {
+            return int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out pageNumber)
+                && pageNumber >= 1 && pageNumber <= pageCount;
+        }
+    }
+
     public sealed class EmbeddedPdfDocument
     {
         public string Id { get; set; }
@@ -175,6 +184,12 @@ namespace AnonPDF
             var destination = gap - selected.Count(n => n < gap);
             foreach (int index in selected.OrderByDescending(n => n)) Pages.RemoveAt(index);
             Pages.InsertRange(destination, moving);
+        }
+
+        public void MoveToPage(IEnumerable<int> indices, int targetPage, bool after)
+        {
+            if (targetPage < 1 || targetPage > Pages.Count) throw new ArgumentOutOfRangeException(nameof(targetPage));
+            Move(indices, targetPage - 1 + (after ? 1 : 0));
         }
 
         public Dictionary<int, int> ExistingPageMap()

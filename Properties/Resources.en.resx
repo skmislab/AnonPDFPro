@@ -2419,6 +2419,15 @@ Exit codes: 0 success, 2 invalid arguments, 3 incompatible template, 4 output ex
   <data name="Pages_Before" xml:space="preserve"><value>Before the selected page</value></data>
   <data name="Pages_After" xml:space="preserve"><value>After the selected page</value></data>
   <data name="Pages_MoveEarlier" xml:space="preserve"><value>Move earlier</value></data>
+  <data name="Pages_Move" xml:space="preserve"><value>Move</value></data>
+  <data name="Pages_MoveTitle" xml:space="preserve"><value>Move pages</value></data>
+  <data name="Pages_MoveTarget" xml:space="preserve"><value>Destination page number</value></data>
+  <data name="Pages_MovePosition" xml:space="preserve"><value>Position</value></data>
+  <data name="Pages_MoveBefore" xml:space="preserve"><value>Before the specified page</value></data>
+  <data name="Pages_MoveAfter" xml:space="preserve"><value>After the specified page</value></data>
+  <data name="Pages_ShowSource" xml:space="preserve"><value>Show previous location</value></data>
+  <data name="Pages_PreviousView" xml:space="preserve"><value>Previous view</value></data>
+  <data name="Pages_ShowDestination" xml:space="preserve"><value>Show destination location</value></data>
   <data name="Pages_MoveLater" xml:space="preserve"><value>Move later</value></data>
   <data name="Pages_Remove" xml:space="preserve"><value>Remove pages</value></data>
   <data name="Pages_Restore" xml:space="preserve"><value>Undo deletion mark</value></data>
