@@ -1,4 +1,7 @@
-## AnonPDF Pro - Instrukcja użytkownika
+---
+title: AnonPDF Pro - Instrukcja użytkownika
+lang: pl
+---
 
 # 1. Wprowadzenie
 
@@ -8,7 +11,7 @@ AnonPDF Pro to narzędzie służące do częściowego lub całkowitego usuwania 
 
 > 1\. Pobierz i zainstaluj aplikację AnonPDF Pro (w zależności od sposobu dystrybucji może to być instalator MSI/EXE lub pliki binarne).
 
-> 2\. Upewnij się, że na komputerze jest zainstalowany .NET Framework / .NET Runtime (wersja zależna od projektu).
+> 2\. Aplikacja wymaga systemu Windows i .NET Framework 4.8.
 
 > 3\. Uruchom aplikację, np. poprzez skrót na pulpicie, w menu Start lub bezpośrednio przez plik wykonywalny AnonPDFPro.exe
 
@@ -49,7 +52,7 @@ Główne okno aplikacji składa się z następujących elementów:
 
 - Górny pasek menu – zawiera opcje do zarządzania projektem i plikami, m.in.:
 
-> \- Plik: umożliwia otwarcie nowego PDF, zapis/otwarcie projektu zaznaczeń redakcyjnych, wyjście z aplikacji.
+> \- Plik: otwieranie PDF i projektów, zapis wyniku, eksport zakresu stron, organizowanie stron, ustawienia dokumentu, podgląd i drukowanie.
 
 > \- Szukaj: pozwala szybko przejść do pola wyszukiwania.
 
@@ -70,7 +73,7 @@ Główne okno aplikacji składa się z następujących elementów:
 - Pole tekstowe zmiany strony – służy do szybkiego przejścia do wybranej strony, wprowadzając jej numer.
 - Grupa narzędzi redakcji:
 
-> \- Tryb kursora – pozwala wybierać tekst, zaznaczenia i obiekty bez rozpoczynania nowego zaznaczenia anonimizacyjnego.
+> \- Tryb Kursor – kliknięcie słowa tworzy zaznaczenie anonimizacyjne obejmujące to słowo. Kliknięcie istniejącego zaznaczenia lub obiektu wybiera je do dalszej pracy.
 
 > \- Tryb markera – pozwala zaznaczać poziome obszary (np. wąskie pasy do usuwania pojedynczych linii tekstu).
 
@@ -100,7 +103,7 @@ Wybierz z paska menu pozycję Plik → Otwórz plik PDF (lub przycisk „Wybierz
 
 ## 4.2 Przeglądanie stron
 
-Użyj listy stron z lewej strony okna (lub przycisków „Następna”, „Poprzednia” itp.), aby wybrać stronę do edycji.
+Użyj zakładki `Lista stron` lub `Miniatury` w prawym panelu albo przycisków „Następna”, „Poprzednia” itp., aby wybrać stronę do edycji.
 
 ## 4.3 Wyszukiwanie
 
@@ -124,7 +127,7 @@ Przycisk `Dane osobowe` uruchamia wykrywanie danych osobowych w całym dokumenci
 
 ## 4.4 Zaznaczanie obszarów do redakcji
 
-Aby utworzyć obszar redakcji:
+W trybie `Kursor` kliknij słowo, które chcesz usunąć. Działa to także dla słów rozpoznanych przez OCR. Takie zaznaczenie można dopasować uchwytami. Aby narysować obszar redakcji w trybie `Marker` lub `Box`:
 
 > 1\. Wybierz tryb markera lub prostokąta.
 
@@ -144,9 +147,11 @@ Aby utworzyć obszar redakcji:
 
 Wybrane zaznaczenie typu `box` lub `marker` można usunąć także klawiszem `DELETE`. W trybie kursora kliknięcie istniejącego zaznaczenia pozwala je wybrać bez rysowania nowego obszaru.
 
+Menu kontekstowe zaznaczenia `Box` zawiera opcję `Całe słowa`. Po jej wyłączeniu w skanach usuwany jest dokładnie obszar prostokąta, bez obejmowania całych dotkniętych słów z OCR. Ustawienie jest stosowane także do kolejnych rysowanych boxów w tym dokumencie i zapisywane w projekcie. `Marker` nadal obejmuje dotknięte słowa; jeśli obejmie za dużo tekstu, usuń zaznaczenie i narysuj je ponownie we właściwym miejscu.
+
 ## 4.5 Podgląd po zmianach
 
-Po wprowadzeniu zaznaczenia tekst, który będzie usunięty, jest od razu wyszarzany na podglądzie. Działa to również w dokumentach skanowanych rozpoznanych przez OCR — wówczas wyszarzane są całe dotknięte słowa.
+Po wprowadzeniu zaznaczenia tekst przeznaczony do usunięcia jest wyszarzany na podglądzie. W skanach z OCR pomaga to sprawdzić, czy nie objęto także sąsiedniego wiersza. Dla boxa z wyłączoną opcją `Całe słowa` o zakresie usuwania decyduje prostokąt. Przed udostępnieniem dokumentu sprawdź wynik we wbudowanym Podglądzie.
 
 ## 4.6 Zapisywanie projektu
 
@@ -156,7 +161,11 @@ Jeśli chcesz zapisać stan zaznaczeń do późniejszej edycji, wybierz Zapisz p
 
 Po zaznaczeniu odpowiednich obszarów wybierz przycisk Zapisz plik PDF (lub z paska menu Plik → Zapisz plik PDF). Wskaż docelowy plik wynikowy, w którym uwzględnione zostaną zaznaczone obszary. Po zakończeniu procesu aplikacja wygeneruje nowy, zredagowany plik PDF.
 
+Program proponuje nazwę z końcówką `_anon`, ale możesz ją zmienić. W kolejnych zapisach końcowego PDF w tej samej sesji dokumentu proponowana jest ostatnio wybrana nazwa.
+
 Przed zapisaniem możesz użyć opcji `Plik -> Podgląd` (`CTRL+F2`). Otwiera ona wbudowany podgląd dokumentu po zastosowaniu anonimizacji, bez uruchamiania zewnętrznej przeglądarki PDF. W oknie podglądu możesz przechodzić między stronami, wpisać numer strony oraz wydrukować dokument w takiej postaci, w jakiej zostanie zapisany.
+
+Podgląd otwiera się zmaksymalizowany i pokazuje bieżącą stronę. Uwzględnia również obiekty, układ stron i marginesy z Ustawień dokumentu. Wybór opcji `Pokaż obrys` i `Zaczernienie` wpływa na wygląd końcowego wyniku.
 
 Jeśli potrzebujesz obrazów stron zamiast pliku PDF, wybierz `Plik -> Zapisz zakres stron do JPEG`. Po wskazaniu katalogu aplikacja utworzy w nim podfolder o nazwie bieżącego pliku PDF i zapisze wybrane strony jako osobne, ponumerowane pliki `.jpg`. Podczas zapisu postęp jest pokazywany w etykiecie u góry widoku.
 
@@ -190,16 +199,18 @@ Jeśli w dokumencie jest dużo zaznaczonych obszarów, możesz użyć przyciskó
 
 ## 6.2 Podpisy
 
-Aplikacja udostępnia opcje związane z kwalifikowanymi podpisami elektronicznymi:
+Aplikacja rozpoznaje podpisy elektroniczne w dokumencie źródłowym.
 
-- Usunięte – usuwa wszystkie podpisy kwalifikowane z dokumentu.
-- Oryginalne – pozostawia oryginalne podpisy, jednak z uwagi na zmiany w dokumencie nie będzie można ich zweryfikować.
-- Raport – generuje dodatkową stronę w formie listy z informacjami o złożonych podpisach zamiast oryginalnej wizualizacji podpisów.
+- `Opcje -> Wybierz podpisy do usunięcia` pozwala wskazać podpisy, których wizualizacji nie chcesz zachować. Początkowo żaden podpis nie jest wybrany do usunięcia.
+- W sekcji `Podpisy` wybierz `Zachowane`, aby pozostawić wizualizacje pozostałych podpisów, lub `Raport`, aby zastąpić je stroną z informacjami o podpisach.
+- Dla podpisów zachowanych pole `Wygląd` udostępnia wariant oryginalny oraz `AnonPDF Pro`, pokazujący status weryfikacji w aktualnym języku aplikacji.
+- Informacja o weryfikacji dotyczy podpisu w źródłowym PDF. Zmiana treści dokumentu nie tworzy nowego podpisu elektronicznego; zapisanej kopii nie należy traktować jako ponownie podpisanego dokumentu.
 
 ## 6.3 Usuwanie stron
 
 - Kliknięcie na ikonce „Kosz 1..n” w lewym panelu umożliwia oznaczenie wybranego zakresu stron do usunięcia lub rezygnacji z usunięcia.
 - Kliknięcie na ikonce „Kosz” w lewym panelu umożliwia oznaczenie strony do usunięcia. Ikonka zmienia kolor tła na czarny.
+- Te same oznaczenia można włączać i cofać w `Plik -> Organizuj strony` dla jednej lub wielu wybranych stron. Strony źródłowe pozostają w projekcie, a znikają z końcowego PDF po zapisie.
 
 ## 6.4 Zaczernienie
 
@@ -246,9 +257,11 @@ Podczas pracy z obiektami dostępne są także:
 - `CTRL + V` - wklej obiekt ze schowka. Wklejony obiekt trafia na aktywną warstwę, zachowuje kolejność nakładania ze źródła i może zostać automatycznie przeskalowany, jeśli strona docelowa jest mniejsza.
 - Kopiowanie i wklejanie obiektów działa również między dwoma uruchomionymi instancjami aplikacji.
 - `DELETE` - usuń aktywny obiekt lub grupę aktywnych obiektów.
+- `ESC` - odwołaj zaznaczenie obiektów bez ich usuwania.
 - W dialogu napisów można włączyć opcję `Strzałka` dla ramki tekstu.
 - Opcję `Ogranicz widok rastra` w dialogu kształtów dla prostokąta, elipsy, trójkąta i regionu.
-- Dla strzałki napisu można ustawić `Grubość linii strzałki`, `Długość grotu` i `Szerokość grotu`.
+- Dla strzałki napisu można ustawić grubość linii, grubość krawędzi, szerokość i długość grotu oraz kolory wypełnienia i krawędzi. Grubość krawędzi równa zero oznacza brak krawędzi strzałki, niezależnie od ramki napisu.
+- W edycji obrazu opcja `Przekoloruj tusz` i przycisk `Kolor tuszu` pozwalają zmienić kolor rysunku, np. oznaczenia skopiowanego z planu technicznego. Wygładzone brzegi zachowują odcienie pasujące do wybranego koloru.
 - Koniec strzałki napisu można przeciągać myszą, a punkt przypięcia do ramki aktualizuje się automatycznie do narożników i środków boków.
 - Obrót napisu nie obraca końca strzałki; aktualizuje się tylko miejsce przypięcia do ramki.
 - Skalowanie napisu skaluje także ramkę i przypiętą strzałkę jako jeden obiekt.
@@ -297,7 +310,8 @@ Aplikacja obsługuje warstwy robocze dla anonimizacji i obiektów.
 - W oknie zarządzania warstwami opcja `Eksportuj i drukuj tylko widoczne warstwy` nadpisuje ustawienia z kolumny `Eksport`.
 - Nowe zaznaczenia i nowe obiekty powstają na aktualnie aktywnej warstwie.
 - Wklejane obiekty trafiają na aktywną warstwę, z zachowaniem kolejności nakładania ze źródła.
-- Warstwa `Robocza` jest zawsze najwyżej i nie trafia do finalnego PDF.
+- Warstwa `Robocza` jest zawsze najwyżej i domyślnie wyłączona z eksportu. Przed zapisem sprawdź ustawienia eksportu warstw; opcja eksportowania tylko widocznych warstw uwzględnia ich widoczność zamiast kolumny `Eksport`.
+- Kolejność warstw poza warstwą `Robocza` można zmieniać przeciąganiem w oknie zarządzania warstwami.
 - Ukryte warstwy nie biorą udziału w interakcji na podglądzie.
 - Zablokowane warstwy blokują przesuwanie, edycję, skalowanie i usuwanie obiektów.
 - Import projektu zachowuje przypisanie obiektów do warstw.
@@ -317,15 +331,17 @@ Opcja `Plik -> Zapisz aktualny widok...` pozwala zapisać aktualnie widoczną st
 Zakładka `Znalezione` w prawym panelu zbiera w jednym miejscu wyniki wyszukiwania oraz wykryte dane osobowe.
 
 - Pozycje są pogrupowane według stron i opatrzone polami wyboru.
-- Lista rozwijana filtra pozwala zawęzić widok do kategorii: `Wszystkie`, `Wyszukiwanie`, `Dane osobowe`, `Tekst alternatywny` lub `Poza stroną`.
+- Każdy wynik pokazuje znalezioną treść i jej typ. Filtr pozwala wybrać jednocześnie kilka dostępnych kategorii, np. tylko NIP i PESEL.
+- Zmiany pól wyboru filtra od razu aktualizują listę oraz żółte wyróżnienia wyników na stronie. Ukrycie kategorii w filtrze nie usuwa wcześniej utworzonych zaznaczeń anonimizacyjnych.
 - Kliknięcie pozycji przechodzi do odpowiedniej strony i podświetla miejsce w dokumencie.
 - Zaznaczenie pozycji tworzy zaznaczenie anonimizacyjne, a jej odznaczenie je usuwa. Stan pól wyboru jest synchronizowany w obie strony z zaznaczeniami na stronie.
+- Można wybrać pojedyncze wyniki, wszystkie wyniki z wybranej strony lub wszystkie pozycje widoczne przy bieżącym filtrze. Kliknięcie wyróżnionego słowa w trybie `Kursor` jest synchronizowane z odpowiednią pozycją listy.
 
 ## 6.15 Wykrywanie danych osobowych
 
 Przycisk `Dane osobowe` uruchamia analizę całego dokumentu i prezentuje znalezione dane w zakładce `Znalezione`.
 
-- Rozpoznawanie nazwisk i lokalizacji wymaga zainstalowania dodatkowego modułu rozpoznawania dla wybranego kraju. Bez tego modułu przycisk nie zwróci wyników.
+- Opcja wymaga odpowiedniej wtyczki PII. Pobierz ją ze [strony produktu](https://misart.pl/anonpdfpro/?lang=pl#pii), rozpakuj do katalogu `plugins` aplikacji i uruchom program ponownie. Poczekaj na zakończenie inicjalizacji wtyczki i analizy dokumentu.
 - Niezależnie od modułu nadal działa wyszukiwanie identyfikatorów (PESEL, numer księgi wieczystej, NIP, REGON, KRS, rachunek bankowy, dowód osobisty, e-mail, kod pocztowy, adres internetowy, VIN) opisane w punkcie 4.3.
 - Wyniki można zbiorczo zamienić na zaznaczenia anonimizacyjne w zakładce `Znalezione`.
 
@@ -335,6 +351,7 @@ Aplikacja wykrywa dane osobowe również w tekstach alternatywnych (opisach) obr
 
 - Takie wyniki pojawiają się w zakładce `Znalezione` w kategorii `Tekst alternatywny`.
 - Z menu kontekstowego (prawy przycisk myszy) dostępne są opcje `Edytuj tekst alternatywny` oraz `Wyczyść tekst alternatywny`. Zmiany są zachowywane w zapisanym pliku PDF.
+- Edycję opisu grafiki można uruchomić także z menu `Narzędzia`. Samo dodanie opisów ALT lub zapis PDF/A nie oznacza automatycznej zgodności całego dokumentu z WCAG.
 
 ## 6.17 Kopiowanie tekstu z zaznaczeń
 
@@ -350,9 +367,9 @@ W menu `Opcje -> Kraj` można wskazać kraj dokumentu: `Automatycznie`, `Polska`
 - Ustawienie dopasowuje zakresy danych proponowane do anonimizacji do wybranego kraju i języka.
 - Wybór `Automatycznie` korzysta z ustawień regionalnych systemu oraz wykrytego języka dokumentu.
 
-## 6.19 Obsługa formatu JPEG 2000
+## 6.19 Obrazy JPEG 2000 i JBIG2
 
-Anonimizacja obejmuje teraz także obrazy zapisane w formacie JPEG 2000 (JP2/JPX) — treść w obrębie zaznaczenia jest poprawnie usuwana również z takich obrazów.
+Anonimizacja obejmuje obrazy JPEG 2000 (JP2/JPX) i czarno-białe skany JBIG2. Nie trzeba ich wcześniej konwertować do innego formatu. Wybór kompresji i optymalizacji wyniku nadal wpływa na rozmiar zapisanego PDF.
 
 ## 6.20 Szybszy ponowny przegląd dokumentu
 
@@ -374,6 +391,37 @@ Miniatury są ułożone od lewej do prawej, a następnie w kolejnych wierszach. 
 Zmiany można cofnąć. Zapis projektu i wznowienie pracy zachowują zmieniony dokument wraz z dołączonymi stronami. Oryginalne pliki PDF nie są modyfikowane podczas organizowania stron.
 
 **Ważne:** projekt `.app` po reorganizacji zawiera również PDF sprzed anonimizacji. Nie należy go udostępniać zamiast końcowego, zanonimizowanego PDF. Zmiana układu stron unieważnia podpisy cyfrowe w zmienionym dokumencie, ale nie w oryginalnych plikach.
+
+Do zaznaczania grup używaj `CTRL` z kliknięciem dla osobnych stron oraz `SHIFT` dla zakresu. `Zastosuj` zatwierdza zmiany w dokumencie, a `Anuluj` je porzuca. Miniatury są przygotowywane dla widocznego obszaru i sąsiednich wierszy, co ogranicza zużycie pamięci przy dużych dokumentach.
+
+## 6.22 Ustawienia dokumentu
+
+W `Plik -> Ustawienia dokumentu` podaj górny, dolny, lewy i prawy margines w pełnych milimetrach. Wartość `0` oznacza brak marginesu. Zawartość każdej strony jest proporcjonalnie dopasowywana do pozostawionego obszaru, np. aby uzyskać miejsce na nagłówek. Efekt widać w Podglądzie, na wydruku oraz w wynikowym PDF i PDF/A. Ustawienia są zapisywane w projekcie i przywracane po wznowieniu pracy.
+
+## 6.23 Automatyczne redagowanie wielu dokumentów
+
+Zapisany projekt może służyć jako szablon tych samych zaznaczeń, nagłówków, pieczątek i innych obiektów w podobnych dokumentach. Do takiej pracy z pliku `.cmd` służy uruchomienie bez okna aplikacji:
+
+```bat
+start "" /wait AnonPDFPro.exe "dokument.pdf" ^
+  --headless --template "szablon.app" ^
+  --pdfout "wynik.pdf" --lang pl
+```
+
+- `--template` używa układu projektu, ale ignoruje zapisaną w nim ścieżkę PDF; dokument wejściowy trzeba wskazać osobno.
+- `--overwrite` zezwala na nadpisanie istniejącego wyniku. Bez niego taki plik jest chroniony przed nadpisaniem.
+- `--text` włącza indeksowanie tekstu natywnego; `--ocr` również rozpoznawanie stron bez tekstu. Bez tych opcji dodatkowa analiza nie jest uruchamiana. Wtyczka PII nie jest ładowana w tym trybie.
+- `--format pdfa` wybiera PDF/A i automatycznie włącza wymagane OCR. Domyślnym wynikiem jest zwykły PDF.
+- `--skip-template-validation` pomija domyślne sprawdzanie zgodności liczby, rozmiarów i obrotów stron z szablonem, np. gdy pliki mają różną liczbę dalszych stron. Nie dopasowuje położeń ani rozmiarów zaznaczeń: użytkownik musi sprawdzić, czy trafiają we właściwe miejsca.
+- `--help --lang pl` wyświetla pełną listę parametrów i kodów zakończenia. Dostępne języki komunikatów to `pl`, `en` i `de`.
+
+Przed opracowaniem całej grupy plików sprawdź rezultat na kilku reprezentatywnych dokumentach. Używaj szablonów przygotowanych dla takiego samego układu stron.
+
+## 6.24 Przypisy wyłączenia jawności
+
+W menu `Opcje` ustaw `Organ lub osoba dokonująca wyłączeń` i sprawdź słownik podstaw prawnych. Następnie z menu kontekstowego zaznaczenia wybierz zakres wyłączenia i podstawę prawną; opcja automatycznych przypisów pozwala umieścić je w wyniku.
+
+Globalny słownik utrzymuje administrator, a użytkownik może zarządzać wpisami lokalnymi. Dostarczone fragmenty podstaw prawnych są przykładami: jednostka powinna je uzupełnić i dbać o ich aktualność. Zawsze sprawdź treść przypisów w Podglądzie przed opublikowaniem dokumentu.
 
 # 7. Najczęstsze problemy i wskazówki
 
@@ -407,17 +455,20 @@ W ostatnich wersjach dodano m.in.:
 
 - Drukowanie z menu `Plik` (`CTRL+P`) z wyborem: bieżąca strona, zakres stron lub cały dokument.
 - Wbudowany `Podgląd` w menu `Plik` (`CTRL+F2`) pokazujący dokument po anonimizacji bez zewnętrznej przeglądarki PDF.
+- `Organizuj strony`: wstawianie stron z innego PDF i pustych stron, przenoszenie grup przeciąganiem lub według numeru oraz przycisk `Poprzedni widok`.
+- `Ustawienia dokumentu` z marginesami zapisywanymi w projekcie.
+- Opcję `Całe słowa` dla zaznaczeń `Box` oraz automatyczne redagowanie wielu dokumentów według szablonu projektu.
 - Opcję `Zapisz zakres stron do PDF` (menu `Plik`) z domyślnym zakresem ustawionym na bieżącą stronę.
 - Opcję `Zapisz zakres stron do JPEG` (menu `Plik`) zapisującą wybrane strony jako ponumerowane pliki `.jpg` w osobnym katalogu.
 - Zapis dokumentów w pełni skanowanych jako PDF/A z niewidoczną warstwą tekstową OCR oraz zapamiętywaniem ostatnio wybranego typu zapisu dla skanów.
-- Trzy zakładki po prawej stronie: `Lista stron`, `Miniatury` i `Warstwy`.
+- Cztery zakładki po prawej stronie: `Lista stron`, `Miniatury`, `Warstwy` i `Znalezione`.
 - Dynamiczne generowanie miniaturek stron oraz pamięć podręczną miniaturek dla szybszej pracy na dużych dokumentach.
 - Poprawione odświeżanie miniatur po zmianie filtra stron.
 - Miniatury pokazujące również zaznaczenia anonimizacji, komentarze, obiekty oraz strony oznaczone do usunięcia.
 - Wyszukiwanie tekstu w dokumentach skanowanych i na obrazach osadzonych w PDF.
 - Rozpoznawanie danych osobowych i identyfikatorów także w dokumentach skanowanych.
 - Zamianę wyników wyszukiwania ze skanów na zaznaczenia anonimizacyjne.
-- Tryb kursora do bezpiecznego wybierania tekstu, zaznaczeń i obiektów bez przypadkowego rysowania nowych zaznaczeń.
+- Tryb `Kursor` do anonimizacji słów przez kliknięcie oraz wybierania istniejących zaznaczeń i obiektów.
 - Motywy wysokiego kontrastu: czarno-żółty i czarno-biały.
 - Opcję `Zapisz aktualny widok...` w menu `Plik`.
 - Zapamiętywanie ostatnio wybranej zakładki po prawej stronie (`Lista stron` / `Miniatury` / `Warstwy`).
@@ -426,7 +477,7 @@ W ostatnich wersjach dodano m.in.:
 - Obsługę warstw roboczych z własną widocznością, blokadą i aktywną warstwą.
 - Rozszerzone menu kontekstowe dla zaznaczeń i obiektów (m.in. kopiowanie, wycinanie, powielanie, usuwanie kopii).
 - Skalowanie pojedynczych obiektów i grup obiektów narożnymi uchwytami (`SHIFT` - proporcje, `ALT` - od środka).
-- Opcję `Strzałka` w dialogu napisów z regulacją grubości linii strzałki, długości grotu i szerokości grotu.
+- Opcję `Strzałka` w dialogu napisów z regulacją wymiarów, kolorów wypełnienia i krawędzi oraz grubości krawędzi.
 - Kopiowanie i wklejanie obiektów przez schowek systemowy także między dwoma instancjami aplikacji, z zachowaniem kolejności nakładania.
 - Funkcje `Cofnij` (`CTRL+Z`) i `Ponów` (`CTRL+Y`).
 - Krótki samouczek startowy dostępny z menu `? -> Jak zacząć?`.
@@ -438,5 +489,5 @@ W ostatnich wersjach dodano m.in.:
 - Kopiowanie tekstu z zaznaczeń do schowka (`Kopiuj do schowka`) w poprawnej kolejności czytania, także na obróconych stronach i czystych skanach.
 - Wyszarzanie dotkniętego tekstu również w czystych skanach (na podstawie rozpoznania OCR).
 - Zapis wybranego zakresu stron do ponumerowanych plików JPEG.
-- Obsługę anonimizacji obrazów zapisanych w formacie JPEG 2000.
+- Obsługę anonimizacji obrazów zapisanych w formatach JPEG 2000 i JBIG2.
 - Szybszy ponowny przegląd dokumentu dzięki pamięci podręcznej na dysku.

@@ -1,4 +1,7 @@
-## AnonPDF Pro - Benutzerhandbuch
+---
+title: AnonPDF Pro - Benutzerhandbuch
+lang: de
+---
 
 *Deutsche Version der Benutzeranleitung*
 
@@ -10,9 +13,9 @@ AnonPDF Pro ist ein Werkzeug zur teilweisen oder vollständigen Entfernung (Anon
 
 > **1.** Installieren Sie AnonPDF Pro (je nach Bereitstellung als Installer oder als bereitgestellte Programmdateien).
 
-> **2.** Stellen Sie sicher, dass die benötigte .NET-Laufzeit installiert ist.
+> **2.** Die Anwendung benötigt Windows und .NET Framework 4.8.
 
-> **3.** Starten Sie die Anwendung Über Desktop-Verknüpfung, Startmenü oder direkt Über AnonPDFPro.exe.
+> **3.** Starten Sie die Anwendung über eine Desktop-Verknüpfung, das Startmenü oder direkt über AnonPDFPro.exe.
 
 > **4.** Nach dem Start wird das Hauptfenster der Anwendung geöffnet.
 
@@ -65,7 +68,7 @@ Wählen Sie Datei -\> PDF öffnen und wählen Sie das Ziel-Dokument.
 
 ## 4.2 Seiten durchsuchen
 
-Verwenden Sie die Seitenliste oder die Navigationsschaltflächen (Vorherige/Nächste), um zwischen Seiten zu wechseln.
+Verwenden Sie `Seitenliste` oder `Miniaturen` im rechten Panel oder die Navigationsschaltflächen (Vorherige/Nächste), um zwischen Seiten zu wechseln.
 
 ## 4.3 Suche
 
@@ -87,7 +90,9 @@ Wenn eine gescannte Seite leicht schief ist, versucht die Anwendung, die Positio
 
 Die Schaltfläche `Personendaten` startet die Erkennung personenbezogener Daten im gesamten Dokument. Suchergebnisse und erkannte Personendaten - auch aus Alternativtexten (ALT) und aus Bereichen außerhalb der Seite - erscheinen im Tab `Gefunden` (siehe Abschnitt 6.14).
 
-Zum Markieren eines Bereichs:
+## 4.4 Bereiche zur Anonymisierung markieren
+
+Im Modus `Cursor` erstellt ein Klick auf ein Wort eine Anonymisierungsmarkierung, auch bei per OCR erkannten Wörtern. Die Markierung lässt sich mit Griffen anpassen. Für `Marker` oder `Box` gehen Sie wie folgt vor:
 
 > **1.** Wählen Sie Marker oder Box.
 
@@ -103,9 +108,11 @@ Zum Markieren eines Bereichs:
 
 Eine ausgewählte `Box`- oder `Marker`-Markierung kann auch mit der Taste `DELETE` entfernt werden. Im Cursor-Modus wählt ein Klick eine vorhandene Markierung aus, ohne eine neue Markierung zu zeichnen.
 
+Das Kontextmenü einer `Box` enthält `Ganze Wörter`. Ist die Option ausgeschaltet, wird in Scans nur das Rechteck entfernt, ohne es auf ganze berührte OCR-Wörter zu erweitern. Die Einstellung gilt auch für weitere Boxen in diesem Dokument und wird im Projekt gespeichert. Der `Marker` erfasst weiterhin berührte Wörter. Erfasst er zu viel Text, löschen Sie die Markierung und zeichnen sie an der richtigen Stelle neu.
+
 ## 4.5 Vorschau der markierten Ausschlüsse
 
-Nach dem Markieren wird der betroffene Text in der Vorschau sofort grau dargestellt. Das funktioniert auch in gescannten, per OCR erkannten Dokumenten - dann werden ganze betroffene Wörter grau dargestellt.
+Zur Entfernung vorgesehener Text wird in der Vorschau grau dargestellt. Bei OCR-Scans hilft dies, versehentlich erfasste Nachbarzeilen zu erkennen. Bei einer Box ohne `Ganze Wörter` bestimmt das Rechteck den Entfernungsbereich. Prüfen Sie das Ergebnis vor der Weitergabe in der eingebauten Vorschau.
 
 ## 4.6 Projekt speichern
 
@@ -115,7 +122,11 @@ Speichern Sie den Bearbeitungsstand Über Projekt speichern oder Projekt speiche
 
 Klicken Sie auf PDF speichern, wählen Sie den Zielpfad und speichern Sie die finale Datei mit angewendeten Ausschlüssen.
 
+Der vorgeschlagene Dateiname endet auf `_anon`, kann aber geändert werden. Bei weiteren Speichervorgängen für das finale PDF in derselben Dokumentsitzung wird der zuletzt gewählte Name vorgeschlagen.
+
 Vor dem Speichern können Sie `Datei -> Vorschau` (`CTRL+F2`) verwenden. Diese Funktion öffnet eine eingebaute Vorschau des Dokuments nach der Anonymisierung, ohne einen externen PDF-Viewer zu starten. Im Vorschaufenster können Sie zwischen Seiten wechseln, eine Seitenzahl eingeben und das Dokument in der Form drucken, in der es gespeichert wird.
+
+Die Vorschau öffnet sich maximiert auf der aktuellen Seite. Sie berücksichtigt auch Objekte, Seitenanordnung und Ränder aus den Dokumenteinstellungen. Umriss und Schwärzung beeinflussen das Aussehen der fertigen Ausgabe.
 
 Wenn Sie Seitenbilder statt einer PDF-Datei benötigen, wählen Sie `Datei -> Seitenbereich als JPEG speichern`. Nach Auswahl eines Ordners erstellt die Anwendung darin einen Unterordner mit dem Namen der aktuellen PDF-Datei und speichert die ausgewählten Seiten als einzelne, nummerierte `.jpg`-Dateien. Der Fortschritt wird während des Speicherns oben in der Ansicht angezeigt.
 
@@ -153,17 +164,18 @@ Mit den Funktionen Erste/Vorherige/Nächste/Letzte Markierung springen Sie schne
 
 ## 6.2 Signaturen
 
-Für qualifizierte Signaturen stehen mehrere Optionen zur Verfügung:
+Die Anwendung erkennt elektronische Signaturen im Quelldokument.
 
-> \- Entfernt: entfernt die Signaturen aus dem Dokument.
-
-> \- Original: lässt Signaturen sichtbar, sie sind nach Änderungen jedoch nicht mehr gültig.
-
-> \- Bericht: fügt statt der Signaturdarstellung eine zusätzliche Berichtsseite hinzu.
+- Unter `Optionen` wählen Sie die Signaturen aus, deren Darstellung entfernt werden soll. Anfangs ist keine Signatur zum Entfernen ausgewählt.
+- Im Bereich `Signaturen` belässt `Beibehalten` die übrigen Signaturdarstellungen. `Bericht` ersetzt sie durch eine Seite mit Signaturinformationen.
+- Unter `Darstellung` können Sie das Original oder `AnonPDFPro` mit Prüfstatus in der aktuellen Anwendungssprache wählen.
+- Der Prüfstatus bezieht sich auf die Signatur im Quell-PDF. Das Bearbeiten erzeugt keine neue elektronische Signatur; die gespeicherte Kopie ist kein neu signiertes Dokument.
 
 ## 6.3 Seiten entfernen
 
 > \- Mit den Lösch-Symbolen können einzelne Seiten oder Bereiche zum Entfernen markiert werden.
+
+Dieselben Markierungen lassen sich unter `Datei -> Seiten organisieren` für einzelne oder mehrere Seiten setzen und aufheben. Quellseiten bleiben im Projekt erhalten und werden erst beim Speichern aus der fertigen PDF-Datei entfernt.
 
 ## 6.4 Schwärzung
 
@@ -196,6 +208,8 @@ Beim Beenden fragt die Anwendung bei ungespeicherten Änderungen nach einer Best
 > \- Über: zeigt Versions- und Herstellerinformationen.
 
 ## 6.9 Objekte hinzufügen und bearbeiten
+
+`ESC` hebt die Objektauswahl auf, ohne Objekte zu löschen. Der integrierte Pfeil eines Textobjekts besitzt eigene Füll- und Randfarben, Randstärke, Liniendicke und Spitzenabmessungen. Randstärke null bedeutet keinen Pfeilrand, unabhängig vom Textrahmen. Bei der Bildbearbeitung lässt sich die Tintenfarbe ändern; geglättete Kanten behalten zur gewählten Farbe passende Abstufungen.
 
 Objekte können über das Menü `Werkzeuge` oder mit Tastenkürzeln hinzugefügt werden:
 
@@ -275,7 +289,8 @@ Die Anwendung unterstützt Arbeitsebenen für Markierungen und Objekte.
 - Ein neu erstellter `Box`-Ausschluss bleibt sofort ausgewählt. Seine Größe kann über die Griffe oben links und unten rechts korrigiert werden.
 - Ein Klick auf eine vorhandene Markierung wählt sie aus und zeigt oben im Arbeitsbereich eine kurze Information an. Dabei wird keine neue Markierung innerhalb der bestehenden erzeugt.
 - Eingefügte Objekte werden auf der aktiven Ebene erstellt und behalten die Stapelreihenfolge der Quelle.
-- Die Ebene `Robocza` liegt immer ganz oben und wird nicht in das finale PDF exportiert.
+- Die Arbeitsebene liegt immer ganz oben und ist standardmäßig vom Export ausgeschlossen. Prüfen Sie vor dem Speichern die Exporteinstellungen: Der Export nur sichtbarer Ebenen verwendet die Sichtbarkeit statt der Spalte `Export`.
+- Andere Ebenen lassen sich im Ebenendialog durch Ziehen umsortieren.
 - Mit ausgeblendeten Ebenen kann in der Vorschau nicht interagiert werden.
 - Gesperrte Ebenen blockieren Verschieben, Bearbeiten, Skalieren und Löschen von Objekten.
 - Beim Projektimport bleiben die Zuordnungen von Objekten zu Ebenen erhalten.
@@ -296,15 +311,17 @@ Die Anwendung unterstützt Arbeitsebenen für Markierungen und Objekte.
 Der Tab `Gefunden` im rechten Panel sammelt Suchergebnisse und erkannte Personendaten an einem Ort.
 
 - Die Einträge sind nach Seiten gruppiert und haben Kontrollkästchen.
-- Eine Filter-Auswahlliste schränkt die Ansicht auf eine Kategorie ein: `Alle`, `Suche`, `Personendaten`, `ALT-Text` oder `Außerhalb`.
+- Jeder Treffer zeigt den gefundenen Inhalt und seinen Typ. Im Filter können mehrere verfügbare Kategorien gleichzeitig gewählt werden, etwa nur NIP und PESEL.
+- Änderungen der Filterkästchen aktualisieren sofort die Liste und die gelben Trefferhervorhebungen auf der Seite. Das Ausblenden einer Kategorie löscht keine bereits erstellten Anonymisierungsmarkierungen.
 - Ein Klick auf einen Eintrag springt zur betreffenden Seite und hebt die Stelle im Dokument hervor.
 - Das Aktivieren eines Eintrags erstellt eine Anonymisierungsmarkierung, das Deaktivieren entfernt sie. Die Kontrollkästchen sind in beide Richtungen mit den Markierungen auf der Seite synchronisiert.
+- Wählen Sie einzelne Treffer, alle Treffer einer Seite oder alle beim aktuellen Filter sichtbaren Treffer. Ein Klick auf ein hervorgehobenes Wort im Modus `Cursor` wird mit dem zugehörigen Listeneintrag synchronisiert.
 
 ## 6.15 Erkennung personenbezogener Daten
 
 Die Schaltfläche `Personendaten` analysiert das gesamte Dokument und zeigt die Ergebnisse im Tab `Gefunden` an.
 
-- Die Erkennung von Namen und Orten erfordert ein optionales Erkennungsmodul für das gewählte Land. Ohne dieses Modul liefert die Schaltfläche keine Ergebnisse.
+- Diese Funktion benötigt das passende PII-Plugin. Laden Sie es von der [Produktseite](https://misart.pl/anonpdfpro/?lang=de#pii), entpacken Sie es im Anwendungsordner `plugins` und starten Sie die Anwendung neu. Warten Sie auf die Initialisierung und die Dokumentanalyse.
 - Unabhängig vom Modul bleibt die Suche nach Identifikatoren (PESEL, Grundbuchnummer, NIP, REGON, KRS, Bankkonto, Ausweis, E-Mail, Postleitzahl, Internetadresse, VIN) aus Abschnitt 4.3 verfügbar.
 - Die Ergebnisse können im Tab `Gefunden` gesammelt in Anonymisierungsmarkierungen umgewandelt werden.
 
@@ -314,6 +331,7 @@ Die Anwendung erkennt personenbezogene Daten auch im Alternativtext (Beschreibun
 
 - Solche Ergebnisse erscheinen im Tab `Gefunden` in der Kategorie `ALT-Text`.
 - Das Kontextmenü (Rechtsklick) bietet `Alternativtext bearbeiten` und `Alternativtext löschen`. Änderungen bleiben in der exportierten PDF erhalten.
+- Bildbeschreibungen lassen sich auch über `Werkzeuge` bearbeiten. ALT-Beschreibungen oder ein PDF/A-Export allein machen das gesamte Dokument nicht automatisch WCAG-konform.
 
 ## 6.17 Text aus Markierungen kopieren
 
@@ -329,9 +347,9 @@ Im Menü `Optionen -> Land` können Sie das Land des Dokuments festlegen: `Autom
 - Die Einstellung passt die zur Anonymisierung vorgeschlagenen Datenbereiche an das gewählte Land und die Sprache an.
 - `Automatisch` verwendet die Regionseinstellungen des Systems und die erkannte Dokumentsprache.
 
-## 6.19 Unterstützung für JPEG 2000
+## 6.19 JPEG-2000- und JBIG2-Bilder
 
-Die Anonymisierung umfasst nun auch Bilder im Format JPEG 2000 (JP2/JPX) - Inhalte innerhalb einer Markierung werden auch aus solchen Bildern korrekt entfernt.
+Die Anonymisierung unterstützt JPEG 2000 (JP2/JPX) und Schwarz-Weiß-Scans im JBIG2-Format ohne vorherige Umwandlung. Komprimierung und Ausgabeoptimierung beeinflussen weiterhin die Größe der gespeicherten PDF-Datei.
 
 ## 6.20 Schnellere erneute Durchsicht
 
@@ -353,6 +371,37 @@ Die Miniaturen sind von links nach rechts und danach in weiteren Zeilen angeordn
 Änderungen können rückgängig gemacht werden. Das Projekt und die Funktion zum Fortsetzen speichern das geänderte Dokument einschließlich der eingefügten Seiten. Die Original-PDF-Dateien werden beim Organisieren nicht geändert.
 
 **Wichtig:** nach einer Neuordnung enthält die `.app`-Projektdatei auch das PDF vor der Anonymisierung. Geben Sie sie nicht anstelle des fertigen anonymisierten PDFs weiter. Eine andere Seitenanordnung macht digitale Signaturen im geänderten Dokument ungültig, nicht in den Originaldateien.
+
+Wählen Sie einzelne Seiten mit `CTRL` und Klicks oder einen Bereich mit `SHIFT`. `Übernehmen` bestätigt die Änderungen am Dokument, `Abbrechen` verwirft sie. Miniaturen werden für den sichtbaren Bereich und benachbarte Zeilen vorbereitet, um den Speicherbedarf großer Dokumente zu begrenzen.
+
+## 6.22 Dokumenteinstellungen
+
+Unter `Datei -> Dokumenteinstellungen` geben Sie obere, untere, linke und rechte Ränder in ganzen Millimetern ein. `0` bedeutet keinen Rand. Der Inhalt jeder Seite wird proportional in die verbleibende Fläche eingepasst, etwa für einen freien Kopfbereich. Vorschau, Druck und die fertige PDF-/PDF/A-Datei zeigen das Ergebnis. Die Einstellungen werden im Projekt gespeichert und beim Fortsetzen wiederhergestellt.
+
+## 6.23 Mehrere Dokumente automatisch bearbeiten
+
+Ein gespeichertes Projekt kann als Vorlage für gleiche Markierungen, Überschriften, Stempel und andere Objekte in ähnlichen Dokumenten dienen. Eine `.cmd`-Datei ermöglicht die Ausführung ohne Anwendungsfenster:
+
+```bat
+start "" /wait AnonPDFPro.exe "dokument.pdf" ^
+  --headless --template "vorlage.app" ^
+  --pdfout "ergebnis.pdf" --lang de
+```
+
+- `--template` verwendet die Projektanordnung, ignoriert aber deren gespeicherten PDF-Pfad. Geben Sie das Eingabe-PDF getrennt an.
+- `--overwrite` erlaubt das Überschreiben einer vorhandenen Ausgabedatei. Ohne diese Option bleibt sie geschützt.
+- `--text` aktiviert die Indizierung nativen Texts; `--ocr` zusätzlich die Erkennung von Seiten ohne Text. Standardmäßig läuft diese Zusatzanalyse nicht. Das PII-Plugin wird in diesem Modus nicht geladen.
+- `--format pdfa` wählt PDF/A und aktiviert die erforderliche OCR automatisch. Standard ist normales PDF.
+- `--skip-template-validation` überspringt den normalen Vergleich von Seitenzahl, Seitengrößen und Drehungen mit der Vorlage, etwa bei unterschiedlich vielen Folgeseiten. Markierungen werden dabei nicht verschoben oder skaliert: Prüfen Sie selbst, ob sie die richtigen Bereiche erfassen.
+- `--help --lang de` zeigt alle Parameter und Rückgabecodes. Verfügbare Meldungssprachen sind `pl`, `en` und `de`.
+
+Prüfen Sie repräsentative Ergebnisse, bevor Sie die gesamte Dateigruppe bearbeiten. Verwenden Sie Vorlagen für Dokumente mit gleicher Seitenanordnung.
+
+## 6.24 Fußnoten zu Ausschlüssen
+
+Legen Sie unter `Optionen` die `Stelle oder Person, die Ausschlüsse vornimmt` fest und prüfen Sie das Wörterbuch der Rechtsgrundlagen. Wählen Sie dann im Kontextmenü einer Markierung den Ausschlussbereich und die Rechtsgrundlage. Die Option für automatische Fußnoten fügt diese der Ausgabe hinzu.
+
+Das globale Wörterbuch wird vom Administrator gepflegt; Benutzer können lokale Einträge verwalten. Die mitgelieferten Rechtsgrundlagenauszüge sind Beispiele, die die Organisation ergänzen und aktuell halten muss. Prüfen Sie Fußnoten vor der Veröffentlichung immer in der Vorschau.
 
 # 7. Häufige Probleme und Hinweise
 
@@ -384,17 +433,20 @@ In den letzten Versionen wurden u. a. ergänzt:
 
 - Drucken über das Menü `Datei` (`CTRL+P`) mit Auswahl: aktuelle Seite, Seitenbereich oder gesamtes Dokument.
 - Eingebaute `Vorschau` im Menü `Datei` (`CTRL+F2`), die das Dokument nach der Anonymisierung ohne externen PDF-Viewer anzeigt.
+- `Seiten organisieren`: Seiten aus anderen PDFs und leere Seiten einfügen, Gruppen durch Ziehen oder über eine Zielseitennummer verschieben sowie `Vorherige Ansicht`.
+- `Dokumenteinstellungen` mit im Projekt gespeicherten Rändern.
+- `Ganze Wörter` für Box-Markierungen und automatische Bearbeitung mehrerer Dokumente anhand einer Projektvorlage.
 - Option `Seitenbereich als PDF speichern` im Menü `Datei`, standardmäßig mit der aktuellen Seite vorbelegt.
 - Option `Seitenbereich als JPEG speichern` im Menü `Datei`, die ausgewählte Seiten als nummerierte `.jpg`-Dateien in einem separaten Ordner speichert.
 - Speichern vollständig gescannter Dokumente als PDF/A mit unsichtbarer OCR-Textebene sowie Merken des zuletzt gewählten Speichertyps für Scans.
-- Drei Tabs auf der rechten Seite: `Seitenliste`, `Miniaturen` und `Ebenen`.
+- Vier Tabs auf der rechten Seite: `Seitenliste`, `Miniaturen`, `Ebenen` und `Gefunden`.
 - Dynamische Erzeugung von Miniaturen sowie Miniatur-Cache für bessere Leistung bei großen Dokumenten.
 - Verbesserte Aktualisierung der Miniaturen nach Änderung des Seitenfilters.
 - Miniaturen, die zusätzlich Markierungen, Kommentare, Objekte und zum Löschen markierte Seiten anzeigen.
 - Textsuche in gescannten Dokumenten und in Bildern, die in PDFs eingebettet sind.
 - Erkennung personenbezogener Daten und Identifikatoren auch in gescannten Dokumenten.
 - Umwandlung von Suchtreffern aus gescannten Seiten in Anonymisierungsmarkierungen.
-- Cursor-Modus zum sicheren Auswählen von Text, Markierungen und Objekten, ohne versehentlich neue Markierungen zu zeichnen.
+- `Cursor`-Modus zum Anonymisieren von Wörtern per Klick und zum Auswählen vorhandener Markierungen und Objekte.
 - Kontrastreiche Themen: Schwarz-Gelb und Schwarz-Weiß.
 - `Aktuelle Ansicht speichern...` im Menü `Datei`.
 - Speicherung des zuletzt gewählten rechten Tabs (`Seitenliste` / `Miniaturen` / `Ebenen`).
@@ -403,7 +455,7 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Unterstützung für Arbeitsebenen mit eigener Sichtbarkeit, Sperre und aktiver Ebene.
 - Erweiterte Kontextmenüs für Markierungen und Objekte (Kopieren, Ausschneiden, Duplizieren, duplizierte Kopien löschen).
 - Skalierung einzelner Objekte und Objektgruppen über Eckgriffe (`SHIFT` - proportional, `ALT` - vom Mittelpunkt).
-- Die Option `Pfeil` im Textdialog mit einstellbarer Liniendicke des Pfeils, Spitzenlänge und Spitzenbreite.
+- Die Option `Pfeil` im Textdialog mit einstellbaren Abmessungen, Füll- und Randfarben sowie Randstärke.
 - Kopieren und Einfügen von Objekten über die Systemzwischenablage, auch zwischen zwei laufenden Instanzen der Anwendung, mit erhaltener Stapelreihenfolge.
 - `Rückgängig` (`CTRL+Z`) und `Wiederholen` (`CTRL+Y`).
 - Kurzes Start-Tutorial über `? -> Wie fange ich an?`.
@@ -415,5 +467,5 @@ In den letzten Versionen wurden u. a. ergänzt:
 - Kopieren von Text aus Markierungen in die Zwischenablage (`In Zwischenablage kopieren`) in korrekter Lesereihenfolge, auch bei gedrehten Seiten und reinen Scans.
 - Graue Vorschau des betroffenen Textes auch bei reinen Scans (auf Basis von OCR).
 - Speichern eines ausgewählten Seitenbereichs in nummerierte JPEG-Dateien.
-- Unterstützung der Anonymisierung von Bildern im Format JPEG 2000.
+- Unterstützung der Anonymisierung von JPEG-2000- und JBIG2-Bildern.
 - Schnellere erneute Durchsicht des Dokuments dank Festplatten-Cache.

@@ -32,5 +32,5 @@ using System.Runtime.InteropServices;
 //
 [assembly: AssemblyVersion("1.0.0.0")]
 [assembly: InternalsVisibleTo("AnonPDFPro.Tests")]
-[assembly: AssemblyFileVersion("1.26.0804.21")]
+[assembly: AssemblyFileVersion("1.26.1027.22")]
 [assembly: NeutralResourcesLanguage("pl-PL")]

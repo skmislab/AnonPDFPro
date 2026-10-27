@@ -1,4 +1,7 @@
-## AnonPDF Pro - User Guide
+---
+title: AnonPDF Pro - User Guide
+lang: en
+---
 
 *English translation of the Polish help document*
 
@@ -10,7 +13,7 @@ AnonPDF Pro is a tool for partially or fully removing (redacting) selected conte
 
 > **1.** Download and install AnonPDF Pro (depending on the distribution method, this may be an MSI/EXE installer or a set of binaries).
 
-> **2.** Make sure the required .NET Framework / .NET Runtime is installed (the exact version depends on the application build).
+> **2.** The application requires Windows and .NET Framework 4.8.
 
 > **3.** Start the application, e.g., from the desktop shortcut, the Start menu, or directly by running AnonPDFPro.exe.
 
@@ -51,7 +54,7 @@ The main window consists of the following elements:
 
 - Top menu bar - options for managing projects and files, including:
 
-> \- File: open a new PDF, save/open a redaction project, exit the application.
+> \- File: open PDFs and projects, save the result, export page ranges, organize pages, change document settings, preview, and print.
 
 > \- Search: quickly move focus to the search field.
 
@@ -72,7 +75,7 @@ The main window consists of the following elements:
 - Page number input - a text box for jumping to a specific page by entering its number.
 - Redaction tool group:
 
-> \- Cursor mode - selects text, redaction areas, and objects without starting a new redaction area.
+> \- Cursor mode - clicking a word creates a redaction selection for that word. Clicking an existing selection or object selects it for further editing.
 
 > \- Marker mode - marks horizontal areas (e.g., narrow strips for removing single text lines).
 
@@ -102,7 +105,7 @@ From the menu, select File → Open PDF (or click the "Select PDF" button), then
 
 ## 4.2 Browse pages
 
-Use the page list on the left side (or the navigation buttons such as "Next" / "Previous") to select the page you want to edit.
+Use `Page List` or `Thumbnails` in the right panel, or navigation buttons such as "Next" / "Previous", to select the page you want to edit.
 
 ## 4.3 Search
 
@@ -126,7 +129,7 @@ The `Personal data` button runs personal-data detection across the whole documen
 
 ## 4.4 Mark areas for redaction
 
-To create a redaction area:
+In `Cursor` mode, click the word you want to remove. This also works with words recognized by OCR. Adjust the selection with its handles if needed. To draw a selection in `Marker` or `Box` mode:
 
 > **1.** Select Marker mode or Rectangle mode.
 
@@ -146,9 +149,11 @@ To create a redaction area:
 
 You can also remove a selected `box` or `marker` with the `DELETE` key. In Cursor mode, clicking an existing redaction area selects it without drawing a new area.
 
+The context menu for a `Box` selection contains `Whole words`. Disable it to remove only the rectangle from a scan, without expanding to entire touched OCR words. This choice also applies to subsequent boxes in this document and is saved in the project. `Marker` still covers touched words; if it covers too much text, delete the selection and draw it again in the correct place.
+
 ## 4.5 Preview pending redactions
 
-After you create a selection, the text that will be removed is immediately shaded gray in the preview. This also works in scanned documents recognized by OCR - in that case whole touched words are shaded.
+Text intended for removal is shaded gray in the preview. On OCR scans this helps detect accidental selection of a neighboring line. For a box with `Whole words` disabled, the rectangle determines the removal area. Check the final result in the built-in Preview before sharing the document.
 
 ## 4.6 Save your redaction project
 
@@ -158,7 +163,11 @@ If you want to save the current selection state for later editing, choose Save p
 
 After marking all required areas, click Save PDF (or File → Save PDF). Select the destination output file. The application generates a new redacted PDF with your selected areas removed.
 
+The suggested filename ends in `_anon`, but you can change it. Further final-PDF saves in the same document session suggest the last filename you chose.
+
 Before saving, you can use `File -> Preview` (`CTRL+F2`). This opens a built-in preview of the document after redaction, without launching an external PDF viewer. In the preview window you can move between pages, enter a page number, and print the document in the same form in which it will be saved.
+
+Preview opens maximized on the current page. It also includes objects, page arrangement, and margins from Document settings. `Show outline` and `Black fill` affect the final output appearance.
 
 If you need page images instead of a PDF file, choose `File -> Save page range to JPEG`. After you select a folder, the application creates a subfolder named after the current PDF file and saves the selected pages as separate, numbered `.jpg` files. Export progress is shown in a label at the top of the view.
 
@@ -192,16 +201,18 @@ If your document contains many selections, use "First selection", "Previous sele
 
 ## 6.2 Signatures
 
-The application provides options related to qualified electronic signatures:
+The application recognizes electronic signatures in the source document.
 
-- "Removed" - removes all qualified signatures from the document.
-- "Original" - keeps the original signatures, but due to document modifications they will not be verifiable.
-- "Report" - adds an extra page listing signature information instead of the original signature visualization.
+- `Options -> Select signatures to remove` selects signatures whose visual appearance should not be retained. Initially none are selected for removal.
+- In the `Signatures` section choose `Preserved` to keep the remaining signature appearances, or `Report` to replace them with a signature-information page.
+- For preserved signatures, `Appearance` offers the original appearance or `AnonPDFPro`, which shows verification status in the current application language.
+- Verification status refers to the signature in the source PDF. Editing a document does not create a new electronic signature; the saved copy must not be treated as a newly signed document.
 
 ## 6.3 Removing pages
 
 - Click the "Trash 1..n" icon in the left panel to mark a selected page range for removal (or to cancel removal).
 - Click the "Trash" icon in the left panel to mark a single page for removal. The icon background turns black.
+- You can set or undo the same deletion marks for one or several pages in `File -> Organize pages`. Source pages remain in the project and are excluded from the final PDF when saved.
 
 ## 6.4 Black fill
 
@@ -248,8 +259,10 @@ When working with objects, you can also use:
 - `CTRL + V` - paste an object from the clipboard. The pasted object is created on the active layer, keeps the original stacking order, and can be scaled down automatically if the target page is smaller.
 - Object copy and paste also works between two running instances of the application.
 - `DELETE` - remove the active object or active object group.
+- `ESC` - clear the object selection without deleting objects.
 - In the text dialog, you can enable the `Arrow` option for the text box frame.
-- For a text arrow, you can set `Arrow line width`, `Head length`, and `Head width`.
+- A text object's integrated arrow has separate fill and border colors, border width, line width, and head dimensions. Zero arrow border width means no arrow border, independently of the text frame.
+- Image editing also offers ink recoloring, preserving edge shades that match the selected color.
 - The end of the text arrow can be dragged with the mouse, and the attachment point on the frame updates automatically to corners and side centers.
 - Rotating the text does not rotate the arrow end; only the attachment point on the frame is updated.
 - Scaling the text also scales the frame and attached arrow as a single object.
@@ -297,7 +310,8 @@ The application supports working layers for redaction selections and objects.
 - In the layer management window, the `Export and print only visible layers` option overrides the `Export` column settings.
 - New selections and new objects are created on the currently active layer.
 - Pasted objects are created on the active layer and keep the source stacking order.
-- The `Work` layer is always on top and is not exported to the final PDF.
+- The `Work` layer is always on top and is excluded from export by default. Check layer export settings before saving: exporting only visible layers uses visibility instead of the `Export` column.
+- Reorder layers other than `Work` by dragging them in the layer management window.
 - Hidden layers cannot be interacted with in the preview.
 - Locked layers block moving, editing, scaling, and deleting objects.
 - Project import keeps object-to-layer assignments.
@@ -317,15 +331,17 @@ The application supports working layers for redaction selections and objects.
 The `Found` tab in the right panel collects search results and detected personal data in one place.
 
 - Items are grouped by page and have checkboxes.
-- A filter drop-down narrows the view to a category: `All`, `Search`, `Personal data`, `ALT text`, or `Outside page`.
+- Each result shows the found content and its type. The filter can include several available categories at once, for example only NIP and PESEL.
+- Toggling filter checkboxes immediately updates the list and yellow result highlights on the page. Hiding a category does not delete redaction selections already created.
 - Clicking an item jumps to the relevant page and highlights its location in the document.
 - Ticking an item creates a redaction selection; unticking it removes the selection. Checkbox states stay synchronized both ways with the selections on the page.
+- Select individual results, all results on one page, or all results visible under the current filter. Clicking a highlighted word in `Cursor` mode is synchronized with its matching list item.
 
 ## 6.15 Personal data detection
 
 The `Personal data` button analyzes the whole document and shows the results in the `Found` tab.
 
-- Name and location recognition requires an optional recognition module for the selected country. Without that module the button returns no results.
+- This feature requires the appropriate PII plugin. Download it from the [product website](https://misart.pl/anonpdfpro/?lang=en#pii), extract it into the application's `plugins` folder, and restart the application. Wait for plugin initialization and document analysis to finish.
 - Regardless of the module, identifier search (PESEL, Land and Mortgage Register number, NIP, REGON, KRS, bank account, ID card, email, postal code, website address, VIN) described in section 4.3 remains available.
 - Results can be converted to redaction selections in bulk from the `Found` tab.
 
@@ -335,6 +351,7 @@ The application also detects personal data in the alternative text (descriptions
 
 - Such results appear in the `Found` tab under the `ALT text` category.
 - The context menu (right-click) offers `Edit alternative text` and `Clear alternative text`. Changes are preserved in the exported PDF.
+- Image descriptions can also be edited from the `Tools` menu. ALT descriptions or PDF/A export alone do not automatically make the entire document WCAG-compliant.
 
 ## 6.17 Copy selection text
 
@@ -350,9 +367,9 @@ In `Options -> Country` you can set the document country: `Automatic`, `Poland`,
 - This tailors the anonymization data scopes to the chosen country and language.
 - `Automatic` uses the system regional settings and the detected document language.
 
-## 6.19 JPEG 2000 support
+## 6.19 JPEG 2000 and JBIG2 images
 
-Redaction now also covers images stored in the JPEG 2000 format (JP2/JPX) - content within a selection is correctly removed from such images as well.
+Redaction supports JPEG 2000 (JP2/JPX) images and black-and-white JBIG2 scans without prior conversion. Compression and output optimization settings still affect the saved PDF's size.
 
 ## 6.20 Faster document re-review
 
@@ -374,6 +391,37 @@ Thumbnails run from left to right and continue on the next row. A vertical line 
 Changes can be undone. Saving the project and resuming work preserve the modified document, including inserted pages. Organizing pages does not modify the original PDF files.
 
 **Important:** after reorganization, the `.app` project also contains the PDF before redaction. Do not share it instead of the final redacted PDF. Changing page arrangement invalidates digital signatures in the modified document, not in the original files.
+
+Use `CTRL` with clicks for separate pages and `SHIFT` for a range. `Apply` commits changes to the document; `Cancel` discards them. Thumbnails are prepared for the visible area and nearby rows to limit memory usage on large documents.
+
+## 6.22 Document settings
+
+In `File -> Document settings`, enter top, bottom, left, and right margins in whole millimetres. `0` means no margin. Each page's content is proportionally fitted into the remaining area, for example to leave room for a heading. Preview, printing, and final PDF/PDF/A output show the result. Settings are saved in the project and restored when work is resumed.
+
+## 6.23 Automatically editing multiple documents
+
+A saved project can serve as a template for the same redactions, headings, stamps, and other objects in similar documents. Use a `.cmd` script to run without an application window:
+
+```bat
+start "" /wait AnonPDFPro.exe "document.pdf" ^
+  --headless --template "template.app" ^
+  --pdfout "output.pdf" --lang en
+```
+
+- `--template` uses the project layout but ignores its saved PDF path; specify the input PDF separately.
+- `--overwrite` allows replacement of an existing output file. Without it, the file is protected from overwriting.
+- `--text` enables native-text indexing; `--ocr` also recognizes pages without text. This extra analysis is not run by default. The PII plugin is not loaded in this mode.
+- `--format pdfa` selects PDF/A and automatically enables the required OCR. Normal PDF is the default output.
+- `--skip-template-validation` skips the default comparison of page count, sizes, and rotations against the template, for example when later pages vary in number. It does not reposition or resize selections: the user must verify that they still cover the intended areas.
+- `--help --lang en` lists all options and exit codes. Message languages are `pl`, `en`, and `de`.
+
+Check representative output files before processing the full set. Prepare templates for documents with the same page layout.
+
+## 6.24 Exclusion footnotes
+
+In `Options`, set `Authority or person performing exclusions` and review the legal-basis dictionary. Then use a selection's context menu to choose an exclusion scope and legal basis; the automatic-footnotes option adds footnotes to the result.
+
+An administrator maintains the global dictionary; users can manage local entries. Supplied legal-basis excerpts are examples that the organization must complete and keep current. Always review footnotes in Preview before publishing.
 
 # 7. Common Issues and Tips
 
@@ -407,17 +455,20 @@ Recent versions include:
 
 - Printing from the `File` menu (`CTRL+P`) with range options: current page, selected page range, or whole document.
 - Built-in `Preview` in the `File` menu (`CTRL+F2`) showing the document after redaction without an external PDF viewer.
+- `Organize pages`: inserting pages from other PDFs and blank pages, moving groups by dragging or destination number, and `Previous view` navigation.
+- `Document settings` with margins saved in the project.
+- `Whole words` for Box selections and automatic processing of multiple documents using a project template.
 - `Save page range to PDF` in the `File` menu, with the current page prefilled by default.
 - `Save page range to JPEG` in the `File` menu, saving selected pages as numbered `.jpg` files in a separate folder.
 - Saving fully scanned documents as PDF/A with an invisible OCR text layer, including remembering the last selected save type for scanned documents.
-- Three right-side tabs: `Page List`, `Thumbnails`, and `Layers`.
+- Four right-side tabs: `Page List`, `Thumbnails`, `Layers`, and `Found`.
 - Dynamic thumbnail generation plus thumbnail cache for better performance on large documents.
 - Improved thumbnail refresh after changing the page filter.
 - Thumbnails that also show redaction selections, comments, objects, and pages marked for deletion.
 - Text search in scanned documents and images embedded in PDFs.
 - Detection of personal data and identifiers also in scanned documents.
 - Converting search results from scanned pages into redaction areas.
-- Cursor mode for safely selecting text, redaction areas, and objects without accidentally drawing new redactions.
+- `Cursor` mode for redacting words with a click and selecting existing redactions and objects.
 - High-contrast themes: black-yellow and black-white.
 - `Save current view...` in the `File` menu.
 - Remembering the last selected right-side tab (`Page List` / `Thumbnails` / `Layers`).
@@ -427,7 +478,7 @@ Recent versions include:
 - Grouping layers by a shared name, with quick visibility and lock toggles for the whole group.
 - Extended context menus for selections and objects (copy, cut, duplicate, remove duplicated copies).
 - Corner-handle scaling for single objects and object groups (`SHIFT` - proportional, `ALT` - from center).
-- The `Arrow` option in the text dialog, with adjustable arrow line width, head length, and head width.
+- The `Arrow` option in the text dialog, with adjustable dimensions, fill and border colors, and border width.
 - The `Limit raster view` option in the shape dialog for rectangles, ellipses, triangles, and regions.
 - Object copy and paste through the system clipboard, including between two running application instances, with preserved stacking order.
 - `Undo` (`CTRL+Z`) and `Redo` (`CTRL+Y`).
@@ -440,5 +491,5 @@ Recent versions include:
 - Copying selection text to the clipboard (`Copy to clipboard`) in correct reading order, including on rotated pages and pure scans.
 - Gray preview of touched text also on pure scans (based on OCR).
 - Saving a selected page range to numbered JPEG files.
-- Redaction support for images stored in the JPEG 2000 format.
+- Redaction support for JPEG 2000 and JBIG2 images.
 - Faster document re-review thanks to an on-disk cache.
