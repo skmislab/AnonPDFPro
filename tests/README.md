@@ -32,6 +32,8 @@ build with Visual Studio MSBuild first. Test results can be saved with
 
 - Command-line parsing, template paths, overwrite guards and geometry bypass.
 - Whole-word selection, document margin settings and Unicode project/cache data.
+- Margin scaling keeps text, vectors, images and forms outside the original
+  MediaBox/CropBox hidden, including rotated pages and offset page origins.
 - Layered images sharing a CTM, nested graphics states, A5/Letter/A4 and rotations.
 - Physical removal of pixels from both underlying images, plus PDFium rendering
   and character coordinates on rotated pages (Cursor/Marker dependency).

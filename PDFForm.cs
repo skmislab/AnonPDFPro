@@ -22617,7 +22617,7 @@ namespace AnonPDF
                 EnsureITextMetadataCompliance(pdfDoc, "full-export");
 
                 ApplyDemoWatermarkIfNeeded(pdfDoc);
-                ApplyDocumentMarginsToPdf(pdfDoc);
+                ApplyDocumentMarginsToPdf(pdfDoc, documentMargins);
             }
 
             if (combineObjectsWithScanPagesEnabled && flattenPages.Count > 0)
@@ -22636,18 +22636,20 @@ namespace AnonPDF
             return documentMargins?.HasMargins == true;
         }
 
-        private void ApplyDocumentMarginsToPdf(iText.Kernel.Pdf.PdfDocument pdfDoc)
+        internal static void ApplyDocumentMarginsToPdf(
+            iText.Kernel.Pdf.PdfDocument pdfDoc,
+            DocumentMarginSettings margins)
         {
-            if (pdfDoc == null || !HasDocumentMargins())
+            if (pdfDoc == null || margins?.HasMargins != true)
             {
                 return;
             }
 
             const float pointsPerMillimeter = 72f / 25.4f;
-            float top = documentMargins.TopMillimeters * pointsPerMillimeter;
-            float bottom = documentMargins.BottomMillimeters * pointsPerMillimeter;
-            float left = documentMargins.LeftMillimeters * pointsPerMillimeter;
-            float right = documentMargins.RightMillimeters * pointsPerMillimeter;
+            float top = margins.TopMillimeters * pointsPerMillimeter;
+            float bottom = margins.BottomMillimeters * pointsPerMillimeter;
+            float left = margins.LeftMillimeters * pointsPerMillimeter;
+            float right = margins.RightMillimeters * pointsPerMillimeter;
 
             for (int pageNumber = 1; pageNumber <= pdfDoc.GetNumberOfPages(); pageNumber++)
             {
@@ -22692,6 +22694,11 @@ namespace AnonPDF
                     scale,
                     translateX,
                     translateY));
+
+                // Clip in the transformed source coordinates, before off-page content can enter the margins.
+                KernelGeom.Rectangle visibleBounds = pageSize.GetIntersection(page.GetCropBox() ?? pageSize)
+                    ?? new KernelGeom.Rectangle(0, 0, 0, 0);
+                beforeCanvas.Rectangle(visibleBounds).Clip().EndPath();
 
                 var afterCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(
                     page.NewContentStreamAfter(),
