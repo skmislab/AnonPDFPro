@@ -29,11 +29,11 @@ $files = @("itext.cleanup.dll", "openjp2.dll", "jbig2bridge.dll")
 $missing = @($files | Where-Object { -not (Test-Path -LiteralPath (Join-Path $artifacts $_)) })
 if (-not $RebuildNative -and $missing.Count -eq 0) {
     $info = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $artifacts "itext.cleanup.dll"))
-    if ($info.FileVersion -ne "5.0.8.1") { throw "Unexpected custom pdfSweep artifact version: $($info.FileVersion)" }
+    if ($info.FileVersion -ne "5.0.8.2") { throw "Unexpected custom pdfSweep artifact version: $($info.FileVersion)" }
     foreach ($file in $files) { Copy-Item -LiteralPath (Join-Path $artifacts $file) -Destination $package -Force }
     $xml = Join-Path $artifacts "itext.cleanup.xml"
     if (Test-Path -LiteralPath $xml) { Copy-Item -LiteralPath $xml -Destination $package -Force }
-    Write-Host "Installed existing custom pdfSweep 5.0.8.1 artifacts (signatures preserved)."
+    Write-Host "Installed existing custom pdfSweep 5.0.8.2 artifacts (signatures preserved)."
     return
 }
 
@@ -74,4 +74,4 @@ $built = Join-Path (Split-Path -Parent $project) "bin\local"
 foreach ($file in @("itext.cleanup.dll", "itext.cleanup.xml")) {
     Copy-Item -LiteralPath (Join-Path $built $file) -Destination $package -Force
 }
-Write-Host "Built custom pdfSweep 5.0.8.1 and both native codecs from corresponding sources."
+Write-Host "Built custom pdfSweep 5.0.8.2 and both native codecs from corresponding sources."

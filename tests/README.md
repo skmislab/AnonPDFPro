@@ -10,8 +10,9 @@ servers, or use client PDFs. PDF fixtures are generated in memory.
   targeting pack, and .NET SDK 9 or newer.
 - Run `restore-packages.bat` from the complete corresponding-source package
   or the developer workspace. Do not replace custom pdfSweep with the stock DLL.
-- The OCR integration test needs `bin/<Configuration>/tessdata/pol.traineddata`,
-  the same Polish OCR model used by the application.
+- The native Tesseract integration test needs
+  `bin/<Configuration>/tessdata/pol.traineddata`. The current desktop OCR pipeline
+  uses Windows OCR; this legacy codec test does not replace its interactive test.
   Its location can be overridden during build with `/p:OcrTestDataPath=<full-path>`.
 - Native codec rebuilding additionally requires the C++ and CMake build tools.
 
@@ -32,6 +33,11 @@ build with Visual Studio MSBuild first. Test results can be saved with
 
 - Command-line parsing, template paths, overwrite guards and geometry bypass.
 - Whole-word selection, document margin settings and Unicode project/cache data.
+- Complete removal of scanned word edges for Cursor and Marker, all four page
+  rotations, local ink refinement on grey paper and faint text, and preservation
+  of adjacent rows/table rules, including an invisible OCR line with overlapping
+  font metrics (independent pdfSweep text/image regions). Exact-area Box remains unexpanded. Windows OCR
+  also completes without a message loop on its calling synchronization context.
 - Margin scaling keeps text, vectors, images and forms outside the original
   MediaBox/CropBox hidden, including rotated pages and offset page origins.
 - Layered images sharing a CTM, nested graphics states, A5/Letter/A4 and rotations.
@@ -61,6 +67,14 @@ The normal suite does not show windows. The attended desktop-controller test
 automatic runs. Do not automate showing/reparenting the page dialog inside a
 test-host form: that strategy produced native ListView lifecycle exceptions.
 Actual dialog appearance, DPI layout and mouse interactions require manual QA.
+
+## Public releases
+
+Every public release also requires interactive regression testing of the actual
+Release binaries. Follow the release rule in `../AGENTS.md` and the private
+`private/release-qa` corpus and checklist. Keep client documents and all resulting
+evidence private. Record untested or blocked cases explicitly; passing this NUnit
+suite alone must not be presented as a completed desktop release test.
 
 The initial 5.0.6.4 baseline passed 29 tests and failed the two new accessibility
 metadata tests. These failures demonstrated the issue fixed by pdfSweep 5.0.8.

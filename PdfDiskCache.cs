@@ -34,7 +34,8 @@ namespace AnonPDF
         // language-code stop-word check — v8 results lack them.
         // v10: IsLikelyPersonEntity no longer requires capitalised name parts,
         // so lowercase/ALL-CAPS names survive — v9 results lack them.
-        private const int FormatVersion = 10;
+        // v11: OCR word geometry includes visible edge pixels and antialiasing.
+        private const int FormatVersion = 11;
 
         private static string CacheDir =>
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

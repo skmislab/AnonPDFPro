@@ -4869,6 +4869,17 @@ namespace AnonPDF
             public KernelGeom.Rectangle BoundingBox { get; set; }
         }
 
+        internal static KernelGeom.Rectangle GetOcrTextLayoutBounds(CachedLine line, int wordIndex)
+        {
+            if (line?.OcrWords == null || wordIndex < 0 || wordIndex >= line.OcrWords.Count) return null;
+            // Pixel cleanup includes ink/antialiasing padding; invisible text must
+            // keep its original advance width and inter-word spacing instead.
+            var raw = line.RawOcrWordBounds != null && wordIndex < line.RawOcrWordBounds.Count
+                ? line.RawOcrWordBounds[wordIndex] : null;
+            return raw != null && raw.GetWidth() > 0 && raw.GetHeight() > 0
+                ? raw : line.OcrWords[wordIndex]?.BoundingBox;
+        }
+
         internal class AltTextEntry
         {
             public int PageNumber { get; set; }
@@ -5659,6 +5670,7 @@ namespace AnonPDF
             }
 
             string tempImagePath = null;
+            Bitmap geometryBitmap = null;
             try
             {
                 tempImagePath = Path.Combine(Path.GetTempPath(), "AnonPDFPro-ocr-" + Guid.NewGuid().ToString("N") + ".png");
@@ -5748,6 +5760,17 @@ namespace AnonPDF
                     return result;
                 }
 
+                geometryBitmap = new Bitmap(bitmap);
+                if (effectivePageRot != pageRotation)
+                    geometryBitmap.RotateFlip(RotateFlipType.Rotate270FlipNone);
+                var imageWordBounds = page.Lines.SelectMany(line => line.Words).Select(word =>
+                {
+                    var rect = MapWindowsOcrRectToOriginalImageRect(word.BoundingRect,
+                        effectiveBitmapW, effectiveBitmapH, page.TextAngle);
+                    return new RectangleF((float)rect.X, (float)rect.Y, (float)rect.Width, (float)rect.Height);
+                }).ToList();
+                var inkBounds = new OcrInkBoundsRefiner(geometryBitmap, imageWordBounds);
+
                 int rank = 0;
                 int lineIndex = 0;
                 foreach (OcrLine textLine in page.Lines)
@@ -5793,7 +5816,8 @@ namespace AnonPDF
                         pageSize,
                         effectiveBitmapW,
                         effectiveBitmapH,
-                        page.TextAngle);
+                        page.TextAngle,
+                        inkBounds);
 
                     if (cachedLine != null && !string.IsNullOrWhiteSpace(cachedLine.Text))
                     {
@@ -5810,6 +5834,7 @@ namespace AnonPDF
             }
             finally
             {
+                geometryBitmap?.Dispose();
                 if (!string.IsNullOrWhiteSpace(tempImagePath))
                 {
                     try
@@ -5828,12 +5853,17 @@ namespace AnonPDF
 
         private static async Task<OcrResult> RecognizeWindowsOcrAsync(OcrEngine engine, string imagePath)
         {
-            StorageFile file = await StorageFile.GetFileFromPathAsync(imagePath);
-            using (IRandomAccessStream stream = await file.OpenAsync(FileAccessMode.Read))
+            // The synchronous cache/export caller may own a WinForms context
+            // without a running message loop (headless OCR).
+            StorageFile file = await StorageFile.GetFileFromPathAsync(imagePath).AsTask().ConfigureAwait(false);
+            using (IRandomAccessStream stream = await file.OpenAsync(FileAccessMode.Read).AsTask().ConfigureAwait(false))
             {
-                BitmapDecoder decoder = await BitmapDecoder.CreateAsync(stream);
-                SoftwareBitmap softwareBitmap = await decoder.GetSoftwareBitmapAsync(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
-                return await engine.RecognizeAsync(softwareBitmap);
+                BitmapDecoder decoder = await BitmapDecoder.CreateAsync(stream).AsTask().ConfigureAwait(false);
+                using (SoftwareBitmap softwareBitmap = await decoder.GetSoftwareBitmapAsync(
+                    BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied).AsTask().ConfigureAwait(false))
+                {
+                    return await engine.RecognizeAsync(softwareBitmap).AsTask().ConfigureAwait(false);
+                }
             }
         }
 
@@ -5932,7 +5962,8 @@ namespace AnonPDF
             KernelGeom.Rectangle pageSize,
             int bitmapWidth,
             int bitmapHeight,
-            double? textAngleDegrees)
+            double? textAngleDegrees,
+            OcrInkBoundsRefiner inkBounds)
         {
             if (textLine == null || textLine.Words == null || textLine.Words.Count == 0 || pageSize == null)
             {
@@ -5974,7 +6005,12 @@ namespace AnonPDF
                 KernelGeom.Rectangle rawWordRect = ConvertWindowsOcrRectToPdfRect(correctedOcrRect, pageSize, bitmapWidth, bitmapHeight, pageRotation);
                 cachedLine.RawOcrWordBounds.Add(rawWordRect);
 
-                KernelGeom.Rectangle wordRect = rawWordRect;
+                var refinedImageRect = inkBounds.Refine(new RectangleF((float)correctedOcrRect.X,
+                    (float)correctedOcrRect.Y, (float)correctedOcrRect.Width, (float)correctedOcrRect.Height));
+                KernelGeom.Rectangle wordRect = ConvertWindowsOcrRectToPdfRect(
+                    new Windows.Foundation.Rect(refinedImageRect.X, refinedImageRect.Y,
+                        refinedImageRect.Width, refinedImageRect.Height),
+                    pageSize, bitmapWidth, bitmapHeight, pageRotation);
                 cachedLine.OcrWordBounds.Add(wordRect);
                 if (hasWords)
                 {

@@ -261,6 +261,7 @@
     <Compile Include="TutorialBrowserForm.cs" />
     <Compile Include="PdfDiskCache.cs" />
     <Compile Include="PDFFormTypes.cs" />
+    <Compile Include="OcrRedactionGeometry.cs" />
     <Compile Include="PageOrganization.cs" />
     <Compile Include="PageOrganizationForm.cs" />
     <Compile Include="PageThumbnailView.cs" />

@@ -8258,6 +8258,36 @@ namespace AnonPDF
                 rectangle.GetHeight() - (inset * 2f));
         }
 
+        private List<PdfCleanUpLocation> GetCleanupLocationsForBlock(
+            iText.Kernel.Pdf.PdfPage page, RedactionBlock block, KernelGeom.Rectangle rectangle,
+            string sourcePdfPath, bool graphicMode)
+        {
+            bool ocrTextVertical = false;
+            var ocrWords = graphicMode || IsExactAreaBox(block)
+                ? new List<KernelGeom.Rectangle>()
+                : GetOcrPreviewRectsForBlock(block, ConvertToItTextRectangleF(rectangle), out ocrTextVertical, sourcePdfPath);
+            var textHitRectangle = GetCursorTextHitRectangle(block, rectangle);
+            var pixelHitRectangle = textHitRectangle;
+            if (block.IsCursorSelection && ocrWords.Count == 0 && !graphicMode &&
+                GetPrimaryRasterInfoForPage(page)?.CoverageRatio >= 0.85d)
+            {
+                // Templates may be exported without running OCR. Even then a scan
+                // must retain the full selection rather than the native-text inset.
+                pixelHitRectangle = rectangle;
+            }
+            int pageNumber = page.GetDocument().GetPageNumber(page);
+            return RedactionCleanupGeometry.Build(block, rectangle, pixelHitRectangle, ocrWords, graphicMode)
+                .Select(region =>
+                {
+                    var textRegion = graphicMode || IsExactAreaBox(block) ? region : textHitRectangle;
+                    if (ocrWords.Count > 0 &&
+                        (block.IsCursorSelection || block.IsMarkerSelection || !ReferenceEquals(region, rectangle)))
+                        textRegion = RedactionCleanupGeometry.GetOcrTextHitArea(region, ocrTextVertical);
+                    return new PdfCleanUpLocation(pageNumber, region, new DeviceRgb(255, 255, 255))
+                        .SetTextRegion(textRegion);
+                }).ToList();
+        }
+
         private bool TryGetWordBoundsAtPoint(
             Point location,
             out RectangleF wordBounds,
@@ -8293,6 +8323,7 @@ namespace AnonPDF
             // For OCR lines: search ALL OcrWords across all lines by bounding box.
             // Lines can overlap in Y, so we must match X too.
             PdfTextSearcher.OcrWordInfo bestOcrWord = null;
+            bool bestOcrWordVertical = false;
             float bestOcrDistance = float.MaxValue;
             foreach (var line in lines)
             {
@@ -8313,6 +8344,7 @@ namespace AnonPDF
                         {
                             bestOcrDistance = centerDistance;
                             bestOcrWord = ow;
+                            bestOcrWordVertical = line.PageRotation % 180 != 0;
                         }
                     }
                 }
@@ -8325,6 +8357,7 @@ namespace AnonPDF
                 float owH = (float)bestOcrWord.BoundingBox.GetHeight();
                 LogDebug($"TryGetWordBoundsAtPoint: OCR word hit text={bestOcrWord.Text} bounds=({ox:F1},{oy:F1},{owW:F1},{owH:F1})");
                 wordBounds = ConvertPdfToViewCoordinates(new RectangleF(ox, oy, owW, owH), currentPage, rotation);
+                textVerticalInPdf = bestOcrWordVertical;
                 return true;
             }
 
@@ -20520,14 +20553,9 @@ namespace AnonPDF
                             foreach (var block in blocksForThisPage)
                             {
                                 var pdfCoordinates = ConvertToPdfCoordinates(block.Bounds, currentPage, rotation);
-                                iText.Kernel.Geom.Rectangle rectangle = new iText.Kernel.Geom.Rectangle(
-                                    (int)Math.Round(pdfCoordinates.X),
-                                    (int)Math.Round(pdfCoordinates.Y),
-                                    (int)Math.Round(pdfCoordinates.Width),
-                                    (int)Math.Round(pdfCoordinates.Height));
-                                rectangle = GetCursorTextHitRectangle(block, rectangle);
-                                PdfCleanUpLocation cleanUpLocation = new PdfCleanUpLocation(1, rectangle, new iText.Kernel.Colors.DeviceRgb(255, 255, 255));
-                                cleanUpTool.AddCleanupLocation(cleanUpLocation);
+                                var rectangle = ConvertToItTextRectangle(pdfCoordinates);
+                                foreach (var location in GetCleanupLocationsForBlock(pdfDoc.GetPage(1), block, rectangle, inputPdfPath, false))
+                                    cleanUpTool.AddCleanupLocation(location);
                             }
                             cleanUpTool.CleanUp();
                         }
@@ -22143,6 +22171,7 @@ namespace AnonPDF
                             pdfCoordinates.Width,
                             pdfCoordinates.Height);
                         iText.Kernel.Geom.Rectangle textHitRectangle = GetCursorTextHitRectangle(block, cleanupRectangle);
+                        var cleanupLocations = GetCleanupLocationsForBlock(pageWithSelections, block, cleanupRectangle, inputPdfPath, useGraphicRedactionMode);
                         iText.Kernel.Geom.Rectangle visualSourceRectangle = block.IsCursorSelection
                             ? textHitRectangle
                             : cleanupRectangle;
@@ -22151,6 +22180,12 @@ namespace AnonPDF
                         if (useGraphicRedactionMode || IsExactAreaBox(block))
                         {
                             visualRectangle = cleanupRectangle;
+                        }
+                        else if (cleanupLocations.Count > 1)
+                        {
+                            RectangleF union = cleanupLocations.Select(location => ConvertToItTextRectangleF(location.GetRegion()))
+                                .Aggregate(RectangleF.Union);
+                            visualRectangle = ConvertToItTextRectangle(union);
                         }
                         else
                         {
@@ -22162,7 +22197,8 @@ namespace AnonPDF
                                 block.IsMarkerSelection ? "export-visual" : "export-visual-box");
                         }
                         redactionVisualPdfBoundsByBlock[block] = ConvertToItTextRectangleF(visualRectangle);
-                        cleanUpTool.AddCleanupLocation(new PdfCleanUpLocation(pageNum, textHitRectangle, cleanUpColorWhite));
+                        foreach (var location in cleanupLocations)
+                            cleanUpTool.AddCleanupLocation(location);
                     }
                 }
 
@@ -25839,8 +25875,12 @@ namespace AnonPDF
 
             var words = cachedLines
                 .Where(line => line != null && line.IsOcr && line.PageNumber == sourcePageNumber && line.OcrWords != null)
-                .SelectMany(line => line.OcrWords)
-                .Where(word => word != null && !string.IsNullOrWhiteSpace(word.Text) && word.BoundingBox != null)
+                .SelectMany(line => line.OcrWords.Select((word, index) => new
+                {
+                    Word = word,
+                    LayoutBounds = PdfTextSearcher.GetOcrTextLayoutBounds(line, index)
+                }))
+                .Where(item => item.Word != null && !string.IsNullOrWhiteSpace(item.Word.Text) && item.Word.BoundingBox != null)
                 .ToList();
 
             if (words.Count == 0)
@@ -25854,15 +25894,16 @@ namespace AnonPDF
             canvas.BeginText();
             canvas.SetTextRenderingMode(iText.Kernel.Pdf.Canvas.PdfCanvasConstants.TextRenderingMode.INVISIBLE);
 
-            foreach (PdfTextSearcher.OcrWordInfo word in words)
+            foreach (var item in words)
             {
+                PdfTextSearcher.OcrWordInfo word = item.Word;
                 if (IntersectsAnyPdfARect(word.BoundingBox, suppressedTextRects))
                 {
                     continue;
                 }
 
                 KernelGeom.Rectangle rect = ConvertOcrWordBoundsToPdfAVisualRect(
-                    word.BoundingBox,
+                    item.LayoutBounds,
                     sourcePageNumber,
                     pageWidthPoints,
                     pageHeightPoints);
@@ -35572,7 +35613,7 @@ namespace AnonPDF
             // A scanned page can also contain an invisible OCR text layer whose glyph
             // boxes overlap adjacent lines. Prefer the OCR geometry tied to the visible
             // image so cursor alignment and marker feedback match what the user sees.
-            List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetOcrPreviewRectsForBlock(block, pdfCoords);
+            List<iText.Kernel.Geom.Rectangle> pdfLineRects = GetOcrPreviewRectsForBlock(block, pdfCoords, out _);
             if (pdfLineRects.Count > 0)
             {
                 return pdfLineRects
@@ -35634,10 +35675,13 @@ namespace AnonPDF
         // Touched-text preview for scans, including scans with an invisible text layer: collect
         // cached OCR word boxes that overlap the selection. Bounds are already in PDF user space,
         // matching the intersection test used by GetCachedTextInRect.
-        private List<iText.Kernel.Geom.Rectangle> GetOcrPreviewRectsForBlock(RedactionBlock block, RectangleF pdfRect)
+        private List<iText.Kernel.Geom.Rectangle> GetOcrPreviewRectsForBlock(
+            RedactionBlock block, RectangleF pdfRect, out bool textVerticalInPdf, string sourcePdfPath = null)
         {
+            textVerticalInPdf = false;
             var result = new List<iText.Kernel.Geom.Rectangle>();
-            if (block == null || string.IsNullOrWhiteSpace(inputPdfPath))
+            string cachePath = sourcePdfPath ?? inputPdfPath;
+            if (block == null || string.IsNullOrWhiteSpace(cachePath))
             {
                 return result;
             }
@@ -35645,7 +35689,7 @@ namespace AnonPDF
             List<PdfTextSearcher.CachedLine> lines;
             try
             {
-                lines = PdfTextSearcher.GetCachedLines(inputPdfPath);
+                lines = PdfTextSearcher.GetCachedLines(cachePath);
             }
             catch
             {
@@ -35662,7 +35706,7 @@ namespace AnonPDF
 
             foreach (var line in lines)
             {
-                if (line == null || line.PageNumber != block.PageNumber || line.OcrWordBounds == null)
+                if (line == null || !line.IsOcr || line.PageNumber != block.PageNumber || line.OcrWordBounds == null)
                 {
                     continue;
                 }
@@ -35696,6 +35740,7 @@ namespace AnonPDF
                         }
                     }
 
+                    if (result.Count == 0) textVerticalInPdf = line.PageRotation % 180 != 0;
                     result.Add(wb);
                 }
             }
@@ -57767,13 +57812,9 @@ namespace AnonPDF
                     foreach (var block in blocksForPage)
                     {
                         RectangleF pdfCoordinates = ConvertToPdfCoordinates(block.Bounds, pageNumber, rotation);
-                        iText.Kernel.Geom.Rectangle rectangle = new iText.Kernel.Geom.Rectangle(
-                            (int)Math.Round(pdfCoordinates.X),
-                            (int)Math.Round(pdfCoordinates.Y),
-                            (int)Math.Round(pdfCoordinates.Width),
-                            (int)Math.Round(pdfCoordinates.Height));
-                        rectangle = GetCursorTextHitRectangle(block, rectangle);
-                        cleanUpTool.AddCleanupLocation(new PdfCleanUpLocation(1, rectangle, new iText.Kernel.Colors.DeviceRgb(255, 255, 255)));
+                        var rectangle = ConvertToItTextRectangle(pdfCoordinates);
+                        foreach (var location in GetCleanupLocationsForBlock(pdfDoc.GetPage(1), block, rectangle, sourcePdfPath, false))
+                            cleanUpTool.AddCleanupLocation(location);
                     }
 
                     cleanUpTool.CleanUp();
@@ -59099,6 +59140,7 @@ namespace AnonPDF
 
                     var rb = CreateRedactionBlockWithAutomaticClassification(convertedRect, loc.PageNumber, false);
                     rb.IsCursorSelection = true;
+                    rb.CursorTextVerticalInPdf = loc.IsOcr && loc.PageRotation % 180 != 0;
                     redactionBlocks.Add(rb);
                     TryComputeRedactionPreviewRects(rb);
                     changed = true;
