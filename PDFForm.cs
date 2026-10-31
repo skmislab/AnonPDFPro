@@ -26667,8 +26667,10 @@ namespace AnonPDF
             private readonly Panel pagePanel;
             private readonly PictureBox pagePictureBox;
             private readonly Label pageLabel;
+            private readonly Button firstButton;
             private readonly Button previousButton;
             private readonly Button nextButton;
+            private readonly Button lastButton;
             private readonly Button zoomOutButton;
             private readonly Button zoomInButton;
             private readonly Button fitButton;
@@ -26677,6 +26679,7 @@ namespace AnonPDF
             private readonly Panel pageNumberInputHost;
             private readonly TextBox pageNumberInput;
             private readonly VScrollBar documentScrollBar;
+            private readonly ToolTip toolbarToolTip = new ToolTip();
             private int currentPreviewPage = 1;
             private float zoomMultiplier = 1f;
             private bool fitToWindow = true;
@@ -26714,20 +26717,24 @@ namespace AnonPDF
                 var toolbar = new FlowLayoutPanel
                 {
                     Dock = DockStyle.Top,
-                    Height = PDFForm.ScaleForDpiStatic(42),
+                    Height = PDFForm.ScaleForDpiStatic(46),
                     FlowDirection = FlowDirection.LeftToRight,
                     WrapContents = false,
                     Padding = new Padding(PDFForm.ScaleForDpiStatic(8), PDFForm.ScaleForDpiStatic(7), PDFForm.ScaleForDpiStatic(8), 0)
                 };
 
-                previousButton = CreateToolbarButton(LocalizedText("Dialog_PreviewPdf_Previous"));
-                nextButton = CreateToolbarButton(LocalizedText("Dialog_PreviewPdf_Next"));
-                zoomOutButton = CreateToolbarButton("-");
-                zoomInButton = CreateToolbarButton("+");
-                fitButton = CreateToolbarButton(LocalizedText("Dialog_PreviewPdf_Fit"));
-                printButton = CreateToolbarButton(LocalizedText("Menu_Print"));
-                closeButton = CreateToolbarButton(LocalizedText("Dialog_Button_Close"));
-                int toolbarControlHeight = PDFForm.ScaleForDpiStatic(28);
+                firstButton = CreateToolbarButton("previewFirstButton", "\uE892", LocalizedText("Tooltip_FirstPage"), theme);
+                previousButton = CreateToolbarButton("previewPreviousButton", "\uE76B", LocalizedText("Dialog_PreviewPdf_Previous"), theme,
+                    toolTipText: LocalizedText("Tooltip_PrevPage"));
+                nextButton = CreateToolbarButton("previewNextButton", "\uE76C", LocalizedText("Dialog_PreviewPdf_Next"), theme,
+                    toolTipText: LocalizedText("Tooltip_NextPage"));
+                lastButton = CreateToolbarButton("previewLastButton", "\uE893", LocalizedText("Tooltip_LastPage"), theme);
+                zoomOutButton = CreateToolbarButton("previewZoomOutButton", "\uE71F", LocalizedText("Tooltip_ZoomOut"), theme);
+                zoomInButton = CreateToolbarButton("previewZoomInButton", "\uE8A3", LocalizedText("Tooltip_ZoomIn"), theme);
+                fitButton = CreateToolbarButton("previewFitButton", "\uE7C3", LocalizedText("Dialog_PreviewPdf_Fit"), theme);
+                printButton = CreateToolbarButton("previewPrintButton", "\uE749", LocalizedText("Menu_Print"), theme, showText: true);
+                closeButton = CreateToolbarButton("previewCloseButton", "\uE8BB", LocalizedText("Dialog_Button_Close"), theme, showText: true);
+                int toolbarControlHeight = PDFForm.ScaleForDpiStatic(32);
                 pageNumberInputHost = new Panel
                 {
                     Width = PDFForm.ScaleForDpiStatic(74),
@@ -26755,8 +26762,10 @@ namespace AnonPDF
                     Margin = new Padding(PDFForm.ScaleForDpiStatic(8), 0, PDFForm.ScaleForDpiStatic(8), 0)
                 };
 
+                toolbar.Controls.Add(firstButton);
                 toolbar.Controls.Add(previousButton);
                 toolbar.Controls.Add(nextButton);
+                toolbar.Controls.Add(lastButton);
                 toolbar.Controls.Add(pageNumberInputHost);
                 toolbar.Controls.Add(pageLabel);
                 toolbar.Controls.Add(zoomOutButton);
@@ -26775,7 +26784,7 @@ namespace AnonPDF
                     Value = currentPreviewPage
                 };
 
-                pagePanel = new Panel
+                pagePanel = new PreviewPagePanel
                 {
                     Dock = DockStyle.Fill,
                     AutoScroll = true,
@@ -26794,8 +26803,10 @@ namespace AnonPDF
                 Controls.Add(documentScrollBar);
                 Controls.Add(toolbar);
 
+                firstButton.Click += (_, __) => ShowPage(1);
                 previousButton.Click += (_, __) => ShowPage(currentPreviewPage - 1);
                 nextButton.Click += (_, __) => ShowPage(currentPreviewPage + 1);
+                lastButton.Click += (_, __) => ShowPage(previewPdf.Pages.Count);
                 zoomOutButton.Click += (_, __) => ApplyZoom(zoomMultiplier / 1.25f);
                 zoomInButton.Click += (_, __) => ApplyZoom(zoomMultiplier * 1.25f);
                 pageNumberInput.KeyPress += PageNumberInput_KeyPress;
@@ -26820,6 +26831,7 @@ namespace AnonPDF
                 };
                 printButton.Click += (_, __) => PrintPreviewDocument();
                 closeButton.Click += (_, __) => Close();
+                CancelButton = closeButton;
                 pagePanel.Click += (_, __) => pagePanel.Focus();
                 pagePanel.MouseWheel += PreviewMouseWheel;
                 pagePictureBox.Click += (_, __) => pagePanel.Focus();
@@ -26840,25 +26852,71 @@ namespace AnonPDF
                 pagePanel.BackColor = theme?.PanelBackColor ?? SystemColors.ControlDark;
             }
 
-            private static Button CreateToolbarButton(string text)
+            private Button CreateToolbarButton(string name, string glyph, string text, DialogTheme theme,
+                bool showText = false, string toolTipText = null)
             {
-                return new Button
+                int iconSize = PDFForm.ScaleForDpiStatic(20);
+                var icon = new Bitmap(iconSize, iconSize, PixelFormat.Format32bppArgb);
+                using (var graphics = Graphics.FromImage(icon))
+                using (var font = new Font("Segoe MDL2 Assets", PDFForm.ScaleForDpiStatic(16), FontStyle.Regular, GraphicsUnit.Pixel))
+                using (var brush = new SolidBrush(theme?.SecondaryButtonForeColor ?? SystemColors.ControlText))
+                using (var format = new StringFormat(StringFormat.GenericTypographic)
                 {
-                    Text = text,
-                    Width = PDFForm.ScaleForDpiStatic(82),
-                    Height = PDFForm.ScaleForDpiStatic(28),
+                    Alignment = StringAlignment.Center,
+                    LineAlignment = StringAlignment.Center
+                })
+                {
+                    graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+                    graphics.DrawString(glyph, font, brush, new RectangleF(0, 0, iconSize, iconSize), format);
+                }
+
+                var button = new Button
+                {
+                    Name = name,
+                    Text = showText ? text : string.Empty,
+                    AccessibleName = text,
+                    Image = icon,
+                    ImageAlign = showText ? ContentAlignment.MiddleLeft : ContentAlignment.MiddleCenter,
+                    TextImageRelation = TextImageRelation.ImageBeforeText,
+                    UseMnemonic = false,
+                    AutoSize = showText,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    MinimumSize = PDFForm.ScaleSizeForDpiStatic(showText ? 84 : 36, 32),
+                    Size = PDFForm.ScaleSizeForDpiStatic(showText ? 84 : 36, 32),
+                    Padding = showText ? new Padding(PDFForm.ScaleForDpiStatic(6), 0, PDFForm.ScaleForDpiStatic(6), 0) : Padding.Empty,
                     Margin = new Padding(PDFForm.ScaleForDpiStatic(2), 0, PDFForm.ScaleForDpiStatic(2), 0)
                 };
+                toolbarToolTip.SetToolTip(button, toolTipText ?? text);
+                button.Disposed += (_, __) => icon.Dispose();
+                return button;
             }
 
             private void RedactedPdfPreviewDialog_KeyDown(object sender, KeyEventArgs e)
             {
+                if (e.KeyCode == Keys.Escape)
+                {
+                    e.SuppressKeyPress = true;
+                    e.Handled = true;
+                    Close();
+                    return;
+                }
+
                 if (pageNumberInput.Focused)
                 {
                     return;
                 }
 
-                if (e.KeyCode == Keys.Left || e.KeyCode == Keys.PageUp)
+                if (e.KeyCode == Keys.Home)
+                {
+                    ShowPage(1);
+                    e.Handled = true;
+                }
+                else if (e.KeyCode == Keys.End)
+                {
+                    ShowPage(previewPdf.Pages.Count);
+                    e.Handled = true;
+                }
+                else if (e.KeyCode == Keys.Left || e.KeyCode == Keys.PageUp)
                 {
                     ShowPage(currentPreviewPage - 1);
                     e.Handled = true;
@@ -26866,11 +26924,6 @@ namespace AnonPDF
                 else if (e.KeyCode == Keys.Right || e.KeyCode == Keys.PageDown)
                 {
                     ShowPage(currentPreviewPage + 1);
-                    e.Handled = true;
-                }
-                else if (e.KeyCode == Keys.Escape)
-                {
-                    Close();
                     e.Handled = true;
                 }
             }
@@ -26957,7 +27010,8 @@ namespace AnonPDF
             {
                 base.OnMouseWheel(e);
 
-                if (!pageNumberInput.Focused && ClientRectangle.Contains(PointToClient(MousePosition)))
+                if (((ModifierKeys & Keys.Control) == Keys.Control || !pageNumberInput.Focused)
+                    && ClientRectangle.Contains(PointToClient(MousePosition)))
                 {
                     PreviewMouseWheel(this, e);
                 }
@@ -26965,6 +27019,19 @@ namespace AnonPDF
 
             private void PreviewMouseWheel(object sender, MouseEventArgs e)
             {
+                if ((ModifierKeys & Keys.Control) == Keys.Control)
+                {
+                    if (e is HandledMouseEventArgs zoomEvent)
+                    {
+                        zoomEvent.Handled = true;
+                    }
+                    if (e.Delta != 0)
+                    {
+                        ApplyZoom(e.Delta > 0 ? zoomMultiplier * 1.25f : zoomMultiplier / 1.25f);
+                    }
+                    return;
+                }
+
                 if (!fitToWindow)
                 {
                     return;
@@ -26982,6 +27049,22 @@ namespace AnonPDF
                 if (e is HandledMouseEventArgs handled)
                 {
                     handled.Handled = true;
+                }
+            }
+
+            private sealed class PreviewPagePanel : Panel
+            {
+                protected override void OnMouseWheel(MouseEventArgs e)
+                {
+                    // Ctrl+wheel must bypass the panel's automatic scrolling.
+                    if ((ModifierKeys & Keys.Control) == Keys.Control
+                        && FindForm() is RedactedPdfPreviewDialog preview)
+                    {
+                        preview.PreviewMouseWheel(this, e);
+                        return;
+                    }
+
+                    base.OnMouseWheel(e);
                 }
             }
 
@@ -27173,8 +27256,10 @@ namespace AnonPDF
                     documentScrollBar.Enabled = maximumPage > 1;
 
                     pageLabel.Text = string.Format(CultureInfo.CurrentCulture, LocalizedText("Dialog_PreviewPdf_PageLabel"), currentPreviewPage, pageCount);
+                    firstButton.Enabled = currentPreviewPage > 1;
                     previousButton.Enabled = currentPreviewPage > 1;
                     nextButton.Enabled = currentPreviewPage < pageCount;
+                    lastButton.Enabled = currentPreviewPage < pageCount;
                 }
                 finally
                 {
@@ -27198,6 +27283,7 @@ namespace AnonPDF
             {
                 if (disposing)
                 {
+                    toolbarToolTip.Dispose();
                     Image image = pagePictureBox?.Image;
                     if (pagePictureBox != null)
                     {
